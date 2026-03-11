@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag, e.g. v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install uv
+        run: python -m pip install uv
+      - name: Resolve release version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Sync backend dependencies
+        working-directory: backend
+        run: uv sync --all-extras
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run full validation
+        run: python automation/scripts/validate_repo.py --scope all
+      - name: Extract changelog notes
+        run: python automation/scripts/extract_release_notes.py --version ${{ steps.version.outputs.value }} --output release_notes.md
+      - name: Publish GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ steps.version.outputs.value }}" >/dev/null 2>&1; then
+            gh release edit "${{ steps.version.outputs.value }}" --title "${{ steps.version.outputs.value }}" --notes-file release_notes.md
+          else
+            gh release create "${{ steps.version.outputs.value }}" --title "${{ steps.version.outputs.value }}" --notes-file release_notes.md
+          fi

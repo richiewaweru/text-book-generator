@@ -43,3 +43,7 @@ htmlcov/
 
 # Misc
 *.log
+ai-review.md
+architecture-report.md
+architecture-report.sarif
+release_notes.md

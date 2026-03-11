@@ -1,0 +1,40 @@
+name: Architecture Guard
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  architecture-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - id: guard
+        name: Check architecture boundaries
+        continue-on-error: true
+        run: python automation/scripts/check_architecture.py --format markdown > architecture-report.md
+      - name: Write step summary
+        if: always()
+        run: cat architecture-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Generate SARIF artifact
+        if: always()
+        run: python automation/scripts/check_architecture.py --format sarif > architecture-report.sarif
+      - name: Upload architecture artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-guard
+          path: |
+            architecture-report.md
+            architecture-report.sarif
+      - name: Fail on architecture violations
+        if: steps.guard.outcome != 'success'
+        run: exit 1
