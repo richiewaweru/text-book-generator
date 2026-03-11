@@ -50,17 +50,24 @@ npm run build
 
 ```
 tests/
-├── conftest.py              # Shared fixtures (profile loaders, mock provider)
+├── conftest.py              # Shared fixtures (GenerationContext loaders, MockProvider)
 ├── fixtures/                # Learner profile JSON files
 │   ├── stem_beginner.json
 │   ├── stem_intermediate.json
 │   └── stem_advanced.json
 ├── domain/
-│   └── test_entities.py     # Schema validation tests
+│   ├── test_entities.py     # Schema validation (GenerationContext, CurriculumPlan, etc.)
+│   ├── test_prompts.py      # Prompt builder output validation
+│   ├── test_nodes.py        # Pipeline node execution with MockProvider
+│   └── test_student_profile.py  # StudentProfile, User, enum validation
+├── application/
+│   └── test_orchestrator.py # Full pipeline with MockProvider
 ├── infrastructure/
-│   └── test_providers.py    # Provider factory tests
+│   ├── test_providers.py    # Provider factory tests
+│   ├── test_renderer.py     # HTML rendering output
+│   └── test_auth.py         # JWT handler round-trip
 └── interface/
-    └── test_api.py          # FastAPI endpoint tests
+    └── test_api.py          # FastAPI endpoint tests (health, auth, generation)
 ```
 
 ### Running Tests
@@ -68,14 +75,14 @@ tests/
 ```bash
 cd backend
 
-# All tests
+# All tests (76 should pass)
 uv run pytest
 
 # Specific test file
 uv run pytest tests/domain/test_entities.py
 
 # Specific test class
-uv run pytest tests/domain/test_entities.py::TestLearnerProfile
+uv run pytest tests/domain/test_entities.py::TestGenerationContext
 
 # Verbose output
 uv run pytest -v
@@ -91,7 +98,12 @@ Three learner profiles are provided as test fixtures:
 | `stem_intermediate.json` | calculus | 17 | standard | math_notation |
 | `stem_advanced.json` | linear algebra | 22 | deep | math_notation |
 
-All three must produce valid output before Phase 1 is complete.
+All three must produce valid output through the full pipeline.
+
+### Test Dependencies
+
+- **MockProvider** (`conftest.py`) returns canned Pydantic instances keyed by `response_schema` type. To test a new node, add a canned response to `_MOCK_RESPONSES`.
+- **Auth overrides** (`test_api.py`) use FastAPI's `dependency_overrides` to mock `get_current_user` and `get_student_profile_repository`, avoiding real DB/Google auth in tests.
 
 ## Code Style
 
@@ -100,11 +112,17 @@ All three must produce valid output before Phase 1 is complete.
 
 ## API Endpoints
 
-| Method | Path | Status | Description |
+| Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/health` | Implemented | Health check |
-| POST | `/api/v1/generate` | Stub (501) | Generate textbook |
-| GET | `/api/v1/status/{id}` | Stub (501) | Check generation status |
+| GET | `/health` | No | Health check |
+| POST | `/api/v1/auth/google` | No | Exchange Google ID token for JWT |
+| GET | `/api/v1/auth/me` | Yes | Get current authenticated user |
+| GET | `/api/v1/profile` | Yes | Get student profile |
+| POST | `/api/v1/profile` | Yes | Create student profile |
+| PATCH | `/api/v1/profile` | Yes | Update student profile |
+| POST | `/api/v1/generate` | Yes | Start textbook generation (returns 202) |
+| GET | `/api/v1/status/{id}` | Yes | Poll generation status |
+| GET | `/api/v1/textbook/{path}` | Yes | Fetch rendered HTML |
 
 ## DDD Layer Rules
 
@@ -117,6 +135,27 @@ When adding code, respect the dependency direction:
 
 If you find yourself importing from a wrong direction, introduce a port (abstract interface) in the domain layer.
 
+## Key Entity Relationships
+
+```
+StudentProfile (persistent, DB)          GenerationRequest (per-request DTO)
+         \                                        /
+          \______ merged by use case _____________/
+                         |
+                         v
+               GenerationContext (ephemeral)
+                         |
+                         v
+                  6-Node Pipeline
+                         |
+                         v
+                    RawTextbook → HTMLRenderer → HTML output
+```
+
+- `StudentProfile` stores who the student is (age, education, interests, goals, learner_description)
+- `GenerationRequest` carries what to generate now (subject, context, optional depth/language overrides)
+- `GenerationContext` is assembled fresh for each run and is what the pipeline nodes consume
+
 ## Adding a New Pipeline Node
 
 1. Define input/output schemas in `domain/entities/`
@@ -125,12 +164,14 @@ If you find yourself importing from a wrong direction, introduce a port (abstrac
 4. Wire into the orchestrator in `application/orchestrator.py`
 5. Add tests in `tests/domain/`
 
-## Build Order (Phase 1 Implementation)
+## Adding a New Field to StudentProfile
 
-Per the proposal, implement in this order:
-1. Schemas first (entities)
-2. BaseProvider and provider implementations
-3. Pipeline nodes (6 nodes)
-4. HTML renderer
-5. CLI/API entry points
-6. Tests against all 3 fixtures
+1. Add the field to `domain/entities/student_profile.py`
+2. Add the column to `infrastructure/database/models.py` (`StudentProfileModel`)
+3. Map it in `infrastructure/repositories/sql_student_profile_repo.py` (create, update, _to_entity)
+4. Add it to `interface/api/routes/profile.py` (`ProfileCreateRequest` and `ProfileUpdateRequest`)
+5. If it should flow into generation, add it to `domain/entities/generation_context.py`
+6. If it should flow into generation, map it in `application/use_cases/generate_textbook.py` (`_build_generation_context`)
+7. If it should appear in prompts, update `domain/prompts/planner_prompts.py` (`_learner_block`)
+8. Update frontend types in `frontend/src/lib/types/index.ts`
+9. Update frontend form in `frontend/src/lib/components/ProfileSetup.svelte`

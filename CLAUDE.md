@@ -15,8 +15,13 @@
 ## DDD Layers (dependency flows inward)
 - `domain/` - Entities, value objects, pipeline nodes, prompts, ports (abstract). Zero framework imports.
 - `application/` - Use cases, orchestrator, DTOs. Depends only on domain.
-- `infrastructure/` - LLM providers, storage, renderer, config. Implements domain ports.
-- `interface/` - FastAPI routes. Calls application use cases.
+- `infrastructure/` - LLM providers, auth, database, storage, renderer, config. Implements domain ports.
+- `interface/` - FastAPI routes, auth middleware. Calls application use cases.
+
+## Key Entities
+- `StudentProfile` - Persistent student data (age, education, interests, goals, learner_description). Stored in DB.
+- `GenerationContext` - Ephemeral per-generation context. Built from StudentProfile + GenerationRequest. Never stored.
+- `GenerationRequest` - Per-request DTO (subject, context, optional depth/language overrides).
 
 ## Key Rules
 - Domain layer NEVER imports from other layers
@@ -25,17 +30,21 @@
 - Renderer has NO LLM calls - pure mechanical assembly
 - BASE_PEDAGOGICAL_RULES must be injected into every content-generating node
 - Schemas are the source of truth - build/verify them first
+- StudentProfile → GenerationContext hydration happens in GenerateTextbookUseCase._build_generation_context()
 
 ## Frontend
 - Package manager: `npm`
 - Framework: SvelteKit with TypeScript
 - Dev: `cd frontend && npm run dev`
+- Auth: Google OAuth via Google Identity Services, JWT stored in localStorage
+- Routes: /login, /onboarding, /dashboard, /textbook/[id]
 
 ## Common Commands
 ```bash
 # Backend
 cd backend && uv sync                    # Install deps
 cd backend && uv run pytest              # Run tests
+cd backend && uv run ruff check src/ tests/  # Lint
 cd backend && uv run uvicorn textbook_agent.interface.api.app:app --reload  # Dev server
 
 # Frontend

@@ -102,14 +102,19 @@ cd frontend && npm run dev
 
 ```
 Textbook agent/
-├── backend/          # FastAPI + Python (DDD architecture)
+├── backend/                # FastAPI + Python (DDD architecture)
 │   ├── src/textbook_agent/
-│   │   ├── domain/          # Core business logic
-│   │   ├── application/     # Use cases, orchestration
-│   │   ├── infrastructure/  # Providers, storage, renderer
-│   │   └── interface/       # FastAPI routes
-│   └── tests/
-├── frontend/         # SvelteKit + TypeScript
+│   │   ├── domain/         # Core business logic (entities, services, prompts, ports)
+│   │   ├── application/    # Use cases, orchestrator, DTOs
+│   │   ├── infrastructure/ # Providers, auth, database, renderer, storage
+│   │   └── interface/      # FastAPI routes, middleware, dependencies
+│   └── tests/              # 76 tests (domain, app, infra, interface)
+├── frontend/               # SvelteKit + TypeScript
 │   └── src/
-└── docs/             # Project documentation
+│       ├── lib/            # Stores, API clients, components, types
+│       └── routes/         # Pages (login, onboarding, dashboard, textbook viewer)
+└── docs/                   # Project documentation
+    ├── PROPOSAL_v1.0.md    # Original product specification
+    └── v0.1.0/             # Current release docs (architecture, schemas, setup, workflow)
+        └── progress/       # Phase handoff documents
 ```
