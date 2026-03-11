@@ -10,9 +10,8 @@ from .routes.generation import router as generation_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    app.state.jobs = {}
     yield
-    # Shutdown
 
 
 def create_app() -> FastAPI:
@@ -22,6 +21,8 @@ def create_app() -> FastAPI:
         description="AI-agnostic pipeline for generating personalized textbooks",
         lifespan=lifespan,
     )
+
+    app.state.jobs = {}
 
     app.add_middleware(
         CORSMiddleware,

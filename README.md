@@ -31,3 +31,6 @@ See [docs/v0.1.0/ARCHITECTURE.md](docs/v0.1.0/ARCHITECTURE.md) for the full DDD 
 - [Setup Guide](docs/v0.1.0/SETUP.md) - Development environment setup
 - [Schemas](docs/v0.1.0/SCHEMAS.md) - All domain entity definitions
 - [Development Workflow](docs/v0.1.0/DEVELOPMENT_WORKFLOW.md) - How to develop, test, contribute
+- [Engineering Docs](docs/engineering/README.md) - Current workflow, governance, and release process
+- [Automation Assets](automation/README.md) - Reusable scripts, templates, and review-agent prompts
+- [Changelog](CHANGELOG.md) - Release ledger and milestone notes

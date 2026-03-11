@@ -1,0 +1,25 @@
+name: Feature Request
+description: Propose a new product or engineering capability.
+title: "feat: "
+labels:
+  - architecture
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What should success look like?
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Architecture, product, or workflow constraints to respect.
