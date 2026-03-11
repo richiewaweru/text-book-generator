@@ -1,13 +1,309 @@
 /* Textbook Agent Design System v0.1.0
  *
- * Single source of truth for all visual decisions.
- * Does not change between textbooks.
- *
- * Design language:
- * - Dark theme, high contrast, optimised for long reading sessions
- * - Monospace display font for headings and code
- * - Serif body font for prose
- * - Colour coding: green=definitions, orange=warnings, blue=examples, purple=connections
- * - Sticky sidebar navigation
- * - SVG diagrams inline
+ * Dark theme, high contrast, optimised for long reading sessions.
+ * Monospace display font for headings and code.
+ * Serif body font for prose.
+ * Colour coding: green=definitions, orange=warnings, blue=examples, purple=connections.
+ * Sticky sidebar navigation.
+ * SVG diagrams inline.
  */
+
+:root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-sidebar: #0d1117;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --border: #30363d;
+    --accent-green: #3fb950;
+    --accent-orange: #d29922;
+    --accent-blue: #58a6ff;
+    --accent-purple: #bc8cff;
+    --accent-red: #f85149;
+    --font-body: Georgia, 'Times New Roman', serif;
+    --font-heading: 'Courier New', Courier, monospace;
+    --font-code: 'Courier New', Courier, monospace;
+    --sidebar-width: 280px;
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.7;
+    display: flex;
+    min-height: 100vh;
+}
+
+/* Sidebar navigation */
+.sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--sidebar-width);
+    height: 100vh;
+    background-color: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 2rem 1rem;
+    z-index: 100;
+}
+
+.sidebar h2 {
+    font-family: var(--font-heading);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+}
+
+.sidebar ol {
+    list-style: none;
+    counter-reset: toc-counter;
+}
+
+.sidebar ol li {
+    counter-increment: toc-counter;
+    margin-bottom: 0.4rem;
+}
+
+.sidebar ol li a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-family: var(--font-heading);
+    display: block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    transition: color 0.15s, background-color 0.15s;
+}
+
+.sidebar ol li a::before {
+    content: counter(toc-counter) ". ";
+    color: var(--text-muted);
+}
+
+.sidebar ol li a:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-secondary);
+}
+
+/* Main content area */
+.content {
+    margin-left: var(--sidebar-width);
+    max-width: 800px;
+    padding: 3rem 2.5rem;
+    flex: 1;
+}
+
+.textbook-header {
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.textbook-header h1 {
+    font-family: var(--font-heading);
+    font-size: 2.2rem;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.textbook-header .meta {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+/* Section blocks */
+.section {
+    margin-bottom: 4rem;
+    padding-bottom: 3rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.section:last-child {
+    border-bottom: none;
+}
+
+.section h2 {
+    font-family: var(--font-heading);
+    font-size: 1.6rem;
+    color: var(--text-primary);
+    margin-bottom: 1.5rem;
+}
+
+/* Hook */
+.hook {
+    background-color: var(--bg-secondary);
+    border-left: 4px solid var(--accent-blue);
+    padding: 1rem 1.5rem;
+    margin-bottom: 1.5rem;
+    border-radius: 0 6px 6px 0;
+    font-style: italic;
+    color: var(--text-primary);
+}
+
+/* Plain explanation */
+.explanation {
+    margin-bottom: 1.5rem;
+}
+
+/* Formal definition — green */
+.definition {
+    background-color: rgba(63, 185, 80, 0.08);
+    border-left: 4px solid var(--accent-green);
+    padding: 1rem 1.5rem;
+    margin-bottom: 1.5rem;
+    border-radius: 0 6px 6px 0;
+}
+
+.definition-label {
+    font-family: var(--font-heading);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent-green);
+    margin-bottom: 0.4rem;
+}
+
+/* Worked example — blue */
+.example {
+    background-color: rgba(88, 166, 255, 0.08);
+    border-left: 4px solid var(--accent-blue);
+    padding: 1rem 1.5rem;
+    margin-bottom: 1.5rem;
+    border-radius: 0 6px 6px 0;
+}
+
+.example-label {
+    font-family: var(--font-heading);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent-blue);
+    margin-bottom: 0.4rem;
+}
+
+/* Common misconception — orange */
+.misconception {
+    background-color: rgba(210, 153, 34, 0.08);
+    border-left: 4px solid var(--accent-orange);
+    padding: 1rem 1.5rem;
+    margin-bottom: 1.5rem;
+    border-radius: 0 6px 6px 0;
+}
+
+.misconception-label {
+    font-family: var(--font-heading);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent-orange);
+    margin-bottom: 0.4rem;
+}
+
+/* Forward connection — purple */
+.connection {
+    background-color: rgba(188, 140, 255, 0.08);
+    border-left: 4px solid var(--accent-purple);
+    padding: 1rem 1.5rem;
+    margin-bottom: 1.5rem;
+    border-radius: 0 6px 6px 0;
+}
+
+.connection-label {
+    font-family: var(--font-heading);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent-purple);
+    margin-bottom: 0.4rem;
+}
+
+/* Diagram */
+.diagram {
+    margin-bottom: 1.5rem;
+    text-align: center;
+}
+
+.diagram svg {
+    max-width: 100%;
+    height: auto;
+}
+
+.diagram-caption {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-style: italic;
+    margin-top: 0.5rem;
+}
+
+/* Code blocks */
+.code-block {
+    margin-bottom: 1.5rem;
+}
+
+.code-block pre {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.5rem;
+    overflow-x: auto;
+    font-family: var(--font-code);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--text-primary);
+}
+
+.code-explanation {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+}
+
+.code-output {
+    background-color: rgba(63, 185, 80, 0.06);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin-top: 0.5rem;
+    font-family: var(--font-code);
+    font-size: 0.85rem;
+    color: var(--accent-green);
+}
+
+.code-output::before {
+    content: "Output: ";
+    color: var(--text-muted);
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .sidebar {
+        position: static;
+        width: 100%;
+        height: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+    }
+    body {
+        flex-direction: column;
+    }
+    .content {
+        margin-left: 0;
+        padding: 2rem 1.5rem;
+    }
+}

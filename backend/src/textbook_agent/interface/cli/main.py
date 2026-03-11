@@ -36,7 +36,7 @@ def main():
 
     args = parser.parse_args()
 
-    print(f"Textbook Agent v0.1.0")
+    print("Textbook Agent v0.1.0")
     print(f"Profile: {args.profile}")
     print(f"Provider: {args.provider}")
     print(f"Output: {args.output}")

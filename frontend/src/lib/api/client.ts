@@ -1,8 +1,13 @@
-import type { GenerationRequest, GenerationResponse, GenerationStatus } from '$lib/types';
+import type { GenerationRequest, GenerationStatus } from '$lib/types';
 
 const API_BASE = 'http://localhost:8000';
 
-export async function generateTextbook(request: GenerationRequest): Promise<GenerationResponse> {
+export interface GenerateAccepted {
+	generation_id: string;
+	status: string;
+}
+
+export async function startGeneration(request: GenerationRequest): Promise<GenerateAccepted> {
 	const response = await fetch(`${API_BASE}/api/v1/generate`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -24,6 +29,31 @@ export async function getGenerationStatus(id: string): Promise<GenerationStatus>
 	}
 
 	return response.json();
+}
+
+export async function pollUntilDone(
+	id: string,
+	onUpdate: (status: GenerationStatus) => void,
+	intervalMs = 1500
+): Promise<GenerationStatus> {
+	while (true) {
+		const status = await getGenerationStatus(id);
+		onUpdate(status);
+
+		if (status.status === 'completed' || status.status === 'failed') {
+			return status;
+		}
+
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+	}
+}
+
+export async function fetchTextbookHtml(outputPath: string): Promise<string> {
+	const response = await fetch(`${API_BASE}/api/v1/textbook/${encodeURIComponent(outputPath)}`);
+	if (!response.ok) {
+		throw new Error(`Failed to fetch textbook: ${response.statusText}`);
+	}
+	return response.text();
 }
 
 export async function healthCheck(): Promise<{ status: string; version: string }> {

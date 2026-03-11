@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ textbook.subject | title }} — Personalized Textbook</title>
+    <style>
+{{ base_css }}
+{{ prism_css }}
+    </style>
+</head>
+<body>
+    <nav class="sidebar">
+        <h2>Table of Contents</h2>
+        <ol>
+        {%- for section_id in textbook.plan.reading_order %}
+            {%- set sec = section_map.get(section_id) %}
+            <li><a href="#{{ section_id }}">{{ sec.hook[:60] + '...' if sec and sec.hook|length > 60 else (sec.hook if sec else section_id) }}</a></li>
+        {%- endfor %}
+        </ol>
+    </nav>
+
+    <main class="content">
+        <header class="textbook-header">
+            <h1>{{ textbook.subject | title }}</h1>
+            <p class="meta">
+                Depth: {{ textbook.profile.depth.value }} &middot;
+                Age: {{ textbook.profile.age }} &middot;
+                Sections: {{ textbook.plan.total_sections }} &middot;
+                Generated: {{ textbook.generated_at.strftime('%Y-%m-%d %H:%M') }}
+            </p>
+        </header>
+
+        {%- for section_id in textbook.plan.reading_order %}
+        {%- set sec = section_map.get(section_id) %}
+        {%- if sec %}
+        <article class="section" id="{{ section_id }}">
+            <h2>{{ spec_map[section_id].title if section_id in spec_map else section_id }}</h2>
+
+            <div class="hook">{{ sec.hook }}</div>
+
+            <div class="explanation">{{ sec.plain_explanation }}</div>
+
+            {%- if section_id in diagram_map %}
+            <div class="diagram">
+                {{ diagram_map[section_id].svg_markup }}
+                <p class="diagram-caption">{{ diagram_map[section_id].caption }}</p>
+            </div>
+            {%- endif %}
+
+            <div class="definition">
+                <div class="definition-label">Formal Definition</div>
+                {{ sec.formal_definition }}
+            </div>
+
+            <div class="example">
+                <div class="example-label">Worked Example</div>
+                {{ sec.worked_example }}
+            </div>
+
+            {%- if section_id in code_map %}
+            <div class="code-block">
+                <pre><code>{{ code_map[section_id].code }}</code></pre>
+                <p class="code-explanation">{{ code_map[section_id].explanation }}</p>
+                <div class="code-output">{{ code_map[section_id].expected_output }}</div>
+            </div>
+            {%- endif %}
+
+            <div class="misconception">
+                <div class="misconception-label">Common Misconception</div>
+                {{ sec.common_misconception }}
+            </div>
+
+            <div class="connection">
+                <div class="connection-label">What's Next</div>
+                {{ sec.connection_forward }}
+            </div>
+        </article>
+        {%- endif %}
+        {%- endfor %}
+    </main>
+</body>
+</html>
