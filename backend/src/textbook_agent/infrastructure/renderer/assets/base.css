@@ -1,0 +1,13 @@
+/* Textbook Agent Design System v0.1.0
+ *
+ * Single source of truth for all visual decisions.
+ * Does not change between textbooks.
+ *
+ * Design language:
+ * - Dark theme, high contrast, optimised for long reading sessions
+ * - Monospace display font for headings and code
+ * - Serif body font for prose
+ * - Colour coding: green=definitions, orange=warnings, blue=examples, purple=connections
+ * - Sticky sidebar navigation
+ * - SVG diagrams inline
+ */
