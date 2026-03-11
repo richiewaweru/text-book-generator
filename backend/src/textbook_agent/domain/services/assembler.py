@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-from textbook_agent.domain.entities.learner_profile import LearnerProfile
+from textbook_agent.domain.entities.generation_context import GenerationContext
 from textbook_agent.domain.entities.curriculum_plan import CurriculumPlan
 from textbook_agent.domain.entities.section_content import SectionContent
 from textbook_agent.domain.entities.section_diagram import SectionDiagram
@@ -13,7 +13,7 @@ from .node_base import PipelineNode
 class AssemblerInput(BaseModel):
     """Combined input for the Assembler node."""
 
-    profile: LearnerProfile
+    profile: GenerationContext
     plan: CurriculumPlan
     sections: list[SectionContent]
     diagrams: list[SectionDiagram]

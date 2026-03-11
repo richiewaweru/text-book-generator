@@ -1,8 +1,8 @@
-from textbook_agent.domain.entities.learner_profile import LearnerProfile
+from textbook_agent.domain.entities.generation_context import GenerationContext
 from .base_prompt import BASE_PEDAGOGICAL_RULES
 
 
-def _learner_block(profile: LearnerProfile) -> str:
+def _learner_block(profile: GenerationContext) -> str:
     """Build the LEARNER context block shared across prompts."""
     lines = [
         f"- Age: {profile.age}",
@@ -15,10 +15,14 @@ def _learner_block(profile: LearnerProfile) -> str:
         lines.append(f"- Interests: {', '.join(profile.interests)}")
     if profile.goals:
         lines.append(f"- Goals: {profile.goals}")
+    if profile.prior_knowledge:
+        lines.append(f"- Prior knowledge: {profile.prior_knowledge}")
+    if profile.learner_description:
+        lines.append(f"- Learner description: {profile.learner_description}")
     return "\n".join(lines)
 
 
-def build_planner_prompt(profile: LearnerProfile) -> str:
+def build_planner_prompt(profile: GenerationContext) -> str:
     """Build the system prompt for the Curriculum Planner node."""
     return f"""
 {BASE_PEDAGOGICAL_RULES}

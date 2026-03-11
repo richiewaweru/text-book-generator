@@ -57,7 +57,7 @@ The Textbook Generation Agent is a full-stack application with a Python/FastAPI 
 
 **Purpose**: Core business logic. Zero framework dependencies (only `pydantic` for schema validation).
 
-- `entities/` - `LearnerProfile`, `StudentProfile`, `User`, `CurriculumPlan`, `SectionContent`, etc.
+- `entities/` - `GenerationContext`, `StudentProfile`, `User`, `CurriculumPlan`, `SectionContent`, etc.
 - `value_objects/` - `Depth`, `NotationLanguage`, `EducationLevel`, `LearningStyle`, `SectionDepth`
 - `services/` - The 6 pipeline nodes that ARE the business logic
 - `prompts/` - Pedagogical rules and prompt construction (domain knowledge)
@@ -103,13 +103,14 @@ Domain NEVER imports from any other layer. Infrastructure implements domain port
 The `StudentProfile` entity captures persistent learner context:
 - Age, education level, learning style, interests, goals, prior knowledge
 - Preferred notation and depth defaults
+- `learner_description` - free-text manual override describing abilities, gaps, and signals (will be populated by automated diagnostics in a future phase)
 
-On generation, `StudentProfile` is merged with the per-request `GenerationRequest` (subject + context) into a full `LearnerProfile`. The expanded profile is injected into planner and content prompts to personalise examples, vocabulary, and analogies.
+On generation, `StudentProfile` is merged with the per-request `GenerationRequest` (subject + context) into a `GenerationContext`. This ephemeral context carries everything the pipeline needs to personalise content — it is built fresh each time and never stored. The `prior_knowledge` and `learner_description` fields from the student profile are injected into planner and content prompts to personalise examples, vocabulary, and analogies.
 
 ## The 6-Node Pipeline
 
 ```
-LearnerProfile (hydrated from StudentProfile + request)
+GenerationContext (hydrated from StudentProfile + request)
      ↓
 [Node 1] CurriculumPlanner    → CurriculumPlan
      ↓

@@ -85,6 +85,12 @@
 						<span class="value">{profile.interests.join(', ')}</span>
 					</div>
 				{/if}
+				{#if profile.learner_description}
+					<div class="profile-item wide">
+						<span class="label">Learner Description</span>
+						<span class="value">{profile.learner_description}</span>
+					</div>
+				{/if}
 			</div>
 			<button class="edit-profile-btn" onclick={() => goto('/onboarding')}>Edit Profile</button>
 		</div>

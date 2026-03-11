@@ -28,6 +28,7 @@ class ProfileCreateRequest(BaseModel):
     prior_knowledge: str = ""
     goals: str = ""
     preferred_depth: Depth = Depth.STANDARD
+    learner_description: str = ""
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -39,6 +40,7 @@ class ProfileUpdateRequest(BaseModel):
     prior_knowledge: str | None = None
     goals: str | None = None
     preferred_depth: Depth | None = None
+    learner_description: str | None = None
 
 
 @router.get("", response_model=StudentProfile)
@@ -80,6 +82,7 @@ async def create_profile(
         prior_knowledge=body.prior_knowledge,
         goals=body.goals,
         preferred_depth=body.preferred_depth,
+        learner_description=body.learner_description,
         created_at=now,
         updated_at=now,
     )

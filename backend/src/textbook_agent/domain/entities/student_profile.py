@@ -23,5 +23,6 @@ class StudentProfile(BaseModel):
     prior_knowledge: str = ""
     goals: str = ""
     preferred_depth: Depth = Depth.STANDARD
+    learner_description: str = ""
     created_at: datetime
     updated_at: datetime

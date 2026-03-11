@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
 
-from textbook_agent.domain.entities.learner_profile import LearnerProfile
+from textbook_agent.domain.entities.generation_context import GenerationContext
 
 
 class FileStoragePort(ABC):
     """Abstract file storage interface for reading profiles and writing outputs."""
 
     @abstractmethod
-    def read_profile(self, path: str) -> LearnerProfile:
+    def read_profile(self, path: str) -> GenerationContext:
         """Read a learner profile from a JSON file."""
         ...
 

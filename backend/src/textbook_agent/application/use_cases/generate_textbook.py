@@ -5,7 +5,7 @@ from textbook_agent.application.dtos.generation_request import (
     GenerationResponse,
 )
 from textbook_agent.application.orchestrator import TextbookAgent
-from textbook_agent.domain.entities.learner_profile import LearnerProfile
+from textbook_agent.domain.entities.generation_context import GenerationContext
 from textbook_agent.domain.entities.student_profile import StudentProfile
 from textbook_agent.domain.ports.llm_provider import BaseProvider
 from textbook_agent.domain.ports.renderer import RendererPort
@@ -33,7 +33,7 @@ class GenerateTextbookUseCase:
         student_profile: StudentProfile | None = None,
         on_progress: Callable[[str], None] | None = None,
     ) -> GenerationResponse:
-        profile = self._build_learner_profile(request, student_profile)
+        ctx = self._build_generation_context(request, student_profile)
         agent = TextbookAgent(
             provider=self.provider,
             repository=self.repository,
@@ -41,16 +41,16 @@ class GenerateTextbookUseCase:
             quality_check_enabled=self.quality_check_enabled,
             on_progress=on_progress,
         )
-        return await agent.generate(profile)
+        return await agent.generate(ctx)
 
     @staticmethod
-    def _build_learner_profile(
+    def _build_generation_context(
         request: GenerationRequest,
         student_profile: StudentProfile | None,
-    ) -> LearnerProfile:
+    ) -> GenerationContext:
         """Merge persistent StudentProfile with per-generation request."""
         if student_profile is not None:
-            return LearnerProfile(
+            return GenerationContext(
                 subject=request.subject,
                 age=student_profile.age,
                 context=request.context,
@@ -60,8 +60,10 @@ class GenerateTextbookUseCase:
                 interests=student_profile.interests,
                 learning_style=student_profile.learning_style,
                 goals=student_profile.goals,
+                prior_knowledge=student_profile.prior_knowledge,
+                learner_description=student_profile.learner_description,
             )
-        return LearnerProfile(
+        return GenerationContext(
             subject=request.subject,
             age=16,
             context=request.context,

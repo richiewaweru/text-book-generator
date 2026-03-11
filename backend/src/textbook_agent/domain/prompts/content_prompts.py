@@ -1,10 +1,10 @@
 from textbook_agent.domain.entities.curriculum_plan import SectionSpec
-from textbook_agent.domain.entities.learner_profile import LearnerProfile
+from textbook_agent.domain.entities.generation_context import GenerationContext
 from textbook_agent.domain.prompts.planner_prompts import _learner_block
 from .base_prompt import BASE_PEDAGOGICAL_RULES
 
 
-def build_content_prompt(section: SectionSpec, profile: LearnerProfile) -> str:
+def build_content_prompt(section: SectionSpec, profile: GenerationContext) -> str:
     """Build the system prompt for the Content Generator node."""
     return f"""
 {BASE_PEDAGOGICAL_RULES}

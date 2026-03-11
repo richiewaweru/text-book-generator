@@ -2,7 +2,7 @@ import time
 import uuid
 from typing import Callable
 
-from textbook_agent.domain.entities.learner_profile import LearnerProfile
+from textbook_agent.domain.entities.generation_context import GenerationContext
 from textbook_agent.domain.entities.quality_report import QualityReport
 from textbook_agent.domain.ports.llm_provider import BaseProvider
 from textbook_agent.domain.ports.textbook_repository import TextbookRepository
@@ -32,7 +32,7 @@ class TextbookAgent:
     """Top-level orchestrator that wires the 6-node pipeline together.
 
     Pipeline flow:
-        LearnerProfile
+        GenerationContext
         -> [1] Planner -> CurriculumPlan
         -> [2] ContentGenerator -> list[SectionContent]
         -> [3] DiagramGenerator -> list[SectionDiagram]
@@ -59,7 +59,7 @@ class TextbookAgent:
     def _report(self, node_name: str) -> None:
         self._on_progress(node_name)
 
-    async def generate(self, profile: LearnerProfile) -> GenerationResponse:
+    async def generate(self, profile: GenerationContext) -> GenerationResponse:
         start = time.monotonic()
 
         planner = CurriculumPlannerNode(provider=self.provider)

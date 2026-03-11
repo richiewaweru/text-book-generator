@@ -39,6 +39,7 @@ class SqlStudentProfileRepository(StudentProfileRepository):
             prior_knowledge=profile.prior_knowledge,
             goals=profile.goals,
             preferred_depth=profile.preferred_depth.value,
+            learner_description=profile.learner_description,
             created_at=now,
             updated_at=now,
         )
@@ -61,6 +62,7 @@ class SqlStudentProfileRepository(StudentProfileRepository):
         model.prior_knowledge = profile.prior_knowledge
         model.goals = profile.goals
         model.preferred_depth = profile.preferred_depth.value
+        model.learner_description = profile.learner_description
         model.updated_at = datetime.now(timezone.utc)
         await self._session.commit()
         await self._session.refresh(model)
@@ -79,6 +81,7 @@ class SqlStudentProfileRepository(StudentProfileRepository):
             prior_knowledge=model.prior_knowledge or "",
             goals=model.goals or "",
             preferred_depth=Depth(model.preferred_depth),
+            learner_description=model.learner_description or "",
             created_at=model.created_at,
             updated_at=model.updated_at,
         )

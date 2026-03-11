@@ -38,6 +38,7 @@ export interface StudentProfile {
 	prior_knowledge: string;
 	goals: string;
 	preferred_depth: Depth;
+	learner_description: string;
 	created_at: string;
 	updated_at: string;
 }
@@ -51,6 +52,7 @@ export interface ProfileCreateRequest {
 	prior_knowledge: string;
 	goals: string;
 	preferred_depth: Depth;
+	learner_description: string;
 }
 
 export interface GenerationRequest {

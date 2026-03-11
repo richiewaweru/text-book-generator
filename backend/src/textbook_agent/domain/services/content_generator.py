@@ -2,7 +2,7 @@ import asyncio
 
 from pydantic import BaseModel
 
-from textbook_agent.domain.entities.learner_profile import LearnerProfile
+from textbook_agent.domain.entities.generation_context import GenerationContext
 from textbook_agent.domain.entities.curriculum_plan import SectionSpec
 from textbook_agent.domain.entities.section_content import SectionContent
 from textbook_agent.domain.prompts.content_prompts import build_content_prompt
@@ -13,7 +13,7 @@ class ContentGeneratorInput(BaseModel):
     """Combined input for the Content Generator node."""
 
     section: SectionSpec
-    profile: LearnerProfile
+    profile: GenerationContext
 
 
 class ContentGeneratorNode(PipelineNode[ContentGeneratorInput, SectionContent]):

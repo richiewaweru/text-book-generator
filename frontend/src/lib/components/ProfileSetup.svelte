@@ -21,6 +21,7 @@
 	let preferredDepth: Depth = $state('standard');
 	let priorKnowledge = $state('');
 	let goals = $state('');
+	let learnerDescription = $state('');
 	let interests: string[] = $state([]);
 	let interestInput = $state('');
 
@@ -52,7 +53,8 @@
 			preferred_notation: preferredNotation,
 			prior_knowledge: priorKnowledge,
 			goals,
-			preferred_depth: preferredDepth
+			preferred_depth: preferredDepth,
+			learner_description: learnerDescription
 		});
 	}
 </script>
@@ -145,6 +147,12 @@
 		<label>
 			What are your learning goals? (optional)
 			<textarea bind:value={goals} placeholder="e.g. I want to understand calculus well enough for college entrance exams..." rows="3"></textarea>
+		</label>
+
+		<label>
+			Learner description (optional)
+			<textarea bind:value={learnerDescription} placeholder="Describe your learning abilities, gaps, or any signals that might help personalise content. e.g. I struggle with abstract concepts but do well with concrete examples..." rows="4"></textarea>
+			<span class="hint">This will be replaced by automated diagnostics in a future version.</span>
 		</label>
 	</div>
 

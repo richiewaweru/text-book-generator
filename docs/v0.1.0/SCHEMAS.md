@@ -39,18 +39,24 @@ Location: `domain/value_objects/section_depth.py`
 
 ## Entities
 
-### LearnerProfile
+### GenerationContext
 
-Location: `domain/entities/learner_profile.py`
-Pipeline role: **Input** - the starting point for the entire pipeline.
+Location: `domain/entities/generation_context.py`
+Pipeline role: **Input** - ephemeral per-generation context assembled from `StudentProfile` + request. Built fresh for each run, never stored.
 
 | Field | Type | Constraints | Description |
 |---|---|---|---|
 | `subject` | `str` | required | Subject domain e.g. "calculus", "DSA" |
 | `age` | `int` | 8-99 | Drives vocabulary complexity, tone |
-| `context` | `str` | required | What the learner knows and struggles with |
+| `context` | `str` | required | What the learner knows and struggles with for this topic |
 | `depth` | `Depth` | enum | Controls section depth and example count |
 | `language` | `NotationLanguage` | enum | Preferred notation style |
+| `education_level` | `EducationLevel` | enum | Student's education stage |
+| `interests` | `list[str]` | optional | Topics for personalised examples |
+| `learning_style` | `LearningStyle` | enum | Preferred learning modality |
+| `goals` | `str` | optional | What the learner wants to achieve |
+| `prior_knowledge` | `str` | optional | Broad prior knowledge across subjects |
+| `learner_description` | `str` | optional | Free-text description of abilities, gaps, and signals |
 
 Example:
 ```json
@@ -59,7 +65,13 @@ Example:
   "age": 17,
   "context": "I understand derivatives but integration confuses me.",
   "depth": "standard",
-  "language": "math_notation"
+  "language": "math_notation",
+  "education_level": "high_school",
+  "interests": ["physics", "gaming"],
+  "learning_style": "visual",
+  "goals": "Prepare for AP Calculus exam",
+  "prior_knowledge": "Comfortable with algebra and trigonometry",
+  "learner_description": "Strong at mechanical procedures but struggles with conceptual understanding"
 }
 ```
 
@@ -139,7 +151,7 @@ Pipeline role: **Node 5 output** - assembled textbook ready for rendering.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `subject` | `str` | required | Subject being taught |
-| `profile` | `LearnerProfile` | required | Original learner profile |
+| `profile` | `GenerationContext` | required | Per-generation context |
 | `plan` | `CurriculumPlan` | required | Curriculum structure |
 | `sections` | `list[SectionContent]` | required | All section content |
 | `diagrams` | `list[SectionDiagram]` | `[]` | Generated diagrams |
@@ -176,7 +188,7 @@ Pipeline role: **Node 6 output** - validation results.
 
 Location: `application/dtos/generation_request.py`
 
-Mirrors LearnerProfile fields plus `provider: str` for the interface layer.
+Per-generation request fields (`subject`, `context`, optional depth/language overrides) plus `provider: str`. Student-level context is merged from the persistent `StudentProfile` by the use case.
 
 ### GenerationResponse
 

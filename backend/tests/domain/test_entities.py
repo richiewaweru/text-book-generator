@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from textbook_agent.domain.entities import (
-    LearnerProfile,
+    GenerationContext,
     CurriculumPlan,
     SectionSpec,
     SectionContent,
@@ -14,7 +14,7 @@ from textbook_agent.domain.entities import (
 from textbook_agent.domain.value_objects import Depth, NotationLanguage, SectionDepth
 
 
-class TestLearnerProfile:
+class TestGenerationContext:
     def test_valid_profile(self, beginner_profile):
         assert beginner_profile.subject == "algebra"
         assert beginner_profile.age == 14
@@ -28,19 +28,19 @@ class TestLearnerProfile:
 
     def test_rejects_invalid_age_low(self):
         with pytest.raises(ValidationError):
-            LearnerProfile(
+            GenerationContext(
                 subject="math", age=5, context="test", depth="standard", language="plain"
             )
 
     def test_rejects_invalid_age_high(self):
         with pytest.raises(ValidationError):
-            LearnerProfile(
+            GenerationContext(
                 subject="math", age=100, context="test", depth="standard", language="plain"
             )
 
     def test_rejects_invalid_depth(self):
         with pytest.raises(ValidationError):
-            LearnerProfile(
+            GenerationContext(
                 subject="math", age=15, context="test", depth="invalid", language="plain"
             )
 

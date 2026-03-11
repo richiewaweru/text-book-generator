@@ -40,6 +40,7 @@ class StudentProfileModel(Base):
     prior_knowledge = Column(Text, default="")
     goals = Column(Text, default="")
     preferred_depth = Column(String, default="standard")
+    learner_description = Column(Text, default="")
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
