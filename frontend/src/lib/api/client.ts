@@ -1,6 +1,20 @@
 import type { GenerationRequest, GenerationStatus } from '$lib/types';
+import { getToken } from '$lib/stores/auth';
 
 const API_BASE = 'http://localhost:8000';
+
+/**
+ * Wrapper around fetch that injects the auth token.
+ * All API calls should go through this function.
+ */
+export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+	const token = getToken();
+	const headers = new Headers(init?.headers);
+	if (token) {
+		headers.set('Authorization', `Bearer ${token}`);
+	}
+	return fetch(`${API_BASE}${path}`, { ...init, headers });
+}
 
 export interface GenerateAccepted {
 	generation_id: string;
@@ -8,7 +22,7 @@ export interface GenerateAccepted {
 }
 
 export async function startGeneration(request: GenerationRequest): Promise<GenerateAccepted> {
-	const response = await fetch(`${API_BASE}/api/v1/generate`, {
+	const response = await apiFetch('/api/v1/generate', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(request)
@@ -22,7 +36,7 @@ export async function startGeneration(request: GenerationRequest): Promise<Gener
 }
 
 export async function getGenerationStatus(id: string): Promise<GenerationStatus> {
-	const response = await fetch(`${API_BASE}/api/v1/status/${id}`);
+	const response = await apiFetch(`/api/v1/status/${id}`);
 
 	if (!response.ok) {
 		throw new Error(`Status check failed: ${response.statusText}`);
@@ -49,7 +63,7 @@ export async function pollUntilDone(
 }
 
 export async function fetchTextbookHtml(outputPath: string): Promise<string> {
-	const response = await fetch(`${API_BASE}/api/v1/textbook/${encodeURIComponent(outputPath)}`);
+	const response = await apiFetch(`/api/v1/textbook/${encodeURIComponent(outputPath)}`);
 	if (!response.ok) {
 		throw new Error(`Failed to fetch textbook: ${response.statusText}`);
 	}

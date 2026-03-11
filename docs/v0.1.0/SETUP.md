@@ -39,13 +39,6 @@ curl http://localhost:8000/health
 # Should return: {"status":"ok","version":"0.1.0"}
 ```
 
-### CLI Usage (Phase 1 - skeleton only)
-
-```bash
-cd backend
-uv run textbook-agent --profile tests/fixtures/stem_beginner.json
-```
-
 ## Frontend Setup
 
 ```bash
@@ -91,12 +84,19 @@ cd frontend && npm run dev
 | `TEMPERATURE` | `0.3` | LLM temperature |
 | `OUTPUT_DIR` | `outputs/` | Generated textbook output directory |
 | `OUTPUT_FORMAT` | `html` | Output format |
+| `GOOGLE_CLIENT_ID` | | Google OAuth client ID (from Google Cloud Console) |
+| `JWT_SECRET_KEY` | auto-generated | Secret key for JWT signing |
+| `JWT_ALGORITHM` | `HS256` | JWT signing algorithm |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | JWT expiry (default: 7 days) |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./textbook_agent.db` | Database connection URL |
+| `FRONTEND_ORIGIN` | `http://localhost:5173` | Allowed CORS origin |
 
 ### Frontend (`.env`)
 
 | Variable | Default | Description |
 |---|---|---|
 | `PUBLIC_API_URL` | `http://localhost:8000` | Backend API base URL |
+| `VITE_GOOGLE_CLIENT_ID` | | Google OAuth client ID (same as backend) |
 
 ## Project Structure
 
@@ -107,7 +107,7 @@ Textbook agent/
 │   │   ├── domain/          # Core business logic
 │   │   ├── application/     # Use cases, orchestration
 │   │   ├── infrastructure/  # Providers, storage, renderer
-│   │   └── interface/       # FastAPI routes, CLI
+│   │   └── interface/       # FastAPI routes
 │   └── tests/
 ├── frontend/         # SvelteKit + TypeScript
 │   └── src/

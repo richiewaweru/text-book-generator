@@ -1,5 +1,6 @@
-import sys
 import asyncio
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,11 +9,53 @@ from httpx import ASGITransport, AsyncClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from textbook_agent.domain.entities.user import User
 from textbook_agent.interface.api.app import app
+from textbook_agent.interface.api.dependencies import (
+    get_jwt_handler,
+    get_student_profile_repository,
+)
+from textbook_agent.interface.api.middleware.auth_middleware import get_current_user
 from conftest import MockProvider
 
+_TEST_USER = User(
+    id="test-user-id",
+    email="test@example.com",
+    name="Test User",
+    picture_url=None,
+    has_profile=True,
+    created_at=datetime.now(timezone.utc),
+    updated_at=datetime.now(timezone.utc),
+)
+
+
+async def _override_current_user():
+    return _TEST_USER
+
+
+class _MockProfileRepo:
+    async def find_by_user_id(self, user_id: str):
+        return None
+
+    async def create(self, profile):
+        return profile
+
+    async def update(self, profile):
+        return profile
+
+
+async def _override_profile_repo():
+    return _MockProfileRepo()
+
+
+app.dependency_overrides[get_current_user] = _override_current_user
+app.dependency_overrides[get_student_profile_repository] = _override_profile_repo
 
 client = TestClient(app)
+
+jwt_handler = get_jwt_handler()
+_TEST_TOKEN = jwt_handler.create_access_token(_TEST_USER.id, _TEST_USER.email)
+AUTH_HEADERS = {"Authorization": f"Bearer {_TEST_TOKEN}"}
 
 
 class TestHealthCheck:
@@ -38,10 +81,10 @@ class TestGenerationEndpoints:
             from textbook_agent.application.use_cases.generate_textbook import (
                 GenerateTextbookUseCase,
             )
+            from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
             from textbook_agent.infrastructure.repositories.file_textbook_repo import (
                 FileTextbookRepository,
             )
-            from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
 
             provider = MockProvider()
             repo = FileTextbookRepository(output_dir="outputs/")
@@ -53,19 +96,29 @@ class TestGenerationEndpoints:
                 "/api/v1/generate",
                 json={
                     "subject": "algebra",
-                    "age": 14,
                     "context": "test",
                     "depth": "survey",
-                    "language": "plain",
                 },
+                headers=AUTH_HEADERS,
             )
             assert response.status_code == 202
             data = response.json()
             assert "generation_id" in data
             assert data["status"] == "pending"
 
+    def test_generate_returns_401_without_auth(self):
+        app.dependency_overrides.pop(get_current_user, None)
+        try:
+            response = client.post(
+                "/api/v1/generate",
+                json={"subject": "algebra", "context": "test"},
+            )
+            assert response.status_code in (401, 403)
+        finally:
+            app.dependency_overrides[get_current_user] = _override_current_user
+
     def test_status_unknown_returns_404(self):
-        response = client.get("/api/v1/status/nonexistent-id")
+        response = client.get("/api/v1/status/nonexistent-id", headers=AUTH_HEADERS)
         assert response.status_code == 404
 
     async def test_generate_and_poll_status(self):
@@ -75,10 +128,10 @@ class TestGenerationEndpoints:
             from textbook_agent.application.use_cases.generate_textbook import (
                 GenerateTextbookUseCase,
             )
+            from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
             from textbook_agent.infrastructure.repositories.file_textbook_repo import (
                 FileTextbookRepository,
             )
-            from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
 
             provider = MockProvider()
             repo = FileTextbookRepository(output_dir="outputs/")
@@ -92,17 +145,18 @@ class TestGenerationEndpoints:
                     "/api/v1/generate",
                     json={
                         "subject": "algebra",
-                        "age": 14,
                         "context": "test",
                         "depth": "survey",
-                        "language": "plain",
                     },
+                    headers=AUTH_HEADERS,
                 )
                 assert post_resp.status_code == 202
                 gen_id = post_resp.json()["generation_id"]
 
                 for _ in range(50):
-                    status_resp = await ac.get(f"/api/v1/status/{gen_id}")
+                    status_resp = await ac.get(
+                        f"/api/v1/status/{gen_id}", headers=AUTH_HEADERS
+                    )
                     assert status_resp.status_code == 200
                     status_data = status_resp.json()
                     if status_data["status"] in ("completed", "failed"):

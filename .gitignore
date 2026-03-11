@@ -29,6 +29,7 @@ Thumbs.db
 # Backend outputs
 backend/outputs/*
 !backend/outputs/.gitkeep
+backend/*.db
 
 # Frontend
 frontend/node_modules/

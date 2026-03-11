@@ -1,19 +1,23 @@
-from .learner_profile import LearnerProfile
 from .curriculum_plan import CurriculumPlan, SectionSpec
+from .learner_profile import LearnerProfile
+from .quality_report import QualityIssue, QualityReport
+from .section_code import SectionCode
 from .section_content import SectionContent
 from .section_diagram import SectionDiagram
-from .section_code import SectionCode
+from .student_profile import StudentProfile
 from .textbook import RawTextbook
-from .quality_report import QualityIssue, QualityReport
+from .user import User
 
 __all__ = [
-    "LearnerProfile",
     "CurriculumPlan",
-    "SectionSpec",
-    "SectionContent",
-    "SectionDiagram",
-    "SectionCode",
-    "RawTextbook",
+    "LearnerProfile",
     "QualityIssue",
     "QualityReport",
+    "SectionCode",
+    "SectionContent",
+    "SectionDiagram",
+    "SectionSpec",
+    "StudentProfile",
+    "RawTextbook",
+    "User",
 ]

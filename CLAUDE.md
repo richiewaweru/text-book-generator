@@ -9,7 +9,6 @@
 - Package manager: `uv`
 - Source layout: `backend/src/textbook_agent/`
 - Entry point: `uvicorn textbook_agent.interface.api.app:app`
-- CLI: `textbook-agent --profile <path>`
 - Tests: `cd backend && uv run pytest`
 - Lint: `cd backend && uv run ruff check src/ tests/`
 
@@ -17,7 +16,7 @@
 - `domain/` - Entities, value objects, pipeline nodes, prompts, ports (abstract). Zero framework imports.
 - `application/` - Use cases, orchestrator, DTOs. Depends only on domain.
 - `infrastructure/` - LLM providers, storage, renderer, config. Implements domain ports.
-- `interface/` - FastAPI routes, CLI. Calls application use cases.
+- `interface/` - FastAPI routes. Calls application use cases.
 
 ## Key Rules
 - Domain layer NEVER imports from other layers
