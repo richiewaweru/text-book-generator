@@ -1,32 +1,25 @@
-name: Bug Report
-description: Report a defect, regression, or workflow failure.
+name: Bug
+description: Report a bug or regression.
 title: "fix: "
 labels:
-  - bug
+  - runbook
 body:
   - type: textarea
-    id: observed
+    id: problem
     attributes:
-      label: Observed behavior
-      description: What happened?
+      label: Problem
+      description: What is broken?
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
       label: Expected behavior
-      description: What should have happened?
+      description: What should happen instead?
     validations:
       required: true
   - type: textarea
-    id: reproduction
+    id: evidence
     attributes:
-      label: Reproduction steps
-      description: Provide the shortest reliable reproduction.
-    validations:
-      required: true
-  - type: textarea
-    id: impact
-    attributes:
-      label: Impact
-      description: Who is affected and how severe is it?
+      label: Evidence
+      description: Logs, screenshots, or reproduction steps.

@@ -21,3 +21,4 @@ class GenerationStatus(BaseModel):
     progress: GenerationProgress | None = None
     result: GenerationResponse | None = None
     error: str | None = None
+    error_type: str | None = None

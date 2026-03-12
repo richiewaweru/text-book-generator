@@ -7,3 +7,6 @@
 - name: release
   color: "5319E7"
   description: Marks release preparation, tagging, or release follow-up work.
+- name: runbook
+  color: "BFDADC"
+  description: Highlights work that updates or depends on a tracked runbook.

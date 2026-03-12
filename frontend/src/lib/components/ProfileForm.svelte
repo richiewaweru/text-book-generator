@@ -1,11 +1,9 @@
 <script lang="ts">
-	import type { GenerationRequest, Depth, NotationLanguage } from '$lib/types';
+	import type { GenerationRequest, Depth } from '$lib/types';
 
 	let subject = $state('');
-	let age = $state(16);
 	let context = $state('');
 	let depth: Depth = $state('standard');
-	let language: NotationLanguage = $state('plain');
 
 	interface Props {
 		onsubmit: (request: GenerationRequest) => void;
@@ -15,44 +13,80 @@
 	let { onsubmit, disabled = false }: Props = $props();
 
 	function handleSubmit() {
-		onsubmit({ subject, age, context, depth, language });
+		onsubmit({ subject, context, depth });
 	}
 </script>
 
-<form onsubmit={(e: Event) => { e.preventDefault(); handleSubmit(); }}>
+<form onsubmit={(e: Event) => { e.preventDefault(); handleSubmit(); }} class="generation-form">
 	<label>
 		Subject
-		<input type="text" bind:value={subject} placeholder="e.g. calculus, linear algebra" required />
-	</label>
-
-	<label>
-		Age
-		<input type="number" bind:value={age} min="8" max="99" required />
+		<input type="text" bind:value={subject} placeholder="e.g. calculus, linear algebra, data structures" required />
 	</label>
 
 	<label>
 		Context
-		<textarea bind:value={context} placeholder="What do you already know? What confuses you?" required></textarea>
+		<textarea bind:value={context} placeholder="What do you already know about this topic? What specifically confuses you?" required rows="4"></textarea>
 	</label>
 
 	<label>
 		Depth
 		<select bind:value={depth}>
-			<option value="survey">Survey</option>
+			<option value="survey">Survey (quick overview)</option>
 			<option value="standard">Standard</option>
-			<option value="deep">Deep</option>
-		</select>
-	</label>
-
-	<label>
-		Notation
-		<select bind:value={language}>
-			<option value="plain">Plain English</option>
-			<option value="math_notation">Math Notation</option>
-			<option value="python">Python</option>
-			<option value="pseudocode">Pseudocode</option>
+			<option value="deep">Deep (comprehensive)</option>
 		</select>
 	</label>
 
 	<button type="submit" {disabled}>Generate Textbook</button>
 </form>
+
+<style>
+	.generation-form {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		max-width: 600px;
+	}
+
+	label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		font-size: 0.9rem;
+		color: #ccc;
+	}
+
+	input, textarea, select {
+		padding: 0.6rem;
+		border: 1px solid #444;
+		border-radius: 6px;
+		background: #1a1a1a;
+		color: #eee;
+		font-size: 0.95rem;
+	}
+
+	input:focus, textarea:focus, select:focus {
+		outline: none;
+		border-color: #6d9eeb;
+	}
+
+	button {
+		padding: 0.7rem 1.5rem;
+		background: #4a86d6;
+		color: #fff;
+		border: none;
+		border-radius: 6px;
+		font-size: 1rem;
+		cursor: pointer;
+		margin-top: 0.5rem;
+	}
+
+	button:hover:not(:disabled) {
+		background: #5a96e6;
+	}
+
+	button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+</style>

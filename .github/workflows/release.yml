@@ -46,9 +46,14 @@ jobs:
         working-directory: frontend
         run: npm ci
       - name: Run full validation
-        run: python automation/scripts/validate_repo.py --scope all
+        working-directory: backend
+        run: uv run python ../tools/agent/validate_repo.py --context docs/project/context-summary.yaml --scope all
+      - name: Check scaffold drift
+        working-directory: backend
+        run: uv run python ../agents/scripts/bootstrap_project.py --context docs/project/context-summary.yaml --mode check
       - name: Extract changelog notes
-        run: python automation/scripts/extract_release_notes.py --version ${{ steps.version.outputs.value }} --output release_notes.md
+        working-directory: backend
+        run: uv run python ../tools/agent/extract_release_notes.py --context docs/project/context-summary.yaml --version ${{ steps.version.outputs.value }} --output ../release_notes.md
       - name: Publish GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

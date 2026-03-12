@@ -2,7 +2,8 @@ import pytest
 from pydantic import ValidationError
 
 from textbook_agent.domain.entities import (
-    LearnerProfile,
+    Generation,
+    GenerationContext,
     CurriculumPlan,
     SectionSpec,
     SectionContent,
@@ -14,7 +15,7 @@ from textbook_agent.domain.entities import (
 from textbook_agent.domain.value_objects import Depth, NotationLanguage, SectionDepth
 
 
-class TestLearnerProfile:
+class TestGenerationContext:
     def test_valid_profile(self, beginner_profile):
         assert beginner_profile.subject == "algebra"
         assert beginner_profile.age == 14
@@ -28,19 +29,19 @@ class TestLearnerProfile:
 
     def test_rejects_invalid_age_low(self):
         with pytest.raises(ValidationError):
-            LearnerProfile(
+            GenerationContext(
                 subject="math", age=5, context="test", depth="standard", language="plain"
             )
 
     def test_rejects_invalid_age_high(self):
         with pytest.raises(ValidationError):
-            LearnerProfile(
+            GenerationContext(
                 subject="math", age=100, context="test", depth="standard", language="plain"
             )
 
     def test_rejects_invalid_depth(self):
         with pytest.raises(ValidationError):
-            LearnerProfile(
+            GenerationContext(
                 subject="math", age=15, context="test", depth="invalid", language="plain"
             )
 
@@ -115,6 +116,45 @@ class TestSectionCode:
             expected_output="7",
         )
         assert code.language == "python"
+
+
+class TestGeneration:
+    def test_valid_generation(self):
+        gen = Generation(
+            id="gen-001",
+            user_id="user-001",
+            subject="algebra",
+            context="I need help with variables",
+        )
+        assert gen.status == "pending"
+        assert gen.output_path is None
+        assert gen.error is None
+        assert gen.quality_passed is None
+        assert gen.generation_time_seconds is None
+        assert gen.completed_at is None
+
+    def test_completed_generation(self):
+        gen = Generation(
+            id="gen-002",
+            user_id="user-001",
+            subject="calculus",
+            context="Integration basics",
+            status="completed",
+            output_path="/outputs/gen-002.html",
+            quality_passed=True,
+            generation_time_seconds=45.2,
+        )
+        assert gen.status == "completed"
+        assert gen.quality_passed is True
+
+    def test_rejects_invalid_status(self):
+        with pytest.raises(ValidationError):
+            Generation(
+                id="gen-003",
+                user_id="user-001",
+                subject="math",
+                status="unknown",
+            )
 
 
 class TestQualityReport:

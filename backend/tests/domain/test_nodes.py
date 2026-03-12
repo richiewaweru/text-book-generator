@@ -1,4 +1,5 @@
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -44,9 +45,22 @@ class TestCurriculumPlannerNode:
     async def test_retry_on_failure(self, beginner_profile):
         provider = MockProvider(fail_n_times=1)
         node = CurriculumPlannerNode(provider=provider)
+        node.retry_base_delay = 0.01  # Fast for tests
         result = await node.execute(beginner_profile)
         assert isinstance(result, CurriculumPlan)
         assert provider.call_count == 2
+
+    async def test_retry_uses_exponential_backoff(self, beginner_profile):
+        provider = MockProvider(fail_n_times=2)
+        node = CurriculumPlannerNode(provider=provider)
+        node.retry_base_delay = 0.1
+        start = time.monotonic()
+        result = await node.execute(beginner_profile)
+        elapsed = time.monotonic() - start
+        assert isinstance(result, CurriculumPlan)
+        assert provider.call_count == 3
+        # Should have waited at least 0.1 + 0.2 = 0.3 seconds
+        assert elapsed >= 0.25
 
 
 class TestContentGeneratorNode:

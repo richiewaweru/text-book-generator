@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from textbook_agent.domain.entities.learner_profile import LearnerProfile
+from textbook_agent.domain.entities.generation_context import GenerationContext
 from textbook_agent.domain.entities.curriculum_plan import CurriculumPlan, SectionSpec
 from textbook_agent.domain.entities.section_content import SectionContent
 from textbook_agent.domain.entities.section_diagram import SectionDiagram
@@ -120,21 +120,21 @@ class MockProvider(BaseProvider):
 
 
 @pytest.fixture
-def beginner_profile() -> LearnerProfile:
+def beginner_profile() -> GenerationContext:
     data = json.loads((FIXTURES_DIR / "stem_beginner.json").read_text())
-    return LearnerProfile.model_validate(data)
+    return GenerationContext.model_validate(data)
 
 
 @pytest.fixture
-def intermediate_profile() -> LearnerProfile:
+def intermediate_profile() -> GenerationContext:
     data = json.loads((FIXTURES_DIR / "stem_intermediate.json").read_text())
-    return LearnerProfile.model_validate(data)
+    return GenerationContext.model_validate(data)
 
 
 @pytest.fixture
-def advanced_profile() -> LearnerProfile:
+def advanced_profile() -> GenerationContext:
     data = json.loads((FIXTURES_DIR / "stem_advanced.json").read_text())
-    return LearnerProfile.model_validate(data)
+    return GenerationContext.model_validate(data)
 
 
 @pytest.fixture

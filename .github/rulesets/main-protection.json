@@ -24,10 +24,7 @@
       "parameters": {
         "strict_required_status_checks_policy": true,
         "required_status_checks": [
-          { "context": "backend-quality" },
-          { "context": "frontend-quality" },
-          { "context": "architecture-guard" }
-        ]
+          { "context": "backend-quality" },          { "context": "frontend-quality" },          { "context": "architecture-guard" },          { "context": "agent-governance" }        ]
       }
     },
     { "type": "required_linear_history" },

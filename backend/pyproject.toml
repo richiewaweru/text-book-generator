@@ -16,6 +16,11 @@ dependencies = [
     "openai>=1.35.0",
     "jinja2>=3.1.0",
     "python-dotenv>=1.0.0",
+    "python-jose[cryptography]>=3.3.0",
+    "google-auth>=2.29.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "aiosqlite>=0.20.0",
+    "requests>=2.32.5",
 ]
 
 [project.optional-dependencies]
@@ -24,10 +29,8 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "httpx>=0.27.0",
     "ruff>=0.5.0",
+    "pyyaml>=6.0.2",
 ]
-
-[project.scripts]
-textbook-agent = "textbook_agent.interface.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/textbook_agent"]
@@ -36,6 +39,10 @@ packages = ["src/textbook_agent"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+markers = [
+    "integration: tests requiring real LLM API keys (deselected by default)",
+]
+addopts = "-m 'not integration'"
 
 [tool.ruff]
 src = ["src", "tests"]

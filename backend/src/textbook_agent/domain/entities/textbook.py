@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from .learner_profile import LearnerProfile
+from .generation_context import GenerationContext
 from .curriculum_plan import CurriculumPlan
 from .section_content import SectionContent
 from .section_diagram import SectionDiagram
@@ -13,7 +13,7 @@ class RawTextbook(BaseModel):
     """Assembled textbook ready for rendering. Output of the Assembler node."""
 
     subject: str
-    profile: LearnerProfile
+    profile: GenerationContext
     plan: CurriculumPlan
     sections: list[SectionContent]
     diagrams: list[SectionDiagram] = Field(default_factory=list)

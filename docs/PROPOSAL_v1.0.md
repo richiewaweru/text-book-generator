@@ -3,9 +3,44 @@
 # Textbook Generation Agent — Product Proposal & Architecture Specification
 
 **Version:** 1.0
-**Status:** Ready for Implementation
+**Status:** Partially Implemented (see addendum)
 **Primary Language:** Python
 **Target:** AI Coding Agent Implementation Guide
+
+---
+
+> ### Implementation Status Addendum (2026-03-11)
+>
+> This document is the **original product specification**. The implementation has diverged in several ways — all intentional improvements. Key differences:
+>
+> | Proposal says | Implementation does | Reason |
+> |---|---|---|
+> | 3-layer architecture (app/services/infra) | 4-layer DDD (interface/application/domain/infrastructure) | Cleaner separation, explicit ports & adapters |
+> | CLI-first entry point | FastAPI REST API + SvelteKit frontend | Web-first for multi-user support |
+> | Flat `schemas/` directory | `domain/entities/` + `domain/value_objects/` | DDD convention, schemas are domain entities |
+> | `LearnerProfile` as sole input | `StudentProfile` (persistent) + `GenerationContext` (ephemeral, per-generation) | Multi-user personalisation with persistent profiles |
+> | No authentication | Google OAuth + JWT | Multi-user requirement |
+> | No database | SQLite via SQLAlchemy (async) | Persistent users, profiles, and generation records |
+> | Phase 5 = "Service API" | API is the primary interface from Phase 1 | Frontend was built alongside the engine |
+> | `requirements.txt` | `pyproject.toml` + `uv` | Modern Python packaging |
+>
+> **What has been built (through Phase 3.1):**
+> - All 6 pipeline nodes fully implemented (not stubs)
+> - Both LLM providers (Anthropic + OpenAI) implemented
+> - HTML renderer with dark-theme design system
+> - Full orchestrator with progress callbacks
+> - Google OAuth authentication + JWT sessions
+> - Persistent student profiles (SQLite)
+> - SvelteKit frontend (login, onboarding, dashboard, viewer)
+> - 76 passing tests, 0 lint errors
+>
+> **What remains from the original phases:**
+> - Phase 2 (Rich Media): Image generation, audio narration, PDF export — not started
+> - Phase 3 (Executable Notebooks): Pyodide cells — not started
+> - Phase 4 (Diagnostic Integration): Automated learner assessment — not started (manual `learner_description` field is a placeholder)
+>
+> For current architecture, see `docs/v0.1.0/ARCHITECTURE.md`.
+> For phase-by-phase progress, see `docs/v0.1.0/progress/`.
 
 ---
 
@@ -17,10 +52,12 @@ The core thesis: most AI tutoring tools deliver the same content to everyone. Th
 
 ### 1.1 What It Is Not (Phase 1 Scope Boundary)
 
+> **Note:** Several of these have been implemented since the original proposal. See addendum above.
+
 - Not a chatbot or conversational interface
-- Not integrated with any diagnostic system yet
+- ~~Not integrated with any diagnostic system yet~~ — manual `learner_description` field added; automated diagnostics remain Phase 4
 - Not producing audio or runnable code cells yet
-- Not a multi-user platform yet
+- ~~Not a multi-user platform yet~~ — Google OAuth + persistent profiles implemented in Phase 3
 
 These are Phase 2+ concerns. The Phase 1 deliverable is: **profile in → textbook out, reliably and at high quality.**
 
@@ -516,76 +553,91 @@ Every section renders identically:
 
 ---
 
-## 9. CLI Interface
+## 9. ~~CLI Interface~~ → REST API
+
+> **Implementation note:** The CLI was removed in Phase 3. The application is now API-first with a SvelteKit frontend. See `docs/v0.1.0/ARCHITECTURE.md` for the current API endpoints.
 
 ```bash
-# Basic usage
-python main.py --profile tests/fixtures/stem_beginner.json
+# Start the backend
+cd backend && uv run uvicorn textbook_agent.interface.api.app:app --reload
 
-# With options
-python main.py \
-  --profile tests/fixtures/stem_intermediate.json \
-  --provider claude \
-  --depth deep \
-  --output outputs/ \
-  --format html
+# Start the frontend
+cd frontend && npm run dev
 
-# Output
-# outputs/calculus_age17_standard_20260311_143022.html
-# outputs/calculus_age17_standard_20260311_143022_meta.json
+# API usage:
+# POST /api/v1/auth/google     — Exchange Google ID token for JWT
+# GET  /api/v1/auth/me          — Get current user
+# GET  /api/v1/profile           — Get student profile
+# POST /api/v1/profile           — Create student profile
+# PATCH /api/v1/profile          — Update student profile
+# POST /api/v1/generate          — Start textbook generation (returns 202)
+# GET  /api/v1/status/{id}       — Poll generation status
 ```
 
 ---
 
 ## 10. Build Phases
 
-### Phase 1 — Core Engine (Build First)
+### Phase 1 — Core Engine (Build First) — COMPLETE
 
 Everything needed to go from profile to rendered textbook reliably.
 
 **Deliverables:**
 
-- All schemas (learner_profile, curriculum_plan, section, textbook)
-- BaseProvider + factory + Anthropic + OpenAI implementations
-- PipelineNode base class
-- TextbookAgent orchestrator
-- All 6 pipeline nodes
-- HTML renderer with design system
-- CLI entry point
-- 3 test fixtures + test suite
+- All schemas (entities, value objects) — **Done**
+- BaseProvider + factory + Anthropic + OpenAI implementations — **Done**
+- PipelineNode base class — **Done**
+- TextbookAgent orchestrator — **Done**
+- All 6 pipeline nodes — **Done**
+- HTML renderer with design system — **Done**
+- ~~CLI entry point~~ — Replaced by REST API + frontend
+- 3 test fixtures + test suite — **Done (76 tests)**
 
-**Success criteria:**
+**Status:** Complete. See `docs/v0.1.0/progress/HANDOFF_v0.1.0.md` and `HANDOFF_v0.1.0_phase2.md`.
 
-`python main.py --profile tests/fixtures/stem_beginner.json` produces a complete, quality-checked HTML textbook with no errors.
+### Phase 1.5 — Multi-User Web Application — COMPLETE (was not in original proposal)
 
-### Phase 2 — Rich Media
+Added during implementation to support a real application flow:
+
+- Google OAuth authentication + JWT sessions — **Done**
+- Persistent student profiles (SQLite via SQLAlchemy) — **Done**
+- SvelteKit frontend (login, onboarding, dashboard, textbook viewer) — **Done**
+- `StudentProfile` → `GenerationContext` hydration — **Done**
+- `learner_description` free-text field for manual diagnostic signals — **Done**
+- CLI removed in favour of API-first architecture — **Done**
+
+**Status:** Complete. See `docs/v0.1.0/progress/HANDOFF_v0.1.0_phase3.md` and `HANDOFF_v0.1.0_phase3.1.md`.
+
+### Phase 2 — Rich Media — NOT STARTED
 
 - Image generation via external API (DALL-E 3 or equivalent) for sections needing richer visuals
 - Audio narration script generation per section
 - Text-to-speech integration (ElevenLabs or equivalent)
 - PDF export via WeasyPrint
 
-### Phase 3 — Executable Notebooks
+### Phase 3 — Executable Notebooks — NOT STARTED
 
 - Swap static code blocks for Pyodide-embedded runnable cells
 - Output cells appear below code on execution
 - State persists between cells within a session
 - No server required — runs entirely in browser
 
-### Phase 4 — Diagnostic Integration
+### Phase 4 — Diagnostic Integration — NOT STARTED
 
 - Replace the minimal learner profile with the full 8-Steps diagnostic output
-- Learner profile populated by the diagnostic system, not manually
+- Learner profile populated by the diagnostic system, not manually (currently uses manual `learner_description` field as a placeholder)
 - Textbook generation triggered automatically after session completion
 - Gap severity and learning signals drive section depth and example density
 
-### Phase 5 — Service API
+### ~~Phase 5 — Service API~~ — SUPERSEDED
 
-- Wrap the agent in a FastAPI service
-- `POST /generate` accepts profile JSON, returns textbook URL
-- Async job queue for long-running generation
-- Webhook support for completion notification
-- Plugs into any interface: chatbot, school portal, mobile app
+> The REST API and SvelteKit frontend were built as part of Phase 1/1.5. This phase is no longer needed as a separate milestone.
+
+- ~~Wrap the agent in a FastAPI service~~ — Done
+- ~~`POST /generate` accepts profile JSON, returns textbook URL~~ — Done (returns 202, poll for status)
+- ~~Async job queue for long-running generation~~ — Done (asyncio.create_task)
+- Webhook support for completion notification — Not done
+- ~~Plugs into any interface~~ — Done (REST API)
 
 ---
 
@@ -649,4 +701,4 @@ TEMPERATURE=0.3
 
 ---
 
-*End of specification. Phase 1 implementation can begin immediately from this document.*
+*End of specification. Phases 1 and 1.5 (multi-user web app) are complete. See `docs/v0.1.0/progress/` for detailed handoff documents.*
