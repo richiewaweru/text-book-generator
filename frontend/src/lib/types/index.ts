@@ -82,6 +82,7 @@ export interface GenerationStatus {
 	progress: GenerationProgress | null;
 	result: GenerationResponse | null;
 	error: string | null;
+	error_type: string | null;
 }
 
 export interface GenerationHistoryItem {

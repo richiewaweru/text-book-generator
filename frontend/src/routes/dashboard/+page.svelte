@@ -15,6 +15,7 @@
 	let generationStatus: GenerationStatus | null = $state(null);
 	let generating = $state(false);
 	let errorMessage: string | null = $state(null);
+	let errorType: string | null = $state(null);
 	let pastGenerations: GenerationHistoryItem[] = $state([]);
 
 	onMount(async () => {
@@ -33,9 +34,20 @@
 		}
 	});
 
+	function friendlyErrorMessage(error: string | null, type: string | null): string {
+		if (type === 'provider_error') {
+			return 'The AI provider returned an unexpected response. Please try again.';
+		}
+		if (type === 'pipeline_error') {
+			return 'The generation pipeline encountered an error. Please try again with different input.';
+		}
+		return error ?? 'Generation failed unexpectedly.';
+	}
+
 	async function handleGenerate(request: GenerationRequest) {
 		generating = true;
 		errorMessage = null;
+		errorType = null;
 		generationStatus = null;
 
 		try {
@@ -48,7 +60,8 @@
 			if (finalStatus.status === 'completed' && finalStatus.result) {
 				goto(`/textbook/${finalStatus.result.textbook_id}`);
 			} else if (finalStatus.status === 'failed') {
-				errorMessage = finalStatus.error ?? 'Generation failed unexpectedly.';
+				errorType = finalStatus.error_type;
+				errorMessage = friendlyErrorMessage(finalStatus.error, finalStatus.error_type);
 			}
 		} catch (err) {
 			errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
