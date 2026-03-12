@@ -234,3 +234,39 @@ class TestGenerationEndpoints:
                 items = list_resp.json()
                 gen_ids = [item["id"] for item in items]
                 assert gen_id in gen_ids
+
+
+class TestErrorHandler:
+    def test_structured_error_responses(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient as TC
+
+        from textbook_agent.domain.exceptions import PipelineError, ProviderConformanceError
+        from textbook_agent.interface.api.middleware.error_handler import register_error_handlers
+
+        test_app_local = FastAPI()
+        register_error_handlers(test_app_local)
+
+        @test_app_local.get("/test-pipeline-error")
+        async def trigger_pipeline_error():
+            raise PipelineError(node_name="ContentGenerator", reason="LLM timeout")
+
+        @test_app_local.get("/test-provider-error")
+        async def trigger_provider_error():
+            raise ProviderConformanceError(
+                provider_name="claude", schema_name="SectionContent"
+            )
+
+        tc = TC(test_app_local)
+
+        resp = tc.get("/test-pipeline-error")
+        assert resp.status_code == 502
+        data = resp.json()
+        assert data["error_type"] == "pipeline_error"
+        assert "ContentGenerator" in data["detail"]
+
+        resp = tc.get("/test-provider-error")
+        assert resp.status_code == 502
+        data = resp.json()
+        assert data["error_type"] == "provider_error"
+        assert "claude" in data["detail"]

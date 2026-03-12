@@ -14,6 +14,7 @@ from textbook_agent.application.dtos import (
 from textbook_agent.domain.entities.generation import Generation
 from textbook_agent.domain.entities.student_profile import StudentProfile
 from textbook_agent.domain.entities.user import User
+from textbook_agent.domain.exceptions import PipelineError, ProviderConformanceError
 from textbook_agent.domain.ports.generation_repository import GenerationRepository
 from textbook_agent.domain.ports.student_profile_repository import StudentProfileRepository
 from textbook_agent.interface.api.dependencies import (
@@ -75,10 +76,16 @@ async def _run_generation(
         )
     except Exception as exc:
         logger.exception("Generation %s failed", generation_id)
+        error_type = "unknown_error"
+        if isinstance(exc, ProviderConformanceError):
+            error_type = "provider_error"
+        elif isinstance(exc, PipelineError):
+            error_type = "pipeline_error"
         jobs[generation_id] = GenerationStatus(
             id=generation_id,
             status="failed",
             error=str(exc),
+            error_type=error_type,
         )
         await gen_repo.update_status(
             generation_id,

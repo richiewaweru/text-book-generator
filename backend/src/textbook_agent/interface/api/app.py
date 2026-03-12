@@ -8,6 +8,7 @@ from textbook_agent.infrastructure.config.settings import settings
 from textbook_agent.infrastructure.database.models import Base
 from textbook_agent.infrastructure.database.session import engine
 
+from .middleware.error_handler import register_error_handlers
 from .routes.auth import router as auth_router
 from .routes.generation import router as generation_router
 from .routes.health import router as health_router
@@ -44,6 +45,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    register_error_handlers(app)
 
     app.include_router(health_router)
     app.include_router(auth_router)
