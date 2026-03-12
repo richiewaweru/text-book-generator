@@ -6,6 +6,7 @@
 	import { startGeneration, pollUntilDone, getGenerations } from '$lib/api/client';
 	import ProfileForm from '$lib/components/ProfileForm.svelte';
 	import GenerationProgress from '$lib/components/GenerationProgress.svelte';
+	import { getTextbookRoute } from '$lib/navigation/textbook';
 	import type { StudentProfile, GenerationRequest, GenerationStatus, GenerationHistoryItem } from '$lib/types';
 
 	const user = $derived(getUser());
@@ -58,7 +59,7 @@
 			});
 
 			if (finalStatus.status === 'completed' && finalStatus.result) {
-				goto(`/textbook/${finalStatus.result.textbook_id}`);
+				goto(getTextbookRoute(generation_id));
 			} else if (finalStatus.status === 'failed') {
 				errorType = finalStatus.error_type;
 				errorMessage = friendlyErrorMessage(finalStatus.error, finalStatus.error_type);
@@ -149,8 +150,8 @@
 									{/if}
 								</span>
 							</div>
-							{#if gen.status === 'completed' && gen.output_path}
-								<a href="/textbook/{gen.id}" class="view-link">View</a>
+							{#if gen.status === 'completed'}
+								<a href={getTextbookRoute(gen.id)} class="view-link">View</a>
 							{/if}
 						</li>
 					{/each}

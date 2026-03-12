@@ -65,9 +65,9 @@ export interface GenerationRequest {
 
 export interface GenerationResponse {
 	textbook_id: string;
-	output_path: string;
 	quality_report: QualityReport | null;
 	generation_time_seconds: number;
+	quality_reruns: number;
 }
 
 export interface GenerationProgress {
@@ -89,7 +89,18 @@ export interface GenerationHistoryItem {
 	id: string;
 	subject: string;
 	status: 'pending' | 'running' | 'completed' | 'failed';
-	output_path: string | null;
+	quality_passed: boolean | null;
+	generation_time_seconds: number | null;
+	created_at: string | null;
+	completed_at: string | null;
+}
+
+export interface GenerationDetail {
+	id: string;
+	subject: string;
+	context: string;
+	status: 'pending' | 'running' | 'completed' | 'failed';
+	error: string | null;
 	quality_passed: boolean | null;
 	generation_time_seconds: number | null;
 	created_at: string | null;
@@ -101,6 +112,7 @@ export interface QualityIssue {
 	issue_type: string;
 	description: string;
 	severity: 'error' | 'warning';
+	check_source: 'mechanical' | 'llm';
 }
 
 export interface QualityReport {

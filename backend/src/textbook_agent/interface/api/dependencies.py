@@ -67,6 +67,10 @@ def get_repository(settings: Settings | None = None) -> TextbookRepository:
     return FileTextbookRepository(output_dir=s.output_dir)
 
 
+def get_textbook_repository(settings: Settings | None = None) -> TextbookRepository:
+    return get_repository(settings)
+
+
 def get_renderer() -> RendererPort:
     return HTMLRenderer()
 

@@ -3,81 +3,180 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ textbook.subject | title }} — Personalized Textbook</title>
+    <title>{{ escape_html(textbook.subject.title()) }} | Personalized Textbook</title>
     <style>
 {{ base_css }}
 {{ prism_css }}
     </style>
 </head>
 <body>
-    <nav class="sidebar">
-        <h2>Table of Contents</h2>
-        <ol>
-        {%- for section_id in textbook.plan.reading_order %}
-            {%- set sec = section_map.get(section_id) %}
-            <li><a href="#{{ section_id }}">{{ sec.hook[:60] + '...' if sec and sec.hook|length > 60 else (sec.hook if sec else section_id) }}</a></li>
-        {%- endfor %}
-        </ol>
-    </nav>
-
-    <main class="content">
-        <header class="textbook-header">
-            <h1>{{ textbook.subject | title }}</h1>
-            <p class="meta">
-                Depth: {{ textbook.profile.depth.value }} &middot;
-                Age: {{ textbook.profile.age }} &middot;
-                Sections: {{ textbook.plan.total_sections }} &middot;
-                Generated: {{ textbook.generated_at.strftime('%Y-%m-%d %H:%M') }}
-            </p>
-        </header>
-
-        {%- for section_id in textbook.plan.reading_order %}
-        {%- set sec = section_map.get(section_id) %}
-        {%- if sec %}
-        <article class="section" id="{{ section_id }}">
-            <h2>{{ spec_map[section_id].title if section_id in spec_map else section_id }}</h2>
-
-            <div class="hook">{{ sec.hook }}</div>
-
-            <div class="explanation">{{ sec.plain_explanation }}</div>
-
-            {%- if section_id in diagram_map %}
-            <div class="diagram">
-                {{ diagram_map[section_id].svg_markup }}
-                <p class="diagram-caption">{{ diagram_map[section_id].caption }}</p>
+    <div class="page-shell">
+        <nav class="sidebar" aria-label="Textbook navigation">
+            <div class="sidebar-inner">
+                <p class="sidebar-kicker">Textbook Outline</p>
+                <h2>{{ escape_html(textbook.subject.title()) }}</h2>
+                <ol class="sidebar-list">
+                {% for section_id in textbook.plan.reading_order %}
+                    {% set spec = spec_map.get(section_id) %}
+                    <li>
+                        <a href="#{{ escape_html(section_id) }}">
+                            <span class="sidebar-index">{{ "%02d"|format(loop.index) }}</span>
+                            <span>{{ escape_html(spec.title if spec else section_id) }}</span>
+                        </a>
+                    </li>
+                {% endfor %}
+                </ol>
             </div>
-            {%- endif %}
+        </nav>
 
-            <div class="definition">
-                <div class="definition-label">Formal Definition</div>
-                {{ sec.formal_definition }}
-            </div>
+        <main class="content">
+            <header class="textbook-header">
+                <p class="eyebrow">Personalized textbook</p>
+                <h1>{{ escape_html(textbook.subject.title()) }}</h1>
+                <p class="meta-line">
+                    Depth {{ escape_html(textbook.profile.depth.value) }}
+                    <span aria-hidden="true">/</span>
+                    Age {{ textbook.profile.age }}
+                    <span aria-hidden="true">/</span>
+                    {{ textbook.plan.total_sections }} sections
+                    <span aria-hidden="true">/</span>
+                    Generated {{ escape_html(textbook.generated_at.strftime('%Y-%m-%d %H:%M')) }}
+                </p>
+            </header>
 
-            <div class="example">
-                <div class="example-label">Worked Example</div>
-                {{ sec.worked_example }}
-            </div>
+            {% set figures = namespace(value=0) %}
+            {% for section_id in textbook.plan.reading_order %}
+                {% set sec = section_map.get(section_id) %}
+                {% set spec = spec_map.get(section_id) %}
+                {% if sec %}
+                <article class="section" id="{{ escape_html(section_id) }}">
+                    <header class="section-header">
+                        <p class="section-index">Section {{ "%02d"|format(loop.index) }}</p>
+                        <h2>{{ escape_html(spec.title if spec else section_id) }}</h2>
+                        {% if spec and spec.learning_objective %}
+                        <p class="section-objective">{{ escape_html(spec.learning_objective) }}</p>
+                        {% endif %}
+                    </header>
 
-            {%- if section_id in code_map %}
-            <div class="code-block">
-                <pre><code>{{ code_map[section_id].code }}</code></pre>
-                <p class="code-explanation">{{ code_map[section_id].explanation }}</p>
-                <div class="code-output">{{ code_map[section_id].expected_output }}</div>
-            </div>
-            {%- endif %}
+                    <section class="callout hook">
+                        <h4>Intuition Hook</h4>
+                        {{ render_text_block(sec.hook) }}
+                    </section>
 
-            <div class="misconception">
-                <div class="misconception-label">Common Misconception</div>
-                {{ sec.common_misconception }}
-            </div>
+                    {% if sec.prerequisites_block %}
+                    <section class="prerequisites">
+                        <h4>Prerequisites</h4>
+                        {{ render_text_block(sec.prerequisites_block) }}
+                    </section>
+                    {% endif %}
 
-            <div class="connection">
-                <div class="connection-label">What's Next</div>
-                {{ sec.connection_forward }}
-            </div>
-        </article>
-        {%- endif %}
-        {%- endfor %}
-    </main>
+                    <section class="prose-block explanation">
+                        {{ render_text_block(sec.plain_explanation) }}
+                    </section>
+
+                    <section class="callout def-box">
+                        <h4>Definition</h4>
+                        {{ render_text_block(sec.formal_definition) }}
+                    </section>
+
+                    {% if section_id in diagram_map %}
+                    {% set figures.value = figures.value + 1 %}
+                    <figure class="diagram-figure">
+                        <div class="figure-frame">
+                            {{ diagram_map[section_id].svg_markup }}
+                        </div>
+                        <figcaption>
+                            Figure {{ figures.value }}. {{ escape_html(diagram_map[section_id].caption) }}
+                        </figcaption>
+                    </figure>
+                    {% endif %}
+
+                    <section class="worked">
+                        <div class="worked-grid">
+                            <div class="worked-label">
+                                <h4>Worked Example</h4>
+                                <p>Follow the reasoning, not just the result.</p>
+                            </div>
+                            <div class="worked-body">
+                                {{ render_text_block(sec.worked_example) }}
+                            </div>
+                        </div>
+                    </section>
+
+                    {% if section_id in code_map %}
+                    {% set code = code_map[section_id] %}
+                    <section class="code-wrap">
+                        <div class="code-header">
+                            <div class="code-dots" aria-hidden="true">
+                                <span></span><span></span><span></span>
+                            </div>
+                            <span class="code-language">{{ escape_html(code.language) }}</span>
+                        </div>
+                        <pre class="code-panel"><code class="language-{{ escape_html(code.language) }}">{{ escape_html(code.code) }}</code></pre>
+                        <div class="code-notes">
+                            <div class="code-note">
+                                <h4>What to Notice</h4>
+                                {{ render_text_block(code.explanation) }}
+                            </div>
+                            <div class="code-note output">
+                                <h4>Expected Output</h4>
+                                {{ render_text_block(code.expected_output) }}
+                            </div>
+                        </div>
+                    </section>
+                    {% endif %}
+
+                    <section class="callout pitfall">
+                        <h4>Pitfall</h4>
+                        {{ render_text_block(sec.common_misconception) }}
+                    </section>
+
+                    {% if sec.think_prompt %}
+                    <section class="callout think">
+                        <h4>Think Prompt</h4>
+                        {{ render_text_block(sec.think_prompt) }}
+                    </section>
+                    {% endif %}
+
+                    <section class="practice-problems">
+                        <div class="practice-heading">
+                            <h3>Practice Problems</h3>
+                            <p>Work through each one before checking your notes.</p>
+                        </div>
+                        <ol class="practice-list">
+                        {% for problem in sec.practice_problems %}
+                            <li class="practice-item">
+                                <div class="practice-head">
+                                    <span class="difficulty-badge difficulty-{{ escape_html(problem.difficulty) }}">{{ escape_html(problem.difficulty) }}</span>
+                                </div>
+                                <div class="practice-body">
+                                    {{ render_text_block(problem.statement) }}
+                                </div>
+                                <div class="practice-hint">
+                                    <h4>Hint</h4>
+                                    {{ render_text_block(problem.hint) }}
+                                </div>
+                                <div class="write-in-field" aria-hidden="true"></div>
+                            </li>
+                        {% endfor %}
+                        </ol>
+                    </section>
+
+                    {% if sec.interview_anchor %}
+                    <section class="callout interview">
+                        <h4>Interview Anchor</h4>
+                        {{ render_text_block(sec.interview_anchor) }}
+                    </section>
+                    {% endif %}
+
+                    <section class="callout connection">
+                        <h4>What's Next</h4>
+                        {{ render_text_block(sec.connection_forward) }}
+                    </section>
+                </article>
+                {% endif %}
+            {% endfor %}
+        </main>
+    </div>
 </body>
 </html>

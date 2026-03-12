@@ -15,6 +15,7 @@ Validation and architecture scripts live in `tools/agent/`:
 python tools/agent/validate_repo.py --scope all          # Run all validation
 python tools/agent/validate_repo.py --scope backend       # Backend only
 python tools/agent/check_architecture.py --format text    # Check layer boundaries
+cd frontend && npm run test                               # Frontend helper tests
 ```
 
 ## Dev Servers

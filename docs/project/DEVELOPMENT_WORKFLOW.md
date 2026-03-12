@@ -19,6 +19,8 @@
 
 All checks must pass before merge.
 
+Project-local validation uses `python tools/agent/validate_repo.py --scope all`, which now covers backend, frontend, and tooling automation tests declared in `docs/project/context-summary.yaml`.
+
 ## Execution Boundary
 
 - `agents/` -- universal standards and workflows (portable, agent-agnostic)

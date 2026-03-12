@@ -1,6 +1,7 @@
 from .curriculum_plan import CurriculumPlan, SectionSpec
 from .generation import Generation
 from .generation_context import GenerationContext
+from .practice_problem import PracticeProblem
 from .quality_report import QualityIssue, QualityReport
 from .section_code import SectionCode
 from .section_content import SectionContent
@@ -13,6 +14,7 @@ __all__ = [
     "CurriculumPlan",
     "Generation",
     "GenerationContext",
+    "PracticeProblem",
     "QualityIssue",
     "QualityReport",
     "SectionCode",

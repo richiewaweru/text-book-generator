@@ -11,7 +11,7 @@ from textbook_agent.domain.entities.curriculum_plan import CurriculumPlan
 from textbook_agent.domain.entities.section_content import SectionContent
 from textbook_agent.domain.entities.section_diagram import SectionDiagram
 from textbook_agent.domain.entities.section_code import SectionCode
-from textbook_agent.domain.entities.quality_report import QualityReport
+from textbook_agent.domain.entities.quality_report import QualityIssue, QualityReport
 from textbook_agent.domain.entities.textbook import RawTextbook
 from textbook_agent.domain.exceptions import PipelineError
 from textbook_agent.domain.services.planner import CurriculumPlannerNode
@@ -112,6 +112,64 @@ class TestQualityCheckerNode:
         result = await node.execute(input_data)
         assert isinstance(result, QualityReport)
         assert result.passed is True
+
+    async def test_merges_mechanical_and_llm_issues(self, beginner_profile):
+        class QualityProvider(MockProvider):
+            def complete(
+                self,
+                system_prompt: str,
+                user_prompt: str,
+                response_schema: type,
+                temperature: float = 0.3,
+                max_tokens: int = 4096,
+            ):
+                if response_schema is QualityReport:
+                    return QualityReport(
+                        passed=True,
+                        issues=[
+                            QualityIssue(
+                                section_id="section_01",
+                                issue_type="semantic_gap",
+                                description="The explanation skips a motivation step.",
+                                severity="warning",
+                            )
+                        ],
+                    )
+                return super().complete(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    response_schema=response_schema,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+
+        node = QualityCheckerNode(provider=QualityProvider())
+        textbook = RawTextbook(
+            subject="algebra",
+            profile=beginner_profile,
+            plan=SAMPLE_PLAN,
+            sections=[SAMPLE_CONTENT],
+            diagrams=[
+                SectionDiagram(
+                    section_id="section_01",
+                    svg_markup="<svg width='100'></svg>",
+                    caption="Broken diagram",
+                    diagram_type="number_line",
+                )
+            ],
+        )
+
+        input_data = QualityCheckerInput(textbook=textbook, plan=SAMPLE_PLAN)
+        result = await node.execute(input_data)
+
+        # SVG missing attributes is now a warning (not error), so report passes
+        assert result.passed is True
+        assert any(issue.check_source == "mechanical" for issue in result.issues)
+        assert any(issue.check_source == "llm" for issue in result.issues)
+        # SVG issue should be present as a warning
+        svg_issues = [i for i in result.issues if i.issue_type == "svg_missing_required_attributes"]
+        assert len(svg_issues) == 1
+        assert svg_issues[0].severity == "warning"
 
 
 class TestAssemblerNode:

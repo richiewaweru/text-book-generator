@@ -52,6 +52,7 @@ For AI-assisted review, focused prompts produce better results than generic "rev
 - `agents/prompts/bug-risk.md` -- behavioral regressions and correctness issues
 - `agents/prompts/architecture-compliance.md` -- boundary and dependency violations
 - `agents/prompts/test-gap.md` -- missing or weak test coverage
+- `agents/prompts/workflow-compliance.md` -- runbook, CI, and delivery-process issues
 
 Use these when reviewing diffs. They're short and focused.
 

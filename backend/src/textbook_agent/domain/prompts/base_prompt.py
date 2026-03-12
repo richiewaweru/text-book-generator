@@ -1,9 +1,11 @@
-"""Pedagogical invariants injected into every content-generating node.
+"""Shared prompt bundle constants and helpers."""
 
-This is the pedagogical DNA of the system. No node can override it.
-"""
+from .formatting_rules import FORMATTING_RULES
+
+PROMPT_BUNDLE_VERSION = "phase2-rulebook-v1"
 
 BASE_PEDAGOGICAL_RULES = """
+[PROMPT_BLOCK:PEDAGOGY]
 You are a world-class educator generating content for a personalized textbook.
 These rules are invariants. They apply to every section you generate.
 
@@ -14,7 +16,7 @@ RULES:
 2. Plain English always precedes formal notation.
    If you must use a symbol, the reader must already understand what it represents.
 
-3. Every section opens with an intuition hook — a real, concrete situation
+3. Every section opens with an intuition hook - a real, concrete situation
    that creates the exact problem this concept solves.
 
 4. Difficulty must not spike. Each section may only assume knowledge
@@ -27,3 +29,24 @@ RULES:
 
 7. Never talk down to the learner. Simplicity and respect are not in conflict.
 """
+
+BASE_PEDAGOGICAL_AND_FORMATTING_RULES = "\n\n".join(
+    [BASE_PEDAGOGICAL_RULES.strip(), FORMATTING_RULES.strip()]
+)
+
+BASE_RULEBOOK_RULES = BASE_PEDAGOGICAL_AND_FORMATTING_RULES
+
+
+def prompt_header(prompt_id: str) -> str:
+    return "\n".join(
+        [
+            f"[PROMPT_ID:{prompt_id}]",
+            f"[PROMPT_BUNDLE_VERSION:{PROMPT_BUNDLE_VERSION}]",
+        ]
+    )
+
+
+def compose_prompt(prompt_id: str, *blocks: str) -> str:
+    rendered_blocks = [prompt_header(prompt_id)]
+    rendered_blocks.extend(block.strip() for block in blocks if block.strip())
+    return "\n\n".join(rendered_blocks)

@@ -1,33 +1,48 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import TextbookViewer from '$lib/components/TextbookViewer.svelte';
-	import { getGenerationStatus } from '$lib/api/client';
+	import { fetchTextbookHtml, getGenerationDetail, getGenerationStatus } from '$lib/api/client';
 
 	const textbookId = $derived(page.params.id);
 
-	let html = $state('<p>Loading textbook...</p>');
+	let html = $state('');
+	let loading = $state(true);
 	let error: string | null = $state(null);
 
-	async function loadTextbook(id: string) {
+	async function ensureCompletedGeneration(id: string): Promise<void> {
 		try {
 			const status = await getGenerationStatus(id);
-			if (status.status === 'completed' && status.result?.output_path) {
-				const API_BASE = 'http://localhost:8000';
-				const response = await fetch(
-					`${API_BASE}/api/v1/textbook/${encodeURIComponent(status.result.output_path)}`
-				);
-				if (response.ok) {
-					html = await response.text();
-				} else {
-					error = 'Failed to load textbook content.';
-				}
-			} else if (status.status === 'failed') {
-				error = status.error ?? 'Generation failed.';
-			} else {
-				error = `Textbook status: ${status.status}`;
+			if (status.status === 'completed') {
+				return;
 			}
+			if (status.status === 'failed') {
+				throw new Error(status.error ?? 'Generation failed.');
+			}
+		} catch {
+			// Fall back to the persisted generation record for historical loads.
+		}
+
+		const detail = await getGenerationDetail(id);
+		if (detail.status === 'completed') {
+			return;
+		}
+		if (detail.status === 'failed') {
+			throw new Error(detail.error ?? 'Generation failed.');
+		}
+		throw new Error(`Textbook status: ${detail.status}`);
+	}
+
+	async function loadTextbook(id: string) {
+		loading = true;
+		error = null;
+
+		try {
+			await ensureCompletedGeneration(id);
+			html = await fetchTextbookHtml(id);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load textbook.';
+		} finally {
+			loading = false;
 		}
 	}
 
@@ -38,10 +53,38 @@
 	});
 </script>
 
-<h1>Textbook: {textbookId}</h1>
+<div class="page-shell">
+	<h1>Textbook: {textbookId}</h1>
 
-{#if error}
-	<p class="error"><strong>Error:</strong> {error}</p>
-{:else}
-	<TextbookViewer {html} />
-{/if}
+	{#if error}
+		<p class="error"><strong>Error:</strong> {error}</p>
+	{:else if loading}
+		<p class="loading">Loading textbook...</p>
+	{:else}
+		<TextbookViewer {html} />
+	{/if}
+</div>
+
+<style>
+	.page-shell {
+		display: grid;
+		gap: 1rem;
+	}
+
+	h1 {
+		margin: 0;
+		font-size: 1.4rem;
+	}
+
+	.loading {
+		color: #888;
+	}
+
+	.error {
+		background: #2a1515;
+		border: 1px solid #5a2020;
+		border-radius: 8px;
+		padding: 1rem;
+		color: #e57373;
+	}
+</style>

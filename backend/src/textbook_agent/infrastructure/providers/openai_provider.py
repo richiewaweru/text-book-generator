@@ -5,15 +5,15 @@ import openai
 
 from textbook_agent.domain.ports.llm_provider import BaseProvider
 from textbook_agent.domain.exceptions import ProviderConformanceError
-from .json_utils import extract_json
+from .json_utils import extract_json, to_strict_json_schema
 
 logger = logging.getLogger(__name__)
 
 
 class OpenAIProvider(BaseProvider):
-    """OpenAI GPT-4 LLM provider implementation."""
+    """OpenAI LLM provider implementation with strict JSON Schema output."""
 
-    def __init__(self, api_key: str = "", model: str = "gpt-4o") -> None:
+    def __init__(self, api_key: str = "", model: str = "gpt-5-mini") -> None:
         self.api_key = api_key
         self.model = model
         self._client = openai.OpenAI(api_key=api_key) if api_key else None
@@ -29,16 +29,28 @@ class OpenAIProvider(BaseProvider):
         if self._client is None:
             self._client = openai.OpenAI(api_key=self.api_key)
 
-        response = self._client.chat.completions.create(
-            model=self.model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-            messages=[
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": response_schema.__name__.lower(),
+                "strict": True,
+                "schema": to_strict_json_schema(response_schema.model_json_schema()),
+            },
+        }
+
+        request_kwargs = {
+            "model": self.model,
+            "max_completion_tokens": max_tokens,
+            "response_format": response_format,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-        )
+        }
+        if not self.model.startswith("gpt-5"):
+            request_kwargs["temperature"] = temperature
+
+        response = self._client.chat.completions.create(**request_kwargs)
 
         raw_text = response.choices[0].message.content or ""
         logger.debug("OpenAI raw response: %s", raw_text[:500])

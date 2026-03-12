@@ -1,7 +1,16 @@
-import type { GenerationHistoryItem, GenerationRequest, GenerationStatus } from '$lib/types';
+import type {
+	GenerationDetail,
+	GenerationHistoryItem,
+	GenerationRequest,
+	GenerationStatus
+} from '$lib/types';
 import { getToken } from '$lib/stores/auth';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = (import.meta.env.PUBLIC_API_URL ?? '').replace(/\/$/, '');
+
+export function buildApiUrl(path: string): string {
+	return API_BASE ? `${API_BASE}${path}` : path;
+}
 
 /**
  * Wrapper around fetch that injects the auth token.
@@ -13,7 +22,7 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 	if (token) {
 		headers.set('Authorization', `Bearer ${token}`);
 	}
-	return fetch(`${API_BASE}${path}`, { ...init, headers });
+	return fetch(buildApiUrl(path), { ...init, headers });
 }
 
 export interface GenerateAccepted {
@@ -70,8 +79,16 @@ export async function getGenerations(limit = 20, offset = 0): Promise<Generation
 	return response.json();
 }
 
-export async function fetchTextbookHtml(outputPath: string): Promise<string> {
-	const response = await apiFetch(`/api/v1/textbook/${encodeURIComponent(outputPath)}`);
+export async function getGenerationDetail(id: string): Promise<GenerationDetail> {
+	const response = await apiFetch(`/api/v1/generations/${id}`);
+	if (!response.ok) {
+		throw new Error(`Failed to fetch generation detail: ${response.statusText}`);
+	}
+	return response.json();
+}
+
+export async function fetchTextbookHtml(generationId: string): Promise<string> {
+	const response = await apiFetch(`/api/v1/generations/${encodeURIComponent(generationId)}/textbook`);
 	if (!response.ok) {
 		throw new Error(`Failed to fetch textbook: ${response.statusText}`);
 	}
@@ -79,6 +96,6 @@ export async function fetchTextbookHtml(outputPath: string): Promise<string> {
 }
 
 export async function healthCheck(): Promise<{ status: string; version: string }> {
-	const response = await fetch(`${API_BASE}/health`);
+	const response = await fetch(buildApiUrl('/health'));
 	return response.json();
 }

@@ -10,11 +10,13 @@ from httpx import ASGITransport, AsyncClient
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from textbook_agent.domain.entities.user import User
+from textbook_agent.domain.entities.generation import Generation
 from textbook_agent.interface.api.app import app
 from textbook_agent.interface.api.dependencies import (
     get_generation_repository,
     get_jwt_handler,
     get_student_profile_repository,
+    get_textbook_repository,
 )
 from textbook_agent.interface.api.middleware.auth_middleware import get_current_user
 from conftest import MockProvider
@@ -234,6 +236,96 @@ class TestGenerationEndpoints:
                 items = list_resp.json()
                 gen_ids = [item["id"] for item in items]
                 assert gen_id in gen_ids
+                assert all("output_path" not in item for item in items)
+
+    async def test_get_generation_textbook_html(self, tmp_path):
+        with patch(
+            "textbook_agent.interface.api.routes.generation.get_use_case"
+        ) as mock_uc:
+            from textbook_agent.application.use_cases.generate_textbook import (
+                GenerateTextbookUseCase,
+            )
+            from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
+            from textbook_agent.infrastructure.repositories.file_textbook_repo import (
+                FileTextbookRepository,
+            )
+
+            provider = MockProvider()
+            repo = FileTextbookRepository(output_dir=str(tmp_path))
+            mock_uc.return_value = GenerateTextbookUseCase(
+                provider=provider, repository=repo, renderer=HTMLRenderer()
+            )
+            app.dependency_overrides[get_textbook_repository] = lambda: repo
+
+            try:
+                transport = ASGITransport(app=app)
+                async with AsyncClient(transport=transport, base_url="http://test") as ac:
+                    post_resp = await ac.post(
+                        "/api/v1/generate",
+                        json={"subject": "calculus", "context": "test"},
+                        headers=AUTH_HEADERS,
+                    )
+                    assert post_resp.status_code == 202
+                    gen_id = post_resp.json()["generation_id"]
+
+                    for _ in range(50):
+                        status_resp = await ac.get(
+                            f"/api/v1/status/{gen_id}", headers=AUTH_HEADERS
+                        )
+                        status_data = status_resp.json()
+                        if status_data["status"] in ("completed", "failed"):
+                            break
+                        await asyncio.sleep(0.1)
+
+                    html_resp = await ac.get(
+                        f"/api/v1/generations/{gen_id}/textbook",
+                        headers=AUTH_HEADERS,
+                    )
+                    assert html_resp.status_code == 200
+                    assert "<!DOCTYPE html>" in html_resp.text
+            finally:
+                app.dependency_overrides.pop(get_textbook_repository, None)
+
+    async def test_get_generation_textbook_returns_409_when_not_ready(self):
+        gen_id = "pending-textbook"
+        _mock_gen_repo._store[gen_id] = Generation(
+            id=gen_id,
+            user_id=_TEST_USER.id,
+            subject="algebra",
+            status="running",
+        )
+
+        try:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
+                resp = await ac.get(
+                    f"/api/v1/generations/{gen_id}/textbook",
+                    headers=AUTH_HEADERS,
+                )
+            assert resp.status_code == 409
+        finally:
+            _mock_gen_repo._store.pop(gen_id, None)
+
+    async def test_get_generation_textbook_rejects_foreign_generation(self):
+        gen_id = "foreign-textbook"
+        _mock_gen_repo._store[gen_id] = Generation(
+            id=gen_id,
+            user_id="other-user",
+            subject="algebra",
+            status="completed",
+            output_path="other.html",
+        )
+
+        try:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
+                resp = await ac.get(
+                    f"/api/v1/generations/{gen_id}/textbook",
+                    headers=AUTH_HEADERS,
+                )
+            assert resp.status_code == 404
+        finally:
+            _mock_gen_repo._store.pop(gen_id, None)
 
 
 class TestErrorHandler:

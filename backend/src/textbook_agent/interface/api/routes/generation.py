@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -9,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from textbook_agent.application.dtos import (
     GenerationProgress,
     GenerationRequest,
+    GenerationResultSummary,
     GenerationStatus,
 )
 from textbook_agent.domain.entities.generation import Generation
@@ -17,9 +17,11 @@ from textbook_agent.domain.entities.user import User
 from textbook_agent.domain.exceptions import PipelineError, ProviderConformanceError
 from textbook_agent.domain.ports.generation_repository import GenerationRepository
 from textbook_agent.domain.ports.student_profile_repository import StudentProfileRepository
+from textbook_agent.domain.ports.textbook_repository import TextbookRepository
 from textbook_agent.interface.api.dependencies import (
     get_generation_repository,
     get_student_profile_repository,
+    get_textbook_repository,
     get_use_case,
 )
 from textbook_agent.interface.api.middleware.auth_middleware import get_current_user
@@ -63,7 +65,7 @@ async def _run_generation(
         jobs[generation_id] = GenerationStatus(
             id=generation_id,
             status="completed",
-            result=result,
+            result=GenerationResultSummary.from_response(result),
         )
         await gen_repo.update_status(
             generation_id,
@@ -151,7 +153,6 @@ async def list_generations(
             "id": g.id,
             "subject": g.subject,
             "status": g.status,
-            "output_path": g.output_path,
             "quality_passed": g.quality_passed,
             "generation_time_seconds": g.generation_time_seconds,
             "created_at": g.created_at.isoformat() if g.created_at else None,
@@ -175,7 +176,6 @@ async def get_generation_detail(
         "subject": gen.subject,
         "context": gen.context,
         "status": gen.status,
-        "output_path": gen.output_path,
         "error": gen.error,
         "quality_passed": gen.quality_passed,
         "generation_time_seconds": gen.generation_time_seconds,
@@ -184,12 +184,20 @@ async def get_generation_detail(
     }
 
 
-@router.get("/textbook/{output_path:path}", response_class=HTMLResponse)
+@router.get("/generations/{generation_id}/textbook", response_class=HTMLResponse)
 async def get_textbook_html(
-    output_path: str,
+    generation_id: str,
     current_user: User = Depends(get_current_user),
+    gen_repo: GenerationRepository = Depends(get_generation_repository),
+    textbook_repo: TextbookRepository = Depends(get_textbook_repository),
 ):
-    file_path = Path(output_path)
-    if not file_path.exists() or not file_path.suffix == ".html":
-        raise HTTPException(status_code=404, detail="Textbook not found")
-    return HTMLResponse(content=file_path.read_text(encoding="utf-8"))
+    generation = await gen_repo.find_by_id(generation_id)
+    if generation is None or generation.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    if generation.status != "completed" or not generation.output_path:
+        raise HTTPException(status_code=409, detail="Textbook not ready")
+    try:
+        html = await textbook_repo.load_html(generation.output_path)
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(status_code=404, detail="Textbook not found") from None
+    return HTMLResponse(content=html)
