@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
@@ -59,8 +59,13 @@ class GenerationModel(Base):
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     subject = Column(String, nullable=False)
+    context = Column(Text, default="")
     status = Column(String, default="pending")
     output_path = Column(String, nullable=True)
+    error = Column(Text, nullable=True)
+    quality_passed = Column(Boolean, nullable=True)
+    generation_time_seconds = Column(Float, nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
 
     user = relationship("UserModel", back_populates="generations")
