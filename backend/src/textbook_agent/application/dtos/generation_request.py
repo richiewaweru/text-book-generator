@@ -26,3 +26,4 @@ class GenerationResponse(BaseModel):
     output_path: str
     quality_report: QualityReport | None = None
     generation_time_seconds: float
+    quality_reruns: int = 0
