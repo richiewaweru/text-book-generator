@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from textbook_agent.domain.value_objects import SectionDepth
 
@@ -29,3 +29,16 @@ class CurriculumPlan(BaseModel):
     total_sections: int
     sections: list[SectionSpec]
     reading_order: list[str] = Field(description="Ordered list of section IDs")
+
+    @model_validator(mode="after")
+    def validate_consistency(self):
+        section_ids = [section.id for section in self.sections]
+        if self.total_sections != len(self.sections):
+            raise ValueError("total_sections must equal len(sections)")
+        if len(self.reading_order) != len(section_ids):
+            raise ValueError("reading_order must include every section exactly once")
+        if len(set(self.reading_order)) != len(self.reading_order):
+            raise ValueError("reading_order must not contain duplicate section IDs")
+        if set(self.reading_order) != set(section_ids):
+            raise ValueError("reading_order must contain the same section IDs as sections")
+        return self

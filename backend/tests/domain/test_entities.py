@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from textbook_agent.domain.entities import (
     Generation,
     GenerationContext,
+    PracticeProblem,
     CurriculumPlan,
     SectionSpec,
     SectionContent,
@@ -80,19 +81,81 @@ class TestCurriculumPlan:
         assert plan.total_sections == 1
         assert len(plan.sections) == 1
 
+    def test_rejects_inconsistent_reading_order(self):
+        with pytest.raises(ValidationError):
+            CurriculumPlan(
+                subject="algebra",
+                total_sections=1,
+                sections=[
+                    SectionSpec(
+                        id="section_01",
+                        title="Variables",
+                        learning_objective="Learn variables",
+                        estimated_depth=SectionDepth.LIGHT,
+                    )
+                ],
+                reading_order=[],
+            )
+
 
 class TestSectionContent:
     def test_valid_content(self):
         content = SectionContent(
             section_id="section_01",
             hook="Imagine you have a mystery box...",
+            prerequisites_block="Remember that an equation says two sides have the same value.",
             plain_explanation="A variable is a name for a value.",
             formal_definition="A variable x represents an unknown quantity.",
             worked_example="If x + 3 = 7, then x = 4.",
             common_misconception="Variables are not always 'x'.",
+            practice_problems=[
+                PracticeProblem(
+                    difficulty="warm",
+                    statement="Solve y + 1 = 4.",
+                    hint="Subtract 1 from both sides.",
+                ),
+                PracticeProblem(
+                    difficulty="medium",
+                    statement="Write an equation for a mystery number plus 5 equals 9.",
+                    hint="Choose a letter to stand in for the unknown number.",
+                ),
+                PracticeProblem(
+                    difficulty="cold",
+                    statement="Explain why x = 2 and 2 = x are equivalent.",
+                    hint="Read both equations out loud in plain English.",
+                ),
+            ],
+            interview_anchor="How would you explain a variable to someone who hates algebra jargon?",
+            think_prompt="What role does the symbol play before you know its value?",
             connection_forward="Next we'll see how variables combine in expressions.",
         )
         assert content.section_id == "section_01"
+        assert len(content.practice_problems) == 3
+
+    def test_defaults_new_optional_rulebook_fields(self):
+        content = SectionContent(
+            section_id="section_01",
+            hook="Hook",
+            plain_explanation="Explanation",
+            formal_definition="Definition",
+            worked_example="Example",
+            common_misconception="Misconception",
+            connection_forward="Forward",
+        )
+        assert content.prerequisites_block == ""
+        assert content.practice_problems == []
+        assert content.interview_anchor == ""
+        assert content.think_prompt == ""
+
+
+class TestPracticeProblem:
+    def test_valid_practice_problem(self):
+        problem = PracticeProblem(
+            difficulty="warm",
+            statement="Solve x + 2 = 6.",
+            hint="Subtract 2 from both sides.",
+        )
+        assert problem.difficulty == "warm"
 
 
 class TestSectionDiagram:
@@ -172,8 +235,10 @@ class TestQualityReport:
                     issue_type="missing_prerequisite",
                     description="References integration before it is introduced",
                     severity="error",
+                    check_source="mechanical",
                 )
             ],
         )
         assert report.passed is False
         assert len(report.issues) == 1
+        assert report.issues[0].check_source == "mechanical"

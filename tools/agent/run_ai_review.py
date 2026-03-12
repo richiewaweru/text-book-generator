@@ -23,7 +23,7 @@ from tools.agent.common import (
     resolve_repo_path,
 )
 
-REVIEW_ROOT = REPO_ROOT / 'agents' / 'review'
+REVIEW_ROOT = REPO_ROOT / 'agents' / 'prompts'
 DEFAULT_OPENAI_MODEL = 'gpt-4.1-mini'
 DEFAULT_ANTHROPIC_MODEL = 'claude-3-5-haiku-latest'
 MAX_PATCH_CHARS = 32000

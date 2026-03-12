@@ -39,10 +39,17 @@ validation:
         - name: frontend-build
           cwd: frontend
           command: [npm, run, build]
+    tooling:
+      description: Project-local tooling and workflow automation tests.
+      steps:
+        - name: tooling-pytest
+          cwd: backend
+          command: [uv, run, python, -m, pytest, ../tools/agent/tests]
     all:
       include_scopes:
         - backend
         - frontend
+        - tooling
 
 architecture:
   strategy:
@@ -86,10 +93,10 @@ github:
       color: "BFDADC"
       description: Highlights work that updates or depends on a tracked runbook.
   ai_review_prompts:
-    - agents/review/bug-risk.md
-    - agents/review/architecture-compliance.md
-    - agents/review/test-gap.md
-    - agents/review/workflow-compliance.md
+    - agents/prompts/bug-risk.md
+    - agents/prompts/architecture-compliance.md
+    - agents/prompts/test-gap.md
+    - agents/prompts/workflow-compliance.md
   codeowners_paths:
     - path: "*"
       owner: "@TODO-OWNER"

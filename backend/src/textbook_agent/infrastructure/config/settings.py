@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
 
     # Models
-    claude_model: str = "claude-sonnet-4-6"
-    openai_model: str = "gpt-4o"
+    claude_model: str = "claude-sonnet-4-20250514"
+    openai_model: str = "gpt-5-mini"
 
     # Pipeline behaviour
     max_retries: int = 2

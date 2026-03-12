@@ -15,3 +15,8 @@ class TextbookRepository(ABC):
     async def load_metadata(self, textbook_id: str) -> dict:
         """Load metadata for a previously generated textbook."""
         ...
+
+    @abstractmethod
+    async def load_html(self, output_path: str) -> str:
+        """Load a previously rendered textbook HTML artifact."""
+        ...

@@ -11,6 +11,7 @@ class QualityIssue(BaseModel):
     issue_type: str
     description: str
     severity: Literal["error", "warning"]
+    check_source: Literal["mechanical", "llm"] = "llm"
 
 
 class QualityReport(BaseModel):

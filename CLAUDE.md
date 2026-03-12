@@ -1,56 +1,35 @@
 # Textbook Generation Agent - Project Guide
 
 ## Project Structure
-- `backend/` - FastAPI + Python backend (DDD architecture)
+- `backend/` - FastAPI + Python backend
 - `frontend/` - SvelteKit + TypeScript frontend
-- `docs/` - Versioned project documentation
+- `docs/project/` - live project docs
+- `docs/v0.1.0/` - archival snapshot docs
 
 ## Backend
 - Package manager: `uv`
-- Source layout: `backend/src/textbook_agent/`
+- Source root: `backend/src/textbook_agent/`
 - Entry point: `uvicorn textbook_agent.interface.api.app:app`
-- Tests: `cd backend && uv run pytest`
-- Lint: `cd backend && uv run ruff check src/ tests/`
+- Validation: `python tools/agent/validate_repo.py --scope all`
+- Architecture guard: `python tools/agent/check_architecture.py --format text`
 
-## DDD Layers (dependency flows inward)
-- `domain/` - Entities, value objects, pipeline nodes, prompts, ports (abstract). Zero framework imports.
-- `application/` - Use cases, orchestrator, DTOs. Depends only on domain.
-- `infrastructure/` - LLM providers, auth, database, storage, renderer, config. Implements domain ports.
-- `interface/` - FastAPI routes, auth middleware. Calls application use cases.
-
-## Key Entities
-- `StudentProfile` - Persistent student data (age, education, interests, goals, learner_description). Stored in DB.
-- `GenerationContext` - Ephemeral per-generation context. Built from StudentProfile + GenerationRequest. Never stored.
-- `GenerationRequest` - Per-request DTO (subject, context, optional depth/language overrides).
-
-## Key Rules
-- Domain layer NEVER imports from other layers
-- Every LLM call goes through BaseProvider port (domain/ports/llm_provider.py)
-- Every pipeline node validates input/output via Pydantic schemas
-- Renderer has NO LLM calls - pure mechanical assembly
-- BASE_PEDAGOGICAL_RULES must be injected into every content-generating node
-- Schemas are the source of truth - build/verify them first
-- StudentProfile → GenerationContext hydration happens in GenerateTextbookUseCase._build_generation_context()
+## Key Runtime Contracts
+- Domain remains framework-free and owns entities, prompts, ports, and pipeline nodes.
+- All LLM calls flow through `BaseProvider`.
+- The renderer is mechanical only and produces the standalone textbook HTML artifact.
+- Public textbook viewing is generation-centric: `/textbook/[id]` maps to a generation ID, and the frontend fetches HTML through the authenticated generation-owned backend route.
+- The current `SectionContent` schema has 11 fields, including `prerequisites_block`, `practice_problems`, `interview_anchor`, and `think_prompt`.
+- Shared prompt rules live in `backend/src/textbook_agent/domain/prompts/` and are versioned through the composed prompt bundle.
 
 ## Frontend
 - Package manager: `npm`
-- Framework: SvelteKit with TypeScript
 - Dev: `cd frontend && npm run dev`
-- Auth: Google OAuth via Google Identity Services, JWT stored in localStorage
-- Routes: /login, /onboarding, /dashboard, /textbook/[id]
+- Auth: Google OAuth via Google Identity Services
+- Viewer: authenticated iframe rendering of the standalone textbook HTML
 
-## Agent Standards
-Read `agents/ENTRY.md` for development standards, workflows, and quality gates. All agents working on this project should follow the standards in `agents/standards/` and use the workflow playbooks in `agents/workflows/`.
-
-## Common Commands
-```bash
-# Backend
-cd backend && uv sync                    # Install deps
-cd backend && uv run pytest              # Run tests
-cd backend && uv run ruff check src/ tests/  # Lint
-cd backend && uv run uvicorn textbook_agent.interface.api.app:app --reload  # Dev server
-
-# Frontend
-cd frontend && npm install               # Install deps
-cd frontend && npm run dev               # Dev server
-```
+## Live Docs
+- `docs/project/agent-context.md`
+- `docs/project/ARCHITECTURE.md`
+- `docs/project/SETUP.md`
+- `docs/project/DEVELOPMENT_WORKFLOW.md`
+- `docs/project/SCHEMAS.md`

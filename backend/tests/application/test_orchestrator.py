@@ -33,7 +33,7 @@ class TestTextbookAgent:
         assert result.quality_report is not None
         assert result.quality_report.passed is True
 
-        output_file = Path(result.output_path)
+        output_file = repository.resolve_output_path(result.output_path)
         assert output_file.exists()
         html = output_file.read_text(encoding="utf-8")
         assert "<!DOCTYPE html>" in html

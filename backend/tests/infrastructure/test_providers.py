@@ -19,5 +19,5 @@ class TestProviderFactory:
             ProviderFactory.get("unknown")
 
     def test_provider_names(self):
-        assert ProviderFactory.get("claude").name() == "claude-sonnet-4-6"
-        assert ProviderFactory.get("openai").name() == "gpt-4o"
+        assert ProviderFactory.get("claude").name() == "claude-sonnet-4-20250514"
+        assert ProviderFactory.get("openai").name() == "gpt-5-mini"

@@ -1,13 +1,15 @@
 from textbook_agent.domain.entities.curriculum_plan import SectionSpec
 from textbook_agent.domain.entities.section_content import SectionContent
-from .base_prompt import BASE_PEDAGOGICAL_RULES
+
+from .base_prompt import BASE_PEDAGOGICAL_AND_FORMATTING_RULES, compose_prompt
 
 
 def build_code_prompt(section: SectionSpec, content: SectionContent) -> str:
     """Build the system prompt for the Code Generator node."""
-    return f"""
-{BASE_PEDAGOGICAL_RULES}
-
+    return compose_prompt(
+        "code_generator",
+        BASE_PEDAGOGICAL_AND_FORMATTING_RULES,
+        f"""
 You are generating a code example for a textbook section.
 
 SECTION:
@@ -22,4 +24,8 @@ CONTENT CONTEXT:
 
 Return only valid JSON matching the SectionCode schema.
 The example should be runnable and pedagogically aligned to the section.
-"""
+Keep every code line at 80 characters or fewer.
+Use comments to explain why a step matters, not to narrate obvious syntax.
+Do not include commented-out code.
+""",
+    )
