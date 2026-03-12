@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
@@ -5,6 +7,8 @@ from pydantic import BaseModel
 
 from textbook_agent.domain.ports.llm_provider import BaseProvider
 from textbook_agent.domain.exceptions import PipelineError, NodeValidationError
+
+logger = logging.getLogger(__name__)
 
 TInput = TypeVar("TInput", bound=BaseModel)
 TOutput = TypeVar("TOutput", bound=BaseModel)
@@ -22,6 +26,7 @@ class PipelineNode(ABC, Generic[TInput, TOutput]):
     output_schema: type[TOutput]
     retry_on_failure: bool = True
     max_retries: int = 2
+    retry_base_delay: float = 1.0
 
     def __init__(self, provider: BaseProvider | None = None) -> None:
         self.provider = provider
@@ -46,15 +51,27 @@ class PipelineNode(ABC, Generic[TInput, TOutput]):
         last_error: Exception | None = None
         attempts = (self.max_retries + 1) if self.retry_on_failure else 1
 
-        for _ in range(attempts):
+        for attempt in range(attempts):
             try:
                 result = await self.run(validated_input)
                 self.output_schema.model_validate(
                     result if isinstance(result, dict) else result.model_dump()
                 )
                 return result
+            except NodeValidationError:
+                raise
             except Exception as e:
                 last_error = e
+                if attempt < attempts - 1:
+                    delay = self.retry_base_delay * (2**attempt)
+                    logger.warning(
+                        "%s attempt %d failed, retrying in %.1fs: %s",
+                        self.__class__.__name__,
+                        attempt + 1,
+                        delay,
+                        e,
+                    )
+                    await asyncio.sleep(delay)
 
         raise PipelineError(
             node_name=self.__class__.__name__,
