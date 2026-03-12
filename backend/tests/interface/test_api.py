@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from textbook_agent.domain.entities.user import User
 from textbook_agent.interface.api.app import app
 from textbook_agent.interface.api.dependencies import (
+    get_generation_repository,
     get_jwt_handler,
     get_student_profile_repository,
 )
@@ -48,8 +49,40 @@ async def _override_profile_repo():
     return _MockProfileRepo()
 
 
+class _MockGenerationRepo:
+    def __init__(self):
+        self._store: dict = {}
+
+    async def create(self, generation):
+        self._store[generation.id] = generation
+        return generation
+
+    async def update_status(self, generation_id, status, **kwargs):
+        if generation_id in self._store:
+            gen = self._store[generation_id]
+            self._store[generation_id] = gen.model_copy(
+                update={"status": status, **{k: v for k, v in kwargs.items() if v is not None}}
+            )
+
+    async def find_by_id(self, generation_id):
+        return self._store.get(generation_id)
+
+    async def list_by_user(self, user_id, limit=20, offset=0):
+        gens = [g for g in self._store.values() if g.user_id == user_id]
+        gens.sort(key=lambda g: g.created_at, reverse=True)
+        return gens[offset : offset + limit]
+
+
+_mock_gen_repo = _MockGenerationRepo()
+
+
+async def _override_gen_repo():
+    return _mock_gen_repo
+
+
 app.dependency_overrides[get_current_user] = _override_current_user
 app.dependency_overrides[get_student_profile_repository] = _override_profile_repo
+app.dependency_overrides[get_generation_repository] = _override_gen_repo
 
 client = TestClient(app)
 
@@ -165,3 +198,39 @@ class TestGenerationEndpoints:
 
                 assert status_data["status"] == "completed"
                 assert status_data["result"]["textbook_id"]
+
+    async def test_list_generations(self):
+        with patch(
+            "textbook_agent.interface.api.routes.generation.get_use_case"
+        ) as mock_uc:
+            from textbook_agent.application.use_cases.generate_textbook import (
+                GenerateTextbookUseCase,
+            )
+            from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
+            from textbook_agent.infrastructure.repositories.file_textbook_repo import (
+                FileTextbookRepository,
+            )
+
+            provider = MockProvider()
+            repo = FileTextbookRepository(output_dir="outputs/")
+            mock_uc.return_value = GenerateTextbookUseCase(
+                provider=provider, repository=repo, renderer=HTMLRenderer()
+            )
+
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
+                post_resp = await ac.post(
+                    "/api/v1/generate",
+                    json={"subject": "calculus", "context": "test"},
+                    headers=AUTH_HEADERS,
+                )
+                assert post_resp.status_code == 202
+                gen_id = post_resp.json()["generation_id"]
+
+                list_resp = await ac.get(
+                    "/api/v1/generations", headers=AUTH_HEADERS
+                )
+                assert list_resp.status_code == 200
+                items = list_resp.json()
+                gen_ids = [item["id"] for item in items]
+                assert gen_id in gen_ids
