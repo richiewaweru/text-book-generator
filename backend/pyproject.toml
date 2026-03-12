@@ -39,6 +39,10 @@ packages = ["src/textbook_agent"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+markers = [
+    "integration: tests requiring real LLM API keys (deselected by default)",
+]
+addopts = "-m 'not integration'"
 
 [tool.ruff]
 src = ["src", "tests"]
