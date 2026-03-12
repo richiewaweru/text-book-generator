@@ -84,6 +84,17 @@ export interface GenerationStatus {
 	error: string | null;
 }
 
+export interface GenerationHistoryItem {
+	id: string;
+	subject: string;
+	status: 'pending' | 'running' | 'completed' | 'failed';
+	output_path: string | null;
+	quality_passed: boolean | null;
+	generation_time_seconds: number | null;
+	created_at: string | null;
+	completed_at: string | null;
+}
+
 export interface QualityIssue {
 	section_id: string;
 	issue_type: string;

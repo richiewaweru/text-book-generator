@@ -3,10 +3,10 @@
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/stores/auth';
 	import { getProfile } from '$lib/api/profile';
-	import { startGeneration, pollUntilDone } from '$lib/api/client';
+	import { startGeneration, pollUntilDone, getGenerations } from '$lib/api/client';
 	import ProfileForm from '$lib/components/ProfileForm.svelte';
 	import GenerationProgress from '$lib/components/GenerationProgress.svelte';
-	import type { StudentProfile, GenerationRequest, GenerationStatus } from '$lib/types';
+	import type { StudentProfile, GenerationRequest, GenerationStatus, GenerationHistoryItem } from '$lib/types';
 
 	const user = $derived(getUser());
 
@@ -15,14 +15,21 @@
 	let generationStatus: GenerationStatus | null = $state(null);
 	let generating = $state(false);
 	let errorMessage: string | null = $state(null);
+	let pastGenerations: GenerationHistoryItem[] = $state([]);
 
 	onMount(async () => {
 		try {
 			profile = await getProfile();
 		} catch {
 			goto('/onboarding');
+			return;
 		} finally {
 			loadingProfile = false;
+		}
+		try {
+			pastGenerations = await getGenerations();
+		} catch {
+			// Non-critical — dashboard still works without history
 		}
 	});
 
@@ -108,6 +115,33 @@
 		{#if errorMessage}
 			<div class="error">
 				<p><strong>Error:</strong> {errorMessage}</p>
+			</div>
+		{/if}
+
+		{#if pastGenerations.length > 0}
+			<div class="history-section">
+				<h2>Past Generations</h2>
+				<ul class="history-list">
+					{#each pastGenerations as gen}
+						<li class="history-item">
+							<div class="history-info">
+								<span class="history-subject">{gen.subject}</span>
+								<span class="history-meta">
+									<span class="status-badge status-{gen.status}">{gen.status}</span>
+									{#if gen.created_at}
+										<span class="history-date">{new Date(gen.created_at).toLocaleDateString()}</span>
+									{/if}
+									{#if gen.generation_time_seconds}
+										<span class="history-time">{gen.generation_time_seconds.toFixed(1)}s</span>
+									{/if}
+								</span>
+							</div>
+							{#if gen.status === 'completed' && gen.output_path}
+								<a href="/textbook/{gen.id}" class="view-link">View</a>
+							{/if}
+						</li>
+					{/each}
+				</ul>
 			</div>
 		{/if}
 	{/if}
@@ -214,5 +248,91 @@
 	.error p {
 		margin: 0;
 		color: #e57373;
+	}
+
+	.history-section {
+		margin-top: 2rem;
+	}
+
+	.history-section h2 {
+		font-size: 1.15rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.history-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+	}
+
+	.history-item {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 0.75rem 1rem;
+		background: #1a1a1a;
+		border: 1px solid #333;
+		border-radius: 6px;
+		margin-bottom: 0.5rem;
+	}
+
+	.history-info {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.history-subject {
+		font-size: 0.95rem;
+		color: #ddd;
+		text-transform: capitalize;
+	}
+
+	.history-meta {
+		display: flex;
+		gap: 0.75rem;
+		font-size: 0.8rem;
+		color: #888;
+	}
+
+	.status-badge {
+		padding: 0.1rem 0.4rem;
+		border-radius: 3px;
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+
+	.status-completed {
+		background: #1a2e1a;
+		color: #81c784;
+	}
+
+	.status-failed {
+		background: #2a1515;
+		color: #e57373;
+	}
+
+	.status-running {
+		background: #1a1a2e;
+		color: #64b5f6;
+	}
+
+	.status-pending {
+		background: #2a2a1a;
+		color: #fff176;
+	}
+
+	.view-link {
+		color: #64b5f6;
+		text-decoration: none;
+		font-size: 0.85rem;
+		padding: 0.3rem 0.6rem;
+		border: 1px solid #64b5f6;
+		border-radius: 4px;
+	}
+
+	.view-link:hover {
+		background: #1a1a2e;
 	}
 </style>

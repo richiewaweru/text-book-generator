@@ -1,4 +1,4 @@
-import type { GenerationRequest, GenerationStatus } from '$lib/types';
+import type { GenerationHistoryItem, GenerationRequest, GenerationStatus } from '$lib/types';
 import { getToken } from '$lib/stores/auth';
 
 const API_BASE = 'http://localhost:8000';
@@ -60,6 +60,14 @@ export async function pollUntilDone(
 
 		await new Promise((resolve) => setTimeout(resolve, intervalMs));
 	}
+}
+
+export async function getGenerations(limit = 20, offset = 0): Promise<GenerationHistoryItem[]> {
+	const response = await apiFetch(`/api/v1/generations?limit=${limit}&offset=${offset}`);
+	if (!response.ok) {
+		throw new Error(`Failed to fetch generations: ${response.statusText}`);
+	}
+	return response.json();
 }
 
 export async function fetchTextbookHtml(outputPath: string): Promise<string> {
