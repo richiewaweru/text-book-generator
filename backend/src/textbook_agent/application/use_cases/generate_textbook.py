@@ -21,11 +21,13 @@ class GenerateTextbookUseCase:
         repository: TextbookRepository,
         renderer: RendererPort,
         quality_check_enabled: bool = True,
+        max_quality_reruns: int = 2,
     ) -> None:
         self.provider = provider
         self.repository = repository
         self.renderer = renderer
         self.quality_check_enabled = quality_check_enabled
+        self.max_quality_reruns = max_quality_reruns
 
     async def execute(
         self,
@@ -39,6 +41,7 @@ class GenerateTextbookUseCase:
             repository=self.repository,
             renderer=self.renderer,
             quality_check_enabled=self.quality_check_enabled,
+            max_quality_reruns=self.max_quality_reruns,
             on_progress=on_progress,
         )
         return await agent.generate(ctx)

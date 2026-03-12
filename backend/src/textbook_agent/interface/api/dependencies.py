@@ -78,4 +78,5 @@ def get_use_case() -> GenerateTextbookUseCase:
         repository=get_repository(s),
         renderer=get_renderer(),
         quality_check_enabled=s.quality_check_enabled,
+        max_quality_reruns=s.max_quality_reruns,
     )

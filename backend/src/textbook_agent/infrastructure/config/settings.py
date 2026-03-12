@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # Pipeline behaviour
     max_retries: int = 2
     quality_check_enabled: bool = True
+    max_quality_reruns: int = 2
     temperature: float = 0.3
 
     # Output
