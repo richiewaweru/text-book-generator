@@ -1,25 +1,25 @@
-name: Feature Request
-description: Propose a new product or engineering capability.
+name: Feature
+description: Capture a new feature or major change.
 title: "feat: "
 labels:
-  - architecture
+  - runbook
 body:
   - type: textarea
-    id: problem
+    id: summary
     attributes:
-      label: Problem
-      description: What problem are you trying to solve?
+      label: Summary
+      description: What capability is being added?
     validations:
       required: true
   - type: textarea
-    id: outcome
+    id: impact
     attributes:
-      label: Desired outcome
-      description: What should success look like?
+      label: Architecture impact
+      description: What systems or interfaces will change?
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true when this is done?
     validations:
       required: true
-  - type: textarea
-    id: constraints
-    attributes:
-      label: Constraints
-      description: Architecture, product, or workflow constraints to respect.

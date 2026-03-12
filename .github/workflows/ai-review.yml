@@ -45,7 +45,7 @@ jobs:
         run: uv sync --all-extras
       - name: Run advisory review
         working-directory: backend
-        run: uv run python ../automation/scripts/run_ai_review.py --output ../ai-review.md --publish-comment
+        run: uv run python ../tools/agent/run_ai_review.py --context docs/project/context-summary.yaml --output ../ai-review.md --publish-comment
       - name: Append AI review summary
         if: always()
         run: |

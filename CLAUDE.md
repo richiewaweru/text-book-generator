@@ -39,6 +39,9 @@
 - Auth: Google OAuth via Google Identity Services, JWT stored in localStorage
 - Routes: /login, /onboarding, /dashboard, /textbook/[id]
 
+## Agent Standards
+Read `agents/ENTRY.md` for development standards, workflows, and quality gates. All agents working on this project should follow the standards in `agents/standards/` and use the workflow playbooks in `agents/workflows/`.
+
 ## Common Commands
 ```bash
 # Backend
