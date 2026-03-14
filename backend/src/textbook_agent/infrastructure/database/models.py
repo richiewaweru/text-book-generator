@@ -60,11 +60,13 @@ class GenerationModel(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     subject = Column(String, nullable=False)
     context = Column(Text, default="")
+    mode = Column(String, default="balanced", nullable=False)
     status = Column(String, default="pending")
     output_path = Column(String, nullable=True)
     error = Column(Text, nullable=True)
     quality_passed = Column(Boolean, nullable=True)
     generation_time_seconds = Column(Float, nullable=True)
+    source_generation_id = Column(String, nullable=True, index=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
 

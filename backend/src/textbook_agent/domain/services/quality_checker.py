@@ -25,23 +25,47 @@ class QualityCheckerNode(PipelineNode[QualityCheckerInput, QualityReport]):
     input_schema = QualityCheckerInput
     output_schema = QualityReport
 
+    def __init__(
+        self,
+        provider=None,
+        code_line_soft_limit: int = 80,
+        code_line_hard_limit: int = 300,
+        include_llm_review: bool = True,
+        model_override: str | None = None,
+    ) -> None:
+        super().__init__(provider=provider)
+        self.code_line_soft_limit = code_line_soft_limit
+        self.code_line_hard_limit = code_line_hard_limit
+        self.include_llm_review = include_llm_review
+        self.model_override = model_override
+
     async def run(self, input_data: QualityCheckerInput) -> QualityReport:
         mechanical_issues = run_mechanical_checks(
             textbook=input_data.textbook,
             plan=input_data.plan,
+            code_line_soft_limit=self.code_line_soft_limit,
+            code_line_hard_limit=self.code_line_hard_limit,
         )
-        prompt = build_quality_prompt(input_data.textbook, input_data.plan)
-        llm_report = await asyncio.to_thread(
-            self.provider.complete,
-            system_prompt=prompt,
-            user_prompt="Review this textbook for quality issues.",
-            response_schema=QualityReport,
-        )
-        llm_issues = [
-            issue.model_copy(update={"check_source": "llm"})
-            for issue in llm_report.issues
-        ]
-        llm_issues = apply_severity_policy(llm_issues)
+        llm_issues = []
+        if self.include_llm_review:
+            prompt = build_quality_prompt(input_data.textbook, input_data.plan)
+            llm_report = await asyncio.to_thread(
+                self.provider.complete,
+                system_prompt=prompt,
+                user_prompt="Review this textbook for quality issues.",
+                response_schema=QualityReport,
+                model=self.model_override,
+            )
+            llm_issues = [
+                issue.model_copy(
+                    update={
+                        "check_source": "llm",
+                        "scope": issue.scope or "section",
+                    }
+                )
+                for issue in llm_report.issues
+            ]
+            llm_issues = apply_severity_policy(llm_issues)
         merged_issues = [*mechanical_issues, *llm_issues]
         return QualityReport(
             passed=not any(issue.severity == "error" for issue in merged_issues),

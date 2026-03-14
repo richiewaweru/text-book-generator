@@ -10,9 +10,16 @@
 	interface Props {
 		onsubmit: (data: ProfileCreateRequest) => void;
 		disabled?: boolean;
+		initialData?: ProfileCreateRequest | null;
+		submitLabel?: string;
 	}
 
-	let { onsubmit, disabled = false }: Props = $props();
+	let {
+		onsubmit,
+		disabled = false,
+		initialData = null,
+		submitLabel = 'Complete Setup'
+	}: Props = $props();
 
 	let age = $state(16);
 	let educationLevel: EducationLevel = $state('high_school');
@@ -24,6 +31,24 @@
 	let learnerDescription = $state('');
 	let interests: string[] = $state([]);
 	let interestInput = $state('');
+	let initializedFromProps = $state(false);
+
+	$effect(() => {
+		if (!initialData || initializedFromProps) {
+			return;
+		}
+
+		age = initialData.age;
+		educationLevel = initialData.education_level;
+		learningStyle = initialData.learning_style;
+		preferredNotation = initialData.preferred_notation;
+		preferredDepth = initialData.preferred_depth;
+		priorKnowledge = initialData.prior_knowledge;
+		goals = initialData.goals;
+		learnerDescription = initialData.learner_description;
+		interests = [...initialData.interests];
+		initializedFromProps = true;
+	});
 
 	function addInterest() {
 		const tag = interestInput.trim().toLowerCase();
@@ -34,12 +59,12 @@
 	}
 
 	function removeInterest(tag: string) {
-		interests = interests.filter((t) => t !== tag);
+		interests = interests.filter((entry) => entry !== tag);
 	}
 
-	function handleInterestKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter' || e.key === ',') {
-			e.preventDefault();
+	function handleInterestKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter' || event.key === ',') {
+			event.preventDefault();
 			addInterest();
 		}
 	}
@@ -59,7 +84,7 @@
 	}
 </script>
 
-<form onsubmit={(e: Event) => { e.preventDefault(); handleSubmit(); }} class="profile-form">
+<form onsubmit={(event: Event) => { event.preventDefault(); handleSubmit(); }} class="profile-form">
 	<div class="form-section">
 		<h3>About You</h3>
 
@@ -156,7 +181,7 @@
 		</label>
 	</div>
 
-	<button type="submit" class="submit-btn" {disabled}>Complete Setup</button>
+	<button type="submit" class="submit-btn" {disabled}>{submitLabel}</button>
 </form>
 
 <style>

@@ -46,6 +46,13 @@ class FileTextbookRepository(TextbookRepository):
             raise FileNotFoundError(output_path)
         return file_path.read_text(encoding="utf-8")
 
+    async def load_textbook(self, output_path: str) -> RawTextbook:
+        html_path = self._resolve_path(output_path)
+        meta_path = html_path.with_name(f"{html_path.stem}_meta.json")
+        if not meta_path.exists():
+            raise FileNotFoundError(str(meta_path))
+        return RawTextbook.model_validate_json(meta_path.read_text(encoding="utf-8"))
+
     def resolve_output_path(self, output_path: str) -> Path:
         return self._resolve_path(output_path)
 

@@ -1,4 +1,3 @@
-import secrets
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,13 +13,24 @@ class Settings(BaseSettings):
 
     # Models
     claude_model: str = "claude-sonnet-4-20250514"
+    claude_fast_model: str = "claude-haiku-4-5-20251001"
     openai_model: str = "gpt-5-mini"
+    openai_fast_model: str = "gpt-5-mini"
+    llm_max_tokens: int = 4096
 
     # Pipeline behaviour
     max_retries: int = 2
+    retry_base_delay: float = 1.0
     quality_check_enabled: bool = True
-    max_quality_reruns: int = 2
+    max_quality_reruns: int = 3
     temperature: float = 0.3
+
+    # Quality thresholds
+    code_line_soft_limit: int = 80
+    code_line_hard_limit: int = 300
+
+    # API
+    default_pagination_limit: int = 20
 
     # Output
     output_dir: str = "outputs/"
@@ -28,7 +38,7 @@ class Settings(BaseSettings):
 
     # Authentication
     google_client_id: str = ""
-    jwt_secret_key: str = secrets.token_urlsafe(32)
+    jwt_secret_key: str = "CHANGE-ME"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
 

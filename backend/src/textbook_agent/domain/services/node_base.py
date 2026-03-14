@@ -6,7 +6,11 @@ from typing import Generic, TypeVar
 from pydantic import BaseModel
 
 from textbook_agent.domain.ports.llm_provider import BaseProvider
-from textbook_agent.domain.exceptions import PipelineError, NodeValidationError
+from textbook_agent.domain.exceptions import (
+    NodeValidationError,
+    PipelineError,
+    ProviderRequestError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +63,8 @@ class PipelineNode(ABC, Generic[TInput, TOutput]):
                 )
                 return result
             except NodeValidationError:
+                raise
+            except ProviderRequestError:
                 raise
             except Exception as e:
                 last_error = e

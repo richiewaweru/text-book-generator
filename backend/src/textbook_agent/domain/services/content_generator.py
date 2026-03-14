@@ -2,6 +2,7 @@ import asyncio
 
 from pydantic import BaseModel
 
+from textbook_agent.domain.entities.correction_context import ContentCorrectionContext
 from textbook_agent.domain.entities.generation_context import GenerationContext
 from textbook_agent.domain.entities.curriculum_plan import SectionSpec
 from textbook_agent.domain.entities.section_content import SectionContent
@@ -14,6 +15,7 @@ class ContentGeneratorInput(BaseModel):
 
     section: SectionSpec
     profile: GenerationContext
+    correction_context: ContentCorrectionContext | None = None
 
 
 class ContentGeneratorNode(PipelineNode[ContentGeneratorInput, SectionContent]):
@@ -22,11 +24,20 @@ class ContentGeneratorNode(PipelineNode[ContentGeneratorInput, SectionContent]):
     input_schema = ContentGeneratorInput
     output_schema = SectionContent
 
+    def __init__(self, provider=None, model_override: str | None = None) -> None:
+        super().__init__(provider=provider)
+        self.model_override = model_override
+
     async def run(self, input_data: ContentGeneratorInput) -> SectionContent:
-        prompt = build_content_prompt(input_data.section, input_data.profile)
+        prompt = build_content_prompt(
+            input_data.section,
+            input_data.profile,
+            correction_context=input_data.correction_context,
+        )
         return await asyncio.to_thread(
             self.provider.complete,
             system_prompt=prompt,
             user_prompt=f"Write section: {input_data.section.title}",
             response_schema=SectionContent,
+            model=self.model_override,
         )

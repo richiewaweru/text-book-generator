@@ -1,9 +1,11 @@
 import type {
 	GenerationDetail,
 	GenerationHistoryItem,
+	EnhanceGenerationRequest,
 	GenerationRequest,
 	GenerationStatus
 } from '$lib/types';
+import { ensureOk } from '$lib/api/errors';
 import { getToken } from '$lib/stores/auth';
 
 const API_BASE = (import.meta.env.PUBLIC_API_URL ?? '').replace(/\/$/, '');
@@ -28,6 +30,8 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 export interface GenerateAccepted {
 	generation_id: string;
 	status: string;
+	mode: string;
+	source_generation_id?: string;
 }
 
 export async function startGeneration(request: GenerationRequest): Promise<GenerateAccepted> {
@@ -36,21 +40,26 @@ export async function startGeneration(request: GenerationRequest): Promise<Gener
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(request)
 	});
+	await ensureOk(response, 'Generation failed.');
+	return response.json();
+}
 
-	if (!response.ok) {
-		throw new Error(`Generation failed: ${response.statusText}`);
-	}
-
+export async function enhanceGeneration(
+	id: string,
+	request: EnhanceGenerationRequest
+): Promise<GenerateAccepted> {
+	const response = await apiFetch(`/api/v1/generations/${id}/enhance`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(request)
+	});
+	await ensureOk(response, 'Draft enhancement failed.');
 	return response.json();
 }
 
 export async function getGenerationStatus(id: string): Promise<GenerationStatus> {
 	const response = await apiFetch(`/api/v1/status/${id}`);
-
-	if (!response.ok) {
-		throw new Error(`Status check failed: ${response.statusText}`);
-	}
-
+	await ensureOk(response, 'Status check failed.');
 	return response.json();
 }
 
@@ -73,25 +82,19 @@ export async function pollUntilDone(
 
 export async function getGenerations(limit = 20, offset = 0): Promise<GenerationHistoryItem[]> {
 	const response = await apiFetch(`/api/v1/generations?limit=${limit}&offset=${offset}`);
-	if (!response.ok) {
-		throw new Error(`Failed to fetch generations: ${response.statusText}`);
-	}
+	await ensureOk(response, 'Failed to fetch generations.');
 	return response.json();
 }
 
 export async function getGenerationDetail(id: string): Promise<GenerationDetail> {
 	const response = await apiFetch(`/api/v1/generations/${id}`);
-	if (!response.ok) {
-		throw new Error(`Failed to fetch generation detail: ${response.statusText}`);
-	}
+	await ensureOk(response, 'Failed to fetch generation detail.');
 	return response.json();
 }
 
 export async function fetchTextbookHtml(generationId: string): Promise<string> {
 	const response = await apiFetch(`/api/v1/generations/${encodeURIComponent(generationId)}/textbook`);
-	if (!response.ok) {
-		throw new Error(`Failed to fetch textbook: ${response.statusText}`);
-	}
+	await ensureOk(response, 'Failed to fetch textbook.');
 	return response.text();
 }
 

@@ -1,9 +1,10 @@
 <script lang="ts">
-	import type { GenerationRequest, Depth } from '$lib/types';
+	import type { GenerationMode, GenerationRequest, Depth } from '$lib/types';
 
 	let subject = $state('');
 	let context = $state('');
 	let depth: Depth = $state('standard');
+	let mode: GenerationMode = $state('draft');
 
 	interface Props {
 		onsubmit: (request: GenerationRequest) => void;
@@ -13,7 +14,12 @@
 	let { onsubmit, disabled = false }: Props = $props();
 
 	function handleSubmit() {
-		onsubmit({ subject, context, depth });
+		onsubmit({
+			subject,
+			context,
+			mode,
+			depth: mode === 'draft' ? 'survey' : depth
+		});
 	}
 </script>
 
@@ -29,12 +35,24 @@
 	</label>
 
 	<label>
+		Mode
+		<select bind:value={mode}>
+			<option value="draft">Draft (fast first readable version)</option>
+			<option value="balanced">Balanced (default full run)</option>
+			<option value="strict">Strict (highest polish)</option>
+		</select>
+	</label>
+
+	<label>
 		Depth
-		<select bind:value={depth}>
+		<select bind:value={depth} disabled={mode === 'draft'}>
 			<option value="survey">Survey (quick overview)</option>
 			<option value="standard">Standard</option>
 			<option value="deep">Deep (comprehensive)</option>
 		</select>
+		{#if mode === 'draft'}
+			<span class="hint">Draft mode always uses survey depth for speed.</span>
+		{/if}
 	</label>
 
 	<button type="submit" {disabled}>Generate Textbook</button>
@@ -63,6 +81,11 @@
 		background: #1a1a1a;
 		color: #eee;
 		font-size: 0.95rem;
+	}
+
+	.hint {
+		color: #888;
+		font-size: 0.8rem;
 	}
 
 	input:focus, textarea:focus, select:focus {

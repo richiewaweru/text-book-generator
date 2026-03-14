@@ -2,34 +2,41 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { initAuth, isAuthenticated, getUser, logout } from '$lib/stores/auth';
+	import { fromStore } from 'svelte/store';
+	import { fetchCurrentUser } from '$lib/api/auth';
+	import { authInitialized, authIsAuthenticated, authUser, bootstrapAuth, logout } from '$lib/stores/auth';
 
 	let { children } = $props();
-	let mounted = $state(false);
-
-	const publicPaths = ['/login'];
+	const initialized = fromStore(authInitialized);
+	const user = fromStore(authUser);
+	const authed = fromStore(authIsAuthenticated);
 
 	onMount(() => {
-		initAuth();
-		mounted = true;
+		void bootstrapAuth(fetchCurrentUser);
 	});
 
 	$effect(() => {
-		if (!mounted) return;
+		if (!initialized.current) return;
 		const path = page.url.pathname;
-		const isPublic = publicPaths.some((p) => path.startsWith(p));
-		if (!isAuthenticated() && !isPublic) {
-			goto('/login');
+		const isLogin = path.startsWith('/login');
+		const isOnboarding = path.startsWith('/onboarding');
+
+		if (!user.current) {
+			if (!isLogin) {
+				goto('/login', { replaceState: true });
+			}
+			return;
+		}
+
+		if (!user.current.has_profile && !isOnboarding) {
+			goto('/onboarding', { replaceState: true });
 		}
 	});
 
 	function handleLogout() {
 		logout();
-		goto('/login');
+		goto('/login', { replaceState: true });
 	}
-
-	const user = $derived(getUser());
-	const authed = $derived(isAuthenticated());
 </script>
 
 <svelte:head>
@@ -38,13 +45,13 @@
 
 <header>
 	<nav>
-		<a href={authed ? '/dashboard' : '/'} class="brand">Textbook Agent</a>
-		{#if authed && user}
+		<a href={authed.current ? '/dashboard' : '/'} class="brand">Textbook Agent</a>
+		{#if authed.current && user.current}
 			<div class="nav-right">
-				{#if user.picture_url}
-					<img src={user.picture_url} alt={user.name ?? ''} class="avatar" />
+				{#if user.current.picture_url}
+					<img src={user.current.picture_url} alt={user.current.name ?? ''} class="avatar" />
 				{/if}
-				<span class="user-name">{user.name ?? user.email}</span>
+				<span class="user-name">{user.current.name ?? user.current.email}</span>
 				<button onclick={handleLogout} class="logout-btn">Sign out</button>
 			</div>
 		{/if}
@@ -52,8 +59,10 @@
 </header>
 
 <main>
-	{#if mounted}
+	{#if initialized.current}
 		{@render children()}
+	{:else}
+		<p>Loading session...</p>
 	{/if}
 </main>
 

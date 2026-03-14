@@ -116,6 +116,7 @@ class MockProvider(BaseProvider):
         response_schema: type,
         temperature: float = 0.3,
         max_tokens: int = 4096,
+        model: str | None = None,
     ) -> Any:
         self._call_count += 1
         if self._call_count <= self._fail_n_times:

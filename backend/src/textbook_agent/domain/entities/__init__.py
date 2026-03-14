@@ -1,3 +1,8 @@
+from .correction_context import (
+    CodeCorrectionContext,
+    ContentCorrectionContext,
+    DiagramCorrectionContext,
+)
 from .curriculum_plan import CurriculumPlan, SectionSpec
 from .generation import Generation
 from .generation_context import GenerationContext
@@ -12,6 +17,9 @@ from .user import User
 
 __all__ = [
     "CurriculumPlan",
+    "CodeCorrectionContext",
+    "ContentCorrectionContext",
+    "DiagramCorrectionContext",
     "Generation",
     "GenerationContext",
     "PracticeProblem",

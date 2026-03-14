@@ -1,15 +1,25 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { getUser } from '$lib/stores/auth';
-	import { getProfile } from '$lib/api/profile';
-	import { startGeneration, pollUntilDone, getGenerations } from '$lib/api/client';
+	import { fromStore } from 'svelte/store';
 	import ProfileForm from '$lib/components/ProfileForm.svelte';
 	import GenerationProgress from '$lib/components/GenerationProgress.svelte';
+	import { isApiError } from '$lib/api/errors';
+	import { getOnboardingRoute, resolveDashboardProfileFailure } from '$lib/auth/routing';
+	import { startGeneration, enhanceGeneration, pollUntilDone, getGenerations } from '$lib/api/client';
+	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
+	import { getProfile } from '$lib/api/profile';
+	import { authUser, logout } from '$lib/stores/auth';
 	import { getTextbookRoute } from '$lib/navigation/textbook';
-	import type { StudentProfile, GenerationRequest, GenerationStatus, GenerationHistoryItem } from '$lib/types';
+	import type {
+		StudentProfile,
+		GenerationRequest,
+		GenerationStatus,
+		GenerationHistoryItem,
+		GenerationMode
+	} from '$lib/types';
 
-	const user = $derived(getUser());
+	const user = fromStore(authUser);
 
 	let profile: StudentProfile | null = $state(null);
 	let loadingProfile = $state(true);
@@ -17,32 +27,40 @@
 	let generating = $state(false);
 	let errorMessage: string | null = $state(null);
 	let errorType: string | null = $state(null);
+	let profileErrorMessage: string | null = $state(null);
 	let pastGenerations: GenerationHistoryItem[] = $state([]);
 
 	onMount(async () => {
 		try {
 			profile = await getProfile();
-		} catch {
-			goto('/onboarding');
+		} catch (err) {
+			const resolution = resolveDashboardProfileFailure(err);
+			if (resolution.redirectTo) {
+				if (resolution.redirectTo === '/login') {
+					logout();
+				}
+				goto(resolution.redirectTo, { replaceState: true });
+				return;
+			}
+
+			profileErrorMessage = resolution.message ?? 'Failed to load your profile.';
 			return;
 		} finally {
 			loadingProfile = false;
 		}
+
 		try {
 			pastGenerations = await getGenerations();
-		} catch {
-			// Non-critical — dashboard still works without history
+		} catch (err) {
+			if (isApiError(err) && err.status === 401) {
+				logout();
+				goto('/login', { replaceState: true });
+			}
 		}
 	});
 
-	function friendlyErrorMessage(error: string | null, type: string | null): string {
-		if (type === 'provider_error') {
-			return 'The AI provider returned an unexpected response. Please try again.';
-		}
-		if (type === 'pipeline_error') {
-			return 'The generation pipeline encountered an error. Please try again with different input.';
-		}
-		return error ?? 'Generation failed unexpectedly.';
+	function modeLabel(mode: GenerationMode): string {
+		return mode.toUpperCase();
 	}
 
 	async function handleGenerate(request: GenerationRequest) {
@@ -54,15 +72,46 @@
 		try {
 			const { generation_id } = await startGeneration(request);
 
-			const finalStatus = await pollUntilDone(generation_id, (s) => {
-				generationStatus = s;
+			const finalStatus = await pollUntilDone(generation_id, (status) => {
+				generationStatus = status;
 			});
 
 			if (finalStatus.status === 'completed' && finalStatus.result) {
 				goto(getTextbookRoute(generation_id));
 			} else if (finalStatus.status === 'failed') {
 				errorType = finalStatus.error_type;
-				errorMessage = friendlyErrorMessage(finalStatus.error, finalStatus.error_type);
+				errorMessage = friendlyGenerationErrorMessage(
+					finalStatus.error,
+					finalStatus.error_type
+				);
+			}
+		} catch (err) {
+			errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+		} finally {
+			generating = false;
+		}
+	}
+
+	async function handleEnhance(id: string) {
+		generating = true;
+		errorMessage = null;
+		errorType = null;
+		generationStatus = null;
+
+		try {
+			const { generation_id } = await enhanceGeneration(id, { target_mode: 'balanced' });
+			const finalStatus = await pollUntilDone(generation_id, (status) => {
+				generationStatus = status;
+			});
+
+			if (finalStatus.status === 'completed' && finalStatus.result) {
+				goto(getTextbookRoute(generation_id));
+			} else if (finalStatus.status === 'failed') {
+				errorType = finalStatus.error_type;
+				errorMessage = friendlyGenerationErrorMessage(
+					finalStatus.error,
+					finalStatus.error_type
+				);
 			}
 		} catch (err) {
 			errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
@@ -75,9 +124,13 @@
 <div class="dashboard">
 	{#if loadingProfile}
 		<p>Loading your profile...</p>
+	{:else if profileErrorMessage}
+		<div class="error">
+			<p><strong>Error:</strong> {profileErrorMessage}</p>
+		</div>
 	{:else if profile}
 		<div class="welcome-section">
-			<h1>Welcome back{user?.name ? `, ${user.name}` : ''}</h1>
+			<h1>Welcome back{user.current?.name ? `, ${user.current.name}` : ''}</h1>
 			<p class="subtitle">Your personalized textbook generator is ready.</p>
 		</div>
 
@@ -113,7 +166,12 @@
 					</div>
 				{/if}
 			</div>
-			<button class="edit-profile-btn" onclick={() => goto('/onboarding')}>Edit Profile</button>
+			<button
+				class="edit-profile-btn"
+				onclick={() => goto(getOnboardingRoute({ edit: true }))}
+			>
+				Edit Profile
+			</button>
 		</div>
 
 		<div class="generate-section">
@@ -142,6 +200,7 @@
 								<span class="history-subject">{gen.subject}</span>
 								<span class="history-meta">
 									<span class="status-badge status-{gen.status}">{gen.status}</span>
+									<span class="mode-badge mode-{gen.mode}">{modeLabel(gen.mode)}</span>
 									{#if gen.created_at}
 										<span class="history-date">{new Date(gen.created_at).toLocaleDateString()}</span>
 									{/if}
@@ -150,9 +209,16 @@
 									{/if}
 								</span>
 							</div>
-							{#if gen.status === 'completed'}
-								<a href={getTextbookRoute(gen.id)} class="view-link">View</a>
-							{/if}
+							<div class="history-actions">
+								{#if gen.status === 'completed'}
+									<a href={getTextbookRoute(gen.id)} class="view-link">View</a>
+									{#if gen.mode === 'draft'}
+										<button class="enhance-link" onclick={() => handleEnhance(gen.id)} disabled={generating}>
+											Enhance
+										</button>
+									{/if}
+								{/if}
+							</div>
 						</li>
 					{/each}
 				</ul>
@@ -290,6 +356,12 @@
 		margin-bottom: 0.5rem;
 	}
 
+	.history-actions {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+	}
+
 	.history-info {
 		display: flex;
 		flex-direction: column;
@@ -337,6 +409,29 @@
 		color: #fff176;
 	}
 
+	.mode-badge {
+		padding: 0.1rem 0.4rem;
+		border-radius: 3px;
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+
+	.mode-draft {
+		background: #2f2612;
+		color: #f1c96c;
+	}
+
+	.mode-balanced {
+		background: #173221;
+		color: #86d39e;
+	}
+
+	.mode-strict {
+		background: #2a1d3b;
+		color: #caa2ff;
+	}
+
 	.view-link {
 		color: #64b5f6;
 		text-decoration: none;
@@ -348,5 +443,24 @@
 
 	.view-link:hover {
 		background: #1a1a2e;
+	}
+
+	.enhance-link {
+		background: transparent;
+		border: 1px solid #86d39e;
+		border-radius: 4px;
+		color: #86d39e;
+		padding: 0.3rem 0.6rem;
+		cursor: pointer;
+		font-size: 0.85rem;
+	}
+
+	.enhance-link:hover:not(:disabled) {
+		background: #173221;
+	}
+
+	.enhance-link:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 </style>

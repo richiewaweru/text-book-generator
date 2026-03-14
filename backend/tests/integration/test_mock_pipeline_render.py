@@ -16,6 +16,7 @@ class EscapingMockProvider(MockProvider):
         response_schema: type,
         temperature: float = 0.3,
         max_tokens: int = 4096,
+        model: str | None = None,
     ) -> Any:
         if response_schema is SectionContent:
             return SAMPLE_CONTENT.model_copy(

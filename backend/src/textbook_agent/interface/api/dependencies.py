@@ -8,6 +8,7 @@ from textbook_agent.domain.ports.generation_repository import GenerationReposito
 from textbook_agent.domain.ports.student_profile_repository import StudentProfileRepository
 from textbook_agent.domain.ports.textbook_repository import TextbookRepository
 from textbook_agent.domain.ports.user_repository import UserRepository
+from textbook_agent.domain.value_objects import ModelRouting
 from textbook_agent.infrastructure.auth.jwt_handler import JWTHandler
 from textbook_agent.infrastructure.config.settings import Settings
 from textbook_agent.infrastructure.database.session import async_session_factory
@@ -59,7 +60,9 @@ def get_provider(settings: Settings | None = None) -> BaseProvider:
     s = settings or get_settings()
     api_key = s.anthropic_api_key if s.provider == "claude" else s.openai_api_key
     model = s.claude_model if s.provider == "claude" else s.openai_model
-    return ProviderFactory.get(s.provider, api_key=api_key, model=model)
+    return ProviderFactory.get(
+        s.provider, api_key=api_key, model=model, max_tokens=s.llm_max_tokens
+    )
 
 
 def get_repository(settings: Settings | None = None) -> TextbookRepository:
@@ -67,12 +70,28 @@ def get_repository(settings: Settings | None = None) -> TextbookRepository:
     return FileTextbookRepository(output_dir=s.output_dir)
 
 
-def get_textbook_repository(settings: Settings | None = None) -> TextbookRepository:
-    return get_repository(settings)
+def get_textbook_repository() -> TextbookRepository:
+    return get_repository()
 
 
 def get_renderer() -> RendererPort:
     return HTMLRenderer()
+
+
+def get_model_routing(settings: Settings | None = None) -> ModelRouting:
+    s = settings or get_settings()
+    premium_model = s.claude_model if s.provider == "claude" else s.openai_model
+    fast_model = (
+        s.claude_fast_model if s.provider == "claude" else s.openai_fast_model
+    )
+    return ModelRouting(
+        planner=premium_model,
+        content=premium_model,
+        diagram=fast_model,
+        code=premium_model,
+        inline_quality=fast_model,
+        final_quality=premium_model,
+    )
 
 
 def get_use_case() -> GenerateTextbookUseCase:
@@ -83,4 +102,9 @@ def get_use_case() -> GenerateTextbookUseCase:
         renderer=get_renderer(),
         quality_check_enabled=s.quality_check_enabled,
         max_quality_reruns=s.max_quality_reruns,
+        max_retries=s.max_retries,
+        retry_base_delay=s.retry_base_delay,
+        code_line_soft_limit=s.code_line_soft_limit,
+        code_line_hard_limit=s.code_line_hard_limit,
+        model_routing=get_model_routing(s),
     )
