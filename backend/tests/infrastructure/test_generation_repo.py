@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from textbook_agent.domain.entities.generation import Generation
+from textbook_agent.domain.value_objects import GenerationMode
 from textbook_agent.infrastructure.database.models import Base, UserModel
 from textbook_agent.infrastructure.repositories.sql_generation_repo import (
     SqlGenerationRepository,
@@ -54,6 +55,25 @@ class TestSqlGenerationRepository:
         found = await repo.find_by_id(gen.id)
         assert found is not None
         assert found.subject == "algebra"
+        assert found.mode == GenerationMode.BALANCED
+        assert found.source_generation_id is None
+
+    async def test_create_persists_mode_and_lineage(self, repo: SqlGenerationRepository):
+        gen = Generation(
+            id=str(uuid.uuid4()),
+            user_id=TEST_USER_ID,
+            subject="algebra",
+            context="Enhance this draft",
+            mode=GenerationMode.STRICT,
+            source_generation_id="draft-123",
+        )
+
+        await repo.create(gen)
+        found = await repo.find_by_id(gen.id)
+
+        assert found is not None
+        assert found.mode == GenerationMode.STRICT
+        assert found.source_generation_id == "draft-123"
 
     async def test_update_status_completed(self, repo: SqlGenerationRepository):
         gen_id = str(uuid.uuid4())

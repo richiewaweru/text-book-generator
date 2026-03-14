@@ -20,3 +20,8 @@ class TextbookRepository(ABC):
     async def load_html(self, output_path: str) -> str:
         """Load a previously rendered textbook HTML artifact."""
         ...
+
+    @abstractmethod
+    async def load_textbook(self, output_path: str) -> RawTextbook:
+        """Load the saved textbook metadata for a rendered artifact."""
+        ...

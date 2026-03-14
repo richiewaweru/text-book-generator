@@ -6,7 +6,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from textbook_agent.application.orchestrator import TextbookAgent
 from textbook_agent.application.dtos.generation_request import GenerationResponse
+from textbook_agent.application.dtos.generation_status import GenerationProgress
 from textbook_agent.domain.entities.quality_report import QualityIssue, QualityReport
+from textbook_agent.domain.value_objects import GenerationMode
 from textbook_agent.infrastructure.repositories.file_textbook_repo import FileTextbookRepository
 from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
 from conftest import MockProvider, _MOCK_RESPONSES
@@ -32,6 +34,8 @@ class TestTextbookAgent:
         assert result.generation_time_seconds >= 0
         assert result.quality_report is not None
         assert result.quality_report.passed is True
+        assert result.mode == GenerationMode.BALANCED
+        assert result.source_generation_id is None
 
         output_file = repository.resolve_output_path(result.output_path)
         assert output_file.exists()
@@ -56,7 +60,7 @@ class TestTextbookAgent:
         provider = MockProvider()
         repository = FileTextbookRepository(output_dir=str(tmp_path))
         renderer = HTMLRenderer()
-        progress_log: list[str] = []
+        progress_log: list[GenerationProgress] = []
 
         agent = TextbookAgent(
             provider=provider,
@@ -68,10 +72,12 @@ class TestTextbookAgent:
 
         await agent.generate(beginner_profile)
 
-        assert "CurriculumPlanner" in progress_log
-        assert "Assembler" in progress_log
-        assert "QualityChecker" in progress_log
-        assert "HTMLRenderer" in progress_log
+        assert progress_log
+        assert progress_log[0].phase == "planning"
+        assert any(item.phase == "generating" for item in progress_log)
+        assert any(item.phase == "checking" for item in progress_log)
+        assert progress_log[-1].phase == "rendering"
+        assert any(item.current_section_id == "section_01" for item in progress_log)
 
     async def test_quality_rerun_triggers_on_failure(self, beginner_profile, tmp_path):
         """When QualityChecker fails first, orchestrator reruns flagged sections."""
@@ -99,9 +105,13 @@ class TestTextbookAgent:
                 response_schema: type,
                 temperature: float = 0.3,
                 max_tokens: int = 4096,
+                model: str | None = None,
             ) -> Any:
                 nonlocal quality_call_count
-                if response_schema is QualityReport:
+                if (
+                    response_schema is QualityReport
+                    and user_prompt == "Review this textbook for quality issues."
+                ):
                     quality_call_count += 1
                     return failing_report if quality_call_count == 1 else passing_report
                 return _MOCK_RESPONSES[response_schema]
@@ -109,7 +119,7 @@ class TestTextbookAgent:
         provider = RerunMockProvider()
         repository = FileTextbookRepository(output_dir=str(tmp_path))
         renderer = HTMLRenderer()
-        progress_log: list[str] = []
+        progress_log: list[GenerationProgress] = []
 
         agent = TextbookAgent(
             provider=provider,
@@ -126,10 +136,12 @@ class TestTextbookAgent:
         assert result.quality_report is not None
         assert result.quality_report.passed is True
         assert quality_call_count == 2
-        # Verify rerun progress was reported
-        assert "ContentGenerator:section_01:rerun_1" in progress_log
-        assert "Assembler:rerun_1" in progress_log
-        assert "QualityChecker:rerun_1" in progress_log
+        assert any(
+            item.phase == "fixing"
+            and item.retry_attempt == 1
+            and item.flagged_section_ids == ["section_01"]
+            for item in progress_log
+        )
 
     async def test_quality_rerun_capped_at_max(self, beginner_profile, tmp_path):
         """Reruns stop after max_quality_reruns even if still failing."""
@@ -154,8 +166,12 @@ class TestTextbookAgent:
                 response_schema: type,
                 temperature: float = 0.3,
                 max_tokens: int = 4096,
+                model: str | None = None,
             ) -> Any:
-                if response_schema is QualityReport:
+                if (
+                    response_schema is QualityReport
+                    and user_prompt == "Review this textbook for quality issues."
+                ):
                     return always_failing
                 return _MOCK_RESPONSES[response_schema]
 
@@ -167,6 +183,7 @@ class TestTextbookAgent:
             provider=provider,
             repository=repository,
             renderer=renderer,
+            mode=GenerationMode.STRICT,
             quality_check_enabled=True,
             max_quality_reruns=2,
         )

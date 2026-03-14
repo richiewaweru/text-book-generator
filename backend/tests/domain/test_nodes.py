@@ -13,7 +13,7 @@ from textbook_agent.domain.entities.section_diagram import SectionDiagram
 from textbook_agent.domain.entities.section_code import SectionCode
 from textbook_agent.domain.entities.quality_report import QualityIssue, QualityReport
 from textbook_agent.domain.entities.textbook import RawTextbook
-from textbook_agent.domain.exceptions import PipelineError
+from textbook_agent.domain.exceptions import PipelineError, ProviderRequestError
 from textbook_agent.domain.services.planner import CurriculumPlannerNode
 from textbook_agent.domain.services.content_generator import (
     ContentGeneratorNode,
@@ -61,6 +61,37 @@ class TestCurriculumPlannerNode:
         assert provider.call_count == 3
         # Should have waited at least 0.1 + 0.2 = 0.3 seconds
         assert elapsed >= 0.25
+
+    async def test_provider_request_errors_are_not_retried(self, beginner_profile):
+        class BillingFailureProvider:
+            def __init__(self) -> None:
+                self.call_count = 0
+
+            def complete(
+                self,
+                system_prompt: str,
+                user_prompt: str,
+                response_schema: type,
+                temperature: float = 0.3,
+                max_tokens: int = 4096,
+                model: str | None = None,
+            ):
+                self.call_count += 1
+                raise ProviderRequestError(
+                    provider_name="claude",
+                    detail="Anthropic reports the API credit balance is too low.",
+                )
+
+            def name(self) -> str:
+                return "claude"
+
+        provider = BillingFailureProvider()
+        node = CurriculumPlannerNode(provider=provider)
+
+        with pytest.raises(ProviderRequestError, match="credit balance is too low"):
+            await node.execute(beginner_profile)
+
+        assert provider.call_count == 1
 
 
 class TestContentGeneratorNode:
@@ -122,6 +153,7 @@ class TestQualityCheckerNode:
                 response_schema: type,
                 temperature: float = 0.3,
                 max_tokens: int = 4096,
+                model: str | None = None,
             ):
                 if response_schema is QualityReport:
                     return QualityReport(

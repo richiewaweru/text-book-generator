@@ -12,6 +12,10 @@ class CurriculumPlannerNode(PipelineNode[GenerationContext, CurriculumPlan]):
     input_schema = GenerationContext
     output_schema = CurriculumPlan
 
+    def __init__(self, provider=None, model_override: str | None = None) -> None:
+        super().__init__(provider=provider)
+        self.model_override = model_override
+
     async def run(self, input_data: GenerationContext) -> CurriculumPlan:
         prompt = build_planner_prompt(input_data)
         return await asyncio.to_thread(
@@ -19,4 +23,5 @@ class CurriculumPlannerNode(PipelineNode[GenerationContext, CurriculumPlan]):
             system_prompt=prompt,
             user_prompt=f"Create a curriculum plan for: {input_data.subject}",
             response_schema=CurriculumPlan,
+            model=self.model_override,
         )

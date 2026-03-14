@@ -18,7 +18,9 @@ class SqlGenerationRepository(GenerationRepository):
             user_id=generation.user_id,
             subject=generation.subject,
             context=generation.context,
+            mode=generation.mode.value,
             status=generation.status,
+            source_generation_id=generation.source_generation_id,
             created_at=generation.created_at,
         )
         self._session.add(model)
@@ -78,11 +80,13 @@ class SqlGenerationRepository(GenerationRepository):
             user_id=model.user_id,
             subject=model.subject,
             context=model.context or "",
+            mode=model.mode,
             status=model.status,
             output_path=model.output_path,
             error=model.error,
             quality_passed=model.quality_passed,
             generation_time_seconds=model.generation_time_seconds,
+            source_generation_id=model.source_generation_id,
             created_at=model.created_at,
             completed_at=model.completed_at,
         )

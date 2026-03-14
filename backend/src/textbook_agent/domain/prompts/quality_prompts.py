@@ -10,8 +10,8 @@ def build_quality_prompt(textbook: RawTextbook, plan: CurriculumPlan) -> str:
         "quality_checker",
         BASE_PEDAGOGICAL_AND_FORMATTING_RULES,
         f"""
-You are reviewing a generated textbook for correctness, coherence, formatting compliance,
-and pedagogical quality.
+You are reviewing a fully assembled textbook for cross-section correctness,
+coherence, and pedagogical quality.
 
 TEXTBOOK:
 - Subject: {textbook.subject}
@@ -24,15 +24,16 @@ PLAN:
 - Total planned sections: {plan.total_sections}
 - Reading order: {", ".join(plan.reading_order)}
 
-Check categories:
-- structure completeness
-- terminology consistency
-- difficulty progression
-- worked-example alignment
-- formatting and notation compliance
-- diagram and code quality
+Focus on document-level and cross-section issues only:
+- structure completeness across the assembled textbook
+- forward references to concepts introduced later
+- terminology drift across sections
+- symbols redefined with different meanings
+- difficulty spikes across neighboring sections
+- section ordering or progression problems
+- section-specific semantic issues that became visible only in document context
 
-DO NOT CHECK the following — they are already verified by automated mechanical checks:
+DO NOT CHECK the following - they are already verified by automated mechanical checks:
 - Practice problem count or difficulty distribution
 - Empty practice problem statements or hints
 - Missing hooks (empty hook field)
@@ -45,11 +46,15 @@ DO NOT CHECK the following — they are already verified by automated mechanical
 - Code line length
 - Python syntax validity (ast.parse)
 
-Focus your review on semantic and pedagogical quality that code cannot verify:
-forward references, symbol consistency, difficulty progression, tone, and
-structural coherence.
+Scope rules:
+- Use scope "section" when an issue can be fixed by repairing one section.
+- Use scope "document" when the issue spans the textbook and cannot be safely
+  repaired by rerunning one section alone.
+- Section-scoped issues must include a section_id.
+- Document-scoped issues must set section_id to null.
 
 Return only valid JSON matching the QualityReport schema.
-Flag issues that would cause learner confusion, logical gaps, or violations of the curriculum order.
+Flag only issues that would cause learner confusion, logical gaps, or
+violations of the curriculum order.
 """,
     )

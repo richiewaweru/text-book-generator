@@ -7,10 +7,11 @@ from pydantic import BaseModel, Field
 class QualityIssue(BaseModel):
     """A single issue found by the Quality Checker."""
 
-    section_id: str
+    section_id: str | None = None
     issue_type: str
     description: str
     severity: Literal["error", "warning"]
+    scope: Literal["section", "document"] = "section"
     check_source: Literal["mechanical", "llm"] = "llm"
 
 

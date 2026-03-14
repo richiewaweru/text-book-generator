@@ -17,6 +17,7 @@ class BaseProvider(ABC):
         response_schema: type,
         temperature: float = 0.3,
         max_tokens: int = 4096,
+        model: str | None = None,
     ) -> Any:
         """Make a completion call. Always returns a validated Pydantic instance."""
         ...

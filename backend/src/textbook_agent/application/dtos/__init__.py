@@ -1,4 +1,8 @@
-from .generation_request import GenerationRequest, GenerationResponse
+from .generation_request import (
+    EnhanceGenerationRequest,
+    GenerationRequest,
+    GenerationResponse,
+)
 from .generation_status import (
     GenerationProgress,
     GenerationResultSummary,
@@ -8,6 +12,7 @@ from .generation_status import (
 __all__ = [
     "GenerationRequest",
     "GenerationResponse",
+    "EnhanceGenerationRequest",
     "GenerationStatus",
     "GenerationProgress",
     "GenerationResultSummary",

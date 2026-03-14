@@ -13,9 +13,15 @@ logger = logging.getLogger(__name__)
 class OpenAIProvider(BaseProvider):
     """OpenAI LLM provider implementation with strict JSON Schema output."""
 
-    def __init__(self, api_key: str = "", model: str = "gpt-5-mini") -> None:
+    def __init__(
+        self,
+        api_key: str = "",
+        model: str = "gpt-5-mini",
+        max_tokens: int = 4096,
+    ) -> None:
         self.api_key = api_key
         self.model = model
+        self.default_max_tokens = max_tokens
         self._client = openai.OpenAI(api_key=api_key) if api_key else None
 
     def complete(
@@ -24,10 +30,13 @@ class OpenAIProvider(BaseProvider):
         user_prompt: str,
         response_schema: type,
         temperature: float = 0.3,
-        max_tokens: int = 4096,
+        max_tokens: int | None = None,
+        model: str | None = None,
     ) -> Any:
+        max_tokens = max_tokens or self.default_max_tokens
         if self._client is None:
             self._client = openai.OpenAI(api_key=self.api_key)
+        selected_model = model or self.model
 
         response_format = {
             "type": "json_schema",
@@ -39,7 +48,7 @@ class OpenAIProvider(BaseProvider):
         }
 
         request_kwargs = {
-            "model": self.model,
+            "model": selected_model,
             "max_completion_tokens": max_tokens,
             "response_format": response_format,
             "messages": [
@@ -47,7 +56,7 @@ class OpenAIProvider(BaseProvider):
                 {"role": "user", "content": user_prompt},
             ],
         }
-        if not self.model.startswith("gpt-5"):
+        if not selected_model.startswith("gpt-5"):
             request_kwargs["temperature"] = temperature
 
         response = self._client.chat.completions.create(**request_kwargs)
@@ -60,7 +69,7 @@ class OpenAIProvider(BaseProvider):
             return response_schema.model_validate(data)
         except Exception as exc:
             raise ProviderConformanceError(
-                provider_name=self.model,
+                provider_name=selected_model,
                 schema_name=response_schema.__name__,
             ) from exc
 

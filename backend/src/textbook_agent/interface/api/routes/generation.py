@@ -2,10 +2,11 @@ import asyncio
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from textbook_agent.application.dtos import (
+    EnhanceGenerationRequest,
     GenerationProgress,
     GenerationRequest,
     GenerationResultSummary,
@@ -13,13 +14,20 @@ from textbook_agent.application.dtos import (
 )
 from textbook_agent.domain.entities.generation import Generation
 from textbook_agent.domain.entities.student_profile import StudentProfile
+from textbook_agent.domain.entities.textbook import RawTextbook
 from textbook_agent.domain.entities.user import User
-from textbook_agent.domain.exceptions import PipelineError, ProviderConformanceError
+from textbook_agent.domain.exceptions import (
+    PipelineError,
+    ProviderConformanceError,
+    ProviderRequestError,
+)
 from textbook_agent.domain.ports.generation_repository import GenerationRepository
 from textbook_agent.domain.ports.student_profile_repository import StudentProfileRepository
 from textbook_agent.domain.ports.textbook_repository import TextbookRepository
+from textbook_agent.domain.value_objects import GenerationMode
 from textbook_agent.interface.api.dependencies import (
     get_generation_repository,
+    get_settings,
     get_student_profile_repository,
     get_textbook_repository,
     get_use_case,
@@ -30,7 +38,35 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["generation"])
 
-TOTAL_NODE_TYPES = 7
+
+def _history_item(generation: Generation) -> dict:
+    return {
+        "id": generation.id,
+        "subject": generation.subject,
+        "status": generation.status,
+        "mode": generation.mode,
+        "source_generation_id": generation.source_generation_id,
+        "quality_passed": generation.quality_passed,
+        "generation_time_seconds": generation.generation_time_seconds,
+        "created_at": generation.created_at.isoformat() if generation.created_at else None,
+        "completed_at": generation.completed_at.isoformat() if generation.completed_at else None,
+    }
+
+
+def _detail_item(generation: Generation) -> dict:
+    return {
+        "id": generation.id,
+        "subject": generation.subject,
+        "context": generation.context,
+        "status": generation.status,
+        "mode": generation.mode,
+        "source_generation_id": generation.source_generation_id,
+        "error": generation.error,
+        "quality_passed": generation.quality_passed,
+        "generation_time_seconds": generation.generation_time_seconds,
+        "created_at": generation.created_at.isoformat() if generation.created_at else None,
+        "completed_at": generation.completed_at.isoformat() if generation.completed_at else None,
+    }
 
 
 async def _run_generation(
@@ -39,22 +75,21 @@ async def _run_generation(
     req: GenerationRequest,
     student_profile: StudentProfile | None,
     gen_repo: GenerationRepository,
+    *,
+    mode: GenerationMode,
+    source_generation_id: str | None = None,
 ):
     jobs: dict[str, GenerationStatus] = request.app.state.jobs
-    completed_nodes: list[str] = []
 
     await gen_repo.update_status(generation_id, status="running")
 
-    def on_progress(node_name: str):
-        completed_nodes.append(node_name)
+    def on_progress(progress: GenerationProgress):
         jobs[generation_id] = GenerationStatus(
             id=generation_id,
             status="running",
-            progress=GenerationProgress(
-                current_node=node_name,
-                completed_nodes=list(completed_nodes),
-                total_nodes=TOTAL_NODE_TYPES,
-            ),
+            mode=progress.mode,
+            progress=progress,
+            source_generation_id=source_generation_id,
         )
 
     try:
@@ -65,7 +100,9 @@ async def _run_generation(
         jobs[generation_id] = GenerationStatus(
             id=generation_id,
             status="completed",
+            mode=result.mode,
             result=GenerationResultSummary.from_response(result),
+            source_generation_id=source_generation_id,
         )
         await gen_repo.update_status(
             generation_id,
@@ -79,15 +116,84 @@ async def _run_generation(
     except Exception as exc:
         logger.exception("Generation %s failed", generation_id)
         error_type = "unknown_error"
-        if isinstance(exc, ProviderConformanceError):
+        if isinstance(exc, (ProviderConformanceError, ProviderRequestError)):
             error_type = "provider_error"
         elif isinstance(exc, PipelineError):
             error_type = "pipeline_error"
         jobs[generation_id] = GenerationStatus(
             id=generation_id,
             status="failed",
+            mode=mode,
             error=str(exc),
             error_type=error_type,
+            source_generation_id=source_generation_id,
+        )
+        await gen_repo.update_status(
+            generation_id,
+            status="failed",
+            error=str(exc),
+        )
+
+
+async def _run_enhancement(
+    request: Request,
+    generation_id: str,
+    req: EnhanceGenerationRequest,
+    source_textbook: RawTextbook,
+    gen_repo: GenerationRepository,
+    *,
+    source_generation_id: str,
+):
+    jobs: dict[str, GenerationStatus] = request.app.state.jobs
+    await gen_repo.update_status(generation_id, status="running")
+
+    def on_progress(progress: GenerationProgress):
+        jobs[generation_id] = GenerationStatus(
+            id=generation_id,
+            status="running",
+            mode=progress.mode,
+            progress=progress,
+            source_generation_id=source_generation_id,
+        )
+
+    try:
+        use_case = get_use_case()
+        result = await use_case.enhance(
+            req,
+            source_textbook,
+            on_progress=on_progress,
+            source_generation_id=source_generation_id,
+        )
+        jobs[generation_id] = GenerationStatus(
+            id=generation_id,
+            status="completed",
+            mode=result.mode,
+            result=GenerationResultSummary.from_response(result),
+            source_generation_id=source_generation_id,
+        )
+        await gen_repo.update_status(
+            generation_id,
+            status="completed",
+            output_path=result.output_path,
+            quality_passed=(
+                result.quality_report.passed if result.quality_report else None
+            ),
+            generation_time_seconds=result.generation_time_seconds,
+        )
+    except Exception as exc:
+        logger.exception("Enhancement %s failed", generation_id)
+        error_type = "unknown_error"
+        if isinstance(exc, (ProviderConformanceError, ProviderRequestError)):
+            error_type = "provider_error"
+        elif isinstance(exc, PipelineError):
+            error_type = "pipeline_error"
+        jobs[generation_id] = GenerationStatus(
+            id=generation_id,
+            status="failed",
+            mode=req.target_mode,
+            error=str(exc),
+            error_type=error_type,
+            source_generation_id=source_generation_id,
         )
         await gen_repo.update_status(
             generation_id,
@@ -105,8 +211,13 @@ async def generate_textbook(
     gen_repo: GenerationRepository = Depends(get_generation_repository),
 ):
     generation_id = str(uuid.uuid4())
+    mode = req.resolved_mode()
     jobs: dict[str, GenerationStatus] = request.app.state.jobs
-    jobs[generation_id] = GenerationStatus(id=generation_id, status="pending")
+    jobs[generation_id] = GenerationStatus(
+        id=generation_id,
+        status="pending",
+        mode=mode,
+    )
 
     student_profile = await profile_repo.find_by_user_id(current_user.id)
 
@@ -116,14 +227,83 @@ async def generate_textbook(
             user_id=current_user.id,
             subject=req.subject,
             context=req.context,
+            mode=mode,
         )
     )
 
     asyncio.create_task(
-        _run_generation(request, generation_id, req, student_profile, gen_repo)
+        _run_generation(
+            request,
+            generation_id,
+            req,
+            student_profile,
+            gen_repo,
+            mode=mode,
+        )
     )
 
-    return {"generation_id": generation_id, "status": "pending"}
+    return {"generation_id": generation_id, "status": "pending", "mode": mode}
+
+
+@router.post("/generations/{generation_id}/enhance", status_code=202)
+async def enhance_generation(
+    generation_id: str,
+    request: Request,
+    req: EnhanceGenerationRequest = Body(...),
+    current_user: User = Depends(get_current_user),
+    gen_repo: GenerationRepository = Depends(get_generation_repository),
+    textbook_repo: TextbookRepository = Depends(get_textbook_repository),
+):
+    source_generation = await gen_repo.find_by_id(generation_id)
+    if source_generation is None or source_generation.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    if source_generation.mode != GenerationMode.DRAFT:
+        raise HTTPException(status_code=409, detail="Only draft generations can be enhanced")
+    if source_generation.status != "completed" or not source_generation.output_path:
+        raise HTTPException(status_code=409, detail="Draft is not ready for enhancement")
+
+    try:
+        source_textbook = await textbook_repo.load_textbook(source_generation.output_path)
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(status_code=404, detail="Draft artifact not found") from None
+
+    child_generation_id = str(uuid.uuid4())
+    jobs: dict[str, GenerationStatus] = request.app.state.jobs
+    jobs[child_generation_id] = GenerationStatus(
+        id=child_generation_id,
+        status="pending",
+        mode=req.target_mode,
+        source_generation_id=generation_id,
+    )
+
+    await gen_repo.create(
+        Generation(
+            id=child_generation_id,
+            user_id=current_user.id,
+            subject=source_generation.subject,
+            context=source_generation.context,
+            mode=req.target_mode,
+            source_generation_id=generation_id,
+        )
+    )
+
+    asyncio.create_task(
+        _run_enhancement(
+            request,
+            child_generation_id,
+            req,
+            source_textbook,
+            gen_repo,
+            source_generation_id=generation_id,
+        )
+    )
+
+    return {
+        "generation_id": child_generation_id,
+        "status": "pending",
+        "mode": req.target_mode,
+        "source_generation_id": generation_id,
+    }
 
 
 @router.get("/status/{generation_id}")
@@ -142,24 +322,13 @@ async def get_generation_status(
 async def list_generations(
     current_user: User = Depends(get_current_user),
     gen_repo: GenerationRepository = Depends(get_generation_repository),
-    limit: int = 20,
+    limit: int = get_settings().default_pagination_limit,
     offset: int = 0,
 ):
     generations = await gen_repo.list_by_user(
         current_user.id, limit=limit, offset=offset
     )
-    return [
-        {
-            "id": g.id,
-            "subject": g.subject,
-            "status": g.status,
-            "quality_passed": g.quality_passed,
-            "generation_time_seconds": g.generation_time_seconds,
-            "created_at": g.created_at.isoformat() if g.created_at else None,
-            "completed_at": g.completed_at.isoformat() if g.completed_at else None,
-        }
-        for g in generations
-    ]
+    return [_history_item(generation) for generation in generations]
 
 
 @router.get("/generations/{generation_id}")
@@ -171,17 +340,7 @@ async def get_generation_detail(
     gen = await gen_repo.find_by_id(generation_id)
     if gen is None or gen.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
-    return {
-        "id": gen.id,
-        "subject": gen.subject,
-        "context": gen.context,
-        "status": gen.status,
-        "error": gen.error,
-        "quality_passed": gen.quality_passed,
-        "generation_time_seconds": gen.generation_time_seconds,
-        "created_at": gen.created_at.isoformat() if gen.created_at else None,
-        "completed_at": gen.completed_at.isoformat() if gen.completed_at else None,
-    }
+    return _detail_item(gen)
 
 
 @router.get("/generations/{generation_id}/textbook", response_class=HTMLResponse)
