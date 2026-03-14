@@ -1,13 +1,10 @@
 import type { StudentProfile, ProfileCreateRequest } from '$lib/types';
+import { ensureOk } from './errors';
 import { apiFetch } from './client';
 
 export async function getProfile(): Promise<StudentProfile> {
 	const response = await apiFetch('/api/v1/profile');
-
-	if (!response.ok) {
-		throw new Error(`Failed to fetch profile: ${response.statusText}`);
-	}
-
+	await ensureOk(response, 'Failed to fetch profile.');
 	return response.json();
 }
 
@@ -17,11 +14,7 @@ export async function createProfile(data: ProfileCreateRequest): Promise<Student
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(data)
 	});
-
-	if (!response.ok) {
-		throw new Error(`Failed to create profile: ${response.statusText}`);
-	}
-
+	await ensureOk(response, 'Failed to create profile.');
 	return response.json();
 }
 
@@ -33,10 +26,6 @@ export async function updateProfile(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(data)
 	});
-
-	if (!response.ok) {
-		throw new Error(`Failed to update profile: ${response.statusText}`);
-	}
-
+	await ensureOk(response, 'Failed to update profile.');
 	return response.json();
 }

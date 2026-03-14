@@ -1,6 +1,7 @@
 /** Mirrors backend Pydantic schemas for type safety. */
 
 export type Depth = 'survey' | 'standard' | 'deep';
+export type GenerationMode = 'draft' | 'balanced' | 'strict';
 export type NotationLanguage = 'plain' | 'math_notation' | 'python' | 'pseudocode';
 export type EducationLevel =
 	| 'elementary'
@@ -60,35 +61,54 @@ export interface GenerationRequest {
 	context: string;
 	depth?: Depth;
 	language?: NotationLanguage;
+	mode?: GenerationMode;
 	provider?: string;
+}
+
+export interface EnhanceGenerationRequest {
+	target_mode: Exclude<GenerationMode, 'draft'>;
+	note?: string;
 }
 
 export interface GenerationResponse {
 	textbook_id: string;
+	mode: GenerationMode;
 	quality_report: QualityReport | null;
 	generation_time_seconds: number;
 	quality_reruns: number;
+	source_generation_id: string | null;
 }
 
 export interface GenerationProgress {
-	current_node: string;
-	completed_nodes: string[];
-	total_nodes: number;
+	mode: GenerationMode;
+	phase: 'planning' | 'generating' | 'checking' | 'fixing' | 'rendering';
+	message: string;
+	sections_total: number | null;
+	sections_completed: number;
+	current_section_id: string | null;
+	current_section_title: string | null;
+	retry_attempt: number | null;
+	retry_limit: number | null;
+	flagged_section_ids: string[];
 }
 
 export interface GenerationStatus {
 	id: string;
 	status: 'pending' | 'running' | 'completed' | 'failed';
+	mode: GenerationMode | null;
 	progress: GenerationProgress | null;
 	result: GenerationResponse | null;
 	error: string | null;
 	error_type: string | null;
+	source_generation_id: string | null;
 }
 
 export interface GenerationHistoryItem {
 	id: string;
 	subject: string;
 	status: 'pending' | 'running' | 'completed' | 'failed';
+	mode: GenerationMode;
+	source_generation_id: string | null;
 	quality_passed: boolean | null;
 	generation_time_seconds: number | null;
 	created_at: string | null;
@@ -100,6 +120,8 @@ export interface GenerationDetail {
 	subject: string;
 	context: string;
 	status: 'pending' | 'running' | 'completed' | 'failed';
+	mode: GenerationMode;
+	source_generation_id: string | null;
 	error: string | null;
 	quality_passed: boolean | null;
 	generation_time_seconds: number | null;
@@ -108,10 +130,11 @@ export interface GenerationDetail {
 }
 
 export interface QualityIssue {
-	section_id: string;
+	section_id: string | null;
 	issue_type: string;
 	description: string;
 	severity: 'error' | 'warning';
+	scope: 'section' | 'document';
 	check_source: 'mechanical' | 'llm';
 }
 
