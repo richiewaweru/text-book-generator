@@ -36,20 +36,9 @@ validation:
         - name: frontend-check
           cwd: frontend
           command: [npm, run, check]
-        # NOTE: frontend-build temporarily disabled:
-        # - SvelteKit's adapter-auto exits with a non-zero code in CI when it
-        #   cannot detect a supported production environment, even though the
-        #   production bundle builds successfully.
-        # - This causes validate_repo.py --scope frontend to fail on exit code
-        #   alone, which blocks otherwise-healthy PRs.
-        # - We still rely on frontend-check (svelte-check) to catch real type
-        #   and compilation errors. Re-enable this step once a concrete adapter
-        #   is chosen and wired in.
-        # - Validation behavior change is non-critical and intentionally scoped
-        #   to avoid masking unrelated frontend-check failures.
-        # - name: frontend-build
-        #   cwd: frontend
-        #   command: [npm, run, build]
+        - name: frontend-build
+          cwd: frontend
+          command: [npm, run, build]
     tooling:
       description: Project-local tooling and workflow automation tests.
       steps:
@@ -64,20 +53,30 @@ validation:
 
 architecture:
   strategy:
-    type: import-layer
-    name: ddd-layer-boundary
-    report_name: textbook-agent-architecture-guard
-    package_root: backend/src/textbook_agent
-    module_prefix: textbook_agent
-    layers:
-      domain:
-        forbidden: [application, infrastructure, interface]
-      application:
-        forbidden: [infrastructure, interface]
-      infrastructure:
-        forbidden: [application, interface]
-      interface:
-        forbidden: []
+    type: composite
+    name: shell-pipeline-boundary
+    report_name: textbook-shell-pipeline-architecture-guard
+    checks:
+      - type: import-layer
+        name: shell-ddd
+        package_root: backend/src/textbook_agent
+        module_prefix: textbook_agent
+        layers:
+          domain:
+            forbidden: [application, infrastructure, interface]
+          application:
+            forbidden: [infrastructure, interface]
+          infrastructure:
+            forbidden: [application, interface]
+          interface:
+            forbidden: []
+      - type: forbidden-import-prefix
+        name: pipeline-no-shell
+        package_root: backend/src/pipeline
+        module_prefix: pipeline
+        source_label: pipeline
+        forbidden_prefixes:
+          - textbook_agent
 
 github:
   required_checks:

@@ -1,661 +1,415 @@
 import asyncio
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from textbook_agent.domain.entities.user import User
+from pipeline.api import PipelineDocument, PipelineResult
+from pipeline.types.section_content import (
+    ExplanationContent,
+    HookHeroContent,
+    PracticeContent,
+    PracticeHint,
+    PracticeProblem,
+    SectionContent,
+    SectionHeaderContent,
+    WhatNextContent,
+)
 from textbook_agent.domain.entities.generation import Generation
-from textbook_agent.domain.entities.textbook import RawTextbook
-from textbook_agent.interface.api.app import app
+from textbook_agent.domain.entities.student_profile import StudentProfile
+from textbook_agent.domain.entities.user import User
+from textbook_agent.interface.api.app import app, create_app
 from textbook_agent.interface.api.dependencies import (
+    get_document_repository,
     get_generation_repository,
     get_jwt_handler,
     get_student_profile_repository,
-    get_textbook_repository,
     get_user_repository,
 )
 from textbook_agent.interface.api.middleware.auth_middleware import get_current_user
-from textbook_agent.domain.value_objects import GenerationMode
-from conftest import (
-    MockProvider,
-    SAMPLE_CODE,
-    SAMPLE_CONTENT,
-    SAMPLE_DIAGRAM,
-    SAMPLE_PLAN,
-)
 
-_TEST_USER = User(
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+TEST_USER = User(
     id="test-user-id",
     email="test@example.com",
     name="Test User",
     picture_url=None,
     has_profile=True,
-    created_at=datetime.now(timezone.utc),
-    updated_at=datetime.now(timezone.utc),
+    created_at=_now(),
+    updated_at=_now(),
 )
 
 
-async def _override_current_user():
-    return _TEST_USER
+def _section(section_id: str = "s-01") -> SectionContent:
+    return SectionContent(
+        section_id=section_id,
+        template_id="guided-concept-path",
+        header=SectionHeaderContent(
+            title="Limits in Motion",
+            subject="Calculus",
+            grade_band="secondary",
+        ),
+        hook=HookHeroContent(
+            headline="Why a moving graph still tells a stable story",
+            body="Limits let us describe what a function is approaching without requiring the final value yet.",
+            anchor="limits",
+        ),
+        explanation=ExplanationContent(
+            body="A limit studies nearby behavior. We watch what happens as x gets closer and closer to a chosen point.",
+            emphasis=["nearby behavior", "approach", "pattern"],
+        ),
+        practice=PracticeContent(
+            problems=[
+                PracticeProblem(
+                    difficulty="warm",
+                    question="Describe what f(x) does near x = 2.",
+                    hints=[PracticeHint(level=1, text="Look at values close to 2.")],
+                ),
+                PracticeProblem(
+                    difficulty="medium",
+                    question="Estimate lim x->2 of x^2.",
+                    hints=[PracticeHint(level=1, text="Square numbers near 2.")],
+                ),
+            ]
+        ),
+        what_next=WhatNextContent(
+            body="Next we connect limits to continuity.",
+            next="Continuity",
+        ),
+    )
 
 
-class _MockProfileRepo:
-    async def find_by_user_id(self, user_id: str):
-        return None
+def _document(
+    generation_id: str,
+    *,
+    mode: str = "balanced",
+    status: str = "completed",
+    sections: list[SectionContent] | None = None,
+) -> PipelineDocument:
+    return PipelineDocument(
+        generation_id=generation_id,
+        subject="Calculus",
+        context="Explain limits",
+        mode=mode,
+        template_id="guided-concept-path",
+        preset_id="blue-classroom",
+        status=status,
+        sections=sections or [_section()],
+        qc_reports=[],
+        quality_passed=True if status == "completed" else None,
+        created_at=_now(),
+        updated_at=_now(),
+        completed_at=_now() if status == "completed" else None,
+    )
 
-    async def create(self, profile):
-        return profile
 
-    async def update(self, profile):
-        return profile
+class InMemoryGenerationRepo:
+    def __init__(self) -> None:
+        self.store: dict[str, Generation] = {}
 
-
-async def _override_profile_repo():
-    return _MockProfileRepo()
-
-
-class _MockGenerationRepo:
-    def __init__(self):
-        self._store: dict = {}
-
-    async def create(self, generation):
-        self._store[generation.id] = generation
+    async def create(self, generation: Generation) -> Generation:
+        self.store[generation.id] = generation
         return generation
 
-    async def update_status(self, generation_id, status, **kwargs):
-        if generation_id in self._store:
-            gen = self._store[generation_id]
-            self._store[generation_id] = gen.model_copy(
-                update={"status": status, **{k: v for k, v in kwargs.items() if v is not None}}
-            )
+    async def update_status(self, generation_id: str, status: str, **kwargs) -> None:
+        generation = self.store[generation_id]
+        updates = {"status": status}
+        updates.update({key: value for key, value in kwargs.items() if value is not None})
+        if status in {"completed", "failed"}:
+            updates["completed_at"] = _now()
+        self.store[generation_id] = generation.model_copy(update=updates)
 
-    async def find_by_id(self, generation_id):
-        return self._store.get(generation_id)
+    async def find_by_id(self, generation_id: str) -> Generation | None:
+        return self.store.get(generation_id)
 
-    async def list_by_user(self, user_id, limit=20, offset=0):
-        gens = [g for g in self._store.values() if g.user_id == user_id]
-        gens.sort(key=lambda g: g.created_at, reverse=True)
-        return gens[offset : offset + limit]
-
-
-_mock_gen_repo = _MockGenerationRepo()
+    async def list_by_user(self, user_id: str, limit: int = 20, offset: int = 0) -> list[Generation]:
+        items = [generation for generation in self.store.values() if generation.user_id == user_id]
+        items.sort(key=lambda generation: generation.created_at, reverse=True)
+        return items[offset : offset + limit]
 
 
-async def _override_gen_repo():
-    return _mock_gen_repo
+class InMemoryDocumentRepo:
+    def __init__(self) -> None:
+        self.store: dict[str, PipelineDocument] = {}
+
+    async def save_document(self, document: PipelineDocument) -> str:
+        path = f"memory://{document.generation_id}"
+        self.store[path] = document
+        return path
+
+    async def load_document(self, path: str) -> PipelineDocument:
+        return self.store[path]
 
 
-class _AuthProfileRepo:
-    def __init__(self):
-        self._profiles: dict = {}
+class StaticProfileRepo:
+    def __init__(self, profile: StudentProfile | None) -> None:
+        self.profile = profile
 
-    async def find_by_user_id(self, user_id: str):
-        return self._profiles.get(user_id)
+    async def find_by_user_id(self, user_id: str) -> StudentProfile | None:
+        _ = user_id
+        return self.profile
 
-    async def create(self, profile):
-        self._profiles[profile.user_id] = profile
+    async def create(self, profile: StudentProfile) -> StudentProfile:
+        self.profile = profile
         return profile
 
-    async def update(self, profile):
-        self._profiles[profile.user_id] = profile
+    async def update(self, profile: StudentProfile) -> StudentProfile:
+        self.profile = profile
         return profile
 
 
-class _AuthUserRepo:
-    def __init__(self, user: User, profile_repo: _AuthProfileRepo):
-        self._users = {user.id: user.model_copy(update={"has_profile": False})}
-        self._profile_repo = profile_repo
+class StaticUserRepo:
+    async def find_by_email(self, email: str) -> User | None:
+        return TEST_USER if email == TEST_USER.email else None
 
-    async def find_by_email(self, email: str):
-        for user in self._users.values():
-            if user.email == email:
-                profile = await self._profile_repo.find_by_user_id(user.id)
-                return user.model_copy(update={"has_profile": profile is not None})
-        return None
+    async def find_by_id(self, user_id: str) -> User | None:
+        return TEST_USER if user_id == TEST_USER.id else None
 
-    async def find_by_id(self, user_id: str):
-        user = self._users.get(user_id)
-        if user is None:
-            return None
-        profile = await self._profile_repo.find_by_user_id(user_id)
-        return user.model_copy(update={"has_profile": profile is not None})
-
-    async def create(self, user: User):
-        self._users[user.id] = user
+    async def create(self, user: User) -> User:
         return user
 
-    async def update(self, user: User):
-        self._users[user.id] = user
+    async def update(self, user: User) -> User:
         return user
 
 
-app.dependency_overrides[get_current_user] = _override_current_user
-app.dependency_overrides[get_student_profile_repository] = _override_profile_repo
-app.dependency_overrides[get_generation_repository] = _override_gen_repo
+PROFILE = StudentProfile(
+    id="profile-id",
+    user_id=TEST_USER.id,
+    age=16,
+    education_level="high_school",
+    interests=["math"],
+    learning_style="visual",
+    preferred_notation="plain",
+    prior_knowledge="basic algebra",
+    goals="understand limits",
+    preferred_depth="standard",
+    learner_description="Curious and steady",
+    created_at=_now(),
+    updated_at=_now(),
+)
 
-client = TestClient(app)
+GEN_REPO = InMemoryGenerationRepo()
+DOC_REPO = InMemoryDocumentRepo()
+USER_REPO = StaticUserRepo()
+PROFILE_REPO = StaticProfileRepo(PROFILE)
 
-jwt_handler = get_jwt_handler()
-_TEST_TOKEN = jwt_handler.create_access_token(_TEST_USER.id, _TEST_USER.email)
-AUTH_HEADERS = {"Authorization": f"Bearer {_TEST_TOKEN}"}
+
+async def override_current_user():
+    return TEST_USER
 
 
-class TestHealthCheck:
-    def test_health_returns_ok(self):
-        response = client.get("/health")
+async def override_generation_repo():
+    return GEN_REPO
+
+
+async def override_document_repo():
+    return DOC_REPO
+
+
+async def override_profile_repo():
+    return PROFILE_REPO
+
+
+async def override_user_repo():
+    return USER_REPO
+
+
+app.dependency_overrides[get_current_user] = override_current_user
+app.dependency_overrides[get_generation_repository] = override_generation_repo
+app.dependency_overrides[get_document_repository] = override_document_repo
+app.dependency_overrides[get_student_profile_repository] = override_profile_repo
+app.dependency_overrides[get_user_repository] = override_user_repo
+
+JWT_HANDLER = get_jwt_handler()
+AUTH_HEADERS = {
+    "Authorization": f"Bearer {JWT_HANDLER.create_access_token(TEST_USER.id, TEST_USER.email)}"
+}
+
+
+async def _client() -> AsyncClient:
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+class TestHealthAndAuth:
+    async def test_health_returns_pipeline_runtime_metadata(self):
+        with TestClient(create_app()) as client:
+            response = client.get("/health")
         assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "ok"
-        assert "version" in data
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["pipeline_architecture"] == "shell-pipeline-native-lectio"
 
-    def test_health_version_matches(self):
-        from textbook_agent import __version__
+    async def test_auth_me_returns_current_user(self):
+        async with await _client() as client:
+            response = await client.get("/api/v1/auth/me", headers=AUTH_HEADERS)
+        assert response.status_code == 200
+        assert response.json()["id"] == TEST_USER.id
 
-        response = client.get("/health")
-        assert response.json()["version"] == __version__
 
-
-class TestAuthEndpoints:
-    async def test_auth_me_returns_user_for_valid_jwt(self):
-        profile_repo = _AuthProfileRepo()
-        user_repo = _AuthUserRepo(_TEST_USER, profile_repo)
-
-        async def _override_auth_user_repo():
-            return user_repo
-
-        async def _override_auth_profile_repo():
-            return profile_repo
-
-        app.dependency_overrides.pop(get_current_user, None)
-        app.dependency_overrides[get_user_repository] = _override_auth_user_repo
-        app.dependency_overrides[get_student_profile_repository] = (
-            _override_auth_profile_repo
-        )
-
-        try:
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                response = await ac.get("/api/v1/auth/me", headers=AUTH_HEADERS)
-            assert response.status_code == 200
-            data = response.json()
-            assert data["id"] == _TEST_USER.id
-            assert data["has_profile"] is False
-        finally:
-            app.dependency_overrides[get_current_user] = _override_current_user
-            app.dependency_overrides.pop(get_user_repository, None)
-            app.dependency_overrides[get_student_profile_repository] = (
-                _override_profile_repo
+class TestGenerationApi:
+    async def test_create_generation_accepts_valid_template_and_preset(self):
+        async def fake_run_pipeline(command, on_event=None):
+            return PipelineResult(
+                document=_document(command.generation_id or "gen-test"),
+                completed_nodes=["curriculum_planner", "process_section", "qc_agent"],
+                generation_time_seconds=0.01,
             )
 
-    async def test_auth_me_returns_401_for_invalid_jwt(self):
-        profile_repo = _AuthProfileRepo()
-        user_repo = _AuthUserRepo(_TEST_USER, profile_repo)
-
-        async def _override_auth_user_repo():
-            return user_repo
-
-        async def _override_auth_profile_repo():
-            return profile_repo
-
-        app.dependency_overrides.pop(get_current_user, None)
-        app.dependency_overrides[get_user_repository] = _override_auth_user_repo
-        app.dependency_overrides[get_student_profile_repository] = (
-            _override_auth_profile_repo
-        )
-
-        try:
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                response = await ac.get(
-                    "/api/v1/auth/me",
-                    headers={"Authorization": "Bearer invalid-token"},
-                )
-            assert response.status_code == 401
-        finally:
-            app.dependency_overrides[get_current_user] = _override_current_user
-            app.dependency_overrides.pop(get_user_repository, None)
-            app.dependency_overrides[get_student_profile_repository] = (
-                _override_profile_repo
-            )
-
-    async def test_auth_me_reflects_profile_creation(self):
-        profile_repo = _AuthProfileRepo()
-        user_repo = _AuthUserRepo(_TEST_USER, profile_repo)
-
-        async def _override_auth_user_repo():
-            return user_repo
-
-        async def _override_auth_profile_repo():
-            return profile_repo
-
-        app.dependency_overrides.pop(get_current_user, None)
-        app.dependency_overrides[get_user_repository] = _override_auth_user_repo
-        app.dependency_overrides[get_student_profile_repository] = (
-            _override_auth_profile_repo
-        )
-
-        try:
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                create_response = await ac.post(
-                    "/api/v1/profile",
+        with patch(
+            "textbook_agent.interface.api.routes.generation.run_pipeline_streaming",
+            side_effect=fake_run_pipeline,
+        ):
+            async with await _client() as client:
+                response = await client.post(
+                    "/api/v1/generations",
                     json={
-                        "age": 18,
-                        "education_level": "high_school",
-                        "interests": ["math"],
-                        "learning_style": "reading_writing",
-                        "preferred_notation": "plain",
-                        "prior_knowledge": "",
-                        "goals": "",
-                        "preferred_depth": "standard",
-                        "learner_description": "",
+                        "subject": "Calculus",
+                        "context": "Explain limits",
+                        "mode": "balanced",
+                        "template_id": "guided-concept-path",
+                        "preset_id": "blue-classroom",
+                        "section_count": 4,
                     },
                     headers=AUTH_HEADERS,
                 )
-                assert create_response.status_code == 201
+                await asyncio.sleep(0.05)
 
-                auth_response = await ac.get("/api/v1/auth/me", headers=AUTH_HEADERS)
-            assert auth_response.status_code == 200
-            assert auth_response.json()["has_profile"] is True
-        finally:
-            app.dependency_overrides[get_current_user] = _override_current_user
-            app.dependency_overrides.pop(get_user_repository, None)
-            app.dependency_overrides[get_student_profile_repository] = (
-                _override_profile_repo
-            )
+        assert response.status_code == 202
+        payload = response.json()
+        assert payload["mode"] == "balanced"
+        assert payload["events_url"].endswith("/events")
+        generation = await GEN_REPO.find_by_id(payload["generation_id"])
+        assert generation is not None
+        assert generation.requested_template_id == "guided-concept-path"
+        assert generation.requested_preset_id == "blue-classroom"
 
-
-class TestGenerationEndpoints:
-    def test_generate_returns_202(self):
-        with patch(
-            "textbook_agent.interface.api.routes.generation.get_use_case"
-        ) as mock_uc:
-            from textbook_agent.application.use_cases.generate_textbook import (
-                GenerateTextbookUseCase,
-            )
-            from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
-            from textbook_agent.infrastructure.repositories.file_textbook_repo import (
-                FileTextbookRepository,
-            )
-
-            provider = MockProvider()
-            repo = FileTextbookRepository(output_dir="outputs/")
-            mock_uc.return_value = GenerateTextbookUseCase(
-                provider=provider, repository=repo, renderer=HTMLRenderer()
-            )
-
-            response = client.post(
-                "/api/v1/generate",
+    async def test_create_generation_rejects_invalid_template_pair(self):
+        async with await _client() as client:
+            response = await client.post(
+                "/api/v1/generations",
                 json={
-                    "subject": "algebra",
-                    "context": "test",
-                    "depth": "survey",
+                    "subject": "Calculus",
+                    "context": "Explain limits",
+                    "mode": "balanced",
+                    "template_id": "guided-concept-path",
+                    "preset_id": "minimal-light",
+                    "section_count": 4,
                 },
                 headers=AUTH_HEADERS,
             )
-            assert response.status_code == 202
-            data = response.json()
-            assert "generation_id" in data
-            assert data["status"] == "pending"
-            assert data["mode"] == "draft"
+        assert response.status_code == 400
+        assert "not allowed" in response.json()["detail"]
 
-    def test_generate_returns_401_without_auth(self):
-        app.dependency_overrides.pop(get_current_user, None)
-        try:
-            response = client.post(
-                "/api/v1/generate",
-                json={"subject": "algebra", "context": "test"},
-            )
-            assert response.status_code in (401, 403)
-        finally:
-            app.dependency_overrides[get_current_user] = _override_current_user
-
-    def test_status_unknown_returns_404(self):
-        response = client.get("/api/v1/status/nonexistent-id", headers=AUTH_HEADERS)
-        assert response.status_code == 404
-
-    async def test_generate_and_poll_status(self):
-        with patch(
-            "textbook_agent.interface.api.routes.generation.get_use_case"
-        ) as mock_uc:
-            from textbook_agent.application.use_cases.generate_textbook import (
-                GenerateTextbookUseCase,
-            )
-            from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
-            from textbook_agent.infrastructure.repositories.file_textbook_repo import (
-                FileTextbookRepository,
-            )
-
-            provider = MockProvider()
-            repo = FileTextbookRepository(output_dir="outputs/")
-            mock_uc.return_value = GenerateTextbookUseCase(
-                provider=provider, repository=repo, renderer=HTMLRenderer()
-            )
-
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                post_resp = await ac.post(
-                    "/api/v1/generate",
-                    json={
-                        "subject": "algebra",
-                        "context": "test",
-                        "depth": "survey",
-                    },
-                    headers=AUTH_HEADERS,
-                )
-                assert post_resp.status_code == 202
-                gen_id = post_resp.json()["generation_id"]
-
-                for _ in range(50):
-                    status_resp = await ac.get(
-                        f"/api/v1/status/{gen_id}", headers=AUTH_HEADERS
-                    )
-                    assert status_resp.status_code == 200
-                    status_data = status_resp.json()
-                    if status_data["status"] in ("completed", "failed"):
-                        break
-                    await asyncio.sleep(0.1)
-
-                assert status_data["status"] == "completed"
-                assert status_data["result"]["textbook_id"]
-
-    async def test_list_generations(self):
-        with patch(
-            "textbook_agent.interface.api.routes.generation.get_use_case"
-        ) as mock_uc:
-            from textbook_agent.application.use_cases.generate_textbook import (
-                GenerateTextbookUseCase,
-            )
-            from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
-            from textbook_agent.infrastructure.repositories.file_textbook_repo import (
-                FileTextbookRepository,
-            )
-
-            provider = MockProvider()
-            repo = FileTextbookRepository(output_dir="outputs/")
-            mock_uc.return_value = GenerateTextbookUseCase(
-                provider=provider, repository=repo, renderer=HTMLRenderer()
-            )
-
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                post_resp = await ac.post(
-                    "/api/v1/generate",
-                    json={"subject": "calculus", "context": "test"},
-                    headers=AUTH_HEADERS,
-                )
-                assert post_resp.status_code == 202
-                gen_id = post_resp.json()["generation_id"]
-
-                list_resp = await ac.get(
-                    "/api/v1/generations", headers=AUTH_HEADERS
-                )
-                assert list_resp.status_code == 200
-                items = list_resp.json()
-                gen_ids = [item["id"] for item in items]
-                assert gen_id in gen_ids
-                assert all("output_path" not in item for item in items)
-
-    async def test_get_generation_textbook_html(self, tmp_path):
-        with patch(
-            "textbook_agent.interface.api.routes.generation.get_use_case"
-        ) as mock_uc:
-            from textbook_agent.application.use_cases.generate_textbook import (
-                GenerateTextbookUseCase,
-            )
-            from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
-            from textbook_agent.infrastructure.repositories.file_textbook_repo import (
-                FileTextbookRepository,
-            )
-
-            provider = MockProvider()
-            repo = FileTextbookRepository(output_dir=str(tmp_path))
-            mock_uc.return_value = GenerateTextbookUseCase(
-                provider=provider, repository=repo, renderer=HTMLRenderer()
-            )
-            app.dependency_overrides[get_textbook_repository] = lambda: repo
-
-            try:
-                transport = ASGITransport(app=app)
-                async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                    post_resp = await ac.post(
-                        "/api/v1/generate",
-                        json={"subject": "calculus", "context": "test"},
-                        headers=AUTH_HEADERS,
-                    )
-                    assert post_resp.status_code == 202
-                    gen_id = post_resp.json()["generation_id"]
-
-                    for _ in range(50):
-                        status_resp = await ac.get(
-                            f"/api/v1/status/{gen_id}", headers=AUTH_HEADERS
-                        )
-                        status_data = status_resp.json()
-                        if status_data["status"] in ("completed", "failed"):
-                            break
-                        await asyncio.sleep(0.1)
-
-                    html_resp = await ac.get(
-                        f"/api/v1/generations/{gen_id}/textbook",
-                        headers=AUTH_HEADERS,
-                    )
-                    assert html_resp.status_code == 200
-                    assert "<!DOCTYPE html>" in html_resp.text
-            finally:
-                app.dependency_overrides.pop(get_textbook_repository, None)
-
-    async def test_get_generation_textbook_returns_409_when_not_ready(self):
-        gen_id = "pending-textbook"
-        _mock_gen_repo._store[gen_id] = Generation(
-            id=gen_id,
-            user_id=_TEST_USER.id,
-            subject="algebra",
-            status="running",
-        )
-
-        try:
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                resp = await ac.get(
-                    f"/api/v1/generations/{gen_id}/textbook",
-                    headers=AUTH_HEADERS,
-                )
-            assert resp.status_code == 409
-        finally:
-            _mock_gen_repo._store.pop(gen_id, None)
-
-    async def test_get_generation_textbook_rejects_foreign_generation(self):
-        gen_id = "foreign-textbook"
-        _mock_gen_repo._store[gen_id] = Generation(
-            id=gen_id,
-            user_id="other-user",
-            subject="algebra",
-            status="completed",
-            output_path="other.html",
-        )
-
-        try:
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                resp = await ac.get(
-                    f"/api/v1/generations/{gen_id}/textbook",
-                    headers=AUTH_HEADERS,
-                )
-            assert resp.status_code == 404
-        finally:
-            _mock_gen_repo._store.pop(gen_id, None)
-
-    async def test_generation_status_surfaces_provider_request_errors(self):
-        from textbook_agent.domain.exceptions import ProviderRequestError
-
-        class _FailingUseCase:
-            async def execute(self, *args, **kwargs):
-                raise ProviderRequestError(
-                    provider_name="claude",
-                    detail="Anthropic reports the API credit balance is too low.",
-                )
-
-        with patch(
-            "textbook_agent.interface.api.routes.generation.get_use_case",
-            return_value=_FailingUseCase(),
-        ):
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                post_resp = await ac.post(
-                    "/api/v1/generate",
-                    json={"subject": "calculus", "context": "test"},
-                    headers=AUTH_HEADERS,
-                )
-                assert post_resp.status_code == 202
-                gen_id = post_resp.json()["generation_id"]
-
-                for _ in range(50):
-                    status_resp = await ac.get(
-                        f"/api/v1/status/{gen_id}", headers=AUTH_HEADERS
-                    )
-                    assert status_resp.status_code == 200
-                    status_data = status_resp.json()
-                    if status_data["status"] in ("completed", "failed"):
-                        break
-                    await asyncio.sleep(0.1)
-
-                assert status_data["status"] == "failed"
-                assert status_data["error_type"] == "provider_error"
-                assert "credit balance is too low" in status_data["error"]
-
-    async def test_enhance_draft_generation(self, beginner_profile, tmp_path):
-        with patch(
-            "textbook_agent.interface.api.routes.generation.get_use_case"
-        ) as mock_uc:
-            from textbook_agent.application.use_cases.generate_textbook import (
-                GenerateTextbookUseCase,
-            )
-            from textbook_agent.infrastructure.renderer.html_renderer import HTMLRenderer
-            from textbook_agent.infrastructure.repositories.file_textbook_repo import (
-                FileTextbookRepository,
-            )
-
-            provider = MockProvider()
-            repo = FileTextbookRepository(output_dir=str(tmp_path))
-            draft = RawTextbook(
-                subject="algebra",
-                profile=beginner_profile,
-                plan=SAMPLE_PLAN,
-                sections=[SAMPLE_CONTENT],
-                diagrams=[SAMPLE_DIAGRAM],
-                code_examples=[SAMPLE_CODE],
-            )
-            output_path = await repo.save(draft, "<!DOCTYPE html><html></html>")
-            draft_generation_id = "draft-gen-1"
-            child_generation_id: str | None = None
-            _mock_gen_repo._store[draft_generation_id] = Generation(
-                id=draft_generation_id,
-                user_id=_TEST_USER.id,
-                subject="algebra",
-                context="test",
+    async def test_document_endpoint_returns_saved_json_document(self):
+        generation_id = "gen-doc"
+        document = _document(generation_id)
+        path = await DOC_REPO.save_document(document)
+        await GEN_REPO.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER.id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
                 status="completed",
-                mode=GenerationMode.DRAFT,
-                output_path=output_path,
+                document_path=path,
+                requested_template_id="guided-concept-path",
+                resolved_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                resolved_preset_id="blue-classroom",
+                quality_passed=True,
             )
-
-            mock_uc.return_value = GenerateTextbookUseCase(
-                provider=provider,
-                repository=repo,
-                renderer=HTMLRenderer(),
-            )
-            app.dependency_overrides[get_textbook_repository] = lambda: repo
-
-            try:
-                transport = ASGITransport(app=app)
-                async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                    enhance_resp = await ac.post(
-                        f"/api/v1/generations/{draft_generation_id}/enhance",
-                        json={"target_mode": "balanced"},
-                        headers=AUTH_HEADERS,
-                    )
-                    assert enhance_resp.status_code == 202
-                    enhance_data = enhance_resp.json()
-                    child_generation_id = enhance_data["generation_id"]
-                    assert enhance_data["mode"] == "balanced"
-                    assert enhance_data["source_generation_id"] == draft_generation_id
-
-                    for _ in range(50):
-                        status_resp = await ac.get(
-                            f"/api/v1/status/{child_generation_id}",
-                            headers=AUTH_HEADERS,
-                        )
-                        assert status_resp.status_code == 200
-                        status_data = status_resp.json()
-                        if status_data["status"] in ("completed", "failed"):
-                            break
-                        await asyncio.sleep(0.1)
-
-                    assert status_data["status"] == "completed"
-                    assert status_data["mode"] == "balanced"
-                    assert status_data["source_generation_id"] == draft_generation_id
-                    assert status_data["result"]["source_generation_id"] == draft_generation_id
-                    assert status_data["result"]["mode"] == "balanced"
-            finally:
-                app.dependency_overrides.pop(get_textbook_repository, None)
-                _mock_gen_repo._store.pop(draft_generation_id, None)
-                if child_generation_id is not None:
-                    _mock_gen_repo._store.pop(child_generation_id, None)
-
-
-class TestErrorHandler:
-    def test_structured_error_responses(self):
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient as TC
-
-        from textbook_agent.domain.exceptions import (
-            PipelineError,
-            ProviderConformanceError,
-            ProviderRequestError,
         )
-        from textbook_agent.interface.api.middleware.error_handler import register_error_handlers
 
-        test_app_local = FastAPI()
-        register_error_handlers(test_app_local)
+        async with await _client() as client:
+            response = await client.get(
+                f"/api/v1/generations/{generation_id}/document",
+                headers=AUTH_HEADERS,
+            )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["template_id"] == "guided-concept-path"
+        assert payload["sections"][0]["section_id"] == "s-01"
 
-        @test_app_local.get("/test-pipeline-error")
-        async def trigger_pipeline_error():
-            raise PipelineError(node_name="ContentGenerator", reason="LLM timeout")
+    async def test_events_endpoint_supports_stream_token_for_completed_generation(self):
+        generation_id = "gen-events"
+        document = _document(generation_id)
+        path = await DOC_REPO.save_document(document)
+        await GEN_REPO.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER.id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                status="completed",
+                document_path=path,
+                requested_template_id="guided-concept-path",
+                resolved_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                resolved_preset_id="blue-classroom",
+                quality_passed=True,
+            )
+        )
 
-        @test_app_local.get("/test-provider-error")
-        async def trigger_provider_error():
-            raise ProviderConformanceError(
-                provider_name="claude", schema_name="SectionContent"
+        token = JWT_HANDLER.create_access_token(TEST_USER.id, TEST_USER.email)
+        async with await _client() as client:
+            response = await client.get(
+                f"/api/v1/generations/{generation_id}/events?token={token}",
+            )
+        assert response.status_code == 200
+        assert "event: complete" in response.text
+
+    async def test_enhance_generation_creates_child_from_draft_seed(self):
+        source_id = "gen-draft"
+        source_document = _document(source_id, mode="draft")
+        path = await DOC_REPO.save_document(source_document)
+        await GEN_REPO.create(
+            Generation(
+                id=source_id,
+                user_id=TEST_USER.id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="draft",
+                status="completed",
+                document_path=path,
+                requested_template_id="guided-concept-path",
+                resolved_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                resolved_preset_id="blue-classroom",
+                quality_passed=None,
+            )
+        )
+
+        async def fake_run_pipeline(command, on_event=None):
+            assert command.seed_document is not None
+            assert command.seed_document.sections[0].section_id == "s-01"
+            return PipelineResult(
+                document=_document(command.generation_id or "gen-child", mode="balanced"),
+                completed_nodes=["curriculum_planner", "process_section", "qc_agent"],
+                generation_time_seconds=0.01,
             )
 
-        @test_app_local.get("/test-provider-request-error")
-        async def trigger_provider_request_error():
-            raise ProviderRequestError(
-                provider_name="claude",
-                detail="Anthropic reports the API credit balance is too low.",
-            )
+        with patch(
+            "textbook_agent.interface.api.routes.generation.run_pipeline_streaming",
+            side_effect=fake_run_pipeline,
+        ):
+            async with await _client() as client:
+                response = await client.post(
+                    f"/api/v1/generations/{source_id}/enhance",
+                    json={"mode": "balanced", "note": "Tighten the worked explanation."},
+                    headers=AUTH_HEADERS,
+                )
+                await asyncio.sleep(0.05)
 
-        tc = TC(test_app_local)
-
-        resp = tc.get("/test-pipeline-error")
-        assert resp.status_code == 502
-        data = resp.json()
-        assert data["error_type"] == "pipeline_error"
-        assert "ContentGenerator" in data["detail"]
-
-        resp = tc.get("/test-provider-error")
-        assert resp.status_code == 502
-        data = resp.json()
-        assert data["error_type"] == "provider_error"
-        assert "claude" in data["detail"]
-
-        resp = tc.get("/test-provider-request-error")
-        assert resp.status_code == 502
-        data = resp.json()
-        assert data["error_type"] == "provider_error"
-        assert "credit balance is too low" in data["detail"]
+        assert response.status_code == 202
+        payload = response.json()
+        assert payload["source_generation_id"] == source_id
+        child = await GEN_REPO.find_by_id(payload["generation_id"])
+        assert child is not None
+        assert child.source_generation_id == source_id

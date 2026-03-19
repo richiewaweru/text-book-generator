@@ -14,15 +14,32 @@
 | --- | --- |
 | `backend-quality` | Ruff lint + pytest |
 | `frontend-quality` | Svelte type-check + build |
-| `architecture-guard` | DDD layer boundary compliance |
+| `architecture-guard` | Shell DDD boundaries plus pipeline no-import-back-into-shell rules |
 | `agent-governance` | PR structure and process compliance |
 
 All checks must pass before merge.
 
 Project-local validation uses `python tools/agent/validate_repo.py --scope all`, which now covers backend, frontend, and tooling automation tests declared in `docs/project/context-summary.yaml`.
 
+## Runtime Verification
+
+Before testing textbook generation in dev:
+
+```bash
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:5173/src/lib/api/client.ts
+```
+
+Verify that:
+
+- `/health` returns the current runtime fingerprint (`instance_id`, `started_at`, `pipeline_architecture`)
+- the served frontend client bundle points to the intended backend target
+- both checks agree on the canonical `5173 -> 8000` path before starting new generations
+
 ## Execution Boundary
 
 - `agents/` -- universal standards and workflows (portable, agent-agnostic)
 - `tools/agent/` -- project-local validation scripts (reads `context-summary.yaml`)
+- `backend/src/textbook_agent/` -- product shell (auth, profiles, persistence, HTTP)
+- `backend/src/pipeline/` -- standalone generation engine
 - `.github/workflows/` -- CI runners that call `tools/agent/` scripts

@@ -14,8 +14,12 @@ class GenerationRepository(ABC):
         self,
         generation_id: str,
         status: str,
-        output_path: str | None = None,
+        document_path: str | None = None,
         error: str | None = None,
+        error_type: str | None = None,
+        error_code: str | None = None,
+        resolved_template_id: str | None = None,
+        resolved_preset_id: str | None = None,
         quality_passed: bool | None = None,
         generation_time_seconds: float | None = None,
     ) -> None: ...

@@ -1,6 +1,11 @@
-from .llm_provider import BaseProvider
-from .textbook_repository import TextbookRepository
-from .file_storage import FileStoragePort
-from .renderer import RendererPort
+from .document_repository import DocumentRepository
+from .generation_repository import GenerationRepository
+from .student_profile_repository import StudentProfileRepository
+from .user_repository import UserRepository
 
-__all__ = ["BaseProvider", "TextbookRepository", "FileStoragePort", "RendererPort"]
+__all__ = [
+    "DocumentRepository",
+    "GenerationRepository",
+    "StudentProfileRepository",
+    "UserRepository",
+]

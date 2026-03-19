@@ -1,6 +1,6 @@
 # Project Docs
 
-Live project-specific documentation for Textbook Generation Agent.
+Live project-specific documentation for the shell + pipeline + native Lectio runtime.
 
 ## Contents
 

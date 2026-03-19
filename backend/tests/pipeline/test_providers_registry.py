@@ -4,11 +4,12 @@ import os
 from contextlib import contextmanager
 
 from pipeline.providers.registry import (
-    ModelTier,
-    _DEFAULT_TIER_CONFIG,
-    _resolve_tier_config,
-    get_model,
+    ModelRoute,
+    _DEFAULT_ROUTE_CATALOG,
+    _resolve_route_spec,
+    get_node_text_model,
 )
+from pydantic_ai.models.test import TestModel
 
 
 @contextmanager
@@ -25,28 +26,27 @@ def _env(**kwargs: str):
                 os.environ[k] = v
 
 
-def test_default_tier_config_used_when_no_env_override():
-    cfg = _resolve_tier_config(ModelTier.FAST)
-    assert cfg.provider == _DEFAULT_TIER_CONFIG[ModelTier.FAST].provider
-    assert cfg.model_name == _DEFAULT_TIER_CONFIG[ModelTier.FAST].model_name
+def test_default_route_spec_used_when_no_env_override():
+    spec = _resolve_route_spec(ModelRoute.TEXT_FAST)
+    assert spec.provider == _DEFAULT_ROUTE_CATALOG[ModelRoute.TEXT_FAST].provider
+    assert spec.model_name == _DEFAULT_ROUTE_CATALOG[ModelRoute.TEXT_FAST].model_name
 
 
 def test_env_override_can_change_provider_and_model():
-    prefix = "LLM_TIER_FAST"
+    prefix = "MODEL_TEXT_FAST"
     with _env(
         **{
             f"{prefix}_PROVIDER": "openai",
-            f"{prefix}_MODEL": "gpt-5.1-mini",
+            f"{prefix}_NAME": "gpt-5.1-mini",
         }
     ):
-        cfg = _resolve_tier_config(ModelTier.FAST)
-        assert cfg.provider == "openai"
-        assert cfg.model_name == "gpt-5.1-mini"
+        spec = _resolve_route_spec(ModelRoute.TEXT_FAST)
+        assert spec.provider == "openai"
+        assert spec.model_name == "gpt-5.1-mini"
 
 
-def test_get_model_returns_provider_instance():
-    provider = get_model(ModelTier.STANDARD)
-    # we can't assert exact type without tying tests to Anthropic implementation,
-    # but we can at least ensure the object has the expected interface.
-    assert hasattr(provider, "generate")
+def test_get_node_text_model_returns_pydanticai_model():
+    # Avoid requiring real API keys: inject a deterministic TestModel.
+    model = get_node_text_model("qc_agent", {ModelRoute.TEXT_FAST: TestModel()})
+    assert model is not None
 

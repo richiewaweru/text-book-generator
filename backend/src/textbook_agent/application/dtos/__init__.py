@@ -1,19 +1,21 @@
 from .generation_request import (
     EnhanceGenerationRequest,
+    GenerationAcceptedResponse,
     GenerationRequest,
-    GenerationResponse,
 )
 from .generation_status import (
-    GenerationProgress,
-    GenerationResultSummary,
-    GenerationStatus,
+    GenerationDetail,
+    GenerationDocumentResponse,
+    GenerationHistoryItem,
+    GenerationListResponse,
 )
 
 __all__ = [
     "GenerationRequest",
-    "GenerationResponse",
+    "GenerationAcceptedResponse",
     "EnhanceGenerationRequest",
-    "GenerationStatus",
-    "GenerationProgress",
-    "GenerationResultSummary",
+    "GenerationDetail",
+    "GenerationDocumentResponse",
+    "GenerationHistoryItem",
+    "GenerationListResponse",
 ]

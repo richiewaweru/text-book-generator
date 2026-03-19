@@ -1,36 +1,42 @@
+from __future__ import annotations
+
 import asyncio
+import json
 import logging
 import uuid
+from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
+from pipeline.api import PipelineCommand, PipelineDocument
+from pipeline.contracts import get_contract, validate_preset_for_template
+from pipeline.events import CompleteEvent, ErrorEvent, SectionReadyEvent, event_bus
+from pipeline.run import run_pipeline_streaming
+from pipeline.types.requests import SeedDocument
 from textbook_agent.application.dtos import (
     EnhanceGenerationRequest,
-    GenerationProgress,
+    GenerationAcceptedResponse,
     GenerationRequest,
-    GenerationResultSummary,
-    GenerationStatus,
 )
 from textbook_agent.domain.entities.generation import Generation
 from textbook_agent.domain.entities.student_profile import StudentProfile
-from textbook_agent.domain.entities.textbook import RawTextbook
 from textbook_agent.domain.entities.user import User
-from textbook_agent.domain.exceptions import (
-    PipelineError,
-    ProviderConformanceError,
-    ProviderRequestError,
-)
+from textbook_agent.domain.ports.document_repository import DocumentRepository
 from textbook_agent.domain.ports.generation_repository import GenerationRepository
 from textbook_agent.domain.ports.student_profile_repository import StudentProfileRepository
-from textbook_agent.domain.ports.textbook_repository import TextbookRepository
-from textbook_agent.domain.value_objects import GenerationMode
+from textbook_agent.domain.ports.user_repository import UserRepository
+from textbook_agent.domain.services.generation_failure import classify_generation_failure
+from textbook_agent.domain.value_objects import EducationLevel, GenerationMode
+from textbook_agent.infrastructure.auth.jwt_handler import JWTHandler
 from textbook_agent.interface.api.dependencies import (
+    get_document_repository,
     get_generation_repository,
+    get_jwt_handler,
     get_settings,
     get_student_profile_repository,
-    get_textbook_repository,
-    get_use_case,
+    get_user_repository,
 )
 from textbook_agent.interface.api.middleware.auth_middleware import get_current_user
 
@@ -46,6 +52,12 @@ def _history_item(generation: Generation) -> dict:
         "status": generation.status,
         "mode": generation.mode,
         "source_generation_id": generation.source_generation_id,
+        "error_type": generation.error_type,
+        "error_code": generation.error_code,
+        "requested_template_id": generation.requested_template_id,
+        "resolved_template_id": generation.resolved_template_id,
+        "requested_preset_id": generation.requested_preset_id,
+        "resolved_preset_id": generation.resolved_preset_id,
         "quality_passed": generation.quality_passed,
         "generation_time_seconds": generation.generation_time_seconds,
         "created_at": generation.created_at.isoformat() if generation.created_at else None,
@@ -62,260 +74,342 @@ def _detail_item(generation: Generation) -> dict:
         "mode": generation.mode,
         "source_generation_id": generation.source_generation_id,
         "error": generation.error,
+        "error_type": generation.error_type,
+        "error_code": generation.error_code,
+        "requested_template_id": generation.requested_template_id,
+        "resolved_template_id": generation.resolved_template_id,
+        "requested_preset_id": generation.requested_preset_id,
+        "resolved_preset_id": generation.resolved_preset_id,
         "quality_passed": generation.quality_passed,
         "generation_time_seconds": generation.generation_time_seconds,
         "created_at": generation.created_at.isoformat() if generation.created_at else None,
         "completed_at": generation.completed_at.isoformat() if generation.completed_at else None,
+        "document_path": generation.document_path,
     }
 
 
-async def _run_generation(
-    request: Request,
-    generation_id: str,
-    req: GenerationRequest,
-    student_profile: StudentProfile | None,
-    gen_repo: GenerationRepository,
+def _grade_band(profile: StudentProfile) -> str:
+    mapping = {
+        EducationLevel.ELEMENTARY: "primary",
+        EducationLevel.MIDDLE_SCHOOL: "secondary",
+        EducationLevel.HIGH_SCHOOL: "secondary",
+        EducationLevel.UNDERGRADUATE: "advanced",
+        EducationLevel.GRADUATE: "advanced",
+        EducationLevel.PROFESSIONAL: "advanced",
+    }
+    return mapping[profile.education_level]
+
+
+def _document_urls(generation_id: str) -> tuple[str, str]:
+    return (
+        f"/api/v1/generations/{generation_id}/events",
+        f"/api/v1/generations/{generation_id}/document",
+    )
+
+
+def _initial_document(
+    generation: Generation,
     *,
-    mode: GenerationMode,
-    source_generation_id: str | None = None,
-):
-    jobs: dict[str, GenerationStatus] = request.app.state.jobs
+    sections: list | None = None,
+    status_value: str = "pending",
+) -> PipelineDocument:
+    now = datetime.now(timezone.utc)
+    return PipelineDocument(
+        generation_id=generation.id,
+        subject=generation.subject,
+        context=generation.context,
+        mode=generation.mode.value,
+        template_id=generation.requested_template_id,
+        preset_id=generation.requested_preset_id,
+        source_generation_id=generation.source_generation_id,
+        status=status_value,
+        sections=sections or [],
+        created_at=generation.created_at,
+        updated_at=now,
+    )
 
-    await gen_repo.update_status(generation_id, status="running")
 
-    def on_progress(progress: GenerationProgress):
-        jobs[generation_id] = GenerationStatus(
-            id=generation_id,
-            status="running",
-            mode=progress.mode,
-            progress=progress,
-            source_generation_id=source_generation_id,
+def _replace_or_append_section(document: PipelineDocument, section) -> PipelineDocument:
+    sections = list(document.sections)
+    for index, existing in enumerate(sections):
+        if existing.section_id == section.section_id:
+            sections[index] = section
+            break
+    else:
+        sections.append(section)
+    return document.model_copy(
+        update={
+            "sections": sections,
+            "updated_at": datetime.now(timezone.utc),
+            "status": "running",
+        }
+    )
+
+
+async def _stream_user_from_token(
+    request: Request,
+    jwt_handler: JWTHandler,
+    user_repo: UserRepository,
+) -> User:
+    token = request.query_params.get("token")
+    if not token:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing stream token",
         )
 
     try:
-        use_case = get_use_case()
-        result = await use_case.execute(
-            req, student_profile=student_profile, on_progress=on_progress
-        )
-        jobs[generation_id] = GenerationStatus(
-            id=generation_id,
-            status="completed",
-            mode=result.mode,
-            result=GenerationResultSummary.from_response(result),
-            source_generation_id=source_generation_id,
-        )
-        await gen_repo.update_status(
-            generation_id,
-            status="completed",
-            output_path=result.output_path,
-            quality_passed=(
-                result.quality_report.passed if result.quality_report else None
-            ),
-            generation_time_seconds=result.generation_time_seconds,
-        )
+        payload = jwt_handler.decode_token(token)
     except Exception as exc:
-        logger.exception("Generation %s failed", generation_id)
-        error_type = "unknown_error"
-        if isinstance(exc, (ProviderConformanceError, ProviderRequestError)):
-            error_type = "provider_error"
-        elif isinstance(exc, PipelineError):
-            error_type = "pipeline_error"
-        jobs[generation_id] = GenerationStatus(
-            id=generation_id,
-            status="failed",
-            mode=mode,
-            error=str(exc),
-            error_type=error_type,
-            source_generation_id=source_generation_id,
-        )
-        await gen_repo.update_status(
-            generation_id,
-            status="failed",
-            error=str(exc),
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        ) from exc
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
         )
 
+    user = await user_repo.find_by_id(user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+    return user
 
-async def _run_enhancement(
-    request: Request,
-    generation_id: str,
-    req: EnhanceGenerationRequest,
-    source_textbook: RawTextbook,
+
+def _sse_payload(event: dict) -> str:
+    return f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+
+
+async def _run_generation_job(
+    generation: Generation,
+    command: PipelineCommand,
     gen_repo: GenerationRepository,
-    *,
-    source_generation_id: str,
-):
-    jobs: dict[str, GenerationStatus] = request.app.state.jobs
-    await gen_repo.update_status(generation_id, status="running")
+    document_repo: DocumentRepository,
+    initial_document: PipelineDocument,
+) -> None:
+    document = initial_document.model_copy(
+        update={"status": "running", "updated_at": datetime.now(timezone.utc)}
+    )
+    document_path = await document_repo.save_document(document)
+    await gen_repo.update_status(
+        generation.id,
+        status="running",
+        document_path=document_path,
+    )
 
-    def on_progress(progress: GenerationProgress):
-        jobs[generation_id] = GenerationStatus(
-            id=generation_id,
-            status="running",
-            mode=progress.mode,
-            progress=progress,
-            source_generation_id=source_generation_id,
-        )
+    async def on_event(event) -> None:
+        nonlocal document
+        if isinstance(event, SectionReadyEvent):
+            document = _replace_or_append_section(document, event.section)
+            await document_repo.save_document(document)
+        event_bus.publish(generation.id, event)
 
     try:
-        use_case = get_use_case()
-        result = await use_case.enhance(
-            req,
-            source_textbook,
-            on_progress=on_progress,
-            source_generation_id=source_generation_id,
+        result = await run_pipeline_streaming(command, on_event=on_event)
+        completed_at = datetime.now(timezone.utc)
+        document = result.document.model_copy(
+            update={
+                "created_at": initial_document.created_at,
+                "updated_at": completed_at,
+                "completed_at": completed_at,
+                "status": "completed",
+            }
         )
-        jobs[generation_id] = GenerationStatus(
-            id=generation_id,
-            status="completed",
-            mode=result.mode,
-            result=GenerationResultSummary.from_response(result),
-            source_generation_id=source_generation_id,
-        )
+        document_path = await document_repo.save_document(document)
         await gen_repo.update_status(
-            generation_id,
+            generation.id,
             status="completed",
-            output_path=result.output_path,
-            quality_passed=(
-                result.quality_report.passed if result.quality_report else None
-            ),
+            document_path=document_path,
+            resolved_template_id=document.template_id,
+            resolved_preset_id=document.preset_id,
+            quality_passed=document.quality_passed,
             generation_time_seconds=result.generation_time_seconds,
         )
+        _, document_url = _document_urls(generation.id)
+        event_bus.publish(
+            generation.id,
+            CompleteEvent(generation_id=generation.id, document_url=document_url),
+        )
     except Exception as exc:
-        logger.exception("Enhancement %s failed", generation_id)
-        error_type = "unknown_error"
-        if isinstance(exc, (ProviderConformanceError, ProviderRequestError)):
-            error_type = "provider_error"
-        elif isinstance(exc, PipelineError):
-            error_type = "pipeline_error"
-        jobs[generation_id] = GenerationStatus(
-            id=generation_id,
-            status="failed",
-            mode=req.target_mode,
-            error=str(exc),
-            error_type=error_type,
-            source_generation_id=source_generation_id,
+        logger.exception("Generation %s failed", generation.id)
+        classification = classify_generation_failure(exc)
+        completed_at = datetime.now(timezone.utc)
+        failed_document = document.model_copy(
+            update={
+                "status": "failed",
+                "error": str(exc),
+                "updated_at": completed_at,
+                "completed_at": completed_at,
+            }
         )
+        document_path = await document_repo.save_document(failed_document)
         await gen_repo.update_status(
-            generation_id,
+            generation.id,
             status="failed",
+            document_path=document_path,
             error=str(exc),
+            error_type=classification.error_type,
+            error_code=classification.error_code,
+        )
+        event_bus.publish(
+            generation.id,
+            ErrorEvent(generation_id=generation.id, message=str(exc)),
         )
 
 
-@router.post("/generate", status_code=202)
-async def generate_textbook(
+def _validate_template_and_preset(template_id: str, preset_id: str) -> None:
+    try:
+        get_contract(template_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not validate_preset_for_template(template_id, preset_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Preset '{preset_id}' is not allowed for template '{template_id}'",
+        )
+
+
+@router.post("/generations", status_code=202, response_model=GenerationAcceptedResponse)
+async def create_generation(
     req: GenerationRequest,
-    request: Request,
     current_user: User = Depends(get_current_user),
     profile_repo: StudentProfileRepository = Depends(get_student_profile_repository),
     gen_repo: GenerationRepository = Depends(get_generation_repository),
+    document_repo: DocumentRepository = Depends(get_document_repository),
 ):
+    _validate_template_and_preset(req.template_id, req.preset_id)
+    profile = await profile_repo.find_by_user_id(current_user.id)
+    if profile is None:
+        raise HTTPException(status_code=409, detail="Complete your profile first")
+
     generation_id = str(uuid.uuid4())
-    mode = req.resolved_mode()
-    jobs: dict[str, GenerationStatus] = request.app.state.jobs
-    jobs[generation_id] = GenerationStatus(
+    generation = Generation(
         id=generation_id,
-        status="pending",
-        mode=mode,
+        user_id=current_user.id,
+        subject=req.subject,
+        context=req.context,
+        mode=req.mode,
+        requested_template_id=req.template_id,
+        requested_preset_id=req.preset_id,
     )
+    initial_document = _initial_document(generation)
+    document_path = await document_repo.save_document(initial_document)
+    generation.document_path = document_path
+    await gen_repo.create(generation)
 
-    student_profile = await profile_repo.find_by_user_id(current_user.id)
-
-    await gen_repo.create(
-        Generation(
-            id=generation_id,
-            user_id=current_user.id,
-            subject=req.subject,
-            context=req.context,
-            mode=mode,
-        )
+    command = PipelineCommand(
+        generation_id=generation_id,
+        subject=req.subject,
+        context=req.context,
+        grade_band=_grade_band(profile),
+        template_id=req.template_id,
+        preset_id=req.preset_id,
+        learner_fit="general",
+        section_count=req.section_count,
+        mode=req.mode.value,
     )
 
     asyncio.create_task(
-        _run_generation(
-            request,
-            generation_id,
-            req,
-            student_profile,
-            gen_repo,
-            mode=mode,
-        )
+        _run_generation_job(generation, command, gen_repo, document_repo, initial_document)
     )
 
-    return {"generation_id": generation_id, "status": "pending", "mode": mode}
+    events_url, document_url = _document_urls(generation_id)
+    return GenerationAcceptedResponse(
+        generation_id=generation_id,
+        status="pending",
+        mode=req.mode,
+        events_url=events_url,
+        document_url=document_url,
+    )
 
 
-@router.post("/generations/{generation_id}/enhance", status_code=202)
+@router.post(
+    "/generations/{generation_id}/enhance",
+    status_code=202,
+    response_model=GenerationAcceptedResponse,
+)
 async def enhance_generation(
     generation_id: str,
-    request: Request,
     req: EnhanceGenerationRequest = Body(...),
     current_user: User = Depends(get_current_user),
     gen_repo: GenerationRepository = Depends(get_generation_repository),
-    textbook_repo: TextbookRepository = Depends(get_textbook_repository),
+    document_repo: DocumentRepository = Depends(get_document_repository),
 ):
+    if req.mode == GenerationMode.DRAFT:
+        raise HTTPException(status_code=409, detail="Enhancement target must be balanced or strict")
+
     source_generation = await gen_repo.find_by_id(generation_id)
     if source_generation is None or source_generation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
     if source_generation.mode != GenerationMode.DRAFT:
         raise HTTPException(status_code=409, detail="Only draft generations can be enhanced")
-    if source_generation.status != "completed" or not source_generation.output_path:
+    if source_generation.status != "completed" or not source_generation.document_path:
         raise HTTPException(status_code=409, detail="Draft is not ready for enhancement")
 
-    try:
-        source_textbook = await textbook_repo.load_textbook(source_generation.output_path)
-    except (FileNotFoundError, ValueError):
-        raise HTTPException(status_code=404, detail="Draft artifact not found") from None
-
+    source_document = await document_repo.load_document(source_generation.document_path)
     child_generation_id = str(uuid.uuid4())
-    jobs: dict[str, GenerationStatus] = request.app.state.jobs
-    jobs[child_generation_id] = GenerationStatus(
+    generation = Generation(
         id=child_generation_id,
-        status="pending",
-        mode=req.target_mode,
+        user_id=current_user.id,
+        subject=source_generation.subject,
+        context=source_generation.context,
+        mode=req.mode,
+        document_path=None,
+        requested_template_id=source_generation.resolved_template_id
+        or source_generation.requested_template_id,
+        requested_preset_id=source_generation.resolved_preset_id
+        or source_generation.requested_preset_id,
         source_generation_id=generation_id,
     )
+    initial_document = _initial_document(
+        generation,
+        sections=list(source_document.sections),
+        status_value="running",
+    )
+    document_path = await document_repo.save_document(initial_document)
+    generation.document_path = document_path
+    await gen_repo.create(generation)
 
-    await gen_repo.create(
-        Generation(
-            id=child_generation_id,
-            user_id=current_user.id,
-            subject=source_generation.subject,
-            context=source_generation.context,
-            mode=req.target_mode,
-            source_generation_id=generation_id,
-        )
+    command = PipelineCommand(
+        generation_id=child_generation_id,
+        subject=generation.subject,
+        context=generation.context,
+        grade_band=source_document.sections[0].header.grade_band
+        if source_document.sections
+        else "secondary",
+        template_id=generation.requested_template_id,
+        preset_id=generation.requested_preset_id,
+        learner_fit="general",
+        section_count=max(len(source_document.sections), 1),
+        mode=req.mode.value,
+        source_generation_id=generation_id,
+        seed_document=SeedDocument(sections=source_document.sections, note=req.note),
     )
 
     asyncio.create_task(
-        _run_enhancement(
-            request,
-            child_generation_id,
-            req,
-            source_textbook,
-            gen_repo,
-            source_generation_id=generation_id,
-        )
+        _run_generation_job(generation, command, gen_repo, document_repo, initial_document)
     )
 
-    return {
-        "generation_id": child_generation_id,
-        "status": "pending",
-        "mode": req.target_mode,
-        "source_generation_id": generation_id,
-    }
-
-
-@router.get("/status/{generation_id}")
-async def get_generation_status(
-    generation_id: str,
-    request: Request,
-    current_user: User = Depends(get_current_user),
-) -> GenerationStatus:
-    jobs: dict[str, GenerationStatus] = request.app.state.jobs
-    if generation_id not in jobs:
-        raise HTTPException(status_code=404, detail="Generation not found")
-    return jobs[generation_id]
+    events_url, document_url = _document_urls(child_generation_id)
+    return GenerationAcceptedResponse(
+        generation_id=child_generation_id,
+        status="pending",
+        mode=req.mode,
+        source_generation_id=generation_id,
+        events_url=events_url,
+        document_url=document_url,
+    )
 
 
 @router.get("/generations")
@@ -325,9 +419,7 @@ async def list_generations(
     limit: int = get_settings().default_pagination_limit,
     offset: int = 0,
 ):
-    generations = await gen_repo.list_by_user(
-        current_user.id, limit=limit, offset=offset
-    )
+    generations = await gen_repo.list_by_user(current_user.id, limit=limit, offset=offset)
     return [_history_item(generation) for generation in generations]
 
 
@@ -337,26 +429,80 @@ async def get_generation_detail(
     current_user: User = Depends(get_current_user),
     gen_repo: GenerationRepository = Depends(get_generation_repository),
 ):
-    gen = await gen_repo.find_by_id(generation_id)
-    if gen is None or gen.user_id != current_user.id:
+    generation = await gen_repo.find_by_id(generation_id)
+    if generation is None or generation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
-    return _detail_item(gen)
+    return _detail_item(generation)
 
 
-@router.get("/generations/{generation_id}/textbook", response_class=HTMLResponse)
-async def get_textbook_html(
+@router.get("/generations/{generation_id}/document")
+async def get_generation_document(
     generation_id: str,
     current_user: User = Depends(get_current_user),
     gen_repo: GenerationRepository = Depends(get_generation_repository),
-    textbook_repo: TextbookRepository = Depends(get_textbook_repository),
+    document_repo: DocumentRepository = Depends(get_document_repository),
 ):
     generation = await gen_repo.find_by_id(generation_id)
     if generation is None or generation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
-    if generation.status != "completed" or not generation.output_path:
-        raise HTTPException(status_code=409, detail="Textbook not ready")
-    try:
-        html = await textbook_repo.load_html(generation.output_path)
-    except (FileNotFoundError, ValueError):
-        raise HTTPException(status_code=404, detail="Textbook not found") from None
-    return HTMLResponse(content=html)
+    if not generation.document_path:
+        raise HTTPException(status_code=404, detail="Document not found")
+    document = await document_repo.load_document(generation.document_path)
+    return document.model_dump(mode="json", exclude_none=True)
+
+
+@router.get("/generations/{generation_id}/events")
+async def get_generation_events(
+    generation_id: str,
+    request: Request,
+    gen_repo: GenerationRepository = Depends(get_generation_repository),
+    jwt_handler: JWTHandler = Depends(get_jwt_handler),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    current_user = await _stream_user_from_token(request, jwt_handler, user_repo)
+    generation = await gen_repo.find_by_id(generation_id)
+    if generation is None or generation.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+
+    async def stream() -> AsyncIterator[str]:
+        if generation.status == "completed":
+            _, document_url = _document_urls(generation_id)
+            yield _sse_payload(
+                CompleteEvent(generation_id=generation_id, document_url=document_url).model_dump(
+                    mode="json", exclude_none=True
+                )
+            )
+            return
+        if generation.status == "failed":
+            yield _sse_payload(
+                ErrorEvent(
+                    generation_id=generation_id,
+                    message=generation.error or "Generation failed",
+                ).model_dump(mode="json", exclude_none=True)
+            )
+            return
+
+        queue = event_bus.subscribe(generation_id)
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                except TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+
+                yield _sse_payload(event)
+                if event["type"] in {"complete", "error"}:
+                    break
+        finally:
+            event_bus.unsubscribe(generation_id, queue)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

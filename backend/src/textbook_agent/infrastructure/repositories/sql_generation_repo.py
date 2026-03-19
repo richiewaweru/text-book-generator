@@ -20,8 +20,19 @@ class SqlGenerationRepository(GenerationRepository):
             context=generation.context,
             mode=generation.mode.value,
             status=generation.status,
+            document_path=generation.document_path,
+            error=generation.error,
+            error_type=generation.error_type,
+            error_code=generation.error_code,
+            requested_template_id=generation.requested_template_id,
+            resolved_template_id=generation.resolved_template_id,
+            requested_preset_id=generation.requested_preset_id,
+            resolved_preset_id=generation.resolved_preset_id,
+            quality_passed=generation.quality_passed,
+            generation_time_seconds=generation.generation_time_seconds,
             source_generation_id=generation.source_generation_id,
             created_at=generation.created_at,
+            completed_at=generation.completed_at,
         )
         self._session.add(model)
         await self._session.commit()
@@ -32,8 +43,12 @@ class SqlGenerationRepository(GenerationRepository):
         self,
         generation_id: str,
         status: str,
-        output_path: str | None = None,
+        document_path: str | None = None,
         error: str | None = None,
+        error_type: str | None = None,
+        error_code: str | None = None,
+        resolved_template_id: str | None = None,
+        resolved_preset_id: str | None = None,
         quality_passed: bool | None = None,
         generation_time_seconds: float | None = None,
     ) -> None:
@@ -41,10 +56,18 @@ class SqlGenerationRepository(GenerationRepository):
         result = await self._session.execute(stmt)
         model = result.scalar_one()
         model.status = status
-        if output_path is not None:
-            model.output_path = output_path
+        if document_path is not None:
+            model.document_path = document_path
         if error is not None:
             model.error = error
+        if error_type is not None:
+            model.error_type = error_type
+        if error_code is not None:
+            model.error_code = error_code
+        if resolved_template_id is not None:
+            model.resolved_template_id = resolved_template_id
+        if resolved_preset_id is not None:
+            model.resolved_preset_id = resolved_preset_id
         if quality_passed is not None:
             model.quality_passed = quality_passed
         if generation_time_seconds is not None:
@@ -82,8 +105,14 @@ class SqlGenerationRepository(GenerationRepository):
             context=model.context or "",
             mode=model.mode,
             status=model.status,
-            output_path=model.output_path,
+            document_path=model.document_path,
             error=model.error,
+            error_type=model.error_type,
+            error_code=model.error_code,
+            requested_template_id=model.requested_template_id,
+            resolved_template_id=model.resolved_template_id,
+            requested_preset_id=model.requested_preset_id,
+            resolved_preset_id=model.resolved_preset_id,
             quality_passed=model.quality_passed,
             generation_time_seconds=model.generation_time_seconds,
             source_generation_id=model.source_generation_id,
