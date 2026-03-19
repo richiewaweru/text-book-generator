@@ -1,4 +1,4 @@
-/** Mirrors backend Pydantic schemas for type safety. */
+import type { SectionContent } from 'lectio';
 
 export type Depth = 'survey' | 'standard' | 'deep';
 export type GenerationMode = 'draft' | 'balanced' | 'strict';
@@ -59,48 +59,24 @@ export interface ProfileCreateRequest {
 export interface GenerationRequest {
 	subject: string;
 	context: string;
-	depth?: Depth;
-	language?: NotationLanguage;
-	mode?: GenerationMode;
-	provider?: string;
+	mode: GenerationMode;
+	template_id: string;
+	preset_id: string;
+	section_count?: number;
 }
 
 export interface EnhanceGenerationRequest {
-	target_mode: Exclude<GenerationMode, 'draft'>;
+	mode: Exclude<GenerationMode, 'draft'>;
 	note?: string;
 }
 
-export interface GenerationResponse {
-	textbook_id: string;
+export interface GenerationAccepted {
+	generation_id: string;
+	status: string;
 	mode: GenerationMode;
-	quality_report: QualityReport | null;
-	generation_time_seconds: number;
-	quality_reruns: number;
-	source_generation_id: string | null;
-}
-
-export interface GenerationProgress {
-	mode: GenerationMode;
-	phase: 'planning' | 'generating' | 'checking' | 'fixing' | 'rendering';
-	message: string;
-	sections_total: number | null;
-	sections_completed: number;
-	current_section_id: string | null;
-	current_section_title: string | null;
-	retry_attempt: number | null;
-	retry_limit: number | null;
-	flagged_section_ids: string[];
-}
-
-export interface GenerationStatus {
-	id: string;
-	status: 'pending' | 'running' | 'completed' | 'failed';
-	mode: GenerationMode | null;
-	progress: GenerationProgress | null;
-	result: GenerationResponse | null;
-	error: string | null;
-	error_type: string | null;
-	source_generation_id: string | null;
+	source_generation_id?: string;
+	events_url: string;
+	document_url: string;
 }
 
 export interface GenerationHistoryItem {
@@ -109,6 +85,12 @@ export interface GenerationHistoryItem {
 	status: 'pending' | 'running' | 'completed' | 'failed';
 	mode: GenerationMode;
 	source_generation_id: string | null;
+	error_type: string | null;
+	error_code: string | null;
+	requested_template_id: string;
+	resolved_template_id: string | null;
+	requested_preset_id: string;
+	resolved_preset_id: string | null;
 	quality_passed: boolean | null;
 	generation_time_seconds: number | null;
 	created_at: string | null;
@@ -123,23 +105,102 @@ export interface GenerationDetail {
 	mode: GenerationMode;
 	source_generation_id: string | null;
 	error: string | null;
+	error_type: string | null;
+	error_code: string | null;
+	requested_template_id: string;
+	resolved_template_id: string | null;
+	requested_preset_id: string;
+	resolved_preset_id: string | null;
 	quality_passed: boolean | null;
 	generation_time_seconds: number | null;
 	created_at: string | null;
 	completed_at: string | null;
+	document_path: string | null;
 }
 
-export interface QualityIssue {
-	section_id: string | null;
-	issue_type: string;
-	description: string;
-	severity: 'error' | 'warning';
-	scope: 'section' | 'document';
-	check_source: 'mechanical' | 'llm';
+export interface GenerationIssue {
+	block: string;
+	severity: 'blocking' | 'warning';
+	message: string;
 }
 
-export interface QualityReport {
+export interface GenerationSectionReport {
+	section_id: string;
 	passed: boolean;
-	issues: QualityIssue[];
-	checked_at: string;
+	issues: GenerationIssue[];
+	warnings: string[];
 }
+
+export interface GenerationDocument {
+	generation_id: string;
+	subject: string;
+	context: string;
+	mode: GenerationMode;
+	template_id: string;
+	preset_id: string;
+	source_generation_id: string | null;
+	status: 'pending' | 'running' | 'completed' | 'failed';
+	sections: SectionContent[];
+	qc_reports: GenerationSectionReport[];
+	quality_passed: boolean | null;
+	error: string | null;
+	created_at: string;
+	updated_at: string;
+	completed_at: string | null;
+}
+
+export interface PipelineStartEvent {
+	type: 'pipeline_start';
+	generation_id: string;
+	section_count: number;
+	template_id: string;
+	preset_id: string;
+	mode: GenerationMode;
+	started_at: string;
+}
+
+export interface SectionStartedEvent {
+	type: 'section_started';
+	generation_id: string;
+	section_id: string;
+	title: string;
+	position: number;
+}
+
+export interface SectionReadyEvent {
+	type: 'section_ready';
+	generation_id: string;
+	section_id: string;
+	section: SectionContent;
+	completed_sections: number;
+	total_sections: number;
+}
+
+export interface QCCompleteEvent {
+	type: 'qc_complete';
+	generation_id: string;
+	passed: number;
+	total: number;
+}
+
+export interface CompleteEvent {
+	type: 'complete';
+	generation_id: string;
+	document_url?: string;
+	completed_at: string;
+}
+
+export interface ErrorEvent {
+	type: 'error';
+	generation_id: string;
+	message: string;
+	completed_at: string;
+}
+
+export type GenerationStreamEvent =
+	| PipelineStartEvent
+	| SectionStartedEvent
+	| SectionReadyEvent
+	| QCCompleteEvent
+	| CompleteEvent
+	| ErrorEvent;

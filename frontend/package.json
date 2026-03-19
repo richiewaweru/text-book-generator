@@ -12,12 +12,25 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "vitest run"
 	},
+	"dependencies": {
+		"bits-ui": "^2.11.0",
+		"clsx": "^2.1.1",
+		"katex": "^0.16.22",
+		"lectio": "file:../../lectio",
+		"lucide-svelte": "^0.542.0",
+		"tailwind-merge": "^3.3.1"
+	},
 	"devDependencies": {
-		"@sveltejs/adapter-auto": "^7.0.0",
+		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/kit": "^2.50.2",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
+		"@tailwindcss/vite": "^4.1.13",
+		"@testing-library/svelte": "^5.3.1",
+		"@types/katex": "^0.16.7",
+		"jsdom": "^27.0.1",
 		"svelte": "^5.51.0",
 		"svelte-check": "^4.4.2",
+		"tailwindcss": "^4.1.13",
 		"typescript": "^5.9.3",
 		"vite": "^7.3.1",
 		"vitest": "^3.2.4"

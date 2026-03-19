@@ -20,4 +20,14 @@ describe('friendlyGenerationErrorMessage', () => {
 			)
 		).toBe('The generation pipeline encountered an error. Please try again with different input.');
 	});
+
+	it('falls back to the backend message for unknown failures', () => {
+		expect(
+			friendlyGenerationErrorMessage(
+				'Unexpected runtime failure',
+				'runtime_error',
+				'unknown_runtime'
+			)
+		).toBe('Unexpected runtime failure');
+	});
 });

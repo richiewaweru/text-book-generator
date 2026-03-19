@@ -1,4 +1,5 @@
 <script lang="ts">
+	import '../app.css';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -69,14 +70,19 @@
 <style>
 	:global(body) {
 		margin: 0;
-		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-		background: #111;
-		color: #eee;
+		font-family:
+			'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+		background:
+			radial-gradient(circle at top, rgba(214, 196, 160, 0.22), transparent 32%),
+			linear-gradient(180deg, #f4efe4 0%, #ece3d1 52%, #e4d7c0 100%);
+		color: #1e1b16;
 	}
 
 	header {
-		border-bottom: 1px solid #333;
+		border-bottom: 1px solid rgba(61, 47, 26, 0.15);
 		padding: 0.75rem 1.5rem;
+		backdrop-filter: blur(12px);
+		background: rgba(250, 245, 235, 0.82);
 	}
 
 	nav {
@@ -90,7 +96,7 @@
 	.brand {
 		font-weight: 700;
 		font-size: 1.1rem;
-		color: #eee;
+		color: #1f2b34;
 		text-decoration: none;
 	}
 
@@ -108,22 +114,22 @@
 
 	.user-name {
 		font-size: 0.9rem;
-		color: #ccc;
+		color: #5f574d;
 	}
 
 	.logout-btn {
-		background: none;
-		border: 1px solid #555;
-		color: #ccc;
+		background: rgba(31, 43, 52, 0.05);
+		border: 1px solid rgba(31, 43, 52, 0.15);
+		color: #24343f;
 		padding: 0.25rem 0.75rem;
-		border-radius: 4px;
+		border-radius: 999px;
 		cursor: pointer;
 		font-size: 0.8rem;
 	}
 
 	.logout-btn:hover {
-		border-color: #888;
-		color: #fff;
+		border-color: rgba(31, 43, 52, 0.35);
+		color: #111;
 	}
 
 	main {
