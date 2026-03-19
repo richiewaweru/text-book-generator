@@ -117,6 +117,17 @@ If you are picking this repo up fresh, start in this order:
 | Generated contract refresh | If Lectio contracts change, `backend/contracts/` must still be refreshed from the Lectio export script. |
 | Branch granularity | This push intentionally packages a large integrated source-of-truth tree; later cleanup can split future work more narrowly, but this branch is meant to stop the drift between local reality and GitHub. |
 
+## Retired Branch Notes
+
+The older `codex/fix-frontend-build-warnings` branch was reviewed after this source-of-truth push and found to be fully superseded for live code/config.
+
+Its only unique commits were:
+
+- `3fa0c44` `fix(frontend): eliminate build warnings`
+- `43b4192` `docs(project): add branch state handoff`
+
+The runtime/config parts of that branch are already represented in this feature branch, and its remaining lockfile delta only downgraded `katex` from `0.16.39` to `0.16.38` without changing the validated runtime behavior. The codex-only handoff was also stale once this integrated handoff existed. That branch can therefore be retired without porting additional code.
+
 ## Final State
 
 After this push, GitHub should reflect the actual working architecture of the project rather than a stale pre-cutover shell.
