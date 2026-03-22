@@ -17,6 +17,7 @@ from pipeline.api import (
     PipelineErrorInfo,
     PipelineIssue,
     PipelineResult,
+    PipelineSectionManifestItem,
     PipelineSectionReport,
 )
 from pipeline.contracts import get_contract
@@ -80,6 +81,20 @@ def _sorted_sections(
     return ordered
 
 
+def _build_section_manifest(state: TextbookPipelineState) -> list[PipelineSectionManifestItem]:
+    if not state.curriculum_outline:
+        return []
+
+    return [
+        PipelineSectionManifestItem(
+            section_id=plan.section_id,
+            title=plan.title,
+            position=plan.position,
+        )
+        for plan in sorted(state.curriculum_outline, key=lambda item: item.position)
+    ]
+
+
 def _build_reports(state: TextbookPipelineState) -> list[PipelineSectionReport]:
     reports: list[PipelineSectionReport] = []
     for section_id, report in state.qc_reports.items():
@@ -123,6 +138,7 @@ def _build_document(
         preset_id=command.preset_id,
         source_generation_id=command.source_generation_id,
         status=status,
+        section_manifest=_build_section_manifest(state),
         sections=_sorted_sections(state),
         qc_reports=reports,
         quality_passed=quality_passed,

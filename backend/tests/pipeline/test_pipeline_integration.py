@@ -576,6 +576,46 @@ class TestRunPipelineStreamingEvents:
         assert first_event.preset_id == "blue-classroom"
         assert first_event.mode == "balanced"
 
+    async def test_completed_document_includes_section_manifest(self, monkeypatch):
+        from pipeline import run as run_mod
+
+        class _Graph:
+            async def astream(self, initial_state, config=None):
+                _ = initial_state, config
+                yield {
+                    "curriculum_planner": {
+                        "curriculum_outline": [_plan("s-02", 2), _plan("s-01", 1)]
+                    }
+                }
+                yield {
+                    "process_section": {
+                        "assembled_sections": {
+                            "s-02": _section("s-02"),
+                            "s-01": _section("s-01"),
+                        }
+                    }
+                }
+
+        monkeypatch.setattr(run_mod, "build_graph", lambda: _Graph())
+
+        command = run_mod.PipelineCommand(
+            generation_id="gen-manifest",
+            subject="Mathematics",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=2,
+            mode="balanced",
+        )
+
+        result = await run_mod.run_pipeline_streaming(command)
+
+        assert [item.section_id for item in result.document.section_manifest] == ["s-01", "s-02"]
+        assert [item.position for item in result.document.section_manifest] == [1, 2]
+        assert [section.section_id for section in result.document.sections] == ["s-01", "s-02"]
+
 
 # ── Process section composite (forwards qc_reports) ─────────────────────────
 
@@ -590,22 +630,22 @@ class TestProcessSectionComposite:
         sid = "s-01"
         section = _section(sid)
 
-        async def fake_content(state, *, provider_overrides=None):
+        async def fake_content(state, *, model_overrides=None):
             return {
                 "generated_sections": {sid: section},
                 "completed_nodes": ["content_generator"],
             }
 
-        async def fake_diagram(state, *, provider_overrides=None):
+        async def fake_diagram(state, *, model_overrides=None):
             return {"completed_nodes": ["diagram_generator"]}
 
-        async def fake_interaction_decider(state, *, provider_overrides=None):
+        async def fake_interaction_decider(state, *, model_overrides=None):
             return {"completed_nodes": ["interaction_decider"]}
 
-        async def fake_interaction_generator(state, *, provider_overrides=None):
+        async def fake_interaction_generator(state, *, model_overrides=None):
             return {"completed_nodes": ["interaction_generator"]}
 
-        async def fake_assembler(state, *, provider_overrides=None):
+        async def fake_assembler(state, *, model_overrides=None):
             return {
                 "assembled_sections": {sid: section},
                 "qc_reports": {
@@ -650,7 +690,7 @@ class TestProcessSectionComposite:
 
         sid = "s-01"
 
-        async def failing_content(state, *, provider_overrides=None):
+        async def failing_content(state, *, model_overrides=None):
             return {
                 "generated_sections": {},
                 "errors": [
@@ -664,11 +704,11 @@ class TestProcessSectionComposite:
                 "completed_nodes": ["content_generator"],
             }
 
-        async def noop(state, *, provider_overrides=None):
+        async def noop(state, *, model_overrides=None):
             return {"completed_nodes": ["noop"]}
 
         # Assembler will fail because no generated content
-        async def fake_assembler(state, *, provider_overrides=None):
+        async def fake_assembler(state, *, model_overrides=None):
             return {
                 "errors": [
                     PipelineError(

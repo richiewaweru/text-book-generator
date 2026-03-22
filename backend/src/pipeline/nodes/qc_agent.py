@@ -10,7 +10,7 @@ STATE CONTRACT
             contract, rerender_count, max_rerenders
     Writes: qc_reports (semantic issues added), rerender_requests,
             completed_nodes, errors
-    Model:  FAST
+    Slot:   FAST
     Skips:  never
 """
 
@@ -22,11 +22,7 @@ from pydantic import BaseModel
 from pydantic_ai import Agent
 
 from pipeline.prompts.qc import build_qc_system_prompt, build_qc_user_prompt
-from pipeline.providers.registry import (
-    get_node_text_model,
-    get_node_text_route,
-    get_node_text_spec,
-)
+from pipeline.providers.registry import get_node_text_model
 from pipeline.state import (
     PipelineError,
     QCReport,
@@ -45,21 +41,15 @@ class QCOutput(BaseModel):
 async def qc_agent(
     state: TextbookPipelineState | dict,
     *,
-    provider_overrides: dict | None = None,
+    model_overrides: dict | None = None,
 ) -> dict:
+    """Run semantic quality checks and request rerenders for blocking issues."""
+
     state = TextbookPipelineState.parse(state)
 
     model = get_node_text_model(
         "qc_agent",
-        provider_overrides,
-        generation_mode=state.request.mode,
-    )
-    route = get_node_text_route(
-        "qc_agent",
-        generation_mode=state.request.mode,
-    )
-    spec = get_node_text_spec(
-        "qc_agent",
+        model_overrides=model_overrides,
         generation_mode=state.request.mode,
     )
     agent = Agent(
@@ -90,11 +80,11 @@ async def qc_agent(
             result = await run_llm(
                 generation_id=state.request.generation_id or "",
                 node="qc_agent",
-                route=route,
-                spec=spec,
                 agent=agent,
+                model=model,
                 user_prompt=build_qc_user_prompt(section_json),
                 section_id=section_id,
+                generation_mode=state.request.mode,
             )
 
             qc_output = result.output

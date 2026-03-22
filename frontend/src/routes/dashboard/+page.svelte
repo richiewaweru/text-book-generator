@@ -21,6 +21,12 @@
 	let generating = $state(false);
 	let errorMessage = $state<string | null>(null);
 	let profileErrorMessage = $state<string | null>(null);
+	const savedGenerations = $derived(
+		pastGenerations.filter((generation) => generation.status === 'completed')
+	);
+	const activeGenerations = $derived(
+		pastGenerations.filter((generation) => generation.status !== 'completed')
+	);
 
 	onMount(async () => {
 		try {
@@ -154,11 +160,11 @@
 			</div>
 		{/if}
 
-		{#if pastGenerations.length > 0}
+		{#if savedGenerations.length > 0}
 			<section class="history-section">
-				<h2>Recent Generations</h2>
+				<h2>Saved Books</h2>
 				<ul class="history-list">
-					{#each pastGenerations as gen}
+					{#each savedGenerations as gen}
 						<li class="history-item">
 							<div class="history-info">
 								<p class="history-subject">{gen.subject}</p>
@@ -176,11 +182,40 @@
 							</div>
 							<div class="history-actions">
 								<a href={getTextbookRoute(gen.id)} class="view-link">Open</a>
-								{#if gen.status === 'completed' && gen.mode === 'draft'}
+								{#if gen.mode === 'draft'}
 									<button class="enhance-link" onclick={() => handleEnhance(gen.id)} disabled={generating}>
 										Enhance
 									</button>
 								{/if}
+							</div>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
+		{#if activeGenerations.length > 0}
+			<section class="history-section">
+				<h2>Generation Activity</h2>
+				<ul class="history-list">
+					{#each activeGenerations as gen}
+						<li class="history-item">
+							<div class="history-info">
+								<p class="history-subject">{gen.subject}</p>
+								<div class="history-meta">
+									<span class="status status-{gen.status}">{gen.status}</span>
+									<span class="mode">{gen.mode.toUpperCase()}</span>
+									<span>{templateName(gen.resolved_template_id ?? gen.requested_template_id)}</span>
+									<span>{presetName(gen.resolved_preset_id ?? gen.requested_preset_id)}</span>
+								</div>
+								{#if gen.status === 'failed'}
+									<p class="failure-copy">
+										{friendlyGenerationErrorMessage(null, gen.error_type, gen.error_code)}
+									</p>
+								{/if}
+							</div>
+							<div class="history-actions">
+								<a href={getTextbookRoute(gen.id)} class="view-link">Open</a>
 							</div>
 						</li>
 					{/each}

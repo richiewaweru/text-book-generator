@@ -91,6 +91,7 @@ export interface GenerationHistoryItem {
 	resolved_template_id: string | null;
 	requested_preset_id: string;
 	resolved_preset_id: string | null;
+	section_count: number | null;
 	quality_passed: boolean | null;
 	generation_time_seconds: number | null;
 	created_at: string | null;
@@ -111,11 +112,18 @@ export interface GenerationDetail {
 	resolved_template_id: string | null;
 	requested_preset_id: string;
 	resolved_preset_id: string | null;
+	section_count: number | null;
 	quality_passed: boolean | null;
 	generation_time_seconds: number | null;
 	created_at: string | null;
 	completed_at: string | null;
 	document_path: string | null;
+}
+
+export interface PipelineSectionManifestItem {
+	section_id: string;
+	title: string;
+	position: number;
 }
 
 export interface GenerationIssue {
@@ -140,6 +148,7 @@ export interface GenerationDocument {
 	preset_id: string;
 	source_generation_id: string | null;
 	status: 'pending' | 'running' | 'completed' | 'failed';
+	section_manifest: PipelineSectionManifestItem[];
 	sections: SectionContent[];
 	qc_reports: GenerationSectionReport[];
 	quality_passed: boolean | null;

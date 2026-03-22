@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from pydantic_ai.exceptions import UserError
+
 from textbook_agent.domain.exceptions import (
     PipelineError,
     ProviderConformanceError,
@@ -11,6 +13,21 @@ from textbook_agent.domain.exceptions import (
 class GenerationFailureClassification:
     error_type: str
     error_code: str | None = None
+
+
+_PROVIDER_CONFIGURATION_ERROR_CODE = "provider_configuration_failed"
+
+
+def _is_provider_configuration_error_message(message: str) -> bool:
+    normalized = message.lower()
+    return (
+        "api_key" in normalized
+        or "api key" in normalized
+        or "expects env var" in normalized
+        or "environment variable" in normalized
+        or ("env var" in normalized and "not set" in normalized)
+        or "provider configuration" in normalized
+    )
 
 
 def classify_generation_failure(
@@ -31,10 +48,20 @@ def classify_generation_failure(
             error_type="pipeline_error",
             error_code="pipeline_failed",
         )
+    if isinstance(error, UserError) and _is_provider_configuration_error_message(str(error)):
+        return GenerationFailureClassification(
+            error_type="provider_error",
+            error_code=_PROVIDER_CONFIGURATION_ERROR_CODE,
+        )
     return classify_generation_error_message(str(error))
 
 
-def classify_generation_error_message(_message: str) -> GenerationFailureClassification:
+def classify_generation_error_message(message: str) -> GenerationFailureClassification:
+    if _is_provider_configuration_error_message(message):
+        return GenerationFailureClassification(
+            error_type="provider_error",
+            error_code=_PROVIDER_CONFIGURATION_ERROR_CODE,
+        )
     return GenerationFailureClassification(
         error_type="unknown_error",
         error_code=None,

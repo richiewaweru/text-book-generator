@@ -172,6 +172,7 @@ class TestRuntimeDiagnostics:
                             resolved_template_id VARCHAR,
                             requested_preset_id VARCHAR,
                             resolved_preset_id VARCHAR,
+                            section_count INTEGER,
                             quality_passed BOOLEAN,
                             generation_time_seconds FLOAT,
                             source_generation_id VARCHAR,

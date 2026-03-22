@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from pipeline.api import PipelineSectionReport
 from pipeline.types.section_content import SectionContent
 
 
@@ -56,6 +57,7 @@ class CompleteEvent(BaseModel):
     type: Literal["complete"] = "complete"
     generation_id: str
     document_url: str | None = None
+    report_url: str | None = None
     completed_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -65,6 +67,7 @@ class ErrorEvent(BaseModel):
     type: Literal["error"] = "error"
     generation_id: str
     message: str
+    report_url: str | None = None
     completed_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -77,9 +80,10 @@ class LLMCallStartedEvent(BaseModel):
     type: Literal["llm_call_started"] = "llm_call_started"
     generation_id: str
     node: str
-    route: str
-    provider: str | None = None
+    slot: str
+    family: str | None = None
     model_name: str | None = None
+    endpoint_host: str | None = None
     attempt: int
     section_id: str | None = None
 
@@ -88,9 +92,10 @@ class LLMCallSucceededEvent(BaseModel):
     type: Literal["llm_call_succeeded"] = "llm_call_succeeded"
     generation_id: str
     node: str
-    route: str
-    provider: str | None = None
+    slot: str
+    family: str | None = None
     model_name: str | None = None
+    endpoint_host: str | None = None
     attempt: int
     section_id: str | None = None
     latency_ms: float | None = None
@@ -103,14 +108,75 @@ class LLMCallFailedEvent(BaseModel):
     type: Literal["llm_call_failed"] = "llm_call_failed"
     generation_id: str
     node: str
-    route: str
-    provider: str | None = None
+    slot: str
+    family: str | None = None
     model_name: str | None = None
+    endpoint_host: str | None = None
     attempt: int
     section_id: str | None = None
     latency_ms: float | None = None
     retryable: bool = True
     error: str
+
+
+class SectionAttemptStartedEvent(BaseModel):
+    type: Literal["section_attempt_started"] = "section_attempt_started"
+    generation_id: str
+    section_id: str
+    attempt: int
+    trigger: Literal["initial", "rerender"]
+    started_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class NodeStartedEvent(BaseModel):
+    type: Literal["node_started"] = "node_started"
+    generation_id: str
+    node: str
+    attempt: int | None = None
+    section_id: str | None = None
+    started_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class NodeFinishedEvent(BaseModel):
+    type: Literal["node_finished"] = "node_finished"
+    generation_id: str
+    node: str
+    status: Literal["succeeded", "failed"]
+    attempt: int | None = None
+    section_id: str | None = None
+    latency_ms: float | None = None
+    error: str | None = None
+    finished_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class SectionReportUpdatedEvent(BaseModel):
+    type: Literal["section_report_updated"] = "section_report_updated"
+    generation_id: str
+    section_id: str
+    source: Literal["assembler", "qc_agent"]
+    report: PipelineSectionReport
+    updated_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class SectionRetryQueuedEvent(BaseModel):
+    type: Literal["section_retry_queued"] = "section_retry_queued"
+    generation_id: str
+    section_id: str
+    reason: str
+    block_type: str
+    next_attempt: int
+    max_attempts: int
+    queued_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
 
 PipelineEvent = (
@@ -123,6 +189,11 @@ PipelineEvent = (
     | LLMCallStartedEvent
     | LLMCallSucceededEvent
     | LLMCallFailedEvent
+    | SectionAttemptStartedEvent
+    | NodeStartedEvent
+    | NodeFinishedEvent
+    | SectionReportUpdatedEvent
+    | SectionRetryQueuedEvent
 )
 
 
@@ -164,6 +235,11 @@ __all__ = [
     "QCCompleteEvent",
     "SectionReadyEvent",
     "SectionStartedEvent",
+    "SectionAttemptStartedEvent",
+    "NodeStartedEvent",
+    "NodeFinishedEvent",
+    "SectionReportUpdatedEvent",
+    "SectionRetryQueuedEvent",
     "event_bus",
     "LLMCallStartedEvent",
     "LLMCallSucceededEvent",

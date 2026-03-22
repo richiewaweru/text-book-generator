@@ -86,8 +86,11 @@ def _check_capacity(section_dict: dict) -> list[str]:
 async def section_assembler(
     state: TextbookPipelineState | dict,
     *,
-    provider_overrides: dict | None = None,
+    model_overrides: dict | None = None,
 ) -> dict:
+    """Validate the generated section and attach non-blocking QC warnings."""
+
+    _ = model_overrides
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
 

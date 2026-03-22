@@ -21,6 +21,7 @@ class Generation(BaseModel):
     resolved_template_id: str | None = None
     requested_preset_id: str
     resolved_preset_id: str | None = None
+    section_count: int | None = None
     quality_passed: bool | None = None
     generation_time_seconds: float | None = None
     source_generation_id: str | None = None

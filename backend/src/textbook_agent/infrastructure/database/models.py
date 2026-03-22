@@ -70,6 +70,7 @@ class GenerationModel(Base):
     resolved_template_id = Column(String, nullable=True, index=True)
     requested_preset_id = Column(String, nullable=False, index=True)
     resolved_preset_id = Column(String, nullable=True, index=True)
+    section_count = Column(Integer, nullable=True)
     quality_passed = Column(Boolean, nullable=True)
     generation_time_seconds = Column(Float, nullable=True)
     source_generation_id = Column(String, nullable=True, index=True)

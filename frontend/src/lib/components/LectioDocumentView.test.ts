@@ -48,6 +48,7 @@ describe('LectioDocumentView', () => {
 					preset_id: 'blue-classroom',
 					source_generation_id: null,
 					status: 'completed',
+					section_manifest: [],
 					sections: [
 						{
 							section_id: 'sec_1',
@@ -71,5 +72,45 @@ describe('LectioDocumentView', () => {
 		expect(screen.getByRole('heading', { name: /^Derivatives$/i })).toBeTruthy();
 		expect(screen.getByText(/guided concept path/i)).toBeTruthy();
 		expect(screen.getByText(/why derivatives matter/i)).toBeTruthy();
+	});
+
+	it('renders pending placeholders when section slots include in-flight sections', () => {
+		render(LectioDocumentView, {
+			props: {
+				document: {
+					generation_id: 'gen_123',
+					subject: 'Derivatives',
+					context: 'A first pass through rates of change',
+					mode: 'balanced',
+					template_id: 'guided-concept-path',
+					preset_id: 'blue-classroom',
+					source_generation_id: null,
+					status: 'running',
+					section_manifest: [
+						{ section_id: 'sec_1', title: 'Why derivatives matter', position: 1 },
+						{ section_id: 'sec_2', title: 'Instantaneous change', position: 2 }
+					],
+					sections: [],
+					qc_reports: [],
+					quality_passed: null,
+					error: null,
+					created_at: '2026-03-19T00:00:00Z',
+					updated_at: '2026-03-19T00:00:00Z',
+					completed_at: null
+				} as any,
+				sectionSlots: [
+					{
+						section_id: 'sec_1',
+						title: 'Why derivatives matter',
+						position: 1,
+						status: 'pending',
+						section: null
+					}
+				]
+			}
+		});
+
+		expect(screen.getByText(/Generating section 1/i)).toBeTruthy();
+		expect(screen.getByText(/Why derivatives matter/i)).toBeTruthy();
 	});
 });

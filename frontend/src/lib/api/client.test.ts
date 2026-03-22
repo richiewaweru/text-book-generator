@@ -81,6 +81,7 @@ describe('client API helpers', () => {
 					preset_id: 'blue-classroom',
 					source_generation_id: null,
 					status: 'running',
+					section_manifest: [],
 					sections: [],
 					qc_reports: [],
 					quality_passed: null,

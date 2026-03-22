@@ -1,8 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import type { SectionContent } from 'lectio';
 	import LectioDocumentView from '$lib/components/LectioDocumentView.svelte';
+	import {
+		applySectionReady,
+		applySectionStarted,
+		buildSectionSlots,
+		normalizeDocument
+	} from '$lib/generation/viewer-state';
 	import {
 		buildGenerationEventsUrl,
 		enhanceGeneration,
@@ -15,7 +20,8 @@
 		GenerationDetail,
 		GenerationDocument,
 		QCCompleteEvent,
-		SectionReadyEvent
+		SectionReadyEvent,
+		SectionStartedEvent
 	} from '$lib/types';
 
 	const generationId = $derived(page.params.id);
@@ -29,29 +35,24 @@
 	let streamState = $state<'idle' | 'connected' | 'reconnecting' | 'complete'>('idle');
 	let plannedSections = $state<number | null>(null);
 	let qcSummary = $state<{ passed: number; total: number } | null>(null);
+	let viewerWarning = $state<string | null>(null);
+	const sectionSlots = $derived(buildSectionSlots(document, plannedSections));
+	const readySectionCount = $derived(
+		sectionSlots.filter((slot) => slot.status === 'ready').length
+	);
 
 	function closeStream() {
 		eventSource?.close();
 		eventSource = null;
 	}
 
-	function upsertSection(nextSection: SectionContent) {
-		if (!document) {
-			return;
-		}
-		const sections = [...document.sections];
-		const existingIndex = sections.findIndex((section) => section.section_id === nextSection.section_id);
-		if (existingIndex >= 0) {
-			sections[existingIndex] = nextSection;
-		} else {
-			sections.push(nextSection);
-		}
-		document = { ...document, sections, status: 'running', updated_at: new Date().toISOString() };
-	}
-
 	async function refresh(id: string) {
-		detail = await getGenerationDetail(id);
-		document = await getGenerationDocument(id);
+		const [nextDetail, nextDocument] = await Promise.all([
+			getGenerationDetail(id),
+			getGenerationDocument(id)
+		]);
+		detail = nextDetail;
+		document = normalizeDocument(nextDocument);
 	}
 
 	function connectStream(id: string) {
@@ -65,10 +66,26 @@
 			plannedSections = payload.section_count;
 		});
 
+		source.addEventListener('section_started', (event) => {
+			const payload = JSON.parse((event as MessageEvent).data) as SectionStartedEvent;
+			if (!document) {
+				return;
+			}
+			document = applySectionStarted(document, payload);
+		});
+
 		source.addEventListener('section_ready', (event) => {
 			const payload = JSON.parse((event as MessageEvent).data) as SectionReadyEvent;
 			plannedSections = payload.total_sections;
-			upsertSection(payload.section);
+			if (!document) {
+				return;
+			}
+			const result = applySectionReady(document, payload);
+			document = result.document;
+			if (result.warning) {
+				console.error('[Lectio] Section validation failed:', result.warning.message);
+				viewerWarning = result.warning.message;
+			}
 		});
 
 		source.addEventListener('qc_complete', (event) => {
@@ -100,11 +117,15 @@
 		error = null;
 		qcSummary = null;
 		plannedSections = null;
+		viewerWarning = null;
 		closeStream();
 
 		try {
 			await refresh(id);
-			plannedSections = document?.sections.length ?? null;
+			plannedSections =
+				detail?.section_count ??
+				(document?.section_manifest.length || null) ??
+				(document?.sections.length || null);
 
 			if (detail?.status === 'failed') {
 				error = friendlyGenerationErrorMessage(detail.error, detail.error_type, detail.error_code);
@@ -176,13 +197,17 @@
 	{#if plannedSections !== null}
 		<div class="status-panel">
 			<p>
-				Sections ready: {document?.sections.length ?? 0} / {plannedSections}
+				Sections ready: {readySectionCount} / {plannedSections}
 			</p>
 			<p>Stream: {streamState}</p>
 			{#if qcSummary}
 				<p>QC: {qcSummary.passed} / {qcSummary.total} passing</p>
 			{/if}
 		</div>
+	{/if}
+
+	{#if viewerWarning}
+		<div class="warning"><strong>Viewer warning:</strong> {viewerWarning}</div>
 	{/if}
 
 	{#if detail?.mode === 'draft'}
@@ -197,7 +222,7 @@
 	{:else if loading}
 		<p>Loading generation...</p>
 	{:else if document}
-		<LectioDocumentView {document} />
+		<LectioDocumentView {document} sectionSlots={sectionSlots} />
 	{:else}
 		<p>No document is available yet.</p>
 	{/if}
@@ -268,6 +293,7 @@
 	}
 
 	.status-panel,
+	.warning,
 	.draft-note,
 	.error {
 		padding: 1rem;
@@ -291,5 +317,11 @@
 		border-color: rgba(148, 66, 46, 0.18);
 		background: rgba(255, 242, 238, 0.9);
 		color: #7d3524;
+	}
+
+	.warning {
+		border-color: rgba(169, 129, 37, 0.18);
+		background: rgba(255, 248, 225, 0.92);
+		color: #7f5d13;
 	}
 </style>

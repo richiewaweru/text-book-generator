@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 from pipeline.api import PipelineDocument, PipelineResult
+from pipeline.events import SectionReadyEvent, SectionStartedEvent
 from pipeline.types.section_content import (
     ExplanationContent,
     HookHeroContent,
@@ -16,6 +17,7 @@ from pipeline.types.section_content import (
     SectionHeaderContent,
     WhatNextContent,
 )
+from textbook_agent.application.dtos import GenerationReport
 from textbook_agent.domain.entities.generation import Generation
 from textbook_agent.domain.entities.student_profile import StudentProfile
 from textbook_agent.domain.entities.user import User
@@ -24,6 +26,7 @@ from textbook_agent.interface.api.dependencies import (
     get_document_repository,
     get_generation_repository,
     get_jwt_handler,
+    get_report_repository,
     get_student_profile_repository,
     get_user_repository,
 )
@@ -99,6 +102,14 @@ def _document(
         template_id="guided-concept-path",
         preset_id="blue-classroom",
         status=status,
+        section_manifest=[
+            {
+                "section_id": section.section_id,
+                "title": section.header.title,
+                "position": index + 1,
+            }
+            for index, section in enumerate(sections or [_section()])
+        ],
         sections=sections or [_section()],
         qc_reports=[],
         quality_passed=True if status == "completed" else None,
@@ -144,6 +155,18 @@ class InMemoryDocumentRepo:
 
     async def load_document(self, path: str) -> PipelineDocument:
         return self.store[path]
+
+
+class InMemoryReportRepo:
+    def __init__(self) -> None:
+        self.store: dict[str, GenerationReport] = {}
+
+    async def save_report(self, report: GenerationReport) -> str:
+        self.store[report.generation_id] = report
+        return f"memory://report/{report.generation_id}"
+
+    async def load_report(self, generation_id: str) -> GenerationReport:
+        return self.store[generation_id]
 
 
 class StaticProfileRepo:
@@ -195,6 +218,7 @@ PROFILE = StudentProfile(
 
 GEN_REPO = InMemoryGenerationRepo()
 DOC_REPO = InMemoryDocumentRepo()
+REPORT_REPO = InMemoryReportRepo()
 USER_REPO = StaticUserRepo()
 PROFILE_REPO = StaticProfileRepo(PROFILE)
 
@@ -219,11 +243,16 @@ async def override_user_repo():
     return USER_REPO
 
 
+async def override_report_repo():
+    return REPORT_REPO
+
+
 app.dependency_overrides[get_current_user] = override_current_user
 app.dependency_overrides[get_generation_repository] = override_generation_repo
 app.dependency_overrides[get_document_repository] = override_document_repo
 app.dependency_overrides[get_student_profile_repository] = override_profile_repo
 app.dependency_overrides[get_user_repository] = override_user_repo
+app.dependency_overrides[get_report_repository] = override_report_repo
 
 JWT_HANDLER = get_jwt_handler()
 AUTH_HEADERS = {
@@ -283,10 +312,12 @@ class TestGenerationApi:
         payload = response.json()
         assert payload["mode"] == "balanced"
         assert payload["events_url"].endswith("/events")
+        assert payload["report_url"].endswith("/report")
         generation = await GEN_REPO.find_by_id(payload["generation_id"])
         assert generation is not None
         assert generation.requested_template_id == "guided-concept-path"
         assert generation.requested_preset_id == "blue-classroom"
+        assert generation.section_count == 4
 
     async def test_create_generation_rejects_invalid_template_pair(self):
         async with await _client() as client:
@@ -334,7 +365,116 @@ class TestGenerationApi:
         assert response.status_code == 200
         payload = response.json()
         assert payload["template_id"] == "guided-concept-path"
+        assert payload["section_manifest"][0]["section_id"] == "s-01"
         assert payload["sections"][0]["section_id"] == "s-01"
+
+    async def test_generation_detail_and_history_include_section_count(self):
+        generation_id = "gen-history"
+        await GEN_REPO.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER.id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                status="completed",
+                document_path="memory://gen-history",
+                requested_template_id="guided-concept-path",
+                resolved_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                resolved_preset_id="blue-classroom",
+                section_count=5,
+                quality_passed=True,
+            )
+        )
+
+        async with await _client() as client:
+            detail_response = await client.get(
+                f"/api/v1/generations/{generation_id}",
+                headers=AUTH_HEADERS,
+            )
+            history_response = await client.get(
+                "/api/v1/generations",
+                headers=AUTH_HEADERS,
+            )
+
+        assert detail_response.status_code == 200
+        assert detail_response.json()["section_count"] == 5
+        assert detail_response.json()["report_url"].endswith("/report")
+        assert any(item["section_count"] == 5 for item in history_response.json())
+
+    async def test_generation_report_endpoint_returns_saved_report(self):
+        generation_id = "gen-report"
+        await REPORT_REPO.save_report(
+            GenerationReport(
+                generation_id=generation_id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                template_id="guided-concept-path",
+                preset_id="blue-classroom",
+                status="completed",
+                outcome="partial",
+                section_count=2,
+            )
+        )
+        await GEN_REPO.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER.id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                status="completed",
+                requested_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+            )
+        )
+
+        async with await _client() as client:
+            response = await client.get(
+                f"/api/v1/generations/{generation_id}/report",
+                headers=AUTH_HEADERS,
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["generation_id"] == generation_id
+        assert payload["outcome"] == "partial"
+
+    async def test_generation_report_endpoint_requires_ownership(self):
+        generation_id = "gen-report-hidden"
+        await REPORT_REPO.save_report(
+            GenerationReport(
+                generation_id=generation_id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                template_id="guided-concept-path",
+                preset_id="blue-classroom",
+                status="completed",
+            )
+        )
+        await GEN_REPO.create(
+            Generation(
+                id=generation_id,
+                user_id="someone-else",
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                status="completed",
+                requested_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+            )
+        )
+
+        async with await _client() as client:
+            response = await client.get(
+                f"/api/v1/generations/{generation_id}/report",
+                headers=AUTH_HEADERS,
+            )
+
+        assert response.status_code == 404
 
     async def test_events_endpoint_supports_stream_token_for_completed_generation(self):
         generation_id = "gen-events"
@@ -364,6 +504,156 @@ class TestGenerationApi:
             )
         assert response.status_code == 200
         assert "event: complete" in response.text
+        assert "/report" in response.text
+
+    async def test_streaming_partial_saves_keep_manifest_and_section_order(self):
+        async def fake_run_pipeline(command, on_event=None):
+            await on_event(
+                SectionStartedEvent(
+                    generation_id=command.generation_id or "gen-partial",
+                    section_id="s-01",
+                    title="First section",
+                    position=1,
+                )
+            )
+            await on_event(
+                SectionStartedEvent(
+                    generation_id=command.generation_id or "gen-partial",
+                    section_id="s-02",
+                    title="Second section",
+                    position=2,
+                )
+            )
+            await on_event(
+                SectionReadyEvent(
+                    generation_id=command.generation_id or "gen-partial",
+                    section_id="s-02",
+                    section=_section("s-02"),
+                    completed_sections=1,
+                    total_sections=2,
+                )
+            )
+            partial_document = DOC_REPO.store[f"memory://{command.generation_id}"]
+            assert [item.section_id for item in partial_document.section_manifest] == ["s-01", "s-02"]
+            assert [section.section_id for section in partial_document.sections] == ["s-02"]
+
+            await on_event(
+                SectionReadyEvent(
+                    generation_id=command.generation_id or "gen-partial",
+                    section_id="s-01",
+                    section=_section("s-01"),
+                    completed_sections=2,
+                    total_sections=2,
+                )
+            )
+            ordered_document = DOC_REPO.store[f"memory://{command.generation_id}"]
+            assert [section.section_id for section in ordered_document.sections] == ["s-01", "s-02"]
+
+            return PipelineResult(
+                document=_document(
+                    command.generation_id or "gen-partial",
+                    sections=[_section("s-01"), _section("s-02")],
+                ),
+                completed_nodes=["curriculum_planner", "process_section", "qc_agent"],
+                generation_time_seconds=0.01,
+            )
+
+        with patch(
+            "textbook_agent.interface.api.routes.generation.run_pipeline_streaming",
+            side_effect=fake_run_pipeline,
+        ):
+            async with await _client() as client:
+                response = await client.post(
+                    "/api/v1/generations",
+                    json={
+                        "subject": "Calculus",
+                        "context": "Explain limits",
+                        "mode": "balanced",
+                        "template_id": "guided-concept-path",
+                        "preset_id": "blue-classroom",
+                        "section_count": 2,
+                    },
+                    headers=AUTH_HEADERS,
+                )
+                await asyncio.sleep(0.05)
+
+        assert response.status_code == 202
+
+    async def test_completed_generation_with_missing_sections_writes_partial_report(self):
+        async def fake_run_pipeline(command, on_event=None):
+            for index, section_id in enumerate(("s-01", "s-02", "s-03", "s-04"), start=1):
+                await on_event(
+                    SectionStartedEvent(
+                        generation_id=command.generation_id or "gen-missing",
+                        section_id=section_id,
+                        title=f"Section {index}",
+                        position=index,
+                    )
+                )
+            await on_event(
+                SectionReadyEvent(
+                    generation_id=command.generation_id or "gen-missing",
+                    section_id="s-01",
+                    section=_section("s-01"),
+                    completed_sections=1,
+                    total_sections=4,
+                )
+            )
+            await on_event(
+                SectionReadyEvent(
+                    generation_id=command.generation_id or "gen-missing",
+                    section_id="s-02",
+                    section=_section("s-02"),
+                    completed_sections=2,
+                    total_sections=4,
+                )
+            )
+            document = _document(
+                command.generation_id or "gen-missing",
+                sections=[_section("s-01"), _section("s-02")],
+            ).model_copy(
+                update={
+                    "section_manifest": [
+                        {"section_id": "s-01", "title": "Section 1", "position": 1},
+                        {"section_id": "s-02", "title": "Section 2", "position": 2},
+                        {"section_id": "s-03", "title": "Section 3", "position": 3},
+                        {"section_id": "s-04", "title": "Section 4", "position": 4},
+                    ]
+                }
+            )
+            return PipelineResult(
+                document=document,
+                completed_nodes=["curriculum_planner", "process_section", "qc_agent"],
+                generation_time_seconds=9.5,
+            )
+
+        with patch(
+            "textbook_agent.interface.api.routes.generation.run_pipeline_streaming",
+            side_effect=fake_run_pipeline,
+        ):
+            async with await _client() as client:
+                response = await client.post(
+                    "/api/v1/generations",
+                    json={
+                        "subject": "Calculus",
+                        "context": "Explain limits",
+                        "mode": "balanced",
+                        "template_id": "guided-concept-path",
+                        "preset_id": "blue-classroom",
+                        "section_count": 4,
+                    },
+                    headers=AUTH_HEADERS,
+                )
+                await asyncio.sleep(0.05)
+
+        report = await REPORT_REPO.load_report(response.json()["generation_id"])
+        assert report.status == "completed"
+        assert report.outcome == "partial"
+        assert report.summary.ready_sections == 2
+        assert {section.section_id for section in report.sections if section.status != "ready"} == {
+            "s-03",
+            "s-04",
+        }
 
     async def test_enhance_generation_creates_child_from_draft_seed(self):
         source_id = "gen-draft"
@@ -382,6 +672,7 @@ class TestGenerationApi:
                 resolved_template_id="guided-concept-path",
                 requested_preset_id="blue-classroom",
                 resolved_preset_id="blue-classroom",
+                section_count=1,
                 quality_passed=None,
             )
         )
@@ -410,6 +701,8 @@ class TestGenerationApi:
         assert response.status_code == 202
         payload = response.json()
         assert payload["source_generation_id"] == source_id
+        assert payload["report_url"].endswith("/report")
         child = await GEN_REPO.find_by_id(payload["generation_id"])
         assert child is not None
         assert child.source_generation_id == source_id
+        assert child.section_count == 1

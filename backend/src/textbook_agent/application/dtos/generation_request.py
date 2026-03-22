@@ -24,3 +24,4 @@ class GenerationAcceptedResponse(BaseModel):
     source_generation_id: str | None = None
     events_url: str
     document_url: str
+    report_url: str

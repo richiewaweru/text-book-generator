@@ -13,9 +13,11 @@ from pipeline.types.section_content import SimulationContent
 async def interaction_generator(
     state: TextbookPipelineState | dict,
     *,
-    provider_overrides: dict | None = None,
+    model_overrides: dict | None = None,
 ) -> dict:
-    _ = provider_overrides
+    """Materialize the deterministic simulation payload for the current section."""
+
+    _ = model_overrides
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
     spec = state.interaction_specs.get(sid)

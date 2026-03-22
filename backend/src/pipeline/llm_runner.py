@@ -7,6 +7,7 @@ import time
 from typing import Any, Mapping
 
 from pydantic import ValidationError
+from pydantic_ai.exceptions import ModelHTTPError, UserError
 
 from pipeline.events import (
     LLMCallFailedEvent,
@@ -14,7 +15,15 @@ from pipeline.events import (
     LLMCallSucceededEvent,
     event_bus,
 )
-from pipeline.providers.registry import ModelRoute, ModelSpec, get_node_text_spec
+from pipeline.providers.registry import (
+    ModelFamily,
+    ModelSlot,
+    ModelSpec,
+    effective_text_spec,
+    endpoint_host,
+    get_node_text_slot,
+    get_node_text_spec,
+)
 from pipeline.types.requests import GenerationMode
 
 logger = logging.getLogger(__name__)
@@ -22,18 +31,66 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RetryPolicy:
+    """Retry configuration for the shared LLM execution path."""
+
     max_attempts: int = 2
     base_delay_seconds: float = 0.5
 
 
-# Best-effort defaults for Anthropic-style pricing (USD per 1M tokens).
-# If you need exact pricing, wire env overrides by adjusting this table.
-TOKEN_PRICE_USD_PER_1M: dict[ModelRoute, tuple[float, float]] = {
-    # input, output
-    ModelRoute.TEXT_FAST: (0.25, 1.25),
-    ModelRoute.TEXT_STANDARD: (3.0, 15.0),
-    ModelRoute.TEXT_CREATIVE: (3.0, 15.0),
+# Cost keys stay exact by design so we do not guess vendor pricing. Unknown
+# models report `cost_usd=None`, which is safer than inventing a fallback rate.
+TOKEN_PRICE_USD_PER_1M_BY_MODEL: dict[str, tuple[float, float]] = {
+    "anthropic:claude-haiku-4-5-20251001": (0.25, 1.25),
+    "anthropic:claude-sonnet-4-6": (3.0, 15.0),
+    "test:TestModel": (0.0, 0.0),
 }
+
+
+def _price_key(effective_spec: ModelSpec) -> str:
+    """Build the exact pricing key for the resolved runtime model."""
+
+    if effective_spec.family == ModelFamily.OPENAI_COMPATIBLE:
+        host = endpoint_host(effective_spec.base_url)
+        if host:
+            return f"{effective_spec.family.value}:{host}:{effective_spec.model_name}"
+    return f"{effective_spec.family.value}:{effective_spec.model_name}"
+
+
+def _price_per_1m(effective_spec: ModelSpec) -> tuple[float, float] | None:
+    """Return the exact configured price row for a resolved model, if known."""
+
+    return TOKEN_PRICE_USD_PER_1M_BY_MODEL.get(_price_key(effective_spec))
+
+
+def _should_publish_events(generation_id: str) -> bool:
+    return bool(generation_id and generation_id.strip())
+
+
+def _publish_llm_event(generation_id: str, event: Any) -> None:
+    if _should_publish_events(generation_id):
+        event_bus.publish(generation_id, event)
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, (UserError, ValidationError)):
+        return False
+    if isinstance(exc, ModelHTTPError):
+        return exc.status_code in {408, 429, 500, 502, 503, 504}
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return True
+    try:
+        import httpx
+
+        return isinstance(
+            exc,
+            (
+                httpx.TimeoutException,
+                httpx.ConnectError,
+                httpx.ReadError,
+            ),
+        )
+    except ImportError:
+        return False
 
 
 def _extract_usage(result: Any) -> tuple[int | None, int | None]:
@@ -58,15 +115,12 @@ def _extract_usage(result: Any) -> tuple[int | None, int | None]:
             return int(val)
         return None
 
-    # Input tokens
     input_tokens = (
         get_field(usage, "input_tokens")
         or get_field(usage, "prompt_tokens")
         or get_field(usage, "input_token_count")
         or get_field(usage, "prompt_token_count")
     )
-
-    # Output tokens
     output_tokens = (
         get_field(usage, "output_tokens")
         or get_field(usage, "completion_tokens")
@@ -77,10 +131,21 @@ def _extract_usage(result: Any) -> tuple[int | None, int | None]:
     return input_tokens, output_tokens
 
 
-def _compute_cost_usd(route: ModelRoute, tokens_in: int | None, tokens_out: int | None) -> float | None:
+def _compute_cost_usd(
+    effective_spec: ModelSpec,
+    tokens_in: int | None,
+    tokens_out: int | None,
+) -> float | None:
+    """Compute best-effort cost using exact model pricing only."""
+
     if tokens_in is None or tokens_out is None:
         return None
-    in_usd, out_usd = TOKEN_PRICE_USD_PER_1M.get(route, (0.0, 0.0))
+
+    prices = _price_per_1m(effective_spec)
+    if prices is None:
+        return None
+
+    in_usd, out_usd = prices
     return (tokens_in / 1_000_000) * in_usd + (tokens_out / 1_000_000) * out_usd
 
 
@@ -88,9 +153,10 @@ async def run_llm(
     *,
     generation_id: str,
     node: str,
-    route: ModelRoute,
     agent: Any,
     user_prompt: str,
+    model: Any | None = None,
+    slot: ModelSlot | None = None,
     section_id: str | None = None,
     retry_policy: RetryPolicy | None = None,
     spec: ModelSpec | None = None,
@@ -98,24 +164,50 @@ async def run_llm(
 ) -> Any:
     """
     Central choke point for LLM calls: retries + tracing events + cost accounting.
+
+    `slot` and the catalog `spec` are derived from the node name so callers do
+    not need to duplicate provider-routing logic.
+
+    Callers still pass the concrete `model` object that was given to
+    `Agent(model=...)` so diagnostics and cost reflect the real runtime client,
+    including test doubles and slot overrides.
     """
 
     retry_policy = retry_policy or RetryPolicy()
-    spec = spec or get_node_text_spec(node, generation_mode=generation_mode)
+    # The node name is the source of truth for slot resolution inside the
+    # pipeline. This keeps nodes simple and prevents routing details from
+    # leaking into every call site.
+    slot = slot or get_node_text_slot(node)
+    catalog_spec = spec or get_node_text_spec(node, generation_mode=generation_mode)
+    effective_spec = effective_text_spec(catalog_spec=catalog_spec, model=model)
+    effective_endpoint_host = (
+        endpoint_host(effective_spec.base_url)
+        if effective_spec.family == ModelFamily.OPENAI_COMPATIBLE
+        else None
+    )
+
+    publish = _should_publish_events(generation_id)
+    if not publish:
+        logger.debug(
+            "run_llm skipping event_bus (empty generation_id) node=%s slot=%s",
+            node,
+            slot.value,
+        )
 
     attempt = 0
     while attempt < retry_policy.max_attempts:
         attempt += 1
         started_at = time.perf_counter()
 
-        event_bus.publish(
+        _publish_llm_event(
             generation_id,
             LLMCallStartedEvent(
-                generation_id=generation_id,
+                generation_id=generation_id or "",
                 node=node,
-                route=route.value,
-                provider=spec.provider,
-                model_name=spec.model_name,
+                slot=slot.value,
+                family=effective_spec.family.value,
+                model_name=effective_spec.model_name,
+                endpoint_host=effective_endpoint_host,
                 attempt=attempt,
                 section_id=section_id,
             ),
@@ -126,16 +218,17 @@ async def run_llm(
             latency_ms = (time.perf_counter() - started_at) * 1000.0
 
             tokens_in, tokens_out = _extract_usage(result)
-            cost_usd = _compute_cost_usd(route, tokens_in, tokens_out)
+            cost_usd = _compute_cost_usd(effective_spec, tokens_in, tokens_out)
 
-            event_bus.publish(
+            _publish_llm_event(
                 generation_id,
                 LLMCallSucceededEvent(
-                    generation_id=generation_id,
+                    generation_id=generation_id or "",
                     node=node,
-                    route=route.value,
-                    provider=spec.provider,
-                    model_name=spec.model_name,
+                    slot=slot.value,
+                    family=effective_spec.family.value,
+                    model_name=effective_spec.model_name,
+                    endpoint_host=effective_endpoint_host,
                     attempt=attempt,
                     section_id=section_id,
                     latency_ms=latency_ms,
@@ -146,16 +239,16 @@ async def run_llm(
             )
             return result
         except ValidationError as exc:
-            # Output schema violations are rarely fixed by retrying.
             latency_ms = (time.perf_counter() - started_at) * 1000.0
-            event_bus.publish(
+            _publish_llm_event(
                 generation_id,
                 LLMCallFailedEvent(
-                    generation_id=generation_id,
+                    generation_id=generation_id or "",
                     node=node,
-                    route=route.value,
-                    provider=spec.provider,
-                    model_name=spec.model_name,
+                    slot=slot.value,
+                    family=effective_spec.family.value,
+                    model_name=effective_spec.model_name,
+                    endpoint_host=effective_endpoint_host,
                     attempt=attempt,
                     section_id=section_id,
                     latency_ms=latency_ms,
@@ -166,29 +259,25 @@ async def run_llm(
             raise
         except Exception as exc:
             latency_ms = (time.perf_counter() - started_at) * 1000.0
-            retryable = attempt < retry_policy.max_attempts
-
-            event_bus.publish(
+            can_retry = _is_retryable(exc) and attempt < retry_policy.max_attempts
+            _publish_llm_event(
                 generation_id,
                 LLMCallFailedEvent(
-                    generation_id=generation_id,
+                    generation_id=generation_id or "",
                     node=node,
-                    route=route.value,
-                    provider=spec.provider,
-                    model_name=spec.model_name,
+                    slot=slot.value,
+                    family=effective_spec.family.value,
+                    model_name=effective_spec.model_name,
+                    endpoint_host=effective_endpoint_host,
                     attempt=attempt,
                     section_id=section_id,
                     latency_ms=latency_ms,
-                    retryable=retryable,
+                    retryable=can_retry,
                     error=str(exc),
                 ),
             )
-
-            if not retryable:
+            if not can_retry:
                 raise
-
             await asyncio.sleep(retry_policy.base_delay_seconds * attempt)
 
-    # Defensive: should never get here because loop either returns or raises.
     raise RuntimeError("run_llm exhausted retries unexpectedly")
-

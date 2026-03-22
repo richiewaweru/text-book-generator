@@ -10,9 +10,19 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from pipeline.api import PipelineCommand, PipelineDocument
+from pipeline.api import PipelineCommand, PipelineDocument, PipelineSectionManifestItem
 from pipeline.contracts import get_contract, validate_preset_for_template
-from pipeline.events import CompleteEvent, ErrorEvent, SectionReadyEvent, event_bus
+from pipeline.events import (
+    CompleteEvent,
+    ErrorEvent,
+    LLMCallFailedEvent,
+    LLMCallStartedEvent,
+    LLMCallSucceededEvent,
+    SectionReadyEvent,
+    SectionStartedEvent,
+    event_bus,
+)
+from pipeline.runtime_diagnostics import clear_node_attempts
 from pipeline.run import run_pipeline_streaming
 from pipeline.types.requests import SeedDocument
 from textbook_agent.application.dtos import (
@@ -20,10 +30,16 @@ from textbook_agent.application.dtos import (
     GenerationAcceptedResponse,
     GenerationRequest,
 )
+from textbook_agent.application.services.generation_report_recorder import (
+    GenerationReportRecorder,
+)
 from textbook_agent.domain.entities.generation import Generation
 from textbook_agent.domain.entities.student_profile import StudentProfile
 from textbook_agent.domain.entities.user import User
 from textbook_agent.domain.ports.document_repository import DocumentRepository
+from textbook_agent.domain.ports.generation_report_repository import (
+    GenerationReportRepository,
+)
 from textbook_agent.domain.ports.generation_repository import GenerationRepository
 from textbook_agent.domain.ports.student_profile_repository import StudentProfileRepository
 from textbook_agent.domain.ports.user_repository import UserRepository
@@ -34,6 +50,7 @@ from textbook_agent.interface.api.dependencies import (
     get_document_repository,
     get_generation_repository,
     get_jwt_handler,
+    get_report_repository,
     get_settings,
     get_student_profile_repository,
     get_user_repository,
@@ -58,6 +75,7 @@ def _history_item(generation: Generation) -> dict:
         "resolved_template_id": generation.resolved_template_id,
         "requested_preset_id": generation.requested_preset_id,
         "resolved_preset_id": generation.resolved_preset_id,
+        "section_count": generation.section_count,
         "quality_passed": generation.quality_passed,
         "generation_time_seconds": generation.generation_time_seconds,
         "created_at": generation.created_at.isoformat() if generation.created_at else None,
@@ -66,6 +84,7 @@ def _history_item(generation: Generation) -> dict:
 
 
 def _detail_item(generation: Generation) -> dict:
+    _, _, report_url = _generation_urls(generation.id)
     return {
         "id": generation.id,
         "subject": generation.subject,
@@ -80,11 +99,13 @@ def _detail_item(generation: Generation) -> dict:
         "resolved_template_id": generation.resolved_template_id,
         "requested_preset_id": generation.requested_preset_id,
         "resolved_preset_id": generation.resolved_preset_id,
+        "section_count": generation.section_count,
         "quality_passed": generation.quality_passed,
         "generation_time_seconds": generation.generation_time_seconds,
         "created_at": generation.created_at.isoformat() if generation.created_at else None,
         "completed_at": generation.completed_at.isoformat() if generation.completed_at else None,
         "document_path": generation.document_path,
+        "report_url": report_url,
     }
 
 
@@ -100,16 +121,18 @@ def _grade_band(profile: StudentProfile) -> str:
     return mapping[profile.education_level]
 
 
-def _document_urls(generation_id: str) -> tuple[str, str]:
+def _generation_urls(generation_id: str) -> tuple[str, str, str]:
     return (
         f"/api/v1/generations/{generation_id}/events",
         f"/api/v1/generations/{generation_id}/document",
+        f"/api/v1/generations/{generation_id}/report",
     )
 
 
 def _initial_document(
     generation: Generation,
     *,
+    section_manifest: list[PipelineSectionManifestItem] | None = None,
     sections: list | None = None,
     status_value: str = "pending",
 ) -> PipelineDocument:
@@ -123,9 +146,57 @@ def _initial_document(
         preset_id=generation.requested_preset_id,
         source_generation_id=generation.source_generation_id,
         status=status_value,
+        section_manifest=section_manifest or [],
         sections=sections or [],
         created_at=generation.created_at,
         updated_at=now,
+    )
+
+
+def _sort_sections_by_manifest(
+    sections: list,
+    section_manifest: list[PipelineSectionManifestItem],
+) -> list:
+    if not section_manifest:
+        return sections
+
+    positions = {item.section_id: item.position for item in section_manifest}
+    fallback_position = len(positions) + 1
+    return sorted(
+        sections,
+        key=lambda section: (
+            positions.get(section.section_id, fallback_position),
+            section.section_id,
+        ),
+    )
+
+
+def _replace_or_append_manifest_item(
+    document: PipelineDocument,
+    section_id: str,
+    title: str,
+    position: int,
+) -> PipelineDocument:
+    manifest = list(document.section_manifest)
+    next_item = PipelineSectionManifestItem(
+        section_id=section_id,
+        title=title,
+        position=position,
+    )
+    for index, existing in enumerate(manifest):
+        if existing.section_id == section_id:
+            manifest[index] = next_item
+            break
+    else:
+        manifest.append(next_item)
+
+    manifest.sort(key=lambda item: (item.position, item.section_id))
+    return document.model_copy(
+        update={
+            "section_manifest": manifest,
+            "updated_at": datetime.now(timezone.utc),
+            "status": "running",
+        }
     )
 
 
@@ -139,7 +210,7 @@ def _replace_or_append_section(document: PipelineDocument, section) -> PipelineD
         sections.append(section)
     return document.model_copy(
         update={
-            "sections": sections,
+            "sections": _sort_sections_by_manifest(sections, document.section_manifest),
             "updated_at": datetime.now(timezone.utc),
             "status": "running",
         }
@@ -191,13 +262,63 @@ def _sse_payload(event: dict) -> str:
     return f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
 
 
+def _log_trace_event(generation_id: str, event) -> None:
+    if isinstance(event, LLMCallStartedEvent):
+        logger.info(
+            "LLM trace generation=%s event=started node=%s section=%s attempt=%s family=%s model=%s endpoint=%s",
+            generation_id,
+            event.node,
+            event.section_id or "-",
+            event.attempt,
+            event.family or "-",
+            event.model_name or "-",
+            event.endpoint_host or "-",
+        )
+        return
+
+    if isinstance(event, LLMCallSucceededEvent):
+        logger.info(
+            "LLM trace generation=%s event=succeeded node=%s section=%s attempt=%s latency_ms=%s tokens_in=%s tokens_out=%s cost_usd=%s family=%s model=%s endpoint=%s",
+            generation_id,
+            event.node,
+            event.section_id or "-",
+            event.attempt,
+            f"{event.latency_ms:.0f}" if event.latency_ms is not None else "-",
+            event.tokens_in if event.tokens_in is not None else "-",
+            event.tokens_out if event.tokens_out is not None else "-",
+            f"{event.cost_usd:.6f}" if event.cost_usd is not None else "-",
+            event.family or "-",
+            event.model_name or "-",
+            event.endpoint_host or "-",
+        )
+        return
+
+    if isinstance(event, LLMCallFailedEvent):
+        logger.warning(
+            "LLM trace generation=%s event=failed node=%s section=%s attempt=%s retryable=%s latency_ms=%s family=%s model=%s endpoint=%s error=%s",
+            generation_id,
+            event.node,
+            event.section_id or "-",
+            event.attempt,
+            event.retryable,
+            f"{event.latency_ms:.0f}" if event.latency_ms is not None else "-",
+            event.family or "-",
+            event.model_name or "-",
+            event.endpoint_host or "-",
+            event.error,
+        )
+
+
 async def _run_generation_job(
     generation: Generation,
     command: PipelineCommand,
     gen_repo: GenerationRepository,
     document_repo: DocumentRepository,
+    report_repo: GenerationReportRepository,
     initial_document: PipelineDocument,
 ) -> None:
+    recorder = GenerationReportRecorder(generation=generation, repository=report_repo)
+    await recorder.start()
     document = initial_document.model_copy(
         update={"status": "running", "updated_at": datetime.now(timezone.utc)}
     )
@@ -210,6 +331,14 @@ async def _run_generation_job(
 
     async def on_event(event) -> None:
         nonlocal document
+        if isinstance(event, SectionStartedEvent):
+            document = _replace_or_append_manifest_item(
+                document,
+                section_id=event.section_id,
+                title=event.title,
+                position=event.position,
+            )
+            await document_repo.save_document(document)
         if isinstance(event, SectionReadyEvent):
             document = _replace_or_append_section(document, event.section)
             await document_repo.save_document(document)
@@ -236,11 +365,22 @@ async def _run_generation_job(
             quality_passed=document.quality_passed,
             generation_time_seconds=result.generation_time_seconds,
         )
-        _, document_url = _document_urls(generation.id)
+        await recorder.wait_for_idle()
+        await recorder.finalize_success(
+            document=document,
+            generation_time_seconds=result.generation_time_seconds,
+        )
+        _, document_url, report_url = _generation_urls(generation.id)
         event_bus.publish(
             generation.id,
-            CompleteEvent(generation_id=generation.id, document_url=document_url),
+            CompleteEvent(
+                generation_id=generation.id,
+                document_url=document_url,
+                report_url=report_url,
+            ),
         )
+        await recorder.wait_for_idle()
+        recorder.log_final_summary()
     except Exception as exc:
         logger.exception("Generation %s failed", generation.id)
         classification = classify_generation_failure(exc)
@@ -262,10 +402,22 @@ async def _run_generation_job(
             error_type=classification.error_type,
             error_code=classification.error_code,
         )
+        await recorder.wait_for_idle()
+        await recorder.finalize_failure(error=str(exc))
+        _, _, report_url = _generation_urls(generation.id)
         event_bus.publish(
             generation.id,
-            ErrorEvent(generation_id=generation.id, message=str(exc)),
+            ErrorEvent(
+                generation_id=generation.id,
+                message=str(exc),
+                report_url=report_url,
+            ),
         )
+        await recorder.wait_for_idle()
+        recorder.log_final_summary()
+    finally:
+        await recorder.stop()
+        clear_node_attempts(generation.id)
 
 
 def _validate_template_and_preset(template_id: str, preset_id: str) -> None:
@@ -287,6 +439,7 @@ async def create_generation(
     profile_repo: StudentProfileRepository = Depends(get_student_profile_repository),
     gen_repo: GenerationRepository = Depends(get_generation_repository),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    report_repo: GenerationReportRepository = Depends(get_report_repository),
 ):
     _validate_template_and_preset(req.template_id, req.preset_id)
     profile = await profile_repo.find_by_user_id(current_user.id)
@@ -302,6 +455,7 @@ async def create_generation(
         mode=req.mode,
         requested_template_id=req.template_id,
         requested_preset_id=req.preset_id,
+        section_count=req.section_count,
     )
     initial_document = _initial_document(generation)
     document_path = await document_repo.save_document(initial_document)
@@ -321,16 +475,24 @@ async def create_generation(
     )
 
     asyncio.create_task(
-        _run_generation_job(generation, command, gen_repo, document_repo, initial_document)
+        _run_generation_job(
+            generation,
+            command,
+            gen_repo,
+            document_repo,
+            report_repo,
+            initial_document,
+        )
     )
 
-    events_url, document_url = _document_urls(generation_id)
+    events_url, document_url, report_url = _generation_urls(generation_id)
     return GenerationAcceptedResponse(
         generation_id=generation_id,
         status="pending",
         mode=req.mode,
         events_url=events_url,
         document_url=document_url,
+        report_url=report_url,
     )
 
 
@@ -345,6 +507,7 @@ async def enhance_generation(
     current_user: User = Depends(get_current_user),
     gen_repo: GenerationRepository = Depends(get_generation_repository),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    report_repo: GenerationReportRepository = Depends(get_report_repository),
 ):
     if req.mode == GenerationMode.DRAFT:
         raise HTTPException(status_code=409, detail="Enhancement target must be balanced or strict")
@@ -370,10 +533,12 @@ async def enhance_generation(
         or source_generation.requested_template_id,
         requested_preset_id=source_generation.resolved_preset_id
         or source_generation.requested_preset_id,
+        section_count=source_generation.section_count,
         source_generation_id=generation_id,
     )
     initial_document = _initial_document(
         generation,
+        section_manifest=list(source_document.section_manifest),
         sections=list(source_document.sections),
         status_value="running",
     )
@@ -398,10 +563,17 @@ async def enhance_generation(
     )
 
     asyncio.create_task(
-        _run_generation_job(generation, command, gen_repo, document_repo, initial_document)
+        _run_generation_job(
+            generation,
+            command,
+            gen_repo,
+            document_repo,
+            report_repo,
+            initial_document,
+        )
     )
 
-    events_url, document_url = _document_urls(child_generation_id)
+    events_url, document_url, report_url = _generation_urls(child_generation_id)
     return GenerationAcceptedResponse(
         generation_id=child_generation_id,
         status="pending",
@@ -409,6 +581,7 @@ async def enhance_generation(
         source_generation_id=generation_id,
         events_url=events_url,
         document_url=document_url,
+        report_url=report_url,
     )
 
 
@@ -451,6 +624,23 @@ async def get_generation_document(
     return document.model_dump(mode="json", exclude_none=True)
 
 
+@router.get("/generations/{generation_id}/report")
+async def get_generation_report(
+    generation_id: str,
+    current_user: User = Depends(get_current_user),
+    gen_repo: GenerationRepository = Depends(get_generation_repository),
+    report_repo: GenerationReportRepository = Depends(get_report_repository),
+):
+    generation = await gen_repo.find_by_id(generation_id)
+    if generation is None or generation.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    try:
+        report = await report_repo.load_report(generation_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Report not found") from exc
+    return report.model_dump(mode="json", exclude_none=True)
+
+
 @router.get("/generations/{generation_id}/events")
 async def get_generation_events(
     generation_id: str,
@@ -466,18 +656,22 @@ async def get_generation_events(
 
     async def stream() -> AsyncIterator[str]:
         if generation.status == "completed":
-            _, document_url = _document_urls(generation_id)
+            _, document_url, report_url = _generation_urls(generation_id)
             yield _sse_payload(
-                CompleteEvent(generation_id=generation_id, document_url=document_url).model_dump(
-                    mode="json", exclude_none=True
-                )
+                CompleteEvent(
+                    generation_id=generation_id,
+                    document_url=document_url,
+                    report_url=report_url,
+                ).model_dump(mode="json", exclude_none=True)
             )
             return
         if generation.status == "failed":
+            _, _, report_url = _generation_urls(generation_id)
             yield _sse_payload(
                 ErrorEvent(
                     generation_id=generation_id,
                     message=generation.error or "Generation failed",
+                    report_url=report_url,
                 ).model_dump(mode="json", exclude_none=True)
             )
             return

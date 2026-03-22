@@ -1,17 +1,15 @@
 """
-pipeline.providers.registry
+Central command center for pipeline text model selection.
 
-Central model routing for the pipeline.
+The pipeline speaks in terms of node intent, not vendor-specific clients:
 
-Nodes never mention a concrete model name. They ask for a node-scoped model
-and this registry resolves it using:
-  - NODE_REQUIREMENTS (capability + coarse requirements)
-  - a stable ModelRoute derived from those requirements
-  - a route-scoped catalog entry (vendor + model name)
-  - env overrides
+- nodes map to slots (`fast`, `standard`, `creative`)
+- code defaults define a `ModelSpec` profile for each generation mode
+- slot-scoped env overrides can replace those defaults
+- transport families turn a `ModelSpec` into the concrete PydanticAI model
 
-Text/vision models resolve to PydanticAI model objects usable in `Agent(model=...)`.
-Non-text capabilities (e.g. image generation) are intentionally not wired yet.
+This keeps the control plane easy to debug while letting OpenAI-compatible
+providers share one code path through `openai_compatible`.
 """
 
 from __future__ import annotations
@@ -19,248 +17,408 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import os
+from typing import Any
+from urllib.parse import urlparse
 
 from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.test import TestModel
 
 from pipeline.types.requests import GenerationMode
 
 
-class Capability(str, Enum):
-    TEXT = "text"
-    VISION = "vision"
-    IMAGE_GEN = "image_gen"
-    EMBEDDINGS = "embeddings"
+class ModelSlot(str, Enum):
+    FAST = "fast"
+    STANDARD = "standard"
+    CREATIVE = "creative"
 
 
-@dataclass
-class NodeModelRequirements:
-    capability: Capability
-    quality_class: str = "standard"  # low | standard | high (coarse)
-    latency_class: str = "standard"  # fast | standard | slow (coarse)
-    cost_class: str = "standard"  # cheap | standard | premium (coarse)
-
-
-class ModelRoute(str, Enum):
-    """
-    Stable routing keys used for env overrides and node mapping.
-
-    These are intentionally coarse and human-friendly. They are not tied to a vendor.
-    """
-
-    TEXT_FAST = "text_fast"
-    TEXT_STANDARD = "text_standard"
-    TEXT_CREATIVE = "text_creative"
+class ModelFamily(str, Enum):
+    ANTHROPIC = "anthropic"
+    GOOGLE = "google"
+    OPENAI_COMPATIBLE = "openai_compatible"
+    TEST = "test"
 
 
 @dataclass(frozen=True)
 class ModelSpec:
-    capability: Capability
-    provider: str  # 'anthropic' | 'openai' | 'gemini' | ...
+    """Resolved transport configuration for one text-model slot."""
+
+    family: ModelFamily
     model_name: str
-    # Coarse metadata used for humans + future policy; not relied on for correctness.
-    quality_class: str = "standard"
-    latency_class: str = "standard"
-    cost_class: str = "standard"
+    base_url: str | None = None
+    api_key_env: str | None = None
 
 
-NODE_REQUIREMENTS: dict[str, NodeModelRequirements] = {
-    "curriculum_planner": NodeModelRequirements(
-        capability=Capability.TEXT,
-        quality_class="standard",
-        latency_class="fast",
-        cost_class="cheap",
-    ),
-    "content_generator": NodeModelRequirements(
-        capability=Capability.TEXT,
-        quality_class="high",
-        latency_class="standard",
-        cost_class="standard",
-    ),
-    "diagram_generator": NodeModelRequirements(
-        capability=Capability.TEXT,
-        quality_class="standard",
-        latency_class="fast",
-        cost_class="cheap",
-    ),
-    "interaction_generator": NodeModelRequirements(
-        capability=Capability.TEXT,
-        quality_class="standard",
-        latency_class="standard",
-        cost_class="standard",
-    ),
-    "qc_agent": NodeModelRequirements(
-        capability=Capability.TEXT,
-        quality_class="standard",
-        latency_class="fast",
-        cost_class="cheap",
-    ),
+NODE_MODEL_SLOTS: dict[str, ModelSlot] = {
+    "curriculum_planner": ModelSlot.FAST,
+    "content_generator": ModelSlot.STANDARD,
+    "diagram_generator": ModelSlot.FAST,
+    "qc_agent": ModelSlot.FAST,
 }
 
-_DEFAULT_ROUTE_CATALOG: dict[ModelRoute, ModelSpec] = {
-    ModelRoute.TEXT_FAST: ModelSpec(
-        capability=Capability.TEXT,
-        provider="anthropic",
-        model_name="claude-haiku-4-5-20251001",
-        quality_class="standard",
-        latency_class="fast",
-        cost_class="cheap",
-    ),
-    ModelRoute.TEXT_STANDARD: ModelSpec(
-        capability=Capability.TEXT,
-        provider="anthropic",
-        model_name="claude-sonnet-4-6",
-        quality_class="high",
-        latency_class="standard",
-        cost_class="standard",
-    ),
-    ModelRoute.TEXT_CREATIVE: ModelSpec(
-        capability=Capability.TEXT,
-        provider="anthropic",
-        model_name="claude-sonnet-4-6",
-        quality_class="high",
-        latency_class="standard",
-        cost_class="standard",
-    ),
+_DEFAULT_PROFILES_BY_MODE: dict[GenerationMode, dict[ModelSlot, ModelSpec]] = {
+    GenerationMode.DRAFT: {
+        ModelSlot.FAST: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
+        ModelSlot.STANDARD: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
+        ModelSlot.CREATIVE: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
+    },
+    GenerationMode.BALANCED: {
+        ModelSlot.FAST: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
+        ModelSlot.STANDARD: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+        ModelSlot.CREATIVE: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+    },
+    GenerationMode.STRICT: {
+        ModelSlot.FAST: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+        ModelSlot.STANDARD: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+        ModelSlot.CREATIVE: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+    },
+}
+
+_OPENAI_COMPATIBLE_SYSTEMS = {
+    "openai",
+    "openai-chat",
+    "openai-responses",
+    "alibaba",
+    "azure",
+    "cerebras",
+    "deepseek",
+    "fireworks",
+    "github",
+    "grok",
+    "heroku",
+    "litellm",
+    "moonshotai",
+    "nebius",
+    "ollama",
+    "openrouter",
+    "ovhcloud",
+    "sambanova",
+    "together",
+    "vercel",
 }
 
 
-def _env_override(route: ModelRoute) -> ModelSpec | None:
-    """
-    Env overrides are route-scoped so model control remains centralized.
-
-    Preferred env vars:
-      - MODEL_{ROUTE}_PROVIDER
-      - MODEL_{ROUTE}_NAME
-    """
-
-    prefix = f"MODEL_{route.name}"
-    provider = os.getenv(f"{prefix}_PROVIDER")
-    model_name = os.getenv(f"{prefix}_NAME")
-
-    if not provider and not model_name:
-        return None
-
-    base = _DEFAULT_ROUTE_CATALOG[route]
-    return ModelSpec(
-        capability=base.capability,
-        provider=provider or base.provider,
-        model_name=model_name or base.model_name,
-        quality_class=base.quality_class,
-        latency_class=base.latency_class,
-        cost_class=base.cost_class,
+def _normalize_family(raw: str) -> ModelFamily:
+    value = raw.strip().lower()
+    if value == "anthropic":
+        return ModelFamily.ANTHROPIC
+    if value in {"google", "gemini"}:
+        return ModelFamily.GOOGLE
+    if value in {"openai_compatible", "openai-compatible", "openai"}:
+        return ModelFamily.OPENAI_COMPATIBLE
+    if value == "test":
+        return ModelFamily.TEST
+    raise ValueError(
+        f"Unsupported model family '{raw}'. "
+        "Expected one of: anthropic, google, openai_compatible."
     )
 
 
-def _resolve_route_spec(route: ModelRoute) -> ModelSpec:
-    override = _env_override(route)
-    if override:
-        return override
-    return _DEFAULT_ROUTE_CATALOG[route]
+def _slot_prefix(slot: ModelSlot) -> str:
+    """Return the canonical env prefix for a slot."""
+
+    return f"PIPELINE_{slot.name}"
 
 
-def _requirements_to_route(req: NodeModelRequirements) -> ModelRoute:
-    if req.capability != Capability.TEXT:
+def _first_env(*names: str) -> str | None:
+    """Return the first non-empty env var value from the provided names."""
+
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def _env_override(slot: ModelSlot, *, base: ModelSpec) -> ModelSpec | None:
+    """
+    Load a slot override from the canonical `PIPELINE_{SLOT}_*` env contract.
+
+    The override is sparse: any provided field replaces the code default for
+    that slot, while omitted fields continue to inherit from `base`.
+    """
+
+    prefix = _slot_prefix(slot)
+
+    family_raw = _first_env(f"{prefix}_PROVIDER")
+    model_name = _first_env(f"{prefix}_MODEL_NAME")
+    base_url = _first_env(f"{prefix}_BASE_URL")
+    api_key_env = _first_env(f"{prefix}_API_KEY_ENV")
+
+    if not any((family_raw, model_name, base_url, api_key_env)):
+        return None
+
+    family = _normalize_family(family_raw) if family_raw is not None else base.family
+    return ModelSpec(
+        family=family,
+        model_name=model_name or base.model_name,
+        base_url=base_url if base_url is not None else base.base_url,
+        api_key_env=api_key_env if api_key_env is not None else base.api_key_env,
+    )
+
+
+def load_profiles(
+    generation_mode: GenerationMode = GenerationMode.BALANCED,
+) -> dict[ModelSlot, ModelSpec]:
+    """Merge code defaults with any slot-scoped env overrides for one mode."""
+
+    base_profiles = _DEFAULT_PROFILES_BY_MODE[generation_mode]
+    profiles = dict(base_profiles)
+    for slot, spec in base_profiles.items():
+        override = _env_override(slot, base=spec)
+        if override is not None:
+            profiles[slot] = override
+    return profiles
+
+
+def get_node_text_slot(node_name: str) -> ModelSlot:
+    """Return the slot registered for an LLM-backed node."""
+
+    if node_name not in NODE_MODEL_SLOTS:
         raise ValueError(
-            f"Capability '{req.capability}' is not wired yet in the pipeline registry."
+            f"Node '{node_name}' is not registered in NODE_MODEL_SLOTS. "
+            f"Add it to pipeline.providers.registry."
         )
+    return NODE_MODEL_SLOTS[node_name]
 
-    # Keep routing stable and simple: prefer latency for FAST, otherwise choose
-    # STANDARD vs CREATIVE by intent (quality/cost).
-    if req.latency_class == "fast":
-        return ModelRoute.TEXT_FAST
-    if req.quality_class == "high":
-        return ModelRoute.TEXT_STANDARD
-    return ModelRoute.TEXT_STANDARD
+
+def _read_api_key(spec: ModelSpec) -> str | None:
+    """Resolve the configured API key env var for a model spec, if any."""
+
+    if spec.api_key_env is None:
+        return None
+    api_key = os.getenv(spec.api_key_env)
+    if not api_key:
+        raise ValueError(
+            f"Model spec for '{spec.model_name}' expects env var "
+            f"'{spec.api_key_env}', but it is not set."
+        )
+    return api_key
+
+
+def _build_anthropic_model(spec: ModelSpec):
+    """Build the Anthropic transport, optionally with explicit provider config."""
+
+    api_key = _read_api_key(spec)
+    if api_key is None and spec.base_url is None:
+        return AnthropicModel(spec.model_name)
+
+    from pydantic_ai.providers.anthropic import AnthropicProvider
+
+    provider = AnthropicProvider(api_key=api_key, base_url=spec.base_url)
+    return AnthropicModel(spec.model_name, provider=provider)
+
+
+def _build_google_model(spec: ModelSpec):
+    """Build the Google transport, optionally with explicit provider config."""
+
+    api_key = _read_api_key(spec)
+    if api_key is None and spec.base_url is None:
+        return GoogleModel(spec.model_name)
+
+    from pydantic_ai.providers.google import GoogleProvider
+
+    provider = GoogleProvider(api_key=api_key, base_url=spec.base_url)
+    return GoogleModel(spec.model_name, provider=provider)
+
+
+def _build_openai_compatible_model(spec: ModelSpec):
+    """
+    Build the OpenAI-compatible transport for hosted or self-hosted endpoints.
+
+    The configured `base_url` tells PydanticAI which OpenAI-shaped API to talk
+    to; the transport family stays the same whether the endpoint is OpenAI,
+    Groq, Together, Ollama, or another compatible vendor.
+    """
+
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    api_key = _read_api_key(spec)
+    if spec.base_url is not None:
+        # When routing to a custom compatible endpoint, default to a placeholder
+        # unless a provider-specific key env was declared explicitly.
+        provider = OpenAIProvider(
+            base_url=spec.base_url,
+            api_key=api_key or "api-key-not-set",
+        )
+    elif api_key is not None:
+        provider = OpenAIProvider(api_key=api_key)
+    else:
+        provider = OpenAIProvider()
+
+    return OpenAIChatModel(spec.model_name, provider=provider)
 
 
 def _build_text_model(spec: ModelSpec):
-    if spec.provider == "anthropic":
-        return AnthropicModel(spec.model_name)
+    """Resolve a `ModelSpec` into the concrete PydanticAI model object."""
+
+    if spec.family == ModelFamily.ANTHROPIC:
+        return _build_anthropic_model(spec)
+    if spec.family == ModelFamily.GOOGLE:
+        return _build_google_model(spec)
+    if spec.family == ModelFamily.OPENAI_COMPATIBLE:
+        return _build_openai_compatible_model(spec)
+    if spec.family == ModelFamily.TEST:
+        return TestModel()
     raise NotImplementedError(
-        f"Text provider '{spec.provider}' is not wired for PydanticAI yet."
+        f"Text family '{spec.family.value}' is not wired for pipeline use."
     )
 
 
 def resolve_text_model(
     *,
-    route: ModelRoute,
-    overrides: dict | None = None,
+    slot: ModelSlot,
+    spec: ModelSpec,
+    model_overrides: dict | None = None,
 ):
     """
-    Resolve a PydanticAI-compatible model object for text/vision use.
+    Resolve a PydanticAI-compatible text model for a slot.
 
-    `overrides` is intended for tests; keys can be ModelRoute or route string.
+    `model_overrides` is test-oriented and keyed by `ModelSlot` or slot string.
     """
 
-    if overrides:
-        if route in overrides:
-            return overrides[route]
-        if route.value in overrides:
-            return overrides[route.value]
+    if model_overrides:
+        if slot in model_overrides:
+            return model_overrides[slot]
+        if slot.value in model_overrides:
+            return model_overrides[slot.value]
 
-    spec = _resolve_route_spec(route)
-    if spec.capability != Capability.TEXT:
-        raise ValueError(f"Route '{route.value}' is not a text route.")
     return _build_text_model(spec)
-
-
-def requirements_for_node(node_name: str, generation_mode: GenerationMode) -> NodeModelRequirements:
-    if node_name not in NODE_REQUIREMENTS:
-        raise ValueError(
-            f"Node '{node_name}' is not registered in NODE_REQUIREMENTS. "
-            f"Add it to pipeline.providers.registry."
-        )
-
-    req = NODE_REQUIREMENTS[node_name]
-
-    # Mode-based policy adjustments (kept equivalent in spirit to old tier rules)
-    if generation_mode == GenerationMode.DRAFT and node_name == "content_generator":
-        return NodeModelRequirements(
-            capability=req.capability,
-            quality_class="standard",
-            latency_class="fast",
-            cost_class="cheap",
-        )
-
-    if generation_mode == GenerationMode.STRICT and req.latency_class == "fast":
-        return NodeModelRequirements(
-            capability=req.capability,
-            quality_class="high",
-            latency_class="standard",
-            cost_class=req.cost_class,
-        )
-
-    return req
 
 
 def get_node_text_model(
     node_name: str,
-    overrides: dict | None = None,
+    model_overrides: dict | None = None,
     generation_mode: GenerationMode = GenerationMode.BALANCED,
 ):
-    req = requirements_for_node(node_name, generation_mode)
-    route = _requirements_to_route(req)
-    return resolve_text_model(route=route, overrides=overrides)
+    """Resolve the concrete PydanticAI model used by a given node."""
 
-
-def get_node_text_route(
-    node_name: str,
-    generation_mode: GenerationMode = GenerationMode.BALANCED,
-) -> ModelRoute:
-    req = requirements_for_node(node_name, generation_mode)
-    return _requirements_to_route(req)
+    slot = get_node_text_slot(node_name)
+    spec = load_profiles(generation_mode)[slot]
+    return resolve_text_model(
+        slot=slot,
+        spec=spec,
+        model_overrides=model_overrides,
+    )
 
 
 def get_node_text_spec(
     node_name: str,
     generation_mode: GenerationMode = GenerationMode.BALANCED,
 ) -> ModelSpec:
-    """
-    Resolve the current model spec (provider + model_name + metadata) for tracing/cost.
+    """Return the merged `ModelSpec` for the slot assigned to a node."""
 
-    Note: `provider_overrides` affects the returned model object, but this spec is
-    computed from the route catalog + env overrides (intended for production).
+    slot = get_node_text_slot(node_name)
+    return load_profiles(generation_mode)[slot]
+
+
+def endpoint_host(base_url: str | None) -> str | None:
+    """Extract the host portion of a configured endpoint for diagnostics/costs."""
+
+    if not base_url:
+        return None
+    parsed = urlparse(base_url)
+    return parsed.netloc or None
+
+
+def describe_text_model(model: Any) -> ModelSpec | None:
+    """
+    Best-effort identity of the concrete PydanticAI model object for tracing/cost.
+
+    Returns None if the model type is unknown; callers should fall back to the
+    catalog/env-resolved spec.
     """
 
-    route = get_node_text_route(node_name, generation_mode)
-    return _resolve_route_spec(route)
+    cls = getattr(model, "__class__", type(model))
+    module = getattr(cls, "__module__", "")
+    name = getattr(cls, "__name__", "unknown")
+    runtime_name = getattr(model, "model_name", None)
+    runtime_system = getattr(model, "system", None)
+    runtime_base_url = getattr(model, "base_url", None)
+    base_url = str(runtime_base_url) if runtime_base_url is not None else None
+    model_name = str(runtime_name) if runtime_name is not None else name
+
+    if module.startswith("pydantic_ai.models.test") or isinstance(model, TestModel):
+        return ModelSpec(
+            family=ModelFamily.TEST,
+            model_name=name,
+        )
+
+    if isinstance(model, AnthropicModel) or runtime_system == "anthropic":
+        return ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name=model_name,
+            base_url=base_url,
+        )
+
+    if (
+        isinstance(model, GoogleModel)
+        or name == "GeminiModel"
+        or runtime_system in {"google", "google-gla", "google-vertex"}
+        or module.startswith("pydantic_ai.models.google")
+        or module.startswith("pydantic_ai.models.gemini")
+    ):
+        return ModelSpec(
+            family=ModelFamily.GOOGLE,
+            model_name=model_name,
+            base_url=base_url,
+        )
+
+    # PydanticAI uses several system names for OpenAI-shaped transports. This
+    # mapping is intentionally best-effort so SSE/cost logic can stay generic.
+    if (
+        isinstance(model, OpenAIChatModel)
+        or runtime_system in _OPENAI_COMPATIBLE_SYSTEMS
+        or module.startswith("pydantic_ai.models.openai")
+    ):
+        return ModelSpec(
+            family=ModelFamily.OPENAI_COMPATIBLE,
+            model_name=model_name,
+            base_url=base_url,
+        )
+
+    return None
+
+
+def effective_text_spec(*, catalog_spec: ModelSpec, model: Any | None) -> ModelSpec:
+    """
+    Prefer the runtime model identity when it can be described reliably.
+
+    Nodes pass the concrete `model` object to `run_llm` so tracing and cost use
+    the same client that was handed to `Agent(...)`, including test doubles and
+    env-selected OpenAI-compatible endpoints.
+    """
+
+    if model is None:
+        return catalog_spec
+    described = describe_text_model(model)
+    return described if described is not None else catalog_spec

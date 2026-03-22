@@ -18,7 +18,8 @@
 		"katex": "^0.16.22",
 		"lectio": "file:../../lectio",
 		"lucide-svelte": "^0.542.0",
-		"tailwind-merge": "^3.3.1"
+		"tailwind-merge": "^3.3.1",
+		"zod": "^4.3.6"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^3.0.10",

@@ -71,6 +71,7 @@ class TestSqlGenerationRepository:
             context="Enhance this draft",
             mode=GenerationMode.STRICT,
             source_generation_id="draft-123",
+            section_count=6,
             requested_template_id="guided-concept-path",
             requested_preset_id="blue-classroom",
         )
@@ -81,6 +82,7 @@ class TestSqlGenerationRepository:
         assert found is not None
         assert found.mode == GenerationMode.STRICT
         assert found.source_generation_id == "draft-123"
+        assert found.section_count == 6
 
     async def test_update_status_completed(self, repo: SqlGenerationRepository):
         gen_id = str(uuid.uuid4())

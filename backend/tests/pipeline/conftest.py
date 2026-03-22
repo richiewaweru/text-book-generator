@@ -1,0 +1,29 @@
+from __future__ import annotations
+
+import pytest
+
+
+_PIPELINE_PROVIDER_ENV_VARS = (
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "OPENAI_API_KEY",
+    "GROQ_API_KEY",
+    "PIPELINE_FAST_PROVIDER",
+    "PIPELINE_FAST_MODEL_NAME",
+    "PIPELINE_FAST_BASE_URL",
+    "PIPELINE_FAST_API_KEY_ENV",
+    "PIPELINE_STANDARD_PROVIDER",
+    "PIPELINE_STANDARD_MODEL_NAME",
+    "PIPELINE_STANDARD_BASE_URL",
+    "PIPELINE_STANDARD_API_KEY_ENV",
+    "PIPELINE_CREATIVE_PROVIDER",
+    "PIPELINE_CREATIVE_MODEL_NAME",
+    "PIPELINE_CREATIVE_BASE_URL",
+    "PIPELINE_CREATIVE_API_KEY_ENV",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_pipeline_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for env_name in _PIPELINE_PROVIDER_ENV_VARS:
+        monkeypatch.delenv(env_name, raising=False)

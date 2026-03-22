@@ -2,6 +2,9 @@ from collections.abc import AsyncGenerator
 from functools import lru_cache
 
 from textbook_agent.domain.ports.document_repository import DocumentRepository
+from textbook_agent.domain.ports.generation_report_repository import (
+    GenerationReportRepository,
+)
 from textbook_agent.domain.ports.generation_repository import GenerationRepository
 from textbook_agent.domain.ports.student_profile_repository import StudentProfileRepository
 from textbook_agent.domain.ports.user_repository import UserRepository
@@ -10,6 +13,9 @@ from textbook_agent.infrastructure.config.settings import Settings
 from textbook_agent.infrastructure.database.session import async_session_factory
 from textbook_agent.infrastructure.repositories.file_document_repo import (
     FileDocumentRepository,
+)
+from textbook_agent.infrastructure.repositories.file_generation_report_repo import (
+    FileGenerationReportRepository,
 )
 from textbook_agent.infrastructure.repositories.sql_generation_repo import (
     SqlGenerationRepository,
@@ -54,3 +60,9 @@ async def get_student_profile_repository() -> AsyncGenerator[StudentProfileRepos
 def get_document_repository() -> DocumentRepository:
     settings = get_settings()
     return FileDocumentRepository(output_dir=settings.document_output_dir)
+
+
+@lru_cache
+def get_report_repository() -> GenerationReportRepository:
+    settings = get_settings()
+    return FileGenerationReportRepository(output_dir=settings.report_output_dir)

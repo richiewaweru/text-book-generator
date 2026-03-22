@@ -32,6 +32,12 @@ class PipelineErrorInfo(BaseModel):
     recoverable: bool = True
 
 
+class PipelineSectionManifestItem(BaseModel):
+    section_id: str
+    title: str
+    position: int
+
+
 class PipelineDocument(BaseModel):
     generation_id: str
     subject: str
@@ -41,6 +47,7 @@ class PipelineDocument(BaseModel):
     preset_id: str
     source_generation_id: str | None = None
     status: Literal["pending", "running", "completed", "failed"] = "pending"
+    section_manifest: list[PipelineSectionManifestItem] = Field(default_factory=list)
     sections: list[SectionContent] = Field(default_factory=list)
     qc_reports: list[PipelineSectionReport] = Field(default_factory=list)
     quality_passed: bool | None = None
@@ -76,5 +83,6 @@ __all__ = [
     "PipelineIssue",
     "PipelineMode",
     "PipelineResult",
+    "PipelineSectionManifestItem",
     "PipelineSectionReport",
 ]

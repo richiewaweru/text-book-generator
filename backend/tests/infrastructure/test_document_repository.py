@@ -65,6 +65,13 @@ def _document(generation_id: str = "gen-doc") -> PipelineDocument:
         template_id="guided-concept-path",
         preset_id="blue-classroom",
         status="running",
+        section_manifest=[
+            {
+                "section_id": "s-01",
+                "title": "Limits in Motion",
+                "position": 1,
+            }
+        ],
         sections=[_section()],
         created_at=now,
         updated_at=now,
@@ -83,6 +90,7 @@ async def test_save_and_load_document_round_trip(tmp_path):
     assert loaded.generation_id == document.generation_id
     assert loaded.sections[0].section_id == "s-01"
     assert loaded.template_id == "guided-concept-path"
+    assert loaded.section_manifest[0].title == "Limits in Motion"
 
 
 @pytest.mark.asyncio

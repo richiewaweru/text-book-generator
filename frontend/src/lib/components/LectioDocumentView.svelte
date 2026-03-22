@@ -1,15 +1,20 @@
 <script lang="ts">
 	import { LectioThemeSurface, basePresetMap, templateRegistryMap } from 'lectio';
+	import { buildSectionSlots, type ViewerSectionSlot } from '$lib/generation/viewer-state';
 	import type { GenerationDocument } from '$lib/types';
 
 	interface Props {
 		document: GenerationDocument;
+		sectionSlots?: ViewerSectionSlot[];
 	}
 
-	let { document }: Props = $props();
+	let { document, sectionSlots = undefined }: Props = $props();
 
 	const template = $derived(templateRegistryMap[document.template_id]);
 	const preset = $derived(basePresetMap[document.preset_id] ?? null);
+	const resolvedSectionSlots = $derived(
+		sectionSlots ?? buildSectionSlots(document, document.section_manifest.length || document.sections.length)
+	);
 </script>
 
 {#if template}
@@ -28,17 +33,27 @@
 					<div class="document-meta">
 						<span>{template.contract.name}</span>
 						<span>{document.mode.toUpperCase()}</span>
-						<span>{document.sections.length} sections</span>
+						<span>{resolvedSectionSlots.length} sections</span>
 					</div>
 				</div>
 			</header>
 
 			<div class="section-stack">
-				{#each document.sections as section (section.section_id)}
-					{@const TemplateRender = template.render}
-					<article class="animate-step-reveal">
-						<TemplateRender {section} />
-					</article>
+				{#each resolvedSectionSlots as slot (slot.section_id)}
+					{#if slot.status === 'ready' && slot.section}
+						{@const TemplateRender = template.render}
+						<article class="animate-step-reveal">
+							<TemplateRender section={slot.section} />
+						</article>
+					{:else}
+						<article class="glass-panel section-skeleton" aria-busy="true">
+							<p class="skeleton-kicker">Generating section {slot.position}</p>
+							<h3 class="skeleton-title">{slot.title}</h3>
+							<div class="skeleton-line short"></div>
+							<div class="skeleton-line"></div>
+							<div class="skeleton-line"></div>
+						</article>
+					{/if}
 				{/each}
 			</div>
 		</div>
@@ -73,6 +88,37 @@
 	.section-stack {
 		display: grid;
 		gap: 1.25rem;
+	}
+
+	.section-skeleton {
+		display: grid;
+		gap: 0.8rem;
+		padding: 1.25rem;
+		border-radius: 1.5rem;
+	}
+
+	.skeleton-kicker {
+		margin: 0;
+		font-size: 0.78rem;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--accent);
+	}
+
+	.skeleton-title {
+		margin: 0;
+		font-size: 1.2rem;
+		color: var(--foreground);
+	}
+
+	.skeleton-line {
+		height: 0.8rem;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--secondary) 82%, white 18%);
+	}
+
+	.skeleton-line.short {
+		width: 68%;
 	}
 
 	@media (min-width: 1024px) {

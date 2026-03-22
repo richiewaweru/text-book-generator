@@ -76,6 +76,7 @@ async def _reset_legacy_generation_table_if_needed() -> bool:
             "resolved_template_id",
             "requested_preset_id",
             "resolved_preset_id",
+            "section_count",
             "quality_passed",
             "generation_time_seconds",
             "source_generation_id",
@@ -90,6 +91,14 @@ async def _reset_legacy_generation_table_if_needed() -> bool:
         }
         if existing == expected:
             return False
+        if expected - existing:
+            await conn.run_sync(
+                lambda sync_conn: GenerationModel.__table__.drop(sync_conn, checkfirst=True)
+            )
+            await conn.run_sync(
+                lambda sync_conn: GenerationModel.__table__.create(sync_conn, checkfirst=True)
+            )
+            return True
         if not (legacy_markers & existing or "document_path" not in existing):
             return False
 

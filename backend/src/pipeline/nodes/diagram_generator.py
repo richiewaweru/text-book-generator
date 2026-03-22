@@ -5,7 +5,7 @@ STATE CONTRACT
     Reads:  current_section_id, current_section_plan, generated_sections,
             style_context, contract
     Writes: generated_sections[current_section_id].diagram, completed_nodes, errors
-    Model:  FAST
+    Slot:   FAST
     Skips:  if no diagram slot in contract OR section plan says needs_diagram=False
 """
 
@@ -18,11 +18,7 @@ from pipeline.prompts.diagram import (
     build_diagram_system_prompt,
     build_diagram_user_prompt,
 )
-from pipeline.providers.registry import (
-    get_node_text_model,
-    get_node_text_route,
-    get_node_text_spec,
-)
+from pipeline.providers.registry import get_node_text_model
 from pipeline.state import PipelineError, TextbookPipelineState
 from pipeline.types.section_content import DiagramContent
 from pipeline.llm_runner import run_llm
@@ -37,6 +33,8 @@ class DiagramOutput(BaseModel):
 
 
 def _has_diagram_slot(contract) -> bool:
+    """Return whether the active contract can accept any diagram component."""
+
     all_components = set(contract.required_components) | set(
         contract.optional_components
     )
@@ -44,6 +42,8 @@ def _has_diagram_slot(contract) -> bool:
 
 
 def _get_diagram_slot(contract) -> str:
+    """Pick the first compatible diagram slot expected by the template."""
+
     for slot in ("diagram-block", "diagram-series", "diagram-compare"):
         if (
             slot in contract.required_components
@@ -56,8 +56,10 @@ def _get_diagram_slot(contract) -> str:
 async def diagram_generator(
     state: TextbookPipelineState | dict,
     *,
-    provider_overrides: dict | None = None,
+    model_overrides: dict | None = None,
 ) -> dict:
+    """Generate the optional visual explanation for the current section."""
+
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
 
@@ -89,15 +91,7 @@ async def diagram_generator(
 
     model = get_node_text_model(
         "diagram_generator",
-        provider_overrides,
-        generation_mode=state.request.mode,
-    )
-    route = get_node_text_route(
-        "diagram_generator",
-        generation_mode=state.request.mode,
-    )
-    spec = get_node_text_spec(
-        "diagram_generator",
+        model_overrides=model_overrides,
         generation_mode=state.request.mode,
     )
     agent = Agent(
@@ -110,15 +104,15 @@ async def diagram_generator(
         result = await run_llm(
             generation_id=state.request.generation_id or "",
             node="diagram_generator",
-            route=route,
-            spec=spec,
             agent=agent,
+            model=model,
             user_prompt=build_diagram_user_prompt(
                 section_title=section.header.title,
                 hook_body=section.hook.body,
                 explanation_excerpt=section.explanation.body,
                 diagram_slot=_get_diagram_slot(state.contract),
-            )
+            ),
+            generation_mode=state.request.mode,
         )
 
         diagram = DiagramContent(

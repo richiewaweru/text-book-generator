@@ -4,6 +4,7 @@ curriculum_planner node.
 STATE CONTRACT
     Reads:  request, contract
     Writes: curriculum_outline, style_context, completed_nodes, errors
+    Slot:   FAST (resolved centrally in pipeline.providers.registry)
 """
 
 from __future__ import annotations
@@ -16,11 +17,7 @@ from pipeline.prompts.curriculum import (
     build_curriculum_system_prompt,
     build_curriculum_user_prompt,
 )
-from pipeline.providers.registry import (
-    get_node_text_model,
-    get_node_text_route,
-    get_node_text_spec,
-)
+from pipeline.providers.registry import get_node_text_model
 from pipeline.state import PipelineError, StyleContext, TextbookPipelineState
 from pipeline.types.requests import SectionPlan
 from pipeline.llm_runner import run_llm
@@ -77,8 +74,10 @@ def _outline_from_seed(state: TextbookPipelineState) -> list[SectionPlan]:
 async def curriculum_planner(
     state: TextbookPipelineState | dict,
     *,
-    provider_overrides: dict | None = None,
+    model_overrides: dict | None = None,
 ) -> dict:
+    """Generate the curriculum outline or reuse the seeded outline when present."""
+
     state = TextbookPipelineState.parse(state)
 
     if not validate_preset_for_template(state.contract.id, state.request.preset_id):
@@ -107,15 +106,7 @@ async def curriculum_planner(
 
     model = get_node_text_model(
         "curriculum_planner",
-        provider_overrides,
-        generation_mode=state.request.mode,
-    )
-    route = get_node_text_route(
-        "curriculum_planner",
-        generation_mode=state.request.mode,
-    )
-    spec = get_node_text_spec(
-        "curriculum_planner",
+        model_overrides=model_overrides,
         generation_mode=state.request.mode,
     )
     agent = Agent(
@@ -132,16 +123,16 @@ async def curriculum_planner(
         result = await run_llm(
             generation_id=state.request.generation_id or "",
             node="curriculum_planner",
-            route=route,
-            spec=spec,
             agent=agent,
+            model=model,
             user_prompt=build_curriculum_user_prompt(
                 context=state.request.context,
                 subject=state.request.subject,
                 grade_band=state.request.grade_band,
                 learner_fit=state.request.learner_fit,
                 section_count=state.request.section_count,
-            )
+            ),
+            generation_mode=state.request.mode,
         )
         return {
             "curriculum_outline": result.output.sections,

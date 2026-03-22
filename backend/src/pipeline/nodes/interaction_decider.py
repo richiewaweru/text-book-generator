@@ -32,9 +32,11 @@ def _pick_simulation_type(state: TextbookPipelineState, section) -> str:
 async def interaction_decider(
     state: TextbookPipelineState | dict,
     *,
-    provider_overrides: dict | None = None,
+    model_overrides: dict | None = None,
 ) -> dict:
-    _ = provider_overrides
+    """Choose a deterministic interaction type when the template supports it."""
+
+    _ = model_overrides
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
 
