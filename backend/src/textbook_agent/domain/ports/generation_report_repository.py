@@ -13,4 +13,4 @@ class GenerationReportRepository(ABC):
     async def load_report(self, generation_id: str) -> GenerationReport: ...
 
     async def cleanup_tmp(self, generation_id: str) -> None:
-        """Remove any leftover temporary files from interrupted writes."""
+        """Remove leftover temporary files from interrupted report writes."""

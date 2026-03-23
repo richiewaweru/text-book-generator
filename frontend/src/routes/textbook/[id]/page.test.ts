@@ -228,4 +228,47 @@ describe('textbook page stream lifecycle', () => {
 		expect(MockEventSource.instances).toHaveLength(0);
 		expect(screen.getByText(/Stream: completed with QC issues/i)).toBeTruthy();
 	});
+
+	it('performs one guarded refresh on generic stream errors without opening a new stream', async () => {
+		getGenerationDetail
+			.mockResolvedValueOnce(buildDetail())
+			.mockResolvedValueOnce(
+				buildDetail({
+					status: 'failed',
+					error: 'Generation timed out after 300 seconds.',
+					error_type: 'runtime_error',
+					error_code: 'generation_timeout',
+					quality_passed: false,
+					completed_at: '2026-03-23T00:01:00Z'
+				})
+			);
+		getGenerationDocument
+			.mockResolvedValueOnce(buildDocument())
+			.mockResolvedValueOnce(
+				buildDocument({
+					status: 'failed',
+					quality_passed: false,
+					error: 'Generation timed out after 300 seconds.',
+					completed_at: '2026-03-23T00:01:00Z'
+				})
+			);
+
+		render(TextbookPage);
+
+		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
+		expect(MockEventSource.instances).toHaveLength(1);
+
+		MockEventSource.instances[0].emit('error', new Event('error'));
+
+		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(2));
+		expect(MockEventSource.instances).toHaveLength(1);
+		expect(MockEventSource.instances[0].closed).toBe(true);
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(getGenerationDetail).toHaveBeenCalledTimes(2);
+		expect(getGenerationDocument).toHaveBeenCalledTimes(2);
+		expect(screen.getByText(/Generation timed out after 300 seconds\./i)).toBeTruthy();
+	});
 });

@@ -37,6 +37,7 @@
 	let viewerWarning = $state<string | null>(null);
 	let eventSource: EventSource | null = null;
 	let streamClosedTerminally = false;
+	let streamErrorRecoveryAttempted = false;
 	const sectionSlots = $derived(buildSectionSlots(document, plannedSections));
 	const readySectionCount = $derived(
 		sectionSlots.filter((slot) => slot.status === 'ready').length
@@ -99,11 +100,38 @@
 		}
 	}
 
+	async function revalidateTerminalState(source: EventSource, id: string): Promise<boolean> {
+		if (source !== eventSource || streamErrorRecoveryAttempted) {
+			return false;
+		}
+		streamErrorRecoveryAttempted = true;
+		try {
+			await refresh(id);
+		} catch (err) {
+			console.error('[Lectio] Stream recovery refresh failed:', err);
+			return false;
+		}
+		if (source !== eventSource) {
+			return false;
+		}
+		if (detail?.status === 'completed' || detail?.status === 'failed') {
+			streamClosedTerminally = true;
+			streamState = 'complete';
+			closeStream(source);
+			if (detail.status === 'failed') {
+				error = friendlyGenerationErrorMessage(detail.error, detail.error_type, detail.error_code);
+			}
+			return true;
+		}
+		return false;
+	}
+
 	function connectStream(id: string) {
 		closeStream();
 		const source = new EventSource(buildGenerationEventsUrl(id));
 		eventSource = source;
 		streamClosedTerminally = false;
+		streamErrorRecoveryAttempted = false;
 		streamState = 'connected';
 
 		source.addEventListener('pipeline_start', (event) => {
@@ -168,6 +196,9 @@
 				closeStream(source);
 				return;
 			}
+			if (await revalidateTerminalState(source, id)) {
+				return;
+			}
 			streamState = 'reconnecting';
 		});
 	}
@@ -179,6 +210,7 @@
 		plannedSections = null;
 		viewerWarning = null;
 		streamClosedTerminally = false;
+		streamErrorRecoveryAttempted = false;
 		closeStream();
 
 		try {

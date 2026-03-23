@@ -1279,6 +1279,67 @@ class TestProcessSectionComposite:
         assert len(report_events) == 1
         assert report_events[0].source == "assembler"
 
+    async def test_process_section_short_circuits_when_assembler_produces_no_section(self, monkeypatch):
+        from pipeline.nodes import process_section as ps_mod
+
+        sid = "s-01"
+        qc_called = False
+
+        async def fake_content(state, *, model_overrides=None):
+            return {
+                "generated_sections": {sid: _section(sid)},
+                "completed_nodes": ["content_generator"],
+            }
+
+        async def fake_diagram(state, *, model_overrides=None):
+            return {"completed_nodes": ["diagram_generator"]}
+
+        async def fake_interaction_decider(state, *, model_overrides=None):
+            return {"completed_nodes": ["interaction_decider"]}
+
+        async def fake_interaction_generator(state, *, model_overrides=None):
+            return {"completed_nodes": ["interaction_generator"]}
+
+        async def fake_assembler(state, *, model_overrides=None):
+            return {
+                "errors": [
+                    PipelineError(
+                        node="section_assembler",
+                        section_id=sid,
+                        message="No assembled section",
+                        recoverable=False,
+                    )
+                ],
+                "completed_nodes": ["section_assembler"],
+            }
+
+        async def fake_qc(state, *, model_overrides=None):
+            nonlocal qc_called
+            qc_called = True
+            return {"completed_nodes": ["qc_agent"]}
+
+        monkeypatch.setattr(ps_mod, "content_generator", fake_content)
+        monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
+        monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
+        monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
+        monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
+        monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
+
+        state = _base_state(
+            current_section_id=sid,
+            current_section_plan=_plan(sid),
+        )
+        result = await ps_mod.process_section(state)
+
+        assert qc_called is False
+        assert result["completed_nodes"] == [
+            "content_generator",
+            "diagram_generator",
+            "interaction_decider",
+            "interaction_generator",
+            "section_assembler",
+        ]
+
 
 class TestRetryComposites:
 

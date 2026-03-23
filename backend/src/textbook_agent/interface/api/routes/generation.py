@@ -315,7 +315,120 @@ def _log_trace_event(generation_id: str, event) -> None:
         )
 
 
-_GENERATION_JOB_TIMEOUT_SECONDS = 300  # 5-minute hard ceiling
+_GENERATION_JOB_TIMEOUT_SECONDS = 300.0
+_RECORDER_WAIT_TIMEOUT_SECONDS = 5.0
+_RECORDER_FINALIZE_TIMEOUT_SECONDS = 5.0
+_REPORT_SNAPSHOT_TIMEOUT_SECONDS = 5.0
+_SSE_KEEPALIVE_TIMEOUT_SECONDS = 15.0
+_GENERATION_TIMEOUT_ERROR_CODE = "generation_timeout"
+_ORPHANED_GENERATION_ERROR_CODE = "orphaned_generation"
+_ORPHANED_GENERATION_ERROR_MESSAGE = "Pipeline ended without completion."
+
+
+def _complete_event(generation_id: str) -> CompleteEvent:
+    _, document_url, report_url = _generation_urls(generation_id)
+    return CompleteEvent(
+        generation_id=generation_id,
+        document_url=document_url,
+        report_url=report_url,
+    )
+
+
+def _error_event(generation_id: str, message: str) -> ErrorEvent:
+    _, _, report_url = _generation_urls(generation_id)
+    return ErrorEvent(
+        generation_id=generation_id,
+        message=message,
+        report_url=report_url,
+    )
+
+
+def _failed_document_snapshot(
+    document: PipelineDocument,
+    *,
+    error_message: str,
+    completed_at: datetime,
+) -> PipelineDocument:
+    return document.model_copy(
+        update={
+            "status": "failed",
+            "quality_passed": False,
+            "error": error_message,
+            "updated_at": completed_at,
+            "completed_at": completed_at,
+        }
+    )
+
+
+async def _persist_failed_generation_state(
+    *,
+    generation: Generation,
+    gen_repo: GenerationRepository,
+    document_repo: DocumentRepository,
+    document: PipelineDocument,
+    error_message: str,
+    error_type: str,
+    error_code: str | None,
+    generation_time_seconds: float | None,
+) -> PipelineDocument:
+    completed_at = datetime.now(timezone.utc)
+    failed_document = _failed_document_snapshot(
+        document,
+        error_message=error_message,
+        completed_at=completed_at,
+    )
+    document_path = await document_repo.save_document(failed_document)
+    await gen_repo.update_status(
+        generation.id,
+        status="failed",
+        document_path=document_path,
+        error=error_message,
+        error_type=error_type,
+        error_code=error_code,
+        quality_passed=False,
+        generation_time_seconds=generation_time_seconds,
+    )
+    return failed_document
+
+
+async def _save_report_snapshot_with_timeout(
+    *,
+    report_repo: GenerationReportRepository,
+    generation_id: str,
+    report,
+    phase: str,
+) -> bool:
+    try:
+        await asyncio.wait_for(
+            report_repo.save_report(report),
+            timeout=_REPORT_SNAPSHOT_TIMEOUT_SECONDS,
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "Generation %s failed to persist %s report snapshot",
+            generation_id,
+            phase,
+        )
+        return False
+
+
+def _log_recorder_degradation(
+    *,
+    generation_id: str,
+    recorder: GenerationReportRecorder,
+    phase: str,
+) -> None:
+    if not recorder.diagnostics_degraded:
+        return
+    logger.warning(
+        "Generation %s diagnostics degraded during %s consumer_dead=%s dropped_events=%s consumer_error=%s",
+        generation_id,
+        phase,
+        recorder.consumer_dead,
+        recorder.dropped_event_count,
+        str(recorder.consumer_error) if recorder.consumer_error is not None else "-",
+    )
 
 
 async def _run_generation_job(
@@ -327,16 +440,10 @@ async def _run_generation_job(
     initial_document: PipelineDocument,
 ) -> None:
     recorder = GenerationReportRecorder(generation=generation, repository=report_repo)
-    await recorder.start()
     document = initial_document.model_copy(
         update={"status": "running", "updated_at": datetime.now(timezone.utc)}
     )
-    document_path = await document_repo.save_document(document)
-    await gen_repo.update_status(
-        generation.id,
-        status="running",
-        document_path=document_path,
-    )
+    started = perf_counter()
 
     async def on_event(event) -> None:
         nonlocal document
@@ -360,48 +467,96 @@ async def _run_generation_job(
         error_code: str | None,
         generation_time_seconds: float | None,
     ) -> None:
-        completed_at = datetime.now(timezone.utc)
-        failed_document = document.model_copy(
-            update={
-                "status": "failed",
-                "quality_passed": False,
-                "error": error_message,
-                "updated_at": completed_at,
-                "completed_at": completed_at,
-            }
-        )
-        document_path = await document_repo.save_document(failed_document)
-        await gen_repo.update_status(
-            generation.id,
-            status="failed",
-            document_path=document_path,
-            error=error_message,
+        nonlocal document
+        document = await _persist_failed_generation_state(
+            generation=generation,
+            gen_repo=gen_repo,
+            document_repo=document_repo,
+            document=document,
+            error_message=error_message,
             error_type=error_type,
             error_code=error_code,
-            quality_passed=False,
             generation_time_seconds=generation_time_seconds,
         )
-        # Publish terminal event FIRST so SSE subscribers get it promptly.
-        _, _, report_url = _generation_urls(generation.id)
         event_bus.publish(
             generation.id,
-            ErrorEvent(
+            _error_event(generation.id, error_message),
+        )
+        await recorder.wait_for_idle(timeout=_RECORDER_WAIT_TIMEOUT_SECONDS)
+        _log_recorder_degradation(
+            generation_id=generation.id,
+            recorder=recorder,
+            phase="failure_wait",
+        )
+        try:
+            await asyncio.wait_for(
+                recorder.finalize_failure(
+                    error=error_message,
+                    generation_time_seconds=generation_time_seconds,
+                ),
+                timeout=_RECORDER_FINALIZE_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            logger.exception(
+                "Generation %s failed to finalize diagnostics report after error",
+                generation.id,
+            )
+            snapshot = recorder.build_failure_snapshot(
+                error=error_message,
+                generation_time_seconds=generation_time_seconds,
+            )
+            await _save_report_snapshot_with_timeout(
+                report_repo=report_repo,
                 generation_id=generation.id,
-                message=error_message,
-                report_url=report_url,
-            ),
-        )
-        # Finalize the report before draining the queue — sets outcome/status
-        # so the persisted report is complete even if wait_for_idle times out.
-        await recorder.finalize_failure(
-            error=error_message,
-            generation_time_seconds=generation_time_seconds,
-        )
-        await recorder.wait_for_idle()
+                report=snapshot,
+                phase="failure_fallback",
+            )
         recorder.log_final_summary()
 
-    started = perf_counter()
+    async def finalize_success(
+        *,
+        generation_time_seconds: float | None,
+    ) -> None:
+        await recorder.wait_for_idle(timeout=_RECORDER_WAIT_TIMEOUT_SECONDS)
+        _log_recorder_degradation(
+            generation_id=generation.id,
+            recorder=recorder,
+            phase="success_wait",
+        )
+        try:
+            await asyncio.wait_for(
+                recorder.finalize_success(
+                    document=document,
+                    generation_time_seconds=generation_time_seconds,
+                ),
+                timeout=_RECORDER_FINALIZE_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            logger.exception(
+                "Generation %s failed to finalize diagnostics report after completion",
+                generation.id,
+            )
+            snapshot = recorder.build_success_snapshot(
+                document=document,
+                generation_time_seconds=generation_time_seconds,
+            )
+            await _save_report_snapshot_with_timeout(
+                report_repo=report_repo,
+                generation_id=generation.id,
+                report=snapshot,
+                phase="success_fallback",
+            )
+        recorder.log_final_summary()
+
     try:
+        await recorder.start()
+        document_path = await document_repo.save_document(document)
+        await gen_repo.update_status(
+            generation.id,
+            status="running",
+            document_path=document_path,
+        )
+
         result = await asyncio.wait_for(
             run_pipeline_streaming(command, on_event=on_event),
             timeout=_GENERATION_JOB_TIMEOUT_SECONDS,
@@ -425,82 +580,106 @@ async def _run_generation_job(
             quality_passed=document.quality_passed,
             generation_time_seconds=result.generation_time_seconds,
         )
-        # Publish terminal event FIRST so SSE subscribers get it promptly.
-        _, document_url, report_url = _generation_urls(generation.id)
-        event_bus.publish(
-            generation.id,
-            CompleteEvent(
-                generation_id=generation.id,
-                document_url=document_url,
-                report_url=report_url,
-            ),
-        )
-        await recorder.finalize_success(
-            document=document,
-            generation_time_seconds=result.generation_time_seconds,
-        )
-        await recorder.wait_for_idle()
-        recorder.log_final_summary()
+        event_bus.publish(generation.id, _complete_event(generation.id))
+        await finalize_success(generation_time_seconds=result.generation_time_seconds)
     except asyncio.TimeoutError:
         logger.error(
-            "Generation %s timed out after %ds",
+            "Generation %s timed out after %.0fs",
             generation.id,
             _GENERATION_JOB_TIMEOUT_SECONDS,
         )
-        await finalize_failure(
-            error_message=f"Generation timed out after {_GENERATION_JOB_TIMEOUT_SECONDS} seconds",
-            error_type="runtime_error",
-            error_code="generation_timeout",
-            generation_time_seconds=perf_counter() - started,
-        )
+        try:
+            await finalize_failure(
+                error_message=(
+                    f"Generation timed out after {int(_GENERATION_JOB_TIMEOUT_SECONDS)} seconds."
+                ),
+                error_type="runtime_error",
+                error_code=_GENERATION_TIMEOUT_ERROR_CODE,
+                generation_time_seconds=perf_counter() - started,
+            )
+        except Exception:
+            logger.exception(
+                "Generation %s failed while finalizing timeout state",
+                generation.id,
+            )
     except asyncio.CancelledError:
         logger.warning("Generation %s was interrupted before completion", generation.id)
-        await finalize_failure(
-            error_message=INTERRUPTED_GENERATION_ERROR,
-            error_type=INTERRUPTED_GENERATION_ERROR_TYPE,
-            error_code=INTERRUPTED_GENERATION_ERROR_CODE,
-            generation_time_seconds=perf_counter() - started,
-        )
+        try:
+            await finalize_failure(
+                error_message=INTERRUPTED_GENERATION_ERROR,
+                error_type=INTERRUPTED_GENERATION_ERROR_TYPE,
+                error_code=INTERRUPTED_GENERATION_ERROR_CODE,
+                generation_time_seconds=perf_counter() - started,
+            )
+        except Exception:
+            logger.exception(
+                "Generation %s failed while finalizing interrupted state",
+                generation.id,
+            )
     except Exception as exc:
         logger.exception("Generation %s failed", generation.id)
         classification = classify_generation_failure(exc)
-        await finalize_failure(
-            error_message=str(exc),
-            error_type=classification.error_type,
-            error_code=classification.error_code,
-            generation_time_seconds=perf_counter() - started,
-        )
+        try:
+            await finalize_failure(
+                error_message=str(exc),
+                error_type=classification.error_type,
+                error_code=classification.error_code,
+                generation_time_seconds=perf_counter() - started,
+            )
+        except Exception:
+            logger.exception(
+                "Generation %s failed while finalizing exception state",
+                generation.id,
+            )
     finally:
-        await recorder.stop()
+        try:
+            await recorder.stop()
+        except Exception:
+            logger.exception(
+                "Generation %s failed while stopping the diagnostics recorder",
+                generation.id,
+            )
         clear_node_attempts(generation.id)
-        # Safety net: if status is still "running", something went wrong.
+        try:
+            await report_repo.cleanup_tmp(generation.id)
+        except Exception:
+            logger.exception(
+                "Generation %s failed while cleaning report temp files",
+                generation.id,
+            )
         try:
             current = await gen_repo.find_by_id(generation.id)
-            if current and current.status in ("pending", "running"):
+            if current is not None and current.status in {"pending", "running"}:
                 logger.error(
-                    "Generation %s ended without completion — forcing failure",
+                    "Generation %s ended without completion; forcing orphan failure",
                     generation.id,
                 )
-                await gen_repo.update_status(
-                    generation.id,
-                    status="failed",
-                    error="Pipeline ended without completion",
+                document = await _persist_failed_generation_state(
+                    generation=generation,
+                    gen_repo=gen_repo,
+                    document_repo=document_repo,
+                    document=document,
+                    error_message=_ORPHANED_GENERATION_ERROR_MESSAGE,
                     error_type="runtime_error",
-                    error_code="orphaned_generation",
-                    quality_passed=False,
+                    error_code=_ORPHANED_GENERATION_ERROR_CODE,
+                    generation_time_seconds=perf_counter() - started,
+                )
+                await _save_report_snapshot_with_timeout(
+                    report_repo=report_repo,
+                    generation_id=generation.id,
+                    report=recorder.build_failure_snapshot(
+                        error=_ORPHANED_GENERATION_ERROR_MESSAGE,
+                        generation_time_seconds=perf_counter() - started,
+                    ),
+                    phase="orphaned_fallback",
                 )
                 event_bus.publish(
                     generation.id,
-                    ErrorEvent(
-                        generation_id=generation.id,
-                        message="Pipeline ended without completion",
-                    ),
+                    _error_event(generation.id, _ORPHANED_GENERATION_ERROR_MESSAGE),
                 )
+                await report_repo.cleanup_tmp(generation.id)
         except Exception:
-            logger.exception(
-                "Safety-net cleanup failed for generation %s", generation.id
-            )
-        await report_repo.cleanup_tmp(generation.id)
+            logger.exception("Generation %s failed during orphan cleanup", generation.id)
 
 
 def _validate_template_and_preset(template_id: str, preset_id: str) -> None:
@@ -738,50 +917,48 @@ async def get_generation_events(
         raise HTTPException(status_code=404, detail="Generation not found")
 
     async def stream() -> AsyncIterator[str]:
-        # Subscribe FIRST to avoid missing events in the gap between
-        # checking DB status and starting to listen.
         queue = event_bus.subscribe(generation_id)
         try:
-            # Re-read status after subscribing — any event published between
-            # the outer DB read and the subscribe call is now in the queue.
             current = await gen_repo.find_by_id(generation_id)
-            current_status = current.status if current else generation.status
-
-            if current_status == "completed":
-                _, document_url, report_url = _generation_urls(generation_id)
-                yield _sse_payload(
-                    CompleteEvent(
-                        generation_id=generation_id,
-                        document_url=document_url,
-                        report_url=report_url,
-                    ).model_dump(mode="json", exclude_none=True)
-                )
-                return
-            if current_status == "failed":
-                error_msg = (
-                    current.error if current else generation.error
-                ) or "Generation failed"
-                _, _, report_url = _generation_urls(generation_id)
-                yield _sse_payload(
-                    ErrorEvent(
-                        generation_id=generation_id,
-                        message=error_msg,
-                        report_url=report_url,
-                    ).model_dump(mode="json", exclude_none=True)
-                )
-                return
-
-            # Drain any events that arrived between subscribe and status check.
             while not queue.empty():
                 event = queue.get_nowait()
                 yield _sse_payload(event)
                 if event.get("type") in {"complete", "error"}:
                     return
 
+            if current is not None and current.status == "completed":
+                yield _sse_payload(_complete_event(generation_id).model_dump(mode="json", exclude_none=True))
+                return
+            if current is not None and current.status == "failed":
+                yield _sse_payload(
+                    _error_event(
+                        generation_id,
+                        current.error or "Generation failed",
+                    ).model_dump(mode="json", exclude_none=True)
+                )
+                return
+
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                    event = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=_SSE_KEEPALIVE_TIMEOUT_SECONDS,
+                    )
                 except TimeoutError:
+                    current = await gen_repo.find_by_id(generation_id)
+                    if current is not None and current.status == "completed":
+                        yield _sse_payload(
+                            _complete_event(generation_id).model_dump(mode="json", exclude_none=True)
+                        )
+                        return
+                    if current is not None and current.status == "failed":
+                        yield _sse_payload(
+                            _error_event(
+                                generation_id,
+                                current.error or "Generation failed",
+                            ).model_dump(mode="json", exclude_none=True)
+                        )
+                        return
                     yield ": keep-alive\n\n"
                     continue
 

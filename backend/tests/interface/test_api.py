@@ -174,7 +174,20 @@ class InMemoryReportRepo:
         return self.store[generation_id]
 
     async def cleanup_tmp(self, generation_id: str) -> None:
-        pass
+        _ = generation_id
+
+
+class FailingOnCallReportRepo(InMemoryReportRepo):
+    def __init__(self, *, fail_on_calls: set[int]) -> None:
+        super().__init__()
+        self.fail_on_calls = set(fail_on_calls)
+        self.save_calls = 0
+
+    async def save_report(self, report: GenerationReport) -> str:
+        self.save_calls += 1
+        if self.save_calls in self.fail_on_calls:
+            raise RuntimeError(f"report persistence failed on call {self.save_calls}")
+        return await super().save_report(report)
 
 
 class StaticProfileRepo:
@@ -875,3 +888,316 @@ class TestGenerationApi:
         assert report.status == "failed"
         assert report.outcome == "failed"
         assert report.quality_passed is False
+
+    async def test_run_generation_job_keeps_completed_status_when_report_finalize_fails(self):
+        generation_id = "gen-complete-report-failure"
+        generation = Generation(
+            id=generation_id,
+            user_id=TEST_USER.id,
+            subject="Calculus",
+            context="Explain limits",
+            mode="balanced",
+            status="pending",
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
+            section_count=1,
+        )
+        gen_repo = InMemoryGenerationRepo()
+        doc_repo = InMemoryDocumentRepo()
+        report_repo = FailingOnCallReportRepo(fail_on_calls={2})
+        initial_document = _document(generation_id, status="pending").model_copy(
+            update={"quality_passed": None, "completed_at": None, "error": None}
+        )
+        generation.document_path = await doc_repo.save_document(initial_document)
+        await gen_repo.create(generation)
+
+        command = generation_routes.PipelineCommand(
+            generation_id=generation_id,
+            subject="Calculus",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=1,
+            mode="balanced",
+        )
+        queue = generation_routes.event_bus.subscribe(generation_id)
+
+        async def fake_run_pipeline(command, on_event=None):
+            _ = on_event
+            return PipelineResult(
+                document=_document(command.generation_id or generation_id).model_copy(
+                    update={"quality_passed": False}
+                ),
+                completed_nodes=["curriculum_planner", "process_section", "qc_agent"],
+                generation_time_seconds=0.01,
+            )
+
+        with patch.object(
+            generation_routes,
+            "run_pipeline_streaming",
+            side_effect=fake_run_pipeline,
+        ):
+            await generation_routes._run_generation_job(
+                generation,
+                command,
+                gen_repo,
+                doc_repo,
+                report_repo,
+                initial_document,
+            )
+
+        try:
+            events = []
+            while not queue.empty():
+                events.append(queue.get_nowait())
+        finally:
+            generation_routes.event_bus.unsubscribe(generation_id, queue)
+
+        updated = await gen_repo.find_by_id(generation_id)
+        assert updated is not None
+        assert updated.status == "completed"
+        assert updated.quality_passed is False
+        assert any(event["type"] == "complete" for event in events)
+
+        report = await report_repo.load_report(generation_id)
+        assert report.status == "completed"
+        assert report_repo.save_calls >= 3
+
+    async def test_run_generation_job_marks_timeout_failed(self, monkeypatch):
+        generation_id = "gen-timeout"
+        generation = Generation(
+            id=generation_id,
+            user_id=TEST_USER.id,
+            subject="Calculus",
+            context="Explain limits",
+            mode="balanced",
+            status="pending",
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
+            section_count=1,
+        )
+        gen_repo = InMemoryGenerationRepo()
+        doc_repo = InMemoryDocumentRepo()
+        report_repo = InMemoryReportRepo()
+        initial_document = _document(generation_id, status="pending").model_copy(
+            update={"quality_passed": None, "completed_at": None, "error": None}
+        )
+        generation.document_path = await doc_repo.save_document(initial_document)
+        await gen_repo.create(generation)
+
+        command = generation_routes.PipelineCommand(
+            generation_id=generation_id,
+            subject="Calculus",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=1,
+            mode="balanced",
+        )
+
+        async def slow_run_pipeline(command, on_event=None):
+            _ = (command, on_event)
+            await asyncio.sleep(0.05)
+            return PipelineResult(
+                document=_document(generation_id),
+                completed_nodes=["curriculum_planner"],
+                generation_time_seconds=0.05,
+            )
+
+        monkeypatch.setattr(generation_routes, "_GENERATION_JOB_TIMEOUT_SECONDS", 0.01)
+        with patch.object(
+            generation_routes,
+            "run_pipeline_streaming",
+            side_effect=slow_run_pipeline,
+        ):
+            await generation_routes._run_generation_job(
+                generation,
+                command,
+                gen_repo,
+                doc_repo,
+                report_repo,
+                initial_document,
+            )
+
+        updated = await gen_repo.find_by_id(generation_id)
+        assert updated is not None
+        assert updated.status == "failed"
+        assert updated.error_code == "generation_timeout"
+
+        report = await report_repo.load_report(generation_id)
+        assert report.status == "failed"
+        assert report.final_error is not None
+
+    async def test_run_generation_job_forces_orphan_failure_when_primary_persist_breaks(self):
+        generation_id = "gen-orphaned"
+        generation = Generation(
+            id=generation_id,
+            user_id=TEST_USER.id,
+            subject="Calculus",
+            context="Explain limits",
+            mode="balanced",
+            status="pending",
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
+            section_count=1,
+        )
+        gen_repo = InMemoryGenerationRepo()
+        doc_repo = InMemoryDocumentRepo()
+        report_repo = InMemoryReportRepo()
+        initial_document = _document(generation_id, status="pending").model_copy(
+            update={"quality_passed": None, "completed_at": None, "error": None}
+        )
+        generation.document_path = await doc_repo.save_document(initial_document)
+        await gen_repo.create(generation)
+
+        command = generation_routes.PipelineCommand(
+            generation_id=generation_id,
+            subject="Calculus",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=1,
+            mode="balanced",
+        )
+
+        async def broken_run_pipeline(command, on_event=None):
+            _ = (command, on_event)
+            raise RuntimeError("pipeline blew up")
+
+        original_persist_failure = generation_routes._persist_failed_generation_state
+        call_count = 0
+
+        async def flaky_persist_failure(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("failed to persist primary failure")
+            return await original_persist_failure(**kwargs)
+
+        with patch.object(
+            generation_routes,
+            "run_pipeline_streaming",
+            side_effect=broken_run_pipeline,
+        ), patch.object(
+            generation_routes,
+            "_persist_failed_generation_state",
+            side_effect=flaky_persist_failure,
+        ):
+            await generation_routes._run_generation_job(
+                generation,
+                command,
+                gen_repo,
+                doc_repo,
+                report_repo,
+                initial_document,
+            )
+
+        updated = await gen_repo.find_by_id(generation_id)
+        assert updated is not None
+        assert updated.status == "failed"
+        assert updated.error_code == "orphaned_generation"
+
+        report = await report_repo.load_report(generation_id)
+        assert report.status == "failed"
+        assert report.final_error == "Pipeline ended without completion."
+
+    async def test_events_endpoint_self_heals_from_terminal_db_state_after_keep_alive_timeout(
+        self,
+    ):
+        class FlippingGenerationRepo(InMemoryGenerationRepo):
+            def __init__(self) -> None:
+                super().__init__()
+                self.find_calls = 0
+
+            async def find_by_id(self, generation_id: str) -> Generation | None:
+                self.find_calls += 1
+                generation = await super().find_by_id(generation_id)
+                if generation is None:
+                    return None
+                if self.find_calls >= 3:
+                    return generation.model_copy(update={"status": "completed"})
+                return generation
+
+        generation_id = "gen-sse-heal"
+        generation_repo = FlippingGenerationRepo()
+        document_repo = InMemoryDocumentRepo()
+        report_repo = InMemoryReportRepo()
+        profile_repo = StaticProfileRepo(PROFILE)
+        user_repo = StaticUserRepo()
+        app = create_app()
+
+        document = _document(generation_id, status="running").model_copy(
+            update={"quality_passed": None, "completed_at": None}
+        )
+        path = await document_repo.save_document(document)
+        await generation_repo.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER.id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                status="running",
+                document_path=path,
+                requested_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                quality_passed=None,
+            )
+        )
+
+        async def override_current_user():
+            return TEST_USER
+
+        async def override_generation_repo():
+            return generation_repo
+
+        async def override_document_repo():
+            return document_repo
+
+        async def override_profile_repo():
+            return profile_repo
+
+        async def override_user_repo():
+            return user_repo
+
+        async def override_report_repo():
+            return report_repo
+
+        app.dependency_overrides[get_current_user] = override_current_user
+        app.dependency_overrides[get_generation_repository] = override_generation_repo
+        app.dependency_overrides[get_document_repository] = override_document_repo
+        app.dependency_overrides[get_student_profile_repository] = override_profile_repo
+        app.dependency_overrides[get_user_repository] = override_user_repo
+        app.dependency_overrides[get_report_repository] = override_report_repo
+
+        original_wait_for = generation_routes.asyncio.wait_for
+
+        async def immediate_timeout(awaitable, timeout):
+            if timeout == generation_routes._SSE_KEEPALIVE_TIMEOUT_SECONDS:
+                awaitable.close()
+                raise TimeoutError
+            return await original_wait_for(awaitable, timeout)
+
+        token = JWT_HANDLER.create_access_token(TEST_USER.id, TEST_USER.email)
+        try:
+            with patch.object(
+                generation_routes.asyncio,
+                "wait_for",
+                side_effect=immediate_timeout,
+            ):
+                transport = ASGITransport(app=app)
+                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    response = await client.get(
+                        f"/api/v1/generations/{generation_id}/events?token={token}",
+                    )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert "event: complete" in response.text

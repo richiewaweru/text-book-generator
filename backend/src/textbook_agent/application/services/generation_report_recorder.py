@@ -78,10 +78,33 @@ class GenerationReportRecorder:
         self._timeline_sequence = 0
         self._queue: asyncio.Queue | None = None
         self._consumer: asyncio.Task | None = None
+        self._consumer_error: Exception | None = None
+        self._consumer_dead = False
+        self._dropped_event_count = 0
 
     @property
     def report(self) -> GenerationReport:
         return self._report
+
+    @property
+    def consumer_error(self) -> Exception | None:
+        return self._consumer_error
+
+    @property
+    def consumer_dead(self) -> bool:
+        return self._consumer_dead
+
+    @property
+    def dropped_event_count(self) -> int:
+        return self._dropped_event_count
+
+    @property
+    def diagnostics_degraded(self) -> bool:
+        return (
+            self._consumer_error is not None
+            or self._consumer_dead
+            or self._dropped_event_count > 0
+        )
 
     async def start(self) -> None:
         self._queue = event_bus.subscribe(self._generation.id)
@@ -89,51 +112,36 @@ class GenerationReportRecorder:
         self._consumer = asyncio.create_task(self._consume_events())
 
     async def stop(self) -> None:
-        if self._queue is not None:
-            await self.wait_for_idle()
         if self._consumer is not None:
             self._consumer.cancel()
             with suppress(asyncio.CancelledError):
                 await self._consumer
         if self._queue is not None:
+            self._drain_queue(mark_dead=False)
             event_bus.unsubscribe(self._generation.id, self._queue)
             self._queue = None
         self._consumer = None
 
-    async def wait_for_idle(self, *, timeout: float = 30.0) -> None:
+    async def wait_for_idle(self, *, timeout: float = 5.0) -> None:
         if self._queue is None:
             return
         if self._consumer is not None and self._consumer.done():
-            self._drain_dead_queue()
+            self._consumer_dead = True
+            with suppress(asyncio.CancelledError, asyncio.InvalidStateError):
+                exc = self._consumer.exception()
+                if exc is not None:
+                    self._consumer_error = self._consumer_error or exc
+            self._drain_queue()
             return
         try:
             await asyncio.wait_for(self._queue.join(), timeout=timeout)
         except (TimeoutError, asyncio.TimeoutError):
             logger.warning(
-                "wait_for_idle timed out after %.1fs for generation=%s",
+                "Recorder wait_for_idle timed out after %.1fs for generation=%s",
                 timeout,
                 self._generation.id,
             )
-            self._drain_dead_queue()
-
-    def _drain_dead_queue(self) -> None:
-        """Mark all pending queue items as done so join() unblocks."""
-        if self._queue is None:
-            return
-        drained = 0
-        while not self._queue.empty():
-            try:
-                self._queue.get_nowait()
-                self._queue.task_done()
-                drained += 1
-            except asyncio.QueueEmpty:
-                break
-        if drained:
-            logger.warning(
-                "Drained %d unprocessed events from recorder queue for generation=%s",
-                drained,
-                self._generation.id,
-            )
+            self._drain_queue()
 
     async def finalize_success(
         self,
@@ -141,16 +149,10 @@ class GenerationReportRecorder:
         document: PipelineDocument,
         generation_time_seconds: float | None,
     ) -> None:
-        self._apply_document_snapshot(document)
-        self._report.status = "completed"
-        self._report.quality_passed = document.quality_passed
-        self._report.generation_time_seconds = generation_time_seconds
-        self._report.completed_at = document.completed_at or _utc_now()
-        self._report.final_error = document.error
-        self._finalize_incomplete_sections(final_status="completed")
-        self._report.outcome = self._derive_outcome(final_status="completed")
-        self._update_wall_time()
-        self._refresh_summary()
+        self._apply_success_state(
+            document=document,
+            generation_time_seconds=generation_time_seconds,
+        )
         await self._persist()
 
     async def finalize_failure(
@@ -159,16 +161,37 @@ class GenerationReportRecorder:
         error: str,
         generation_time_seconds: float | None = None,
     ) -> None:
-        self._report.status = "failed"
-        self._report.outcome = "failed"
-        self._report.quality_passed = False
-        self._report.completed_at = _utc_now()
-        self._report.generation_time_seconds = generation_time_seconds
-        self._report.final_error = error
-        self._finalize_incomplete_sections(final_status="failed")
-        self._update_wall_time()
-        self._refresh_summary()
+        self._apply_failure_state(
+            error=error,
+            generation_time_seconds=generation_time_seconds,
+        )
         await self._persist()
+
+    def build_success_snapshot(
+        self,
+        *,
+        document: PipelineDocument,
+        generation_time_seconds: float | None,
+    ) -> GenerationReport:
+        self._apply_success_state(
+            document=document,
+            generation_time_seconds=generation_time_seconds,
+        )
+        self._sync_views()
+        return self._report.model_copy(deep=True)
+
+    def build_failure_snapshot(
+        self,
+        *,
+        error: str,
+        generation_time_seconds: float | None = None,
+    ) -> GenerationReport:
+        self._apply_failure_state(
+            error=error,
+            generation_time_seconds=generation_time_seconds,
+        )
+        self._sync_views()
+        return self._report.model_copy(deep=True)
 
     def log_final_summary(self) -> None:
         self._log_final_summary()
@@ -211,18 +234,30 @@ class GenerationReportRecorder:
 
     async def _consume_events(self) -> None:
         assert self._queue is not None
-        while True:
-            event = await self._queue.get()
-            try:
-                await self.apply_event(event)
-            except Exception:
-                logger.exception(
-                    "Recorder failed to process event for generation=%s type=%s",
-                    self._generation.id,
-                    event.get("type", "unknown") if isinstance(event, dict) else "unknown",
-                )
-            finally:
-                self._queue.task_done()
+        try:
+            while True:
+                event = await self._queue.get()
+                try:
+                    await self.apply_event(event)
+                except Exception as exc:
+                    self._consumer_error = exc
+                    logger.exception(
+                        "Recorder failed to process event for generation=%s type=%s",
+                        self._generation.id,
+                        event.get("type", "unknown") if isinstance(event, dict) else "unknown",
+                    )
+                finally:
+                    self._queue.task_done()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._consumer_dead = True
+            self._consumer_error = exc
+            logger.exception(
+                "Recorder consumer crashed for generation=%s",
+                self._generation.id,
+            )
+            raise
 
     def _payload(self, event: Any) -> dict[str, Any]:
         if hasattr(event, "model_dump"):
@@ -487,6 +522,39 @@ class GenerationReportRecorder:
             ]
             section.final_error = None
 
+    def _apply_success_state(
+        self,
+        *,
+        document: PipelineDocument,
+        generation_time_seconds: float | None,
+    ) -> None:
+        self._apply_document_snapshot(document)
+        self._report.status = "completed"
+        self._report.quality_passed = document.quality_passed
+        self._report.generation_time_seconds = generation_time_seconds
+        self._report.completed_at = document.completed_at or _utc_now()
+        self._report.final_error = document.error
+        self._finalize_incomplete_sections(final_status="completed")
+        self._report.outcome = self._derive_outcome(final_status="completed")
+        self._update_wall_time()
+        self._refresh_summary()
+
+    def _apply_failure_state(
+        self,
+        *,
+        error: str,
+        generation_time_seconds: float | None = None,
+    ) -> None:
+        self._report.status = "failed"
+        self._report.outcome = "failed"
+        self._report.quality_passed = False
+        self._report.completed_at = _utc_now()
+        self._report.generation_time_seconds = generation_time_seconds
+        self._report.final_error = error
+        self._finalize_incomplete_sections(final_status="failed")
+        self._update_wall_time()
+        self._refresh_summary()
+
     def _finalize_incomplete_sections(self, *, final_status: str) -> None:
         for section in self._sections.values():
             if section.status == "ready":
@@ -597,6 +665,27 @@ class GenerationReportRecorder:
     async def _persist(self) -> None:
         self._sync_views()
         await self._repository.save_report(self._report)
+
+    def _drain_queue(self, *, mark_dead: bool = True) -> None:
+        if self._queue is None:
+            return
+        drained = 0
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+                self._queue.task_done()
+                drained += 1
+            except asyncio.QueueEmpty:
+                break
+        if drained:
+            self._dropped_event_count += drained
+            if mark_dead:
+                self._consumer_dead = True
+            logger.warning(
+                "Recorder dropped %s queued events for generation=%s",
+                drained,
+                self._generation.id,
+            )
 
     def _log_event(self, payload: dict[str, Any]) -> None:
         if payload.get("type") == "llm_call_started":
