@@ -6,6 +6,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from time import perf_counter
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -54,6 +55,11 @@ from textbook_agent.interface.api.dependencies import (
     get_settings,
     get_student_profile_repository,
     get_user_repository,
+)
+from textbook_agent.interface.api.generation_recovery import (
+    INTERRUPTED_GENERATION_ERROR,
+    INTERRUPTED_GENERATION_ERROR_CODE,
+    INTERRUPTED_GENERATION_ERROR_TYPE,
 )
 from textbook_agent.interface.api.middleware.auth_middleware import get_current_user
 
@@ -344,6 +350,52 @@ async def _run_generation_job(
             await document_repo.save_document(document)
         event_bus.publish(generation.id, event)
 
+    async def finalize_failure(
+        *,
+        error_message: str,
+        error_type: str,
+        error_code: str | None,
+        generation_time_seconds: float | None,
+    ) -> None:
+        completed_at = datetime.now(timezone.utc)
+        failed_document = document.model_copy(
+            update={
+                "status": "failed",
+                "quality_passed": False,
+                "error": error_message,
+                "updated_at": completed_at,
+                "completed_at": completed_at,
+            }
+        )
+        document_path = await document_repo.save_document(failed_document)
+        await gen_repo.update_status(
+            generation.id,
+            status="failed",
+            document_path=document_path,
+            error=error_message,
+            error_type=error_type,
+            error_code=error_code,
+            quality_passed=False,
+            generation_time_seconds=generation_time_seconds,
+        )
+        await recorder.wait_for_idle()
+        await recorder.finalize_failure(
+            error=error_message,
+            generation_time_seconds=generation_time_seconds,
+        )
+        _, _, report_url = _generation_urls(generation.id)
+        event_bus.publish(
+            generation.id,
+            ErrorEvent(
+                generation_id=generation.id,
+                message=error_message,
+                report_url=report_url,
+            ),
+        )
+        await recorder.wait_for_idle()
+        recorder.log_final_summary()
+
+    started = perf_counter()
     try:
         result = await run_pipeline_streaming(command, on_event=on_event)
         completed_at = datetime.now(timezone.utc)
@@ -381,40 +433,23 @@ async def _run_generation_job(
         )
         await recorder.wait_for_idle()
         recorder.log_final_summary()
+    except asyncio.CancelledError:
+        logger.warning("Generation %s was interrupted before completion", generation.id)
+        await finalize_failure(
+            error_message=INTERRUPTED_GENERATION_ERROR,
+            error_type=INTERRUPTED_GENERATION_ERROR_TYPE,
+            error_code=INTERRUPTED_GENERATION_ERROR_CODE,
+            generation_time_seconds=perf_counter() - started,
+        )
     except Exception as exc:
         logger.exception("Generation %s failed", generation.id)
         classification = classify_generation_failure(exc)
-        completed_at = datetime.now(timezone.utc)
-        failed_document = document.model_copy(
-            update={
-                "status": "failed",
-                "error": str(exc),
-                "updated_at": completed_at,
-                "completed_at": completed_at,
-            }
-        )
-        document_path = await document_repo.save_document(failed_document)
-        await gen_repo.update_status(
-            generation.id,
-            status="failed",
-            document_path=document_path,
-            error=str(exc),
+        await finalize_failure(
+            error_message=str(exc),
             error_type=classification.error_type,
             error_code=classification.error_code,
+            generation_time_seconds=perf_counter() - started,
         )
-        await recorder.wait_for_idle()
-        await recorder.finalize_failure(error=str(exc))
-        _, _, report_url = _generation_urls(generation.id)
-        event_bus.publish(
-            generation.id,
-            ErrorEvent(
-                generation_id=generation.id,
-                message=str(exc),
-                report_url=report_url,
-            ),
-        )
-        await recorder.wait_for_idle()
-        recorder.log_final_summary()
     finally:
         await recorder.stop()
         clear_node_attempts(generation.id)

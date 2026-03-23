@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 import logging
+import random
 import time
 from typing import Any, Mapping
 
@@ -33,8 +35,10 @@ logger = logging.getLogger(__name__)
 class RetryPolicy:
     """Retry configuration for the shared LLM execution path."""
 
-    max_attempts: int = 2
+    max_attempts: int = 3
     base_delay_seconds: float = 0.5
+    call_timeout_seconds: float = 120.0
+    max_rate_limit_delay_seconds: float = 8.0
 
 
 # Cost keys stay exact by design so we do not guess vendor pricing. Unknown
@@ -44,6 +48,12 @@ TOKEN_PRICE_USD_PER_1M_BY_MODEL: dict[str, tuple[float, float]] = {
     "anthropic:claude-sonnet-4-6": (3.0, 15.0),
     "test:TestModel": (0.0, 0.0),
 }
+
+_DRAFT_LLM_LIMITS: dict[ModelSlot, int] = {
+    ModelSlot.FAST: 2,
+    ModelSlot.STANDARD: 2,
+}
+_DRAFT_LLM_SEMAPHORES: dict[tuple[int, ModelSlot], asyncio.Semaphore] = {}
 
 
 def _price_key(effective_spec: ModelSpec) -> str:
@@ -69,6 +79,113 @@ def _should_publish_events(generation_id: str) -> bool:
 def _publish_llm_event(generation_id: str, event: Any) -> None:
     if _should_publish_events(generation_id):
         event_bus.publish(generation_id, event)
+
+
+def _draft_semaphore(
+    *,
+    generation_mode: GenerationMode,
+    slot: ModelSlot,
+) -> asyncio.Semaphore | None:
+    if generation_mode != GenerationMode.DRAFT:
+        return None
+
+    limit = _DRAFT_LLM_LIMITS.get(slot)
+    if limit is None:
+        return None
+
+    key = (id(asyncio.get_running_loop()), slot)
+    semaphore = _DRAFT_LLM_SEMAPHORES.get(key)
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(limit)
+        _DRAFT_LLM_SEMAPHORES[key] = semaphore
+    return semaphore
+
+
+def _coerce_retry_after_seconds(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return float(stripped)
+        except ValueError:
+            try:
+                parsed = parsedate_to_datetime(stripped)
+            except (TypeError, ValueError, IndexError):
+                return None
+            return max(parsed.timestamp() - time.time(), 0.0)
+    return None
+
+
+def _retry_after_seconds(exc: ModelHTTPError) -> float | None:
+    header_candidates = []
+
+    headers = getattr(exc, "headers", None)
+    if isinstance(headers, Mapping):
+        header_candidates.append(headers)
+
+    if isinstance(exc.body, Mapping):
+        header_candidates.append(exc.body)
+        nested_headers = exc.body.get("headers")
+        if isinstance(nested_headers, Mapping):
+            header_candidates.append(nested_headers)
+        nested_error = exc.body.get("error")
+        if isinstance(nested_error, Mapping):
+            header_candidates.append(nested_error)
+
+    for candidate in header_candidates:
+        for key in ("retry-after", "Retry-After", "retry_after", "retryAfter"):
+            seconds = _coerce_retry_after_seconds(candidate.get(key))
+            if seconds is not None:
+                return seconds
+
+    return None
+
+
+def _retry_delay_seconds(
+    *,
+    exc: BaseException,
+    attempt: int,
+    retry_policy: RetryPolicy,
+) -> float:
+    if isinstance(exc, ModelHTTPError) and exc.status_code == 429:
+        retry_after = _retry_after_seconds(exc)
+        if retry_after is not None:
+            base_delay = min(retry_after, retry_policy.max_rate_limit_delay_seconds)
+        else:
+            base_delay = min(
+                2.0 * (2 ** max(attempt - 1, 0)),
+                retry_policy.max_rate_limit_delay_seconds,
+            )
+        jitter = random.uniform(0.0, min(base_delay * 0.25, 0.5))
+        return base_delay + jitter
+    return retry_policy.base_delay_seconds * attempt
+
+
+async def _run_agent_with_limits(
+    *,
+    agent: Any,
+    user_prompt: str,
+    retry_policy: RetryPolicy,
+    generation_mode: GenerationMode,
+    slot: ModelSlot,
+) -> Any:
+    semaphore = _draft_semaphore(generation_mode=generation_mode, slot=slot)
+    if semaphore is None:
+        return await asyncio.wait_for(
+            agent.run(user_prompt=user_prompt),
+            timeout=retry_policy.call_timeout_seconds,
+        )
+
+    async with semaphore:
+        return await asyncio.wait_for(
+            agent.run(user_prompt=user_prompt),
+            timeout=retry_policy.call_timeout_seconds,
+        )
 
 
 def _is_retryable(exc: BaseException) -> bool:
@@ -214,7 +331,13 @@ async def run_llm(
         )
 
         try:
-            result = await agent.run(user_prompt=user_prompt)
+            result = await _run_agent_with_limits(
+                agent=agent,
+                user_prompt=user_prompt,
+                retry_policy=retry_policy,
+                generation_mode=generation_mode,
+                slot=slot,
+            )
             latency_ms = (time.perf_counter() - started_at) * 1000.0
 
             tokens_in, tokens_out = _extract_usage(result)
@@ -278,6 +401,12 @@ async def run_llm(
             )
             if not can_retry:
                 raise
-            await asyncio.sleep(retry_policy.base_delay_seconds * attempt)
+            await asyncio.sleep(
+                _retry_delay_seconds(
+                    exc=exc,
+                    attempt=attempt,
+                    retry_policy=retry_policy,
+                )
+            )
 
     raise RuntimeError("run_llm exhausted retries unexpectedly")

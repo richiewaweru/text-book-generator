@@ -22,6 +22,10 @@ from textbook_agent.domain.entities.generation import Generation
 from textbook_agent.domain.entities.student_profile import StudentProfile
 from textbook_agent.domain.entities.user import User
 from textbook_agent.interface.api.app import app, create_app
+from textbook_agent.interface.api.generation_recovery import (
+    INTERRUPTED_GENERATION_ERROR_CODE,
+    mark_stale_generations_failed,
+)
 from textbook_agent.interface.api.dependencies import (
     get_document_repository,
     get_generation_repository,
@@ -31,6 +35,7 @@ from textbook_agent.interface.api.dependencies import (
     get_user_repository,
 )
 from textbook_agent.interface.api.middleware.auth_middleware import get_current_user
+from textbook_agent.interface.api.routes import generation as generation_routes
 
 
 def _now() -> datetime:
@@ -506,6 +511,44 @@ class TestGenerationApi:
         assert "event: complete" in response.text
         assert "/report" in response.text
 
+    async def test_events_endpoint_returns_terminal_error_for_failed_generation(self):
+        generation_id = "gen-failed-events"
+        document = _document(generation_id, status="failed").model_copy(
+            update={
+                "quality_passed": False,
+                "error": "Generation was interrupted before it finished. Please try again.",
+                "completed_at": _now(),
+            }
+        )
+        path = await DOC_REPO.save_document(document)
+        await GEN_REPO.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER.id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                status="failed",
+                document_path=path,
+                error=document.error,
+                error_type="runtime_error",
+                error_code=INTERRUPTED_GENERATION_ERROR_CODE,
+                requested_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                quality_passed=False,
+            )
+        )
+
+        token = JWT_HANDLER.create_access_token(TEST_USER.id, TEST_USER.email)
+        async with await _client() as client:
+            response = await client.get(
+                f"/api/v1/generations/{generation_id}/events?token={token}",
+            )
+
+        assert response.status_code == 200
+        assert "event: error" in response.text
+        assert "interrupted before it finished" in response.text
+
     async def test_streaming_partial_saves_keep_manifest_and_section_order(self):
         async def fake_run_pipeline(command, on_event=None):
             await on_event(
@@ -706,3 +749,126 @@ class TestGenerationApi:
         assert child is not None
         assert child.source_generation_id == source_id
         assert child.section_count == 1
+
+    async def test_run_generation_job_marks_cancelled_task_failed(self):
+        generation_id = "gen-cancelled"
+        generation = Generation(
+            id=generation_id,
+            user_id=TEST_USER.id,
+            subject="Calculus",
+            context="Explain limits",
+            mode="balanced",
+            status="pending",
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
+            section_count=1,
+        )
+        initial_document = _document(generation_id, status="pending").model_copy(
+            update={"quality_passed": None, "completed_at": None, "error": None}
+        )
+        generation.document_path = await DOC_REPO.save_document(initial_document)
+        await GEN_REPO.create(generation)
+
+        command = generation_routes.PipelineCommand(
+            generation_id=generation_id,
+            subject="Calculus",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=1,
+            mode="balanced",
+        )
+
+        async def cancelled_run_pipeline(command, on_event=None):
+            _ = (command, on_event)
+            raise asyncio.CancelledError
+
+        with patch.object(
+            generation_routes,
+            "run_pipeline_streaming",
+            side_effect=cancelled_run_pipeline,
+        ):
+            await generation_routes._run_generation_job(
+                generation,
+                command,
+                GEN_REPO,
+                DOC_REPO,
+                REPORT_REPO,
+                initial_document,
+            )
+
+        updated = await GEN_REPO.find_by_id(generation_id)
+        assert updated is not None
+        assert updated.status == "failed"
+        assert updated.error_code == INTERRUPTED_GENERATION_ERROR_CODE
+        assert updated.quality_passed is False
+
+        document = await DOC_REPO.load_document(updated.document_path or "")
+        assert document.status == "failed"
+        assert document.quality_passed is False
+        assert document.error is not None
+
+        report = await REPORT_REPO.load_report(generation_id)
+        assert report.status == "failed"
+        assert report.outcome == "failed"
+        assert report.quality_passed is False
+        assert report.final_error is not None
+
+    async def test_stale_generation_recovery_updates_generation_document_and_report(self):
+        generation_id = "gen-stale"
+        running_document = _document(generation_id, status="running").model_copy(
+            update={"quality_passed": True, "completed_at": None}
+        )
+        path = await DOC_REPO.save_document(running_document)
+        generation = Generation(
+            id=generation_id,
+            user_id=TEST_USER.id,
+            subject="Calculus",
+            context="Explain limits",
+            mode="balanced",
+            status="running",
+            document_path=path,
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
+            section_count=1,
+            quality_passed=True,
+        )
+        await GEN_REPO.create(generation)
+        await REPORT_REPO.save_report(
+            GenerationReport(
+                generation_id=generation_id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                template_id="guided-concept-path",
+                preset_id="blue-classroom",
+                status="running",
+                section_count=1,
+                quality_passed=True,
+            )
+        )
+
+        count = await mark_stale_generations_failed(
+            [generation],
+            generation_repository=GEN_REPO,
+            document_repository=DOC_REPO,
+            report_repository=REPORT_REPO,
+        )
+
+        assert count == 1
+        updated = await GEN_REPO.find_by_id(generation_id)
+        assert updated is not None
+        assert updated.status == "failed"
+        assert updated.error_code == INTERRUPTED_GENERATION_ERROR_CODE
+        assert updated.quality_passed is False
+
+        document = await DOC_REPO.load_document(updated.document_path or "")
+        assert document.status == "failed"
+        assert document.quality_passed is False
+
+        report = await REPORT_REPO.load_report(generation_id)
+        assert report.status == "failed"
+        assert report.outcome == "failed"
+        assert report.quality_passed is False

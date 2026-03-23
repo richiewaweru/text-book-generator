@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,7 +21,7 @@ from pipeline.events import (
     LLMCallSucceededEvent,
 )
 from pipeline.llm_runner import RetryPolicy, run_llm
-from pipeline.providers.registry import ModelFamily, describe_text_model
+from pipeline.providers.registry import ModelFamily, ModelSlot, describe_text_model
 from pipeline.types.requests import GenerationMode
 
 
@@ -98,6 +99,89 @@ async def test_retry_transient_model_http_error_then_success() -> None:
     assert failed[0].retryable is True
     succeeded = [event for _, event in published if isinstance(event, LLMCallSucceededEvent)]
     assert len(succeeded) == 1
+
+
+async def test_retry_429_honors_retry_after_header() -> None:
+    ok = SimpleNamespace(usage=SimpleNamespace(input_tokens=10, output_tokens=20))
+    throttled = ModelHTTPError(429, "m", None)
+    throttled.headers = {"Retry-After": "6"}
+    agent = MagicMock()
+    agent.run = AsyncMock(side_effect=[throttled, ok])
+
+    with (
+        patch("pipeline.llm_runner.event_bus.publish"),
+        patch("pipeline.llm_runner.random.uniform", return_value=0.0),
+        patch("pipeline.llm_runner.asyncio.sleep", new_callable=AsyncMock) as sleep,
+    ):
+        await run_llm(
+            generation_id="gen-retry-after",
+            node="curriculum_planner",
+            agent=agent,
+            user_prompt="hi",
+            retry_policy=RetryPolicy(max_attempts=2),
+            generation_mode=GenerationMode.BALANCED,
+        )
+
+    sleep.assert_awaited_once_with(6.0)
+
+
+async def test_run_llm_times_out_calls() -> None:
+    agent = MagicMock()
+
+    async def slow_run(*, user_prompt: str):
+        _ = user_prompt
+        await asyncio.sleep(0.05)
+        return SimpleNamespace(usage=SimpleNamespace(input_tokens=1, output_tokens=1))
+
+    agent.run = slow_run
+
+    with patch("pipeline.llm_runner.event_bus.publish"):
+        with pytest.raises(asyncio.TimeoutError):
+            await run_llm(
+                generation_id="gen-timeout",
+                node="curriculum_planner",
+                agent=agent,
+                user_prompt="hi",
+                retry_policy=RetryPolicy(max_attempts=1, call_timeout_seconds=0.01),
+                generation_mode=GenerationMode.BALANCED,
+            )
+
+
+async def test_draft_concurrency_cap_limits_parallel_runs() -> None:
+    current = 0
+    peak = 0
+    lock = asyncio.Lock()
+
+    async def run(*, user_prompt: str):
+        nonlocal current, peak
+        _ = user_prompt
+        async with lock:
+            current += 1
+            peak = max(peak, current)
+        await asyncio.sleep(0.02)
+        async with lock:
+            current -= 1
+        return SimpleNamespace(usage=SimpleNamespace(input_tokens=1, output_tokens=1))
+
+    agent = SimpleNamespace(run=run)
+
+    with patch("pipeline.llm_runner.event_bus.publish"):
+        await asyncio.gather(
+            *[
+                run_llm(
+                    generation_id=f"gen-draft-{index}",
+                    node="curriculum_planner",
+                    agent=agent,
+                    user_prompt=f"hi-{index}",
+                    slot=ModelSlot.FAST,
+                    retry_policy=RetryPolicy(max_attempts=1, call_timeout_seconds=1.0),
+                    generation_mode=GenerationMode.DRAFT,
+                )
+                for index in range(5)
+            ]
+        )
+
+    assert peak == 2
 
 
 async def test_no_retry_on_user_error() -> None:

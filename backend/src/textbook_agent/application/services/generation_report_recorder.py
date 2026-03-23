@@ -130,6 +130,7 @@ class GenerationReportRecorder:
     ) -> None:
         self._report.status = "failed"
         self._report.outcome = "failed"
+        self._report.quality_passed = False
         self._report.completed_at = _utc_now()
         self._report.generation_time_seconds = generation_time_seconds
         self._report.final_error = error

@@ -31,19 +31,47 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let enhancing = $state(false);
-	let eventSource = $state<EventSource | null>(null);
 	let streamState = $state<'idle' | 'connected' | 'reconnecting' | 'complete'>('idle');
 	let plannedSections = $state<number | null>(null);
 	let qcSummary = $state<{ passed: number; total: number } | null>(null);
 	let viewerWarning = $state<string | null>(null);
+	let eventSource: EventSource | null = null;
+	let streamClosedTerminally = false;
 	const sectionSlots = $derived(buildSectionSlots(document, plannedSections));
 	const readySectionCount = $derived(
 		sectionSlots.filter((slot) => slot.status === 'ready').length
 	);
+	const streamLabel = $derived(
+		detail?.status === 'completed'
+			? detail.quality_passed === false
+				? 'completed with QC issues'
+				: 'complete'
+			: detail?.status === 'failed'
+				? 'failed'
+				: streamState
+	);
 
-	function closeStream() {
-		eventSource?.close();
-		eventSource = null;
+	function closeStream(source: EventSource | null = eventSource) {
+		source?.close();
+		if (source === eventSource) {
+			eventSource = null;
+		}
+	}
+
+	function applyGenerationSnapshot(nextDetail: GenerationDetail, nextDocument: GenerationDocument) {
+		const normalizedDocument = normalizeDocument(nextDocument);
+		const manifestCount = normalizedDocument.section_manifest.length;
+		const sectionCount = normalizedDocument.sections.length;
+		detail = nextDetail;
+		document = normalizedDocument;
+		plannedSections =
+			nextDetail.section_count ?? (manifestCount > 0 ? manifestCount : sectionCount > 0 ? sectionCount : null);
+		qcSummary = normalizedDocument.qc_reports.length
+			? {
+					passed: normalizedDocument.qc_reports.filter((report) => report.passed).length,
+					total: normalizedDocument.qc_reports.length
+				}
+			: null;
 	}
 
 	async function refresh(id: string) {
@@ -51,22 +79,45 @@
 			getGenerationDetail(id),
 			getGenerationDocument(id)
 		]);
-		detail = nextDetail;
-		document = normalizeDocument(nextDocument);
+		applyGenerationSnapshot(nextDetail, nextDocument);
+	}
+
+	async function finalizeStream(source: EventSource, id: string, nextError: string | null = null) {
+		if (source !== eventSource) {
+			return;
+		}
+		streamClosedTerminally = true;
+		streamState = 'complete';
+		closeStream(source);
+		await refresh(id);
+		if (detail?.status === 'failed') {
+			error = friendlyGenerationErrorMessage(detail.error, detail.error_type, detail.error_code);
+			return;
+		}
+		if (nextError) {
+			error = nextError;
+		}
 	}
 
 	function connectStream(id: string) {
 		closeStream();
 		const source = new EventSource(buildGenerationEventsUrl(id));
 		eventSource = source;
+		streamClosedTerminally = false;
 		streamState = 'connected';
 
 		source.addEventListener('pipeline_start', (event) => {
+			if (source !== eventSource) {
+				return;
+			}
 			const payload = JSON.parse((event as MessageEvent).data) as { section_count: number };
 			plannedSections = payload.section_count;
 		});
 
 		source.addEventListener('section_started', (event) => {
+			if (source !== eventSource) {
+				return;
+			}
 			const payload = JSON.parse((event as MessageEvent).data) as SectionStartedEvent;
 			if (!document) {
 				return;
@@ -75,6 +126,9 @@
 		});
 
 		source.addEventListener('section_ready', (event) => {
+			if (source !== eventSource) {
+				return;
+			}
 			const payload = JSON.parse((event as MessageEvent).data) as SectionReadyEvent;
 			plannedSections = payload.total_sections;
 			if (!document) {
@@ -89,23 +143,29 @@
 		});
 
 		source.addEventListener('qc_complete', (event) => {
+			if (source !== eventSource) {
+				return;
+			}
 			const payload = JSON.parse((event as MessageEvent).data) as QCCompleteEvent;
 			qcSummary = { passed: payload.passed, total: payload.total };
 		});
 
 		source.addEventListener('complete', async () => {
-			streamState = 'complete';
-			closeStream();
-			await refresh(id);
+			await finalizeStream(source, id);
 		});
 
 		source.addEventListener('error', async (event) => {
 			if (event instanceof MessageEvent) {
 				const payload = JSON.parse(event.data) as ErrorEvent;
-				error = payload.message;
+				await finalizeStream(source, id, payload.message);
+				return;
+			}
+			if (source !== eventSource) {
+				return;
+			}
+			if (streamClosedTerminally || detail?.status === 'completed' || detail?.status === 'failed') {
 				streamState = 'complete';
-				closeStream();
-				await refresh(id);
+				closeStream(source);
 				return;
 			}
 			streamState = 'reconnecting';
@@ -118,17 +178,15 @@
 		qcSummary = null;
 		plannedSections = null;
 		viewerWarning = null;
+		streamClosedTerminally = false;
 		closeStream();
 
 		try {
 			await refresh(id);
-			plannedSections =
-				detail?.section_count ??
-				(document?.section_manifest.length || null) ??
-				(document?.sections.length || null);
 
 			if (detail?.status === 'failed') {
 				error = friendlyGenerationErrorMessage(detail.error, detail.error_type, detail.error_code);
+				streamState = 'complete';
 				return;
 			}
 
@@ -199,7 +257,7 @@
 			<p>
 				Sections ready: {readySectionCount} / {plannedSections}
 			</p>
-			<p>Stream: {streamState}</p>
+			<p>Stream: {streamLabel}</p>
 			{#if qcSummary}
 				<p>QC: {qcSummary.passed} / {qcSummary.total} passing</p>
 			{/if}

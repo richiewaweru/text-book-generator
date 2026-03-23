@@ -6,13 +6,18 @@ from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from textbook_agent import __version__
 from textbook_agent.infrastructure.config.settings import settings
 from textbook_agent.infrastructure.database.models import Base, GenerationModel
-from textbook_agent.infrastructure.database.session import engine
+from textbook_agent.infrastructure.database.session import async_session_factory, engine
+from textbook_agent.infrastructure.repositories.sql_generation_repo import (
+    SqlGenerationRepository,
+)
 
+from .dependencies import get_document_repository, get_report_repository
+from .generation_recovery import mark_stale_generations_failed
 from .middleware.error_handler import register_error_handlers
 from .routes.auth import router as auth_router
 from .routes.generation import router as generation_router
@@ -111,20 +116,42 @@ async def _reset_legacy_generation_table_if_needed() -> bool:
         return True
 
 
+async def _mark_stale_generations_failed() -> int:
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(GenerationModel).where(
+                GenerationModel.status.in_(("pending", "running"))
+            )
+        )
+        models = result.scalars().all()
+        if not models:
+            return 0
+
+        generation_repository = SqlGenerationRepository(session)
+        return await mark_stale_generations_failed(
+            [SqlGenerationRepository._to_entity(model) for model in models],
+            generation_repository=generation_repository,
+            document_repository=get_document_repository(),
+            report_repository=get_report_repository(),
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     reset_generations = await _reset_legacy_generation_table_if_needed()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    stale_generations = await _mark_stale_generations_failed()
     app.state.instance_id = str(uuid4())
     app.state.started_at = datetime.now(timezone.utc)
     app.state.pipeline_architecture = "shell-pipeline-native-lectio"
     logger.info(
-        "Runtime ready instance_id=%s started_at=%s pipeline_architecture=%s reset_generations=%s",
+        "Runtime ready instance_id=%s started_at=%s pipeline_architecture=%s reset_generations=%s stale_generations=%s",
         app.state.instance_id,
         app.state.started_at.isoformat(),
         app.state.pipeline_architecture,
         reset_generations,
+        stale_generations,
     )
     yield
     await engine.dispose()

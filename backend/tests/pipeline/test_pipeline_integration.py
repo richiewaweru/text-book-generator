@@ -535,6 +535,61 @@ class TestQCRouting:
         assert payload["current_section_plan"]["section_id"] == "s-01"
         assert payload["current_section_plan"]["focus"] == "Test focus"
 
+    def test_draft_routes_single_blocking_issue_to_targeted_retry(self):
+        state = _base_state(
+            request=_request(mode="draft"),
+            assembled_sections={"s-01": _section("s-01")},
+            qc_reports={
+                "s-01": QCReport(
+                    section_id="s-01",
+                    passed=False,
+                    issues=[
+                        {
+                            "severity": "blocking",
+                            "block": "practice",
+                            "message": "Practice needs stronger progression",
+                        }
+                    ],
+                    warnings=[],
+                )
+            },
+        )
+        from pipeline.routers.qc_router import route_after_qc
+
+        result = route_after_qc(state)
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].node == "retry_field"
+
+    def test_draft_does_not_escalate_multi_blocking_issue_to_full_rerender(self):
+        state = _base_state(
+            request=_request(mode="draft"),
+            assembled_sections={"s-01": _section("s-01")},
+            qc_reports={
+                "s-01": QCReport(
+                    section_id="s-01",
+                    passed=False,
+                    issues=[
+                        {
+                            "severity": "blocking",
+                            "block": "hook",
+                            "message": "Hook is weak",
+                        },
+                        {
+                            "severity": "blocking",
+                            "block": "diagram",
+                            "message": "Diagram is malformed",
+                        },
+                    ],
+                    warnings=[],
+                )
+            },
+        )
+        from pipeline.routers.qc_router import route_after_qc
+
+        result = route_after_qc(state)
+        assert result == END
+
 
 # ── Section assembler (deterministic, uses contracts on disk) ────────────────
 
@@ -558,6 +613,44 @@ class TestRetryStateLifecycle:
         merge_state_updates(raw, {"rerender_requests": {"s-01": None}})
         cleared = TextbookPipelineState.parse(raw)
         assert cleared.pending_rerender_for("s-01") is None
+
+
+class TestDocumentQuality:
+
+    def test_quality_passed_requires_full_qc_coverage(self):
+        from pipeline import run as run_mod
+
+        command = run_mod.PipelineCommand(
+            generation_id="gen-quality",
+            subject="Mathematics",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=4,
+            mode="draft",
+        )
+        state = _base_state(
+            request=command,
+            assembled_sections={
+                "s-01": _section("s-01"),
+                "s-02": _section("s-02"),
+            },
+            qc_reports={
+                "s-01": QCReport(section_id="s-01", passed=True, issues=[], warnings=[]),
+                "s-02": QCReport(section_id="s-02", passed=True, issues=[], warnings=[]),
+            },
+        )
+
+        document = run_mod._build_document(
+            command,
+            state,
+            status="completed",
+            generation_time_seconds=1.0,
+        )
+
+        assert document.quality_passed is False
 
     async def test_content_generator_does_not_treat_cleared_retry_as_rerender(self, monkeypatch):
         from pipeline.nodes import content_generator as cg_mod

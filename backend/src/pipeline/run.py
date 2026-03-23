@@ -106,7 +106,15 @@ def _build_document(
     error: str | None = None,
 ) -> PipelineDocument:
     reports = _build_reports(state)
-    quality_passed = all(report.passed for report in reports) if reports else None
+    planned_sections = max(len(state.curriculum_outline or []), command.section_count or 0)
+    if not reports and planned_sections:
+        quality_passed = False
+    elif planned_sections and len(reports) < planned_sections:
+        quality_passed = False
+    elif reports:
+        quality_passed = all(report.passed for report in reports)
+    else:
+        quality_passed = None
     completed_at = datetime.now(timezone.utc) if status in {"completed", "failed"} else None
 
     return PipelineDocument(
