@@ -1,6 +1,6 @@
 # Project Docs
 
-Live project-specific documentation for Textbook Generation Agent.
+Live project-specific documentation for the shell + pipeline + native Lectio runtime.
 
 ## Contents
 
@@ -11,6 +11,7 @@ Live project-specific documentation for Textbook Generation Agent.
 | [SETUP.md](SETUP.md) | Install commands and project-local tools |
 | [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md) | How CI and validation work |
 | [SCHEMAS.md](SCHEMAS.md) | Current public and internal data contracts |
+| [MODEL_SLOTS_AND_PROVIDERS.md](MODEL_SLOTS_AND_PROVIDERS.md) | As-built model slots, `load_profiles`, env vars, transports, SSE/cost |
 | [context-summary.yaml](context-summary.yaml) | Machine-readable project config (used by `tools/agent/` scripts) |
 | [stage-packs/](stage-packs/) | Stage-specific operating notes for agents |
 | [runs/](runs/) | Tracking checklists and runbooks |

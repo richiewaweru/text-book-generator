@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from textbook_agent.domain.entities.generation import Generation
+from textbook_agent.domain.value_objects import GenerationMode
 from textbook_agent.infrastructure.database.models import Base, UserModel
 from textbook_agent.infrastructure.repositories.sql_generation_repo import (
     SqlGenerationRepository,
@@ -46,6 +47,8 @@ class TestSqlGenerationRepository:
             user_id=TEST_USER_ID,
             subject="algebra",
             context="Help with variables",
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
         )
         created = await repo.create(gen)
         assert created.id == gen.id
@@ -54,24 +57,55 @@ class TestSqlGenerationRepository:
         found = await repo.find_by_id(gen.id)
         assert found is not None
         assert found.subject == "algebra"
+        assert found.mode == GenerationMode.BALANCED
+        assert found.source_generation_id is None
+        assert found.error_type is None
+        assert found.error_code is None
+        assert found.created_at.tzinfo is not None
+
+    async def test_create_persists_mode_and_lineage(self, repo: SqlGenerationRepository):
+        gen = Generation(
+            id=str(uuid.uuid4()),
+            user_id=TEST_USER_ID,
+            subject="algebra",
+            context="Enhance this draft",
+            mode=GenerationMode.STRICT,
+            source_generation_id="draft-123",
+            section_count=6,
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
+        )
+
+        await repo.create(gen)
+        found = await repo.find_by_id(gen.id)
+
+        assert found is not None
+        assert found.mode == GenerationMode.STRICT
+        assert found.source_generation_id == "draft-123"
+        assert found.section_count == 6
 
     async def test_update_status_completed(self, repo: SqlGenerationRepository):
         gen_id = str(uuid.uuid4())
         await repo.create(
             Generation(
-                id=gen_id, user_id=TEST_USER_ID, subject="calculus", context="Integrals"
+                id=gen_id,
+                user_id=TEST_USER_ID,
+                subject="calculus",
+                context="Integrals",
+                requested_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
             )
         )
         await repo.update_status(
             gen_id,
             status="completed",
-            output_path="/outputs/test.html",
+            document_path="/outputs/documents/test.json",
             quality_passed=True,
             generation_time_seconds=30.5,
         )
         found = await repo.find_by_id(gen_id)
         assert found.status == "completed"
-        assert found.output_path == "/outputs/test.html"
+        assert found.document_path == "/outputs/documents/test.json"
         assert found.quality_passed is True
         assert found.generation_time_seconds == 30.5
         assert found.completed_at is not None
@@ -79,13 +113,50 @@ class TestSqlGenerationRepository:
     async def test_update_status_failed(self, repo: SqlGenerationRepository):
         gen_id = str(uuid.uuid4())
         await repo.create(
-            Generation(id=gen_id, user_id=TEST_USER_ID, subject="physics")
+            Generation(
+                id=gen_id,
+                user_id=TEST_USER_ID,
+                subject="physics",
+                requested_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+            )
         )
-        await repo.update_status(gen_id, status="failed", error="Provider timeout")
+        await repo.update_status(
+            gen_id,
+            status="failed",
+            error="Provider timeout",
+            error_type="provider_error",
+            error_code="provider_request_failed",
+        )
         found = await repo.find_by_id(gen_id)
         assert found.status == "failed"
         assert found.error == "Provider timeout"
+        assert found.error_type == "provider_error"
+        assert found.error_code == "provider_request_failed"
         assert found.completed_at is not None
+
+    async def test_template_metadata_round_trips(self, repo: SqlGenerationRepository):
+        gen = Generation(
+            id=str(uuid.uuid4()),
+            user_id=TEST_USER_ID,
+            subject="chemistry",
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
+        )
+
+        await repo.create(gen)
+        await repo.update_status(
+            gen.id,
+            status="completed",
+            resolved_template_id="figure-first",
+            resolved_preset_id="warm-paper",
+        )
+        found = await repo.find_by_id(gen.id)
+
+        assert found is not None
+        assert found.requested_template_id == "guided-concept-path"
+        assert found.resolved_template_id == "figure-first"
+        assert found.resolved_preset_id == "warm-paper"
 
     async def test_list_by_user_ordered_by_newest(self, repo: SqlGenerationRepository):
         for i in range(3):
@@ -94,6 +165,8 @@ class TestSqlGenerationRepository:
                     id=f"gen-{i}",
                     user_id=TEST_USER_ID,
                     subject=f"subject-{i}",
+                    requested_template_id="guided-concept-path",
+                    requested_preset_id="blue-classroom",
                 )
             )
 
@@ -110,6 +183,8 @@ class TestSqlGenerationRepository:
                     id=f"gen-{i}",
                     user_id=TEST_USER_ID,
                     subject=f"subject-{i}",
+                    requested_template_id="guided-concept-path",
+                    requested_preset_id="blue-classroom",
                 )
             )
 

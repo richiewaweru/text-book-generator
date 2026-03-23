@@ -1,11 +1,16 @@
+import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from textbook_agent import __version__
 from textbook_agent.infrastructure.config.settings import settings
-from textbook_agent.infrastructure.database.models import Base
+from textbook_agent.infrastructure.database.models import Base, GenerationModel
 from textbook_agent.infrastructure.database.session import engine
 
 from .middleware.error_handler import register_error_handlers
@@ -14,12 +19,113 @@ from .routes.generation import router as generation_router
 from .routes.health import router as health_router
 from .routes.profile import router as profile_router
 
+logger = logging.getLogger("uvicorn.error")
+
+
+def _allowed_frontend_origins(frontend_origin: str) -> list[str]:
+    parsed = urlsplit(frontend_origin)
+    hostname = parsed.hostname
+    if hostname not in {"localhost", "127.0.0.1"}:
+        return [frontend_origin]
+
+    port_suffix = f":{parsed.port}" if parsed.port is not None else ""
+    netloc_template = "{host}" + port_suffix
+    variants = []
+    for host in ("localhost", "127.0.0.1"):
+        candidate = urlunsplit(
+            (
+                parsed.scheme,
+                netloc_template.format(host=host),
+                parsed.path,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+        if candidate not in variants:
+            variants.append(candidate)
+    return variants
+
+
+async def _reset_legacy_generation_table_if_needed() -> bool:
+    async with engine.begin() as conn:
+        if conn.dialect.name != "sqlite":
+            return False
+
+        exists = await conn.execute(
+            text(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='generations'"
+            )
+        )
+        if exists.scalar_one_or_none() is None:
+            return False
+
+        result = await conn.execute(text("PRAGMA table_info(generations)"))
+        existing = {row[1] for row in result.fetchall()}
+        expected = {
+            "id",
+            "user_id",
+            "subject",
+            "context",
+            "mode",
+            "status",
+            "document_path",
+            "error",
+            "error_type",
+            "error_code",
+            "requested_template_id",
+            "resolved_template_id",
+            "requested_preset_id",
+            "resolved_preset_id",
+            "section_count",
+            "quality_passed",
+            "generation_time_seconds",
+            "source_generation_id",
+            "created_at",
+            "completed_at",
+        }
+        legacy_markers = {
+            "output_path",
+            "requested_display_mode",
+            "resolved_display_mode",
+            "resolved_template_name",
+        }
+        if existing == expected:
+            return False
+        if expected - existing:
+            await conn.run_sync(
+                lambda sync_conn: GenerationModel.__table__.drop(sync_conn, checkfirst=True)
+            )
+            await conn.run_sync(
+                lambda sync_conn: GenerationModel.__table__.create(sync_conn, checkfirst=True)
+            )
+            return True
+        if not (legacy_markers & existing or "document_path" not in existing):
+            return False
+
+        await conn.run_sync(
+            lambda sync_conn: GenerationModel.__table__.drop(sync_conn, checkfirst=True)
+        )
+        await conn.run_sync(
+            lambda sync_conn: GenerationModel.__table__.create(sync_conn, checkfirst=True)
+        )
+        return True
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    reset_generations = await _reset_legacy_generation_table_if_needed()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    app.state.jobs = {}
+    app.state.instance_id = str(uuid4())
+    app.state.started_at = datetime.now(timezone.utc)
+    app.state.pipeline_architecture = "shell-pipeline-native-lectio"
+    logger.info(
+        "Runtime ready instance_id=%s started_at=%s pipeline_architecture=%s reset_generations=%s",
+        app.state.instance_id,
+        app.state.started_at.isoformat(),
+        app.state.pipeline_architecture,
+        reset_generations,
+    )
     yield
     await engine.dispose()
 
@@ -32,11 +138,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.state.jobs = {}
-
-    allowed_origins = [settings.frontend_origin]
-    if settings.frontend_origin != "http://localhost:5173":
-        allowed_origins.append("http://localhost:5173")
+    allowed_origins = _allowed_frontend_origins(settings.frontend_origin)
 
     app.add_middleware(
         CORSMiddleware,

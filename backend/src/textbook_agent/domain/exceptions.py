@@ -22,3 +22,12 @@ class ProviderConformanceError(Exception):
         super().__init__(
             f"Provider '{provider_name}' could not conform to schema '{schema_name}'"
         )
+
+
+class ProviderRequestError(Exception):
+    """Raised when an LLM provider rejects a request before returning usable output."""
+
+    def __init__(self, provider_name: str, detail: str) -> None:
+        self.provider_name = provider_name
+        self.detail = detail
+        super().__init__(f"Provider '{provider_name}' request failed: {detail}")

@@ -1,55 +1,100 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { fromStore } from 'svelte/store';
 	import { exchangeGoogleToken } from '$lib/api/auth';
-	import { setAuth, isAuthenticated } from '$lib/stores/auth';
+	import { isApiError } from '$lib/api/errors';
+	import { mountGoogleSignIn } from '$lib/auth/google';
+	import { navigateToLanding } from '$lib/auth/routing';
+	import { authUser, setAuth } from '$lib/stores/auth';
+	import type { User } from '$lib/types';
 
 	let errorMessage: string | null = $state(null);
 	let loading = $state(false);
+	let redirecting = $state(false);
+	const user = fromStore(authUser);
 
-	onMount(() => {
-		if (isAuthenticated()) {
-			goto('/dashboard');
+	async function redirectAuthenticatedUser(nextUser: User) {
+		if (redirecting) {
 			return;
 		}
 
-		const script = document.createElement('script');
-		script.src = 'https://accounts.google.com/gsi/client';
-		script.async = true;
-		script.defer = true;
-		script.onload = () => {
-			(window as any).google.accounts.id.initialize({
-				client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
-				callback: handleCredentialResponse
-			});
-			(window as any).google.accounts.id.renderButton(
-				document.getElementById('google-signin-btn'),
-				{
-					theme: 'outline',
-					size: 'large',
-					width: 320,
-					text: 'signin_with'
+		redirecting = true;
+		try {
+			await navigateToLanding(nextUser, goto, {
+				getCurrentPath: () => window.location.pathname,
+				hardRedirect: (path) => {
+					window.location.replace(path);
 				}
-			);
+			});
+		} catch (error) {
+			redirecting = false;
+			loading = false;
+			errorMessage =
+				error instanceof Error ? error.message : 'Signed in, but navigation failed.';
+		}
+	}
+
+	$effect(() => {
+		if (user.current) {
+			void redirectAuthenticatedUser(user.current);
+		}
+	});
+
+	onMount(() => {
+		if (user.current) {
+			return;
+		}
+
+		const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+		if (!clientId) {
+			errorMessage = 'Google sign-in is unavailable because the client ID is missing.';
+			return;
+		}
+
+		const buttonElement = document.getElementById('google-signin-btn');
+		if (!(buttonElement instanceof HTMLElement)) {
+			errorMessage = 'Google sign-in could not be initialized.';
+			return;
+		}
+
+		let cleanup: (() => void) | undefined;
+		void mountGoogleSignIn({
+			clientId,
+			buttonElement,
+			onCredential: handleCredentialResponse
+		})
+			.then((dispose) => {
+				cleanup = dispose;
+			})
+			.catch((error) => {
+				errorMessage =
+					error instanceof Error ? error.message : 'Failed to initialize Google sign-in.';
+			});
+
+		return () => {
+			cleanup?.();
 		};
-		document.head.appendChild(script);
 	});
 
 	async function handleCredentialResponse(response: { credential: string }) {
 		loading = true;
 		errorMessage = null;
+		let authenticated = false;
 		try {
 			const authResponse = await exchangeGoogleToken(response.credential);
 			setAuth(authResponse);
-			if (authResponse.user.has_profile) {
-				goto('/dashboard');
-			} else {
-				goto('/onboarding');
-			}
+			authenticated = true;
 		} catch (err) {
-			errorMessage = err instanceof Error ? err.message : 'Authentication failed.';
-		} finally {
+			if (isApiError(err)) {
+				errorMessage = err.detail;
+			} else {
+				errorMessage = err instanceof Error ? err.message : 'Authentication failed.';
+			}
 			loading = false;
+			return;
+		} finally {
+			loading = authenticated;
 		}
 	}
 </script>
@@ -63,6 +108,8 @@
 
 		{#if loading}
 			<p class="loading">Signing in...</p>
+		{:else}
+			<p class="hint">Continue with your Google account using the button below.</p>
 		{/if}
 
 		{#if errorMessage}
@@ -106,6 +153,11 @@
 
 	.loading {
 		color: #6d9eeb;
+	}
+
+	.hint {
+		font-size: 0.9rem;
+		color: #888;
 	}
 
 	.error {

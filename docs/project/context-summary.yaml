@@ -53,20 +53,30 @@ validation:
 
 architecture:
   strategy:
-    type: import-layer
-    name: ddd-layer-boundary
-    report_name: textbook-agent-architecture-guard
-    package_root: backend/src/textbook_agent
-    module_prefix: textbook_agent
-    layers:
-      domain:
-        forbidden: [application, infrastructure, interface]
-      application:
-        forbidden: [infrastructure, interface]
-      infrastructure:
-        forbidden: [application, interface]
-      interface:
-        forbidden: []
+    type: composite
+    name: shell-pipeline-boundary
+    report_name: textbook-shell-pipeline-architecture-guard
+    checks:
+      - type: import-layer
+        name: shell-ddd
+        package_root: backend/src/textbook_agent
+        module_prefix: textbook_agent
+        layers:
+          domain:
+            forbidden: [application, infrastructure, interface]
+          application:
+            forbidden: [infrastructure, interface]
+          infrastructure:
+            forbidden: [application, interface]
+          interface:
+            forbidden: []
+      - type: forbidden-import-prefix
+        name: pipeline-no-shell
+        package_root: backend/src/pipeline
+        module_prefix: pipeline
+        source_label: pipeline
+        forbidden_prefixes:
+          - textbook_agent
 
 github:
   required_checks:

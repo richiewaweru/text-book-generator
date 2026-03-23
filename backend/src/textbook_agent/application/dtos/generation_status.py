@@ -1,44 +1,59 @@
-from typing import Literal
+from pydantic import BaseModel, Field
 
-from pydantic import BaseModel
-
-from textbook_agent.domain.entities.quality_report import QualityReport
-
-from .generation_request import GenerationResponse
+from pipeline.api import PipelineDocument
+from textbook_agent.application.dtos.generation_report import GenerationReport
+from textbook_agent.domain.value_objects import GenerationMode
 
 
-class GenerationProgress(BaseModel):
-    """Progress information for an ongoing generation."""
-
-    current_node: str
-    completed_nodes: list[str]
-    total_nodes: int
-
-
-class GenerationResultSummary(BaseModel):
-    """Public summary of a completed generation returned by status endpoints."""
-
-    textbook_id: str
-    quality_report: QualityReport | None = None
-    generation_time_seconds: float
-    quality_reruns: int = 0
-
-    @classmethod
-    def from_response(cls, response: GenerationResponse) -> "GenerationResultSummary":
-        return cls(
-            textbook_id=response.textbook_id,
-            quality_report=response.quality_report,
-            generation_time_seconds=response.generation_time_seconds,
-            quality_reruns=response.quality_reruns,
-        )
-
-
-class GenerationStatus(BaseModel):
-    """Full status of a generation job."""
-
+class GenerationHistoryItem(BaseModel):
     id: str
-    status: Literal["pending", "running", "completed", "failed"]
-    progress: GenerationProgress | None = None
-    result: GenerationResultSummary | None = None
+    subject: str
+    status: str
+    mode: GenerationMode
+    source_generation_id: str | None = None
+    error_type: str | None = None
+    error_code: str | None = None
+    requested_template_id: str
+    resolved_template_id: str | None = None
+    requested_preset_id: str
+    resolved_preset_id: str | None = None
+    section_count: int | None = None
+    quality_passed: bool | None = None
+    generation_time_seconds: float | None = None
+    created_at: str | None = None
+    completed_at: str | None = None
+
+
+class GenerationDetail(BaseModel):
+    id: str
+    subject: str
+    context: str
+    status: str
+    mode: GenerationMode
+    source_generation_id: str | None = None
     error: str | None = None
     error_type: str | None = None
+    error_code: str | None = None
+    requested_template_id: str
+    resolved_template_id: str | None = None
+    requested_preset_id: str
+    resolved_preset_id: str | None = None
+    section_count: int | None = None
+    quality_passed: bool | None = None
+    generation_time_seconds: float | None = None
+    created_at: str | None = None
+    completed_at: str | None = None
+    document_path: str | None = None
+    report_url: str | None = None
+
+
+class GenerationListResponse(BaseModel):
+    items: list[GenerationHistoryItem] = Field(default_factory=list)
+
+
+class GenerationDocumentResponse(BaseModel):
+    document: PipelineDocument
+
+
+class GenerationReportResponse(BaseModel):
+    report: GenerationReport

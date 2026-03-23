@@ -1,14 +1,13 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { isAuthenticated } from '$lib/stores/auth';
+	import { fromStore } from 'svelte/store';
+	import { resolveLandingRoute } from '$lib/auth/routing';
+	import { authUser } from '$lib/stores/auth';
 
-	onMount(() => {
-		if (isAuthenticated()) {
-			goto('/dashboard');
-		} else {
-			goto('/login');
-		}
+	const user = fromStore(authUser);
+
+	$effect(() => {
+		goto(resolveLandingRoute(user.current), { replaceState: true });
 	});
 </script>
 

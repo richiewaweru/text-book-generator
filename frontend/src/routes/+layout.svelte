@@ -1,35 +1,43 @@
 <script lang="ts">
+	import '../app.css';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { initAuth, isAuthenticated, getUser, logout } from '$lib/stores/auth';
+	import { fromStore } from 'svelte/store';
+	import { fetchCurrentUser } from '$lib/api/auth';
+	import { authInitialized, authIsAuthenticated, authUser, bootstrapAuth, logout } from '$lib/stores/auth';
 
 	let { children } = $props();
-	let mounted = $state(false);
-
-	const publicPaths = ['/login'];
+	const initialized = fromStore(authInitialized);
+	const user = fromStore(authUser);
+	const authed = fromStore(authIsAuthenticated);
 
 	onMount(() => {
-		initAuth();
-		mounted = true;
+		void bootstrapAuth(fetchCurrentUser);
 	});
 
 	$effect(() => {
-		if (!mounted) return;
+		if (!initialized.current) return;
 		const path = page.url.pathname;
-		const isPublic = publicPaths.some((p) => path.startsWith(p));
-		if (!isAuthenticated() && !isPublic) {
-			goto('/login');
+		const isLogin = path.startsWith('/login');
+		const isOnboarding = path.startsWith('/onboarding');
+
+		if (!user.current) {
+			if (!isLogin) {
+				goto('/login', { replaceState: true });
+			}
+			return;
+		}
+
+		if (!user.current.has_profile && !isOnboarding) {
+			goto('/onboarding', { replaceState: true });
 		}
 	});
 
 	function handleLogout() {
 		logout();
-		goto('/login');
+		goto('/login', { replaceState: true });
 	}
-
-	const user = $derived(getUser());
-	const authed = $derived(isAuthenticated());
 </script>
 
 <svelte:head>
@@ -38,13 +46,13 @@
 
 <header>
 	<nav>
-		<a href={authed ? '/dashboard' : '/'} class="brand">Textbook Agent</a>
-		{#if authed && user}
+		<a href={authed.current ? '/dashboard' : '/'} class="brand">Textbook Agent</a>
+		{#if authed.current && user.current}
 			<div class="nav-right">
-				{#if user.picture_url}
-					<img src={user.picture_url} alt={user.name ?? ''} class="avatar" />
+				{#if user.current.picture_url}
+					<img src={user.current.picture_url} alt={user.current.name ?? ''} class="avatar" />
 				{/if}
-				<span class="user-name">{user.name ?? user.email}</span>
+				<span class="user-name">{user.current.name ?? user.current.email}</span>
 				<button onclick={handleLogout} class="logout-btn">Sign out</button>
 			</div>
 		{/if}
@@ -52,22 +60,29 @@
 </header>
 
 <main>
-	{#if mounted}
+	{#if initialized.current}
 		{@render children()}
+	{:else}
+		<p>Loading session...</p>
 	{/if}
 </main>
 
 <style>
 	:global(body) {
 		margin: 0;
-		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-		background: #111;
-		color: #eee;
+		font-family:
+			'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+		background:
+			radial-gradient(circle at top, rgba(214, 196, 160, 0.22), transparent 32%),
+			linear-gradient(180deg, #f4efe4 0%, #ece3d1 52%, #e4d7c0 100%);
+		color: #1e1b16;
 	}
 
 	header {
-		border-bottom: 1px solid #333;
+		border-bottom: 1px solid rgba(61, 47, 26, 0.15);
 		padding: 0.75rem 1.5rem;
+		backdrop-filter: blur(12px);
+		background: rgba(250, 245, 235, 0.82);
 	}
 
 	nav {
@@ -81,7 +96,7 @@
 	.brand {
 		font-weight: 700;
 		font-size: 1.1rem;
-		color: #eee;
+		color: #1f2b34;
 		text-decoration: none;
 	}
 
@@ -99,22 +114,22 @@
 
 	.user-name {
 		font-size: 0.9rem;
-		color: #ccc;
+		color: #5f574d;
 	}
 
 	.logout-btn {
-		background: none;
-		border: 1px solid #555;
-		color: #ccc;
+		background: rgba(31, 43, 52, 0.05);
+		border: 1px solid rgba(31, 43, 52, 0.15);
+		color: #24343f;
 		padding: 0.25rem 0.75rem;
-		border-radius: 4px;
+		border-radius: 999px;
 		cursor: pointer;
 		font-size: 0.8rem;
 	}
 
 	.logout-btn:hover {
-		border-color: #888;
-		color: #fff;
+		border-color: rgba(31, 43, 52, 0.35);
+		color: #111;
 	}
 
 	main {

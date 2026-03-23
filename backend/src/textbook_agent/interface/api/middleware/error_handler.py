@@ -7,6 +7,7 @@ from textbook_agent.domain.exceptions import (
     NodeValidationError,
     PipelineError,
     ProviderConformanceError,
+    ProviderRequestError,
 )
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,20 @@ def register_error_handlers(app: FastAPI) -> None:
                 "error": str(exc),
                 "error_type": "provider_error",
                 "detail": f"The LLM provider '{exc.provider_name}' could not produce a valid response for '{exc.schema_name}'.",
+            },
+        )
+
+    @app.exception_handler(ProviderRequestError)
+    async def handle_provider_request_error(
+        request: Request, exc: ProviderRequestError
+    ) -> JSONResponse:
+        logger.error("Provider request error: %s", exc)
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": str(exc),
+                "error_type": "provider_error",
+                "detail": exc.detail,
             },
         )
 

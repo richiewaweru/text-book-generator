@@ -1,29 +1,27 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from textbook_agent.domain.entities.quality_report import QualityReport
-from textbook_agent.domain.value_objects import Depth, NotationLanguage
+from textbook_agent.domain.value_objects import GenerationMode
 
 
 class GenerationRequest(BaseModel):
-    """Request DTO for textbook generation.
-
-    Only per-generation fields live here. Student-level context
-    (age, education_level, interests, etc.) comes from the
-    persistent StudentProfile and is merged in the use case.
-    """
-
     subject: str
     context: str
-    depth: Depth | None = None
-    language: NotationLanguage | None = None
-    provider: str = "claude"
+    mode: GenerationMode = GenerationMode.BALANCED
+    template_id: str
+    preset_id: str
+    section_count: int = Field(default=4, ge=1, le=12)
 
 
-class GenerationResponse(BaseModel):
-    """Response DTO for textbook generation."""
+class EnhanceGenerationRequest(BaseModel):
+    mode: GenerationMode = GenerationMode.BALANCED
+    note: str = ""
 
-    textbook_id: str
-    output_path: str
-    quality_report: QualityReport | None = None
-    generation_time_seconds: float
-    quality_reruns: int = 0
+
+class GenerationAcceptedResponse(BaseModel):
+    generation_id: str
+    status: str
+    mode: GenerationMode
+    source_generation_id: str | None = None
+    events_url: str
+    document_url: str
+    report_url: str

@@ -42,6 +42,19 @@ frontend/dist/
 .coverage
 htmlcov/
 
+# Pipeline — Lectio contract exports (generated, not committed)
+backend/contracts/
+
+# Root scratch/output directories (not part of the project)
+outputs/
+rendering_solve/
+files/
+files_phase*/
+
+# Claude Code worktrees (local development artifacts)
+.claude/worktrees/
+.claude/settings.local.json
+
 # Misc
 *.log
 ai-review.md

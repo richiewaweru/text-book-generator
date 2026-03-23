@@ -15,4 +15,7 @@ npm run test
 ## Notes
 
 - API calls use `PUBLIC_API_URL` when set, otherwise they fall back to same-origin paths.
-- The textbook viewer fetches authenticated HTML by generation ID and mounts it with `iframe srcdoc`.
+- Generation pages hydrate from the saved JSON document endpoint and continue with authenticated SSE updates.
+- Textbooks render natively with Lectio components; the legacy HTML `iframe` viewer is no longer part of the live app.
+- The frontend imports `lectio/theme.css` so previews and generated documents use Lectio's shared runtime visuals.
+- Only the fully wired `blue-classroom` preset is exposed in-product right now; other preset ids remain supported in data but are not yet live UI choices.

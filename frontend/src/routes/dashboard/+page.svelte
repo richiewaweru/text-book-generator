@@ -1,87 +1,117 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { getUser } from '$lib/stores/auth';
-	import { getProfile } from '$lib/api/profile';
-	import { startGeneration, pollUntilDone, getGenerations } from '$lib/api/client';
+	import { fromStore } from 'svelte/store';
+	import { basePresetMap, templateRegistryMap } from 'lectio';
 	import ProfileForm from '$lib/components/ProfileForm.svelte';
-	import GenerationProgress from '$lib/components/GenerationProgress.svelte';
+	import { isApiError } from '$lib/api/errors';
+	import { getOnboardingRoute, resolveDashboardProfileFailure } from '$lib/auth/routing';
+	import { startGeneration, enhanceGeneration, getGenerations } from '$lib/api/client';
+	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
+	import { getProfile } from '$lib/api/profile';
+	import { authUser, logout } from '$lib/stores/auth';
 	import { getTextbookRoute } from '$lib/navigation/textbook';
-	import type { StudentProfile, GenerationRequest, GenerationStatus, GenerationHistoryItem } from '$lib/types';
+	import type { GenerationRequest, StudentProfile, GenerationHistoryItem } from '$lib/types';
 
-	const user = $derived(getUser());
+	const user = fromStore(authUser);
 
-	let profile: StudentProfile | null = $state(null);
+	let profile = $state<StudentProfile | null>(null);
+	let pastGenerations = $state<GenerationHistoryItem[]>([]);
 	let loadingProfile = $state(true);
-	let generationStatus: GenerationStatus | null = $state(null);
 	let generating = $state(false);
-	let errorMessage: string | null = $state(null);
-	let errorType: string | null = $state(null);
-	let pastGenerations: GenerationHistoryItem[] = $state([]);
+	let errorMessage = $state<string | null>(null);
+	let profileErrorMessage = $state<string | null>(null);
+	const savedGenerations = $derived(
+		pastGenerations.filter((generation) => generation.status === 'completed')
+	);
+	const activeGenerations = $derived(
+		pastGenerations.filter((generation) => generation.status !== 'completed')
+	);
 
 	onMount(async () => {
 		try {
 			profile = await getProfile();
-		} catch {
-			goto('/onboarding');
+		} catch (err) {
+			const resolution = resolveDashboardProfileFailure(err);
+			if (resolution.redirectTo) {
+				if (resolution.redirectTo === '/login') {
+					logout();
+				}
+				goto(resolution.redirectTo, { replaceState: true });
+				return;
+			}
+			profileErrorMessage = resolution.message ?? 'Failed to load your profile.';
 			return;
 		} finally {
 			loadingProfile = false;
 		}
+
 		try {
 			pastGenerations = await getGenerations();
-		} catch {
-			// Non-critical — dashboard still works without history
+		} catch (err) {
+			if (isApiError(err) && err.status === 401) {
+				logout();
+				goto('/login', { replaceState: true });
+			}
 		}
 	});
-
-	function friendlyErrorMessage(error: string | null, type: string | null): string {
-		if (type === 'provider_error') {
-			return 'The AI provider returned an unexpected response. Please try again.';
-		}
-		if (type === 'pipeline_error') {
-			return 'The generation pipeline encountered an error. Please try again with different input.';
-		}
-		return error ?? 'Generation failed unexpectedly.';
-	}
 
 	async function handleGenerate(request: GenerationRequest) {
 		generating = true;
 		errorMessage = null;
-		errorType = null;
-		generationStatus = null;
 
 		try {
-			const { generation_id } = await startGeneration(request);
-
-			const finalStatus = await pollUntilDone(generation_id, (s) => {
-				generationStatus = s;
-			});
-
-			if (finalStatus.status === 'completed' && finalStatus.result) {
-				goto(getTextbookRoute(generation_id));
-			} else if (finalStatus.status === 'failed') {
-				errorType = finalStatus.error_type;
-				errorMessage = friendlyErrorMessage(finalStatus.error, finalStatus.error_type);
-			}
+			const accepted = await startGeneration(request);
+			goto(getTextbookRoute(accepted.generation_id));
 		} catch (err) {
-			errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+			errorMessage = err instanceof Error ? err.message : 'Generation failed.';
 		} finally {
 			generating = false;
 		}
+	}
+
+	async function handleEnhance(id: string) {
+		generating = true;
+		errorMessage = null;
+
+		try {
+			const accepted = await enhanceGeneration(id, { mode: 'balanced' });
+			goto(getTextbookRoute(accepted.generation_id));
+		} catch (err) {
+			errorMessage = err instanceof Error ? err.message : 'Draft enhancement failed.';
+		} finally {
+			generating = false;
+		}
+	}
+
+	function templateName(templateId: string | null): string {
+		return (templateId && templateRegistryMap[templateId]?.contract.name) ?? templateId ?? 'Unknown template';
+	}
+
+	function presetName(presetId: string | null): string {
+		return (presetId && basePresetMap[presetId]?.name) ?? presetId ?? 'Unknown preset';
 	}
 </script>
 
 <div class="dashboard">
 	{#if loadingProfile}
 		<p>Loading your profile...</p>
-	{:else if profile}
-		<div class="welcome-section">
-			<h1>Welcome back{user?.name ? `, ${user.name}` : ''}</h1>
-			<p class="subtitle">Your personalized textbook generator is ready.</p>
+	{:else if profileErrorMessage}
+		<div class="error">
+			<p><strong>Error:</strong> {profileErrorMessage}</p>
 		</div>
+	{:else if profile}
+		<section class="welcome-section">
+			<div>
+				<p class="eyebrow">Shell + Pipeline</p>
+				<h1>Welcome back{user.current?.name ? `, ${user.current.name}` : ''}</h1>
+				<p class="subtitle">
+					The app shell handles auth, profile, and persistence. The pipeline now owns generation.
+				</p>
+			</div>
+		</section>
 
-		<div class="profile-summary">
+		<section class="profile-summary">
 			<h2>Your Profile</h2>
 			<div class="profile-grid">
 				<div class="profile-item">
@@ -113,18 +143,16 @@
 					</div>
 				{/if}
 			</div>
-			<button class="edit-profile-btn" onclick={() => goto('/onboarding')}>Edit Profile</button>
-		</div>
+			<button class="edit-profile-btn" onclick={() => goto(getOnboardingRoute({ edit: true }))}>
+				Edit Profile
+			</button>
+		</section>
 
-		<div class="generate-section">
-			<h2>Generate a Textbook</h2>
-			<p>Tell us what you want to learn. We'll combine this with your profile to create a personalized textbook.</p>
+		<section class="generate-section">
+			<h2>Generate a Lesson</h2>
+			<p>Choose the local Lectio template and the live Blue Classroom preset directly in the frontend, then let the pipeline stream sections into the saved document.</p>
 			<ProfileForm onsubmit={handleGenerate} disabled={generating} />
-		</div>
-
-		{#if generationStatus}
-			<GenerationProgress status={generationStatus} />
-		{/if}
+		</section>
 
 		{#if errorMessage}
 			<div class="error">
@@ -132,71 +160,114 @@
 			</div>
 		{/if}
 
-		{#if pastGenerations.length > 0}
-			<div class="history-section">
-				<h2>Past Generations</h2>
+		{#if savedGenerations.length > 0}
+			<section class="history-section">
+				<h2>Saved Books</h2>
 				<ul class="history-list">
-					{#each pastGenerations as gen}
+					{#each savedGenerations as gen}
 						<li class="history-item">
 							<div class="history-info">
-								<span class="history-subject">{gen.subject}</span>
-								<span class="history-meta">
-									<span class="status-badge status-{gen.status}">{gen.status}</span>
-									{#if gen.created_at}
-										<span class="history-date">{new Date(gen.created_at).toLocaleDateString()}</span>
-									{/if}
-									{#if gen.generation_time_seconds}
-										<span class="history-time">{gen.generation_time_seconds.toFixed(1)}s</span>
-									{/if}
-								</span>
+								<p class="history-subject">{gen.subject}</p>
+								<div class="history-meta">
+									<span class="status status-{gen.status}">{gen.status}</span>
+									<span class="mode">{gen.mode.toUpperCase()}</span>
+									<span>{templateName(gen.resolved_template_id ?? gen.requested_template_id)}</span>
+									<span>{presetName(gen.resolved_preset_id ?? gen.requested_preset_id)}</span>
+								</div>
+								{#if gen.status === 'failed'}
+									<p class="failure-copy">
+										{friendlyGenerationErrorMessage(null, gen.error_type, gen.error_code)}
+									</p>
+								{/if}
 							</div>
-							{#if gen.status === 'completed'}
-								<a href={getTextbookRoute(gen.id)} class="view-link">View</a>
-							{/if}
+							<div class="history-actions">
+								<a href={getTextbookRoute(gen.id)} class="view-link">Open</a>
+								{#if gen.mode === 'draft'}
+									<button class="enhance-link" onclick={() => handleEnhance(gen.id)} disabled={generating}>
+										Enhance
+									</button>
+								{/if}
+							</div>
 						</li>
 					{/each}
 				</ul>
-			</div>
+			</section>
+		{/if}
+
+		{#if activeGenerations.length > 0}
+			<section class="history-section">
+				<h2>Generation Activity</h2>
+				<ul class="history-list">
+					{#each activeGenerations as gen}
+						<li class="history-item">
+							<div class="history-info">
+								<p class="history-subject">{gen.subject}</p>
+								<div class="history-meta">
+									<span class="status status-{gen.status}">{gen.status}</span>
+									<span class="mode">{gen.mode.toUpperCase()}</span>
+									<span>{templateName(gen.resolved_template_id ?? gen.requested_template_id)}</span>
+									<span>{presetName(gen.resolved_preset_id ?? gen.requested_preset_id)}</span>
+								</div>
+								{#if gen.status === 'failed'}
+									<p class="failure-copy">
+										{friendlyGenerationErrorMessage(null, gen.error_type, gen.error_code)}
+									</p>
+								{/if}
+							</div>
+							<div class="history-actions">
+								<a href={getTextbookRoute(gen.id)} class="view-link">Open</a>
+							</div>
+						</li>
+					{/each}
+				</ul>
+			</section>
 		{/if}
 	{/if}
 </div>
 
 <style>
 	.dashboard {
-		max-width: 800px;
+		display: grid;
+		gap: 1.5rem;
 	}
 
-	.welcome-section {
-		margin-bottom: 2rem;
+	.welcome-section,
+	.profile-summary,
+	.generate-section,
+	.history-section {
+		border: 1px solid rgba(36, 52, 63, 0.12);
+		border-radius: 26px;
+		background: rgba(255, 251, 244, 0.84);
+		box-shadow: 0 18px 50px rgba(72, 52, 23, 0.08);
+		padding: 1.35rem;
 	}
 
-	.welcome-section h1 {
-		margin-bottom: 0.25rem;
+	.eyebrow {
+		margin: 0 0 0.3rem 0;
+		font-size: 0.78rem;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: #6b7c88;
 	}
 
-	.subtitle {
-		color: #888;
-		font-size: 1.05rem;
+	.welcome-section h1,
+	.profile-summary h2,
+	.generate-section h2,
+	.history-section h2 {
+		margin: 0;
 	}
 
-	.profile-summary {
-		background: #1a1a1a;
-		border: 1px solid #333;
-		border-radius: 8px;
-		padding: 1.5rem;
-		margin-bottom: 2rem;
-	}
-
-	.profile-summary h2 {
-		margin: 0 0 1rem 0;
-		font-size: 1.15rem;
+	.subtitle,
+	.generate-section > p {
+		color: #655c52;
+		max-width: 60ch;
 	}
 
 	.profile-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-		gap: 0.75rem;
-		margin-bottom: 1rem;
+		gap: 0.8rem;
+		margin: 1rem 0;
 	}
 
 	.profile-item {
@@ -210,143 +281,119 @@
 	}
 
 	.label {
-		font-size: 0.8rem;
-		color: #888;
+		font-size: 0.78rem;
+		letter-spacing: 0.12em;
 		text-transform: uppercase;
-		letter-spacing: 0.04em;
+		color: #6f6b63;
 	}
 
 	.value {
-		font-size: 0.95rem;
-		color: #ddd;
+		color: #1f1c18;
 		text-transform: capitalize;
 	}
 
-	.edit-profile-btn {
-		background: none;
-		border: 1px solid #555;
-		color: #aaa;
-		padding: 0.3rem 0.8rem;
-		border-radius: 4px;
+	.edit-profile-btn,
+	.enhance-link {
+		border-radius: 999px;
+		border: 1px solid rgba(36, 52, 63, 0.18);
+		background: rgba(36, 52, 63, 0.05);
+		color: #24343f;
+		padding: 0.45rem 0.85rem;
 		cursor: pointer;
-		font-size: 0.85rem;
-	}
-
-	.edit-profile-btn:hover {
-		border-color: #888;
-		color: #ddd;
-	}
-
-	.generate-section {
-		margin-bottom: 2rem;
-	}
-
-	.generate-section h2 {
-		font-size: 1.15rem;
-		margin-bottom: 0.25rem;
-	}
-
-	.generate-section p {
-		color: #888;
-		margin-bottom: 1rem;
-	}
-
-	.error {
-		background: #2a1515;
-		border: 1px solid #5a2020;
-		border-radius: 6px;
-		padding: 1rem;
-		margin-top: 1rem;
-	}
-
-	.error p {
-		margin: 0;
-		color: #e57373;
-	}
-
-	.history-section {
-		margin-top: 2rem;
-	}
-
-	.history-section h2 {
-		font-size: 1.15rem;
-		margin-bottom: 0.75rem;
 	}
 
 	.history-list {
 		list-style: none;
 		padding: 0;
-		margin: 0;
+		margin: 1rem 0 0 0;
+		display: grid;
+		gap: 0.85rem;
 	}
 
 	.history-item {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
-		padding: 0.75rem 1rem;
-		background: #1a1a1a;
-		border: 1px solid #333;
-		border-radius: 6px;
-		margin-bottom: 0.5rem;
-	}
-
-	.history-info {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
+		gap: 1rem;
+		padding: 1rem;
+		border-radius: 18px;
+		background: rgba(255, 255, 255, 0.72);
+		border: 1px solid rgba(36, 52, 63, 0.1);
 	}
 
 	.history-subject {
-		font-size: 0.95rem;
-		color: #ddd;
-		text-transform: capitalize;
+		margin: 0;
+		font-size: 1rem;
+		font-weight: 700;
 	}
 
 	.history-meta {
 		display: flex;
-		gap: 0.75rem;
-		font-size: 0.8rem;
-		color: #888;
+		flex-wrap: wrap;
+		gap: 0.55rem;
+		margin-top: 0.5rem;
+		color: #5e554b;
+		font-size: 0.9rem;
 	}
 
-	.status-badge {
-		padding: 0.1rem 0.4rem;
-		border-radius: 3px;
-		font-size: 0.75rem;
+	.status,
+	.mode {
+		padding: 0.2rem 0.55rem;
+		border-radius: 999px;
+		font-size: 0.76rem;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		letter-spacing: 0.03em;
+	}
+
+	.status-pending,
+	.status-running {
+		background: rgba(54, 101, 130, 0.12);
+		color: #28516b;
 	}
 
 	.status-completed {
-		background: #1a2e1a;
-		color: #81c784;
+		background: rgba(61, 120, 73, 0.13);
+		color: #276135;
 	}
 
 	.status-failed {
-		background: #2a1515;
-		color: #e57373;
+		background: rgba(148, 66, 46, 0.12);
+		color: #8d3a26;
 	}
 
-	.status-running {
-		background: #1a1a2e;
-		color: #64b5f6;
-	}
-
-	.status-pending {
-		background: #2a2a1a;
-		color: #fff176;
+	.mode {
+		background: rgba(36, 52, 63, 0.08);
+		color: #24343f;
 	}
 
 	.view-link {
-		color: #64b5f6;
+		color: #24436a;
+		font-weight: 600;
 		text-decoration: none;
-		font-size: 0.85rem;
-		padding: 0.3rem 0.6rem;
-		border: 1px solid #64b5f6;
-		border-radius: 4px;
 	}
 
-	.view-link:hover {
-		background: #1a1a2e;
+	.history-actions {
+		display: flex;
+		gap: 0.6rem;
+		align-items: center;
+	}
+
+	.failure-copy {
+		margin: 0.5rem 0 0 0;
+		color: #864635;
+		font-size: 0.9rem;
+	}
+
+	.error {
+		padding: 1rem;
+		border-radius: 18px;
+		border: 1px solid rgba(148, 66, 46, 0.18);
+		background: rgba(255, 242, 238, 0.9);
+		color: #7d3524;
+	}
+
+	@media (max-width: 720px) {
+		.history-item {
+			display: grid;
+		}
 	}
 </style>

@@ -1,4 +1,5 @@
 import type { AuthResponse, User } from '$lib/types';
+import { ensureOk } from './errors';
 import { apiFetch } from './client';
 
 export async function exchangeGoogleToken(credential: string): Promise<AuthResponse> {
@@ -7,20 +8,12 @@ export async function exchangeGoogleToken(credential: string): Promise<AuthRespo
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ credential })
 	});
-
-	if (!response.ok) {
-		throw new Error(`Authentication failed: ${response.statusText}`);
-	}
-
+	await ensureOk(response, 'Authentication failed.');
 	return response.json();
 }
 
 export async function fetchCurrentUser(): Promise<User> {
 	const response = await apiFetch('/api/v1/auth/me');
-
-	if (!response.ok) {
-		throw new Error(`Failed to fetch user: ${response.statusText}`);
-	}
-
+	await ensureOk(response, 'Failed to fetch user.');
 	return response.json();
 }

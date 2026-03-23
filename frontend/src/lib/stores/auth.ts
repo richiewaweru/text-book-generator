@@ -1,58 +1,122 @@
-import type { User, AuthResponse } from '$lib/types';
+import { derived, get, writable } from 'svelte/store';
+
+import { isApiError } from '$lib/api/errors';
+import type { AuthResponse, User } from '$lib/types';
 
 const TOKEN_KEY = 'textbook_agent_token';
 const USER_KEY = 'textbook_agent_user';
 
+function hasStorage(): boolean {
+	return typeof localStorage !== 'undefined';
+}
+
 function loadFromStorage(): { token: string | null; user: User | null } {
-	if (typeof window === 'undefined') return { token: null, user: null };
+	if (!hasStorage()) return { token: null, user: null };
 	const token = localStorage.getItem(TOKEN_KEY);
 	const raw = localStorage.getItem(USER_KEY);
 	const user = raw ? (JSON.parse(raw) as User) : null;
 	return { token, user };
 }
 
-let _token = $state<string | null>(null);
-let _user = $state<User | null>(null);
-let _initialized = $state(false);
+const tokenStore = writable<string | null>(null);
+const userStore = writable<User | null>(null);
+const initializedStore = writable(false);
 
-export function initAuth() {
+function persistSession(token: string | null, user: User | null) {
+	if (!hasStorage()) {
+		return;
+	}
+
+	if (token) {
+		localStorage.setItem(TOKEN_KEY, token);
+	} else {
+		localStorage.removeItem(TOKEN_KEY);
+	}
+
+	if (user) {
+		localStorage.setItem(USER_KEY, JSON.stringify(user));
+	} else {
+		localStorage.removeItem(USER_KEY);
+	}
+}
+
+function setSession(token: string | null, user: User | null) {
+	tokenStore.set(token);
+	userStore.set(user);
+	persistSession(token, user);
+}
+
+export const authToken = {
+	subscribe: tokenStore.subscribe
+};
+
+export const authUser = {
+	subscribe: userStore.subscribe
+};
+
+export const authInitialized = {
+	subscribe: initializedStore.subscribe
+};
+
+export const authIsAuthenticated = derived(
+	[tokenStore, userStore],
+	([$token, $user]) => $token !== null && $user !== null
+);
+
+export async function bootstrapAuth(resolveCurrentUser: () => Promise<User>): Promise<User | null> {
 	const stored = loadFromStorage();
-	_token = stored.token;
-	_user = stored.user;
-	_initialized = true;
+	tokenStore.set(stored.token);
+	userStore.set(stored.user);
+
+	if (!stored.token) {
+		setSession(null, null);
+		initializedStore.set(true);
+		return null;
+	}
+
+	try {
+		const user = await resolveCurrentUser();
+		setSession(stored.token, user);
+		initializedStore.set(true);
+		return user;
+	} catch (error) {
+		if (isApiError(error) && error.status === 401) {
+			setSession(null, null);
+			initializedStore.set(true);
+			return null;
+		}
+
+		initializedStore.set(true);
+		return stored.user;
+	}
 }
 
 export function getToken(): string | null {
-	return _token;
+	return get(tokenStore);
 }
 
 export function getUser(): User | null {
-	return _user;
+	return get(userStore);
 }
 
 export function isAuthenticated(): boolean {
-	return _token !== null && _user !== null;
+	return get(authIsAuthenticated);
 }
 
 export function isInitialized(): boolean {
-	return _initialized;
+	return get(initializedStore);
 }
 
 export function setAuth(response: AuthResponse) {
-	_token = response.access_token;
-	_user = response.user;
-	localStorage.setItem(TOKEN_KEY, response.access_token);
-	localStorage.setItem(USER_KEY, JSON.stringify(response.user));
+	setSession(response.access_token, response.user);
+	initializedStore.set(true);
 }
 
 export function updateUser(user: User) {
-	_user = user;
-	localStorage.setItem(USER_KEY, JSON.stringify(user));
+	setSession(get(tokenStore), user);
 }
 
 export function logout() {
-	_token = null;
-	_user = null;
-	localStorage.removeItem(TOKEN_KEY);
-	localStorage.removeItem(USER_KEY);
+	setSession(null, null);
+	initializedStore.set(true);
 }
