@@ -15,7 +15,6 @@ from pipeline.api import (
     PipelineCommand,
     PipelineDocument,
     PipelineErrorInfo,
-    PipelineIssue,
     PipelineResult,
     PipelineSectionManifestItem,
     PipelineSectionReport,
@@ -29,7 +28,7 @@ from pipeline.events import (
     SectionStartedEvent,
 )
 from pipeline.graph import build_graph
-from pipeline.state import PipelineStatus, TextbookPipelineState
+from pipeline.state import PipelineStatus, TextbookPipelineState, merge_state_updates
 from pipeline.types.section_content import SectionContent
 from pipeline.types.template_contract import TemplateContractSummary
 
@@ -58,13 +57,7 @@ async def _emit(
 
 
 def _merge_state(final_state: dict[str, Any], output: dict[str, Any]) -> None:
-    for key, value in output.items():
-        if isinstance(value, dict) and isinstance(final_state.get(key), dict):
-            final_state[key] = {**final_state[key], **value}
-        elif isinstance(value, list) and isinstance(final_state.get(key), list):
-            final_state[key] = final_state[key] + value
-        else:
-            final_state[key] = value
+    merge_state_updates(final_state, output)
 
 
 def _sorted_sections(
@@ -96,23 +89,10 @@ def _build_section_manifest(state: TextbookPipelineState) -> list[PipelineSectio
 
 
 def _build_reports(state: TextbookPipelineState) -> list[PipelineSectionReport]:
-    reports: list[PipelineSectionReport] = []
-    for section_id, report in state.qc_reports.items():
-        reports.append(
-            PipelineSectionReport(
-                section_id=section_id,
-                passed=report.passed,
-                issues=[
-                    PipelineIssue(
-                        block=issue.get("block", "unknown"),
-                        severity=issue.get("severity", "warning"),
-                        message=issue.get("message", ""),
-                    )
-                    for issue in report.issues
-                ],
-                warnings=list(report.warnings),
-            )
-        )
+    reports = [
+        PipelineSectionReport.from_qc_report(report)
+        for report in state.qc_reports.values()
+    ]
     reports.sort(key=lambda item: item.section_id)
     return reports
 
@@ -234,7 +214,7 @@ async def run_pipeline_streaming(
                     )
                 emitted_started_sections = True
 
-            if node_name == "process_section":
+            if node_name in {"process_section", "retry_diagram", "retry_field"}:
                 assembled = output.get("assembled_sections", {}) if isinstance(output, dict) else {}
                 total_sections = len(typed_state.curriculum_outline or []) or command.section_count
                 completed_sections = len(typed_state.assembled_sections)
@@ -254,15 +234,17 @@ async def run_pipeline_streaming(
                         on_event,
                     )
 
-            if node_name == "qc_agent":
+                # QC is now inline in process_section.
+                # Emit QCCompleteEvent when all sections have QC reports.
                 reports = typed_state.qc_reports
-                await _emit(
-                    QCCompleteEvent(
-                        generation_id=command.generation_id or "",
-                        passed=sum(1 for report in reports.values() if report.passed),
-                        total=len(reports),
-                    ),
-                    on_event,
-                )
+                if reports and len(reports) >= total_sections:
+                    await _emit(
+                        QCCompleteEvent(
+                            generation_id=command.generation_id or "",
+                            passed=sum(1 for report in reports.values() if report.passed),
+                            total=len(reports),
+                        ),
+                        on_event,
+                    )
 
     return _build_result(command, final_state, perf_counter() - started)

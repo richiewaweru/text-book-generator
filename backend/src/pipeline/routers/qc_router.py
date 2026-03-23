@@ -1,16 +1,43 @@
 """
 pipeline.routers.qc_router
 
-Decides what happens after qc_agent runs.
+Decides what happens after QC (now inline in process_section) runs.
 
 Returns END when all sections pass or on unrecoverable errors.
-Returns list[Send] to fan out rerender for failing sections.
+Returns list[Send] to fan out retries for failing sections, routed to
+the narrowest possible retry scope:
+    - diagram-only failures  -> retry_diagram  (re-runs diagram + assembler + QC)
+    - text field failures    -> retry_field    (re-generates one field via FAST LLM)
+    - unknown / multi-field  -> process_section (full rerun)
 """
 
 from langgraph.graph import END
 from langgraph.types import Send
 
 from pipeline.state import TextbookPipelineState
+
+# Diagram component blocks that retry_diagram handles.
+_DIAGRAM_FIELDS = {"diagram", "diagram_series", "diagram_compare"}
+
+# Text fields that field_regenerator handles (targeted single-field retry).
+_TEXT_FIELDS = {
+    "hook", "explanation", "practice", "worked_example",
+    "definition", "pitfall", "glossary", "what_next",
+}
+
+
+def _classify_retry_scope(blocking_issues: list[dict]) -> str:
+    """Classify the narrowest retry scope for a set of blocking issues.
+
+    Returns one of: "diagram", "field", "full".
+    """
+    blocks = {i.get("block", "") for i in blocking_issues}
+    if blocks and blocks <= _DIAGRAM_FIELDS:
+        return "diagram"
+    if len(blocks) == 1 and blocks <= _TEXT_FIELDS:
+        # Single text field failure — can be fixed with a targeted LLM call
+        return "field"
+    return "full"
 
 
 def route_after_qc(state: TextbookPipelineState | dict) -> list[Send] | str:
@@ -26,32 +53,64 @@ def route_after_qc(state: TextbookPipelineState | dict) -> list[Send] | str:
     if any(not e.recoverable for e in state.errors):
         return END
 
-    # Find sections needing rerender
+    section_ids = (
+        [state.current_section_id]
+        if state.current_section_id is not None
+        else list(state.qc_reports.keys())
+    )
+
     sends = []
-    for section_id, report in state.qc_reports.items():
-        blocking = [
-            i for i in report.issues if i.get("severity") == "blocking"
-        ]
-        if blocking and state.can_rerender(section_id):
-            plan = next(
-                (
-                    p
-                    for p in (state.curriculum_outline or [])
-                    if p.section_id == section_id
-                ),
-                None,
-            )
-            if plan:
-                sends.append(
-                    Send(
-                        "process_section",
-                        {
-                            **state.model_dump(),
-                            "current_section_id": section_id,
-                            "current_section_plan": plan.model_dump(),
-                        },
-                    )
-                )
+    for section_id in section_ids:
+        if section_id is None:
+            continue
+
+        pending = state.pending_rerender_for(section_id)
+        if pending is not None:
+            if not state.can_rerender(section_id):
+                continue
+            blocking = [
+                {
+                    "severity": "blocking",
+                    "block": pending.block_type,
+                    "message": pending.reason,
+                }
+            ]
+        else:
+            report = state.qc_reports.get(section_id)
+            if report is None:
+                continue
+            blocking = [
+                issue
+                for issue in report.issues
+                if issue.get("severity") == "blocking"
+            ]
+            if not blocking or not state.can_rerender(section_id):
+                continue
+
+        plan = next(
+            (
+                p
+                for p in (state.curriculum_outline or [])
+                if p.section_id == section_id
+            ),
+            None,
+        )
+        if not plan:
+            continue
+
+        base = {
+            **state.model_dump(),
+            "current_section_id": section_id,
+            "current_section_plan": plan.model_dump(),
+        }
+
+        scope = _classify_retry_scope(blocking)
+        if scope == "diagram":
+            sends.append(Send("retry_diagram", base))
+        elif scope == "field":
+            sends.append(Send("retry_field", base))
+        else:
+            sends.append(Send("process_section", base))
 
     if sends:
         return sends

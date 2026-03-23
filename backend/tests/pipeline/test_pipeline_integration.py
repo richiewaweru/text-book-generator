@@ -10,12 +10,15 @@ All other tests use deterministic state or the contracts on disk.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from langgraph.graph import END
 from langgraph.types import Send
 
 from pipeline.state import (
     PipelineError,
     QCReport,
+    RerenderRequest,
     StyleContext,
     TextbookPipelineState,
 )
@@ -28,6 +31,7 @@ from pipeline.types.section_content import (
     PracticeProblem,
     SectionContent,
     SectionHeaderContent,
+    DiagramContent,
     WhatNextContent,
 )
 from pipeline.types.template_contract import (
@@ -275,8 +279,80 @@ class TestQCRouting:
         assert isinstance(result, list)
         assert len(result) == 1
         assert isinstance(result[0], Send)
-        assert result[0].node == "process_section"
+        # Single text field failure routes to targeted retry_field
+        assert result[0].node == "retry_field"
         assert result[0].arg["current_section_id"] == "s-01"
+
+    def test_diagram_block_routes_to_retry_diagram(self):
+        state = _base_state(
+            current_section_id="s-01",
+            assembled_sections={"s-01": _section("s-01")},
+            qc_reports={
+                "s-01": QCReport(
+                    section_id="s-01",
+                    passed=False,
+                    issues=[
+                        {
+                            "severity": "blocking",
+                            "block": "diagram",
+                            "message": "Diagram is malformed",
+                        }
+                    ],
+                    warnings=[],
+                )
+            },
+            rerender_requests={
+                "s-01": RerenderRequest(
+                    section_id="s-01",
+                    block_type="diagram",
+                    reason="Diagram is malformed",
+                )
+            },
+        )
+        from pipeline.routers.qc_router import route_after_qc
+
+        result = route_after_qc(state)
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].node == "retry_diagram"
+
+    def test_multi_field_block_routes_to_full_process_section(self):
+        state = _base_state(
+            current_section_id="s-01",
+            assembled_sections={"s-01": _section("s-01")},
+            qc_reports={
+                "s-01": QCReport(
+                    section_id="s-01",
+                    passed=False,
+                    issues=[
+                        {
+                            "severity": "blocking",
+                            "block": "hook",
+                            "message": "Weak hook",
+                        },
+                        {
+                            "severity": "blocking",
+                            "block": "diagram",
+                            "message": "Broken diagram",
+                        },
+                    ],
+                    warnings=[],
+                )
+            },
+            rerender_requests={
+                "s-01": RerenderRequest(
+                    section_id="s-01",
+                    block_type="hook+diagram",
+                    reason="Multiple blocking issues",
+                )
+            },
+        )
+        from pipeline.routers.qc_router import route_after_qc
+
+        result = route_after_qc(state)
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].node == "process_section"
 
     def test_max_rerenders_respected(self):
         state = _base_state(
@@ -393,6 +469,46 @@ class TestQCRouting:
         sids = {s.arg["current_section_id"] for s in result}
         assert sids == {"s-01", "s-02"}
 
+    def test_current_section_scope_avoids_duplicate_retry_for_other_section(self):
+        state = _base_state(
+            current_section_id="s-02",
+            assembled_sections={
+                "s-01": _section("s-01"),
+                "s-02": _section("s-02"),
+            },
+            qc_reports={
+                "s-01": QCReport(
+                    section_id="s-01",
+                    passed=False,
+                    issues=[
+                        {
+                            "severity": "blocking",
+                            "block": "hook",
+                            "message": "Weak hook",
+                        }
+                    ],
+                    warnings=[],
+                ),
+                "s-02": QCReport(
+                    section_id="s-02",
+                    passed=True,
+                    issues=[],
+                    warnings=[],
+                ),
+            },
+            rerender_requests={
+                "s-01": RerenderRequest(
+                    section_id="s-01",
+                    block_type="hook",
+                    reason="Weak hook",
+                )
+            },
+        )
+        from pipeline.routers.qc_router import route_after_qc
+
+        result = route_after_qc(state)
+        assert result == END
+
     def test_rerender_send_carries_section_plan(self):
         state = _base_state(
             assembled_sections={"s-01": _section("s-01")},
@@ -421,6 +537,67 @@ class TestQCRouting:
 
 
 # ── Section assembler (deterministic, uses contracts on disk) ────────────────
+
+
+class TestRetryStateLifecycle:
+
+    def test_merge_state_updates_can_queue_and_clear_rerender_request(self):
+        from pipeline.state import merge_state_updates
+
+        raw = _base_state().model_dump()
+        request = RerenderRequest(
+            section_id="s-01",
+            block_type="practice",
+            reason="Practice set is too easy",
+        )
+
+        merge_state_updates(raw, {"rerender_requests": {"s-01": request}})
+        queued = TextbookPipelineState.parse(raw)
+        assert queued.pending_rerender_for("s-01") == request
+
+        merge_state_updates(raw, {"rerender_requests": {"s-01": None}})
+        cleared = TextbookPipelineState.parse(raw)
+        assert cleared.pending_rerender_for("s-01") is None
+
+    async def test_content_generator_does_not_treat_cleared_retry_as_rerender(self, monkeypatch):
+        from pipeline.nodes import content_generator as cg_mod
+        from pipeline.state import merge_state_updates
+
+        state = _base_state(
+            current_section_id="s-01",
+            current_section_plan=_plan("s-01"),
+        )
+        raw = state.model_dump()
+        merge_state_updates(
+            raw,
+            {
+                "rerender_requests": {
+                    "s-01": RerenderRequest(
+                        section_id="s-01",
+                        block_type="hook",
+                        reason="Weak hook",
+                    )
+                }
+            },
+        )
+        merge_state_updates(raw, {"rerender_requests": {"s-01": None}})
+        cleared_state = TextbookPipelineState.parse(raw)
+
+        class DummyAgent:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        async def fake_run_llm(**kwargs):
+            return SimpleNamespace(output=_section("s-01"))
+
+        monkeypatch.setattr(cg_mod, "Agent", DummyAgent)
+        monkeypatch.setattr(cg_mod, "get_node_text_model", lambda *args, **kwargs: object())
+        monkeypatch.setattr(cg_mod, "run_llm", fake_run_llm)
+
+        result = await cg_mod.content_generator(cleared_state)
+
+        assert result["rerender_count"] == {}
 
 
 class TestSectionAssembler:
@@ -466,6 +643,110 @@ class TestSectionAssembler:
 
 
 # ── Preset validation (uses contracts on disk) ───────────────────────────────
+
+
+class TestQCAgent:
+
+    async def test_qc_agent_scopes_to_current_section(self, monkeypatch):
+        from pipeline.nodes import qc_agent as qca_mod
+
+        calls = []
+
+        class DummyAgent:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        async def fake_run_llm(**kwargs):
+            calls.append(kwargs["section_id"])
+            return SimpleNamespace(
+                output=qca_mod.QCOutput(
+                    passed=False,
+                    issues=[
+                        {
+                            "severity": "blocking",
+                            "block": "practice",
+                            "message": "Practice problems are too easy",
+                        }
+                    ],
+                    warnings=["Need stronger progression"],
+                )
+            )
+
+        monkeypatch.setattr(qca_mod, "Agent", DummyAgent)
+        monkeypatch.setattr(qca_mod, "get_node_text_model", lambda *args, **kwargs: object())
+        monkeypatch.setattr(qca_mod, "run_llm", fake_run_llm)
+
+        state = _base_state(
+            current_section_id="s-02",
+            assembled_sections={
+                "s-01": _section("s-01"),
+                "s-02": _section("s-02"),
+            },
+            qc_reports={
+                "s-01": QCReport(
+                    section_id="s-01",
+                    passed=True,
+                    issues=[],
+                    warnings=["existing s-01 warning"],
+                ),
+                "s-02": QCReport(
+                    section_id="s-02",
+                    passed=True,
+                    issues=[],
+                    warnings=["capacity warning"],
+                ),
+            },
+        )
+
+        result = await qca_mod.qc_agent(state)
+
+        assert calls == ["s-02"]
+        assert result["qc_reports"]["s-01"].warnings == ["existing s-01 warning"]
+        assert result["qc_reports"]["s-02"].warnings == [
+            "capacity warning",
+            "Need stronger progression",
+        ]
+        assert result["rerender_requests"]["s-02"].block_type == "practice"
+
+    async def test_qc_agent_respects_retry_budget(self, monkeypatch):
+        from pipeline.nodes import qc_agent as qca_mod
+
+        class DummyAgent:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        async def fake_run_llm(**kwargs):
+            return SimpleNamespace(
+                output=qca_mod.QCOutput(
+                    passed=False,
+                    issues=[
+                        {
+                            "severity": "blocking",
+                            "block": "hook",
+                            "message": "Hook still needs work",
+                        }
+                    ],
+                    warnings=[],
+                )
+            )
+
+        monkeypatch.setattr(qca_mod, "Agent", DummyAgent)
+        monkeypatch.setattr(qca_mod, "get_node_text_model", lambda *args, **kwargs: object())
+        monkeypatch.setattr(qca_mod, "run_llm", fake_run_llm)
+
+        state = _base_state(
+            current_section_id="s-01",
+            assembled_sections={"s-01": _section("s-01")},
+            rerender_count={"s-01": 2},
+            max_rerenders=2,
+        )
+
+        result = await qca_mod.qc_agent(state)
+
+        assert result["rerender_requests"]["s-01"] is None
+        assert result["qc_reports"]["s-01"].passed is False
 
 
 class TestPresetValidation:
@@ -659,11 +940,15 @@ class TestProcessSectionComposite:
                 "completed_nodes": ["section_assembler"],
             }
 
+        async def fake_qc(state, *, model_overrides=None):
+            return {"completed_nodes": ["qc_agent"]}
+
         monkeypatch.setattr(ps_mod, "content_generator", fake_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
         monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
+        monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
 
         state = _base_state(
             current_section_id=sid,
@@ -726,6 +1011,7 @@ class TestProcessSectionComposite:
         monkeypatch.setattr(ps_mod, "interaction_decider", noop)
         monkeypatch.setattr(ps_mod, "interaction_generator", noop)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
+        monkeypatch.setattr(ps_mod, "qc_agent", noop)
 
         state = _base_state(
             current_section_id=sid,
@@ -737,3 +1023,348 @@ class TestProcessSectionComposite:
         assert len(result["errors"]) >= 1
         nodes = [e.node for e in result["errors"]]
         assert "content_generator" in nodes
+
+    async def test_process_section_emits_normalized_section_report_sources(self, monkeypatch):
+        from pipeline.events import SectionReportUpdatedEvent
+        from pipeline.nodes import process_section as ps_mod
+        from pipeline.nodes import section_runner as sr_mod
+
+        sid = "s-01"
+        section = _section(sid)
+        events = []
+
+        async def fake_content(state, *, model_overrides=None):
+            return {
+                "generated_sections": {sid: section},
+                "completed_nodes": ["content_generator"],
+            }
+
+        async def fake_diagram(state, *, model_overrides=None):
+            return {"completed_nodes": ["diagram_generator"]}
+
+        async def fake_interaction_decider(state, *, model_overrides=None):
+            return {"completed_nodes": ["interaction_decider"]}
+
+        async def fake_interaction_generator(state, *, model_overrides=None):
+            return {"completed_nodes": ["interaction_generator"]}
+
+        async def fake_assembler(state, *, model_overrides=None):
+            return {
+                "assembled_sections": {sid: section},
+                "qc_reports": {
+                    sid: QCReport(
+                        section_id=sid,
+                        passed=True,
+                        issues=[],
+                        warnings=["capacity warning"],
+                    )
+                },
+                "completed_nodes": ["section_assembler"],
+            }
+
+        async def fake_qc(state, *, model_overrides=None):
+            return {
+                "qc_reports": {
+                    sid: QCReport(
+                        section_id=sid,
+                        passed=False,
+                        issues=[
+                            {
+                                "severity": "blocking",
+                                "block": "practice",
+                                "message": "Practice is too easy",
+                            }
+                        ],
+                        warnings=["capacity warning", "semantic warning"],
+                    )
+                },
+                "rerender_requests": {
+                    sid: RerenderRequest(
+                        section_id=sid,
+                        block_type="practice",
+                        reason="Practice is too easy",
+                    )
+                },
+                "completed_nodes": ["qc_agent"],
+            }
+
+        monkeypatch.setattr(ps_mod, "content_generator", fake_content)
+        monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
+        monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
+        monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
+        monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
+        monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
+        monkeypatch.setattr(
+            sr_mod,
+            "publish_runtime_event",
+            lambda generation_id, event: events.append(event),
+        )
+
+        state = _base_state(
+            request=_request(generation_id="gen-sources"),
+            current_section_id=sid,
+            current_section_plan=_plan(sid),
+        )
+        await ps_mod.process_section(state)
+
+        report_events = [event for event in events if isinstance(event, SectionReportUpdatedEvent)]
+        assert [event.source for event in report_events] == ["assembler", "qc_agent"]
+
+    async def test_process_section_does_not_crash_after_recoverable_diagram_error(self, monkeypatch):
+        from pipeline.events import SectionReportUpdatedEvent
+        from pipeline.nodes import process_section as ps_mod
+        from pipeline.nodes import section_runner as sr_mod
+
+        sid = "s-01"
+        section = _section(sid)
+        events = []
+
+        async def fake_content(state, *, model_overrides=None):
+            return {
+                "generated_sections": {sid: section},
+                "completed_nodes": ["content_generator"],
+            }
+
+        async def fake_diagram(state, *, model_overrides=None):
+            return {
+                "errors": [
+                    PipelineError(
+                        node="diagram_generator",
+                        section_id=sid,
+                        message="Diagram generation timed out",
+                        recoverable=True,
+                    )
+                ],
+                "completed_nodes": ["diagram_generator"],
+            }
+
+        async def fake_interaction_decider(state, *, model_overrides=None):
+            return {"completed_nodes": ["interaction_decider"]}
+
+        async def fake_interaction_generator(state, *, model_overrides=None):
+            return {"completed_nodes": ["interaction_generator"]}
+
+        async def fake_assembler(state, *, model_overrides=None):
+            typed = TextbookPipelineState.parse(state)
+            return {
+                "assembled_sections": {sid: typed.generated_sections[sid]},
+                "qc_reports": {
+                    sid: QCReport(
+                        section_id=sid,
+                        passed=True,
+                        issues=[],
+                        warnings=["diagram omitted"],
+                    )
+                },
+                "completed_nodes": ["section_assembler"],
+            }
+
+        async def fake_qc(state, *, model_overrides=None):
+            return {"completed_nodes": ["qc_agent"]}
+
+        monkeypatch.setattr(ps_mod, "content_generator", fake_content)
+        monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
+        monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
+        monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
+        monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
+        monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
+        monkeypatch.setattr(
+            sr_mod,
+            "publish_runtime_event",
+            lambda generation_id, event: events.append(event),
+        )
+
+        state = _base_state(
+            request=_request(generation_id="gen-regression"),
+            current_section_id=sid,
+            current_section_plan=_plan(sid),
+        )
+        result = await ps_mod.process_section(state)
+
+        assert any(error.node == "diagram_generator" for error in result["errors"])
+        report_events = [event for event in events if isinstance(event, SectionReportUpdatedEvent)]
+        assert len(report_events) == 1
+        assert report_events[0].source == "assembler"
+
+
+class TestRetryComposites:
+
+    async def test_retry_diagram_preserves_text_fields_and_refreshes_qc(self, monkeypatch):
+        from pipeline import graph as graph_mod
+
+        sid = "s-01"
+        original = _section(sid)
+        rerender_counts = []
+
+        async def fake_diagram(state, *, model_overrides=None):
+            typed = TextbookPipelineState.parse(state)
+            rerender_counts.append(typed.rerender_count[sid])
+            updated = typed.generated_sections[sid].model_copy(
+                update={
+                    "diagram": DiagramContent(
+                        svg_content="<svg/>",
+                        caption="Updated diagram",
+                        alt_text="Updated diagram",
+                    )
+                }
+            )
+            return {
+                "generated_sections": {sid: updated},
+                "completed_nodes": ["diagram_generator"],
+            }
+
+        async def fake_assembler(state, *, model_overrides=None):
+            typed = TextbookPipelineState.parse(state)
+            return {
+                "assembled_sections": {sid: typed.generated_sections[sid]},
+                "qc_reports": {
+                    sid: QCReport(
+                        section_id=sid,
+                        passed=True,
+                        issues=[],
+                        warnings=["diagram refreshed"],
+                    )
+                },
+                "completed_nodes": ["section_assembler"],
+            }
+
+        async def fake_qc(state, *, model_overrides=None):
+            typed = TextbookPipelineState.parse(state)
+            return {
+                "qc_reports": {
+                    sid: QCReport(
+                        section_id=sid,
+                        passed=True,
+                        issues=[],
+                        warnings=typed.qc_reports[sid].warnings,
+                    )
+                },
+                "rerender_requests": {sid: None},
+                "completed_nodes": ["qc_agent"],
+            }
+
+        monkeypatch.setattr(graph_mod, "diagram_generator", fake_diagram)
+        monkeypatch.setattr(graph_mod, "section_assembler", fake_assembler)
+        monkeypatch.setattr(graph_mod, "qc_agent", fake_qc)
+
+        state = _base_state(
+            request=_request(generation_id="gen-retry-diagram"),
+            current_section_id=sid,
+            current_section_plan=_plan(sid),
+            generated_sections={sid: original},
+            assembled_sections={sid: original},
+            rerender_requests={
+                sid: RerenderRequest(
+                    section_id=sid,
+                    block_type="diagram",
+                    reason="Diagram is missing",
+                )
+            },
+        )
+
+        result = await graph_mod.retry_diagram(state)
+
+        assert rerender_counts == [1]
+        assert result["completed_nodes"] == [
+            "diagram_generator",
+            "section_assembler",
+            "qc_agent",
+        ]
+        assert result["rerender_count"] == {sid: 1}
+        assert result["generated_sections"][sid].hook.model_dump() == original.hook.model_dump()
+        assert result["generated_sections"][sid].explanation.model_dump() == original.explanation.model_dump()
+        assert result["generated_sections"][sid].diagram.caption == "Updated diagram"
+        assert result["qc_reports"][sid].passed is True
+        assert result["rerender_requests"] == {sid: None}
+
+    async def test_retry_field_changes_only_targeted_field_and_clears_request(self, monkeypatch):
+        from pipeline import graph as graph_mod
+
+        sid = "s-01"
+        original = _section(sid)
+        rerender_counts = []
+        updated_practice = PracticeContent(
+            problems=[
+                PracticeProblem(
+                    difficulty="warm",
+                    question="Different warmup question",
+                    hints=[PracticeHint(level=1, text="Warmup hint")],
+                ),
+                PracticeProblem(
+                    difficulty="medium",
+                    question="Different medium question",
+                    hints=[PracticeHint(level=1, text="Medium hint")],
+                ),
+            ]
+        )
+
+        async def fake_field_regenerator(state, *, model_overrides=None):
+            typed = TextbookPipelineState.parse(state)
+            rerender_counts.append(typed.rerender_count[sid])
+            updated = typed.generated_sections[sid].model_copy(
+                update={"practice": updated_practice}
+            )
+            return {
+                "generated_sections": {sid: updated},
+                "assembled_sections": {sid: updated},
+                "completed_nodes": ["field_regenerator"],
+            }
+
+        async def fake_assembler(state, *, model_overrides=None):
+            typed = TextbookPipelineState.parse(state)
+            return {
+                "assembled_sections": {sid: typed.generated_sections[sid]},
+                "qc_reports": {
+                    sid: QCReport(
+                        section_id=sid,
+                        passed=True,
+                        issues=[],
+                        warnings=["practice refreshed"],
+                    )
+                },
+                "completed_nodes": ["section_assembler"],
+            }
+
+        async def fake_qc(state, *, model_overrides=None):
+            typed = TextbookPipelineState.parse(state)
+            return {
+                "qc_reports": {
+                    sid: QCReport(
+                        section_id=sid,
+                        passed=True,
+                        issues=[],
+                        warnings=typed.qc_reports[sid].warnings,
+                    )
+                },
+                "rerender_requests": {sid: None},
+                "completed_nodes": ["qc_agent"],
+            }
+
+        monkeypatch.setattr(graph_mod, "field_regenerator", fake_field_regenerator)
+        monkeypatch.setattr(graph_mod, "section_assembler", fake_assembler)
+        monkeypatch.setattr(graph_mod, "qc_agent", fake_qc)
+
+        state = _base_state(
+            request=_request(generation_id="gen-retry-field"),
+            current_section_id=sid,
+            current_section_plan=_plan(sid),
+            generated_sections={sid: original},
+            assembled_sections={sid: original},
+            rerender_requests={
+                sid: RerenderRequest(
+                    section_id=sid,
+                    block_type="practice",
+                    reason="Practice needs stronger progression",
+                )
+            },
+        )
+
+        result = await graph_mod.retry_field(state)
+
+        assert rerender_counts == [1]
+        assert result["rerender_count"] == {sid: 1}
+        assert result["generated_sections"][sid].hook.model_dump() == original.hook.model_dump()
+        assert result["generated_sections"][sid].explanation.model_dump() == original.explanation.model_dump()
+        assert result["generated_sections"][sid].practice.model_dump() == updated_practice.model_dump()
+        assert result["rerender_requests"] == {sid: None}
+        assert result["qc_reports"][sid].passed is True

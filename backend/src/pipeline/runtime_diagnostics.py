@@ -27,7 +27,7 @@ def current_section_attempt(
     if section_id is None:
         return None, "initial"
 
-    is_rerender = any(req.section_id == section_id for req in typed.rerender_requests)
+    is_rerender = typed.pending_rerender_for(section_id) is not None
     trigger = "rerender" if is_rerender else "initial"
     attempt = typed.rerender_count.get(section_id, 0) + 1
     if is_rerender:

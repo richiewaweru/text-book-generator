@@ -42,11 +42,8 @@ async def content_generator(
     sid = state.current_section_id
     plan = state.current_section_plan
 
-    rerender_reason = None
-    for req in state.rerender_requests:
-        if req.section_id == sid:
-            rerender_reason = req.reason
-            break
+    rerender_request = state.pending_rerender_for(sid)
+    rerender_reason = rerender_request.reason if rerender_request else None
 
     is_rerender = rerender_reason is not None
     seed_section = _seed_section(state, sid)

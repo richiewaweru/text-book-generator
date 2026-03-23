@@ -2,7 +2,8 @@
 pipeline.graph
 
 The LangGraph generation graph. Curriculum planner fans out into
-per-section mini-pipelines (process_section), then QC runs over everything.
+per-section mini-pipelines (process_section) which include inline QC,
+then route_after_qc decides whether to rerender or finish.
 """
 
 from __future__ import annotations
@@ -13,16 +14,17 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph
 from langgraph.types import Send
 
-from pipeline.api import PipelineSectionReport
 from pipeline.events import (
     NodeFinishedEvent,
     NodeStartedEvent,
-    SectionReportUpdatedEvent,
-    SectionRetryQueuedEvent,
 )
 from pipeline.nodes.curriculum_planner import curriculum_planner
+from pipeline.nodes.diagram_generator import diagram_generator
+from pipeline.nodes.field_regenerator import field_regenerator
 from pipeline.nodes.process_section import process_section
 from pipeline.nodes.qc_agent import qc_agent
+from pipeline.nodes.section_assembler import section_assembler
+from pipeline.nodes.section_runner import run_section_steps
 from pipeline.routers.qc_router import route_after_qc
 from pipeline.runtime_diagnostics import (
     generation_id_from_state,
@@ -94,40 +96,6 @@ async def _run_generation_node(name: str, fn, state, *, model_overrides: dict | 
         ),
     )
 
-    if name == "qc_agent":
-        for section_id, report in result.get("qc_reports", {}).items():
-            publish_runtime_event(
-                generation_id,
-                SectionReportUpdatedEvent(
-                    generation_id=generation_id,
-                    section_id=section_id,
-                    source="qc_agent",
-                    report=PipelineSectionReport.model_validate(report),
-                ),
-            )
-
-        for request in result.get("rerender_requests", []):
-            if isinstance(request, dict):
-                section_id = request.get("section_id")
-                reason = request.get("reason", "QC failed")
-                block_type = request.get("block_type", "unknown")
-            else:
-                section_id = getattr(request, "section_id", None)
-                reason = getattr(request, "reason", "QC failed")
-                block_type = getattr(request, "block_type", "unknown")
-            next_attempt = typed.rerender_count.get(section_id, 0) + 2 if section_id else 2
-            publish_runtime_event(
-                generation_id,
-                SectionRetryQueuedEvent(
-                    generation_id=generation_id,
-                    section_id=section_id or "unknown",
-                    reason=reason,
-                    block_type=block_type,
-                    next_attempt=next_attempt,
-                    max_attempts=typed.max_rerenders + 1,
-                ),
-            )
-
     return result
 
 
@@ -144,16 +112,45 @@ async def _instrumented_curriculum_planner(
     )
 
 
-async def _instrumented_qc_agent(
+async def retry_diagram(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
-):
-    return await _run_generation_node(
-        "qc_agent",
-        qc_agent,
+) -> dict:
+    """
+    Re-run diagram_generator -> section_assembler -> qc_agent only.
+
+    Text content in generated_sections[sid] is preserved exactly.
+    Called when QC flags only diagram blocks as blocking.
+    """
+    return await run_section_steps(
         state,
+        steps=[
+            ("diagram_generator", diagram_generator),
+            ("section_assembler", section_assembler),
+            ("qc_agent", qc_agent),
+        ],
         model_overrides=model_overrides,
+        increment_rerender_count=True,
+    )
+
+
+async def retry_field(
+    state: TextbookPipelineState | dict,
+    *,
+    model_overrides: dict | None = None,
+) -> dict:
+    """Re-run field_regenerator -> section_assembler -> qc_agent only."""
+
+    return await run_section_steps(
+        state,
+        steps=[
+            ("field_regenerator", field_regenerator),
+            ("section_assembler", section_assembler),
+            ("qc_agent", qc_agent),
+        ],
+        model_overrides=model_overrides,
+        increment_rerender_count=True,
     )
 
 
@@ -163,7 +160,8 @@ def build_graph(checkpointer=None) -> StateGraph:
     # Register nodes
     workflow.add_node("curriculum_planner", _instrumented_curriculum_planner)
     workflow.add_node("process_section", process_section)
-    workflow.add_node("qc_agent", _instrumented_qc_agent)
+    workflow.add_node("retry_diagram", retry_diagram)
+    workflow.add_node("retry_field", retry_field)
 
     # Entry point
     workflow.set_entry_point("curriculum_planner")
@@ -174,10 +172,15 @@ def build_graph(checkpointer=None) -> StateGraph:
         fan_out_sections,
     )
 
-    # All sections join at QC
-    workflow.add_edge("process_section", "qc_agent")
+    # QC is now inline in process_section.
+    # After all sections complete, route_after_qc reads qc_reports
+    # and either ends or fans out rerenders to the narrowest scope.
+    workflow.add_conditional_edges("process_section", route_after_qc)
 
-    # QC routes: router returns list[Send] for rerenders or END
-    workflow.add_conditional_edges("qc_agent", route_after_qc)
+    # Diagram-only retry: re-run diagram + assembler + QC, then re-evaluate.
+    workflow.add_conditional_edges("retry_diagram", route_after_qc)
+
+    # Field-level retry: regenerate one text field, then re-evaluate.
+    workflow.add_conditional_edges("retry_field", route_after_qc)
 
     return workflow.compile(checkpointer=checkpointer or MemorySaver())

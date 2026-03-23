@@ -6,8 +6,9 @@ Structural validation (schema, capacity) is already done by section_assembler.
 This node checks whether the content actually teaches well.
 
 STATE CONTRACT
-    Reads:  assembled_sections, qc_reports (capacity warnings from assembler),
-            contract, rerender_count, max_rerenders
+    Reads:  current_section_id, assembled_sections, qc_reports
+            (capacity warnings from assembler), contract, rerender_count,
+            max_rerenders
     Writes: qc_reports (semantic issues added), rerender_requests,
             completed_nodes, errors
     Slot:   FAST
@@ -59,78 +60,77 @@ async def qc_agent(
     )
 
     reports = dict(state.qc_reports)
-    rerender_reqs = []
     errors = []
+    rerender_updates: dict[str, RerenderRequest | None] = {}
 
-    for section_id, section in state.assembled_sections.items():
-        # Skip if already exceeded rerender limit for this section
-        if state.rerender_count.get(section_id, 0) >= state.max_rerenders:
-            continue
+    section_id = state.current_section_id
+    section = state.assembled_sections.get(section_id) if section_id else None
+    if section_id is None or section is None:
+        return {"completed_nodes": ["qc_agent"]}
 
-        try:
-            section_json = json.dumps(
-                (
-                    section.model_dump(exclude_none=True)
-                    if hasattr(section, "model_dump")
-                    else section
-                ),
-                indent=2,
+    try:
+        section_json = json.dumps(
+            (
+                section.model_dump(exclude_none=True)
+                if hasattr(section, "model_dump")
+                else section
+            ),
+            indent=2,
+        )
+
+        result = await run_llm(
+            generation_id=state.request.generation_id or "",
+            node="qc_agent",
+            agent=agent,
+            model=model,
+            user_prompt=build_qc_user_prompt(section_json),
+            section_id=section_id,
+            generation_mode=state.request.mode,
+        )
+
+        qc_output = result.output
+
+        # Preserve assembler warnings, then append semantic QC warnings.
+        existing = reports.get(section_id)
+        existing_warnings = existing.warnings if existing else []
+
+        reports[section_id] = QCReport(
+            section_id=section_id,
+            passed=qc_output.passed,
+            issues=qc_output.issues,
+            warnings=existing_warnings + qc_output.warnings,
+        )
+
+        blocking = [
+            issue
+            for issue in qc_output.issues
+            if issue.get("severity") == "blocking"
+        ]
+        if blocking and state.can_rerender(section_id):
+            rerender_updates[section_id] = RerenderRequest(
+                section_id=section_id,
+                block_type=blocking[0].get("block", "unknown"),
+                reason=blocking[0].get("message", "QC failed"),
             )
+        else:
+            rerender_updates[section_id] = None
 
-            result = await run_llm(
-                generation_id=state.request.generation_id or "",
+    except Exception as exc:
+        errors.append(
+            PipelineError(
                 node="qc_agent",
-                agent=agent,
-                model=model,
-                user_prompt=build_qc_user_prompt(section_json),
                 section_id=section_id,
-                generation_mode=state.request.mode,
+                message=f"QC evaluation failed: {exc}",
+                recoverable=True,
             )
-
-            qc_output = result.output
-
-            # Merge semantic issues with existing capacity warnings
-            existing = reports.get(section_id)
-            existing_warnings = existing.warnings if existing else []
-
-            reports[section_id] = QCReport(
-                section_id=section_id,
-                passed=qc_output.passed,
-                issues=qc_output.issues,
-                warnings=existing_warnings + qc_output.warnings,
-            )
-
-            # If blocking issues found, request a rerender
-            blocking = [
-                i
-                for i in qc_output.issues
-                if i.get("severity") == "blocking"
-            ]
-            if blocking:
-                rerender_reqs.append(
-                    RerenderRequest(
-                        section_id=section_id,
-                        block_type=blocking[0].get("block", "unknown"),
-                        reason=blocking[0].get("message", "QC failed"),
-                    )
-                )
-
-        except Exception as e:
-            errors.append(
-                PipelineError(
-                    node="qc_agent",
-                    section_id=section_id,
-                    message=f"QC evaluation failed: {e}",
-                    recoverable=True,
-                )
-            )
+        )
 
     output: dict = {
         "qc_reports": reports,
         "completed_nodes": ["qc_agent"],
     }
-    if rerender_reqs:
-        output["rerender_requests"] = rerender_reqs
+    if rerender_updates:
+        output["rerender_requests"] = rerender_updates
     if errors:
         output["errors"] = errors
 
