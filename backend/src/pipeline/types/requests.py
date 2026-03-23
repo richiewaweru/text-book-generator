@@ -43,7 +43,7 @@ class PipelineRequest(BaseModel):
 
     def max_rerenders(self) -> int:
         if self.mode == GenerationMode.DRAFT:
-            return 0
+            return 1
         if self.mode == GenerationMode.STRICT:
             return 3
         return 2

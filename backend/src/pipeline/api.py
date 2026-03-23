@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from pipeline.types.requests import GenerationMode as PipelineMode
 from pipeline.types.requests import PipelineRequest as PipelineCommand
 from pipeline.types.section_content import SectionContent
+
+if TYPE_CHECKING:
+    from pipeline.state import QCReport
 
 GradeBand = Literal["primary", "secondary", "advanced"]
 
@@ -23,6 +26,23 @@ class PipelineSectionReport(BaseModel):
     passed: bool
     issues: list[PipelineIssue] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_qc_report(cls, report: QCReport) -> PipelineSectionReport:
+        """Convert an internal QCReport (issues: list[dict]) to the API model."""
+        return cls(
+            section_id=report.section_id,
+            passed=report.passed,
+            issues=[
+                PipelineIssue(
+                    block=issue.get("block", "unknown"),
+                    severity=issue.get("severity", "warning"),
+                    message=issue.get("message", ""),
+                )
+                for issue in report.issues
+            ],
+            warnings=list(report.warnings),
+        )
 
 
 class PipelineErrorInfo(BaseModel):

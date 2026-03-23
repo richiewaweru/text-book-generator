@@ -11,6 +11,8 @@ STATE CONTRACT
 
 from __future__ import annotations
 
+import asyncio
+
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
@@ -101,18 +103,21 @@ async def diagram_generator(
     )
 
     try:
-        result = await run_llm(
-            generation_id=state.request.generation_id or "",
-            node="diagram_generator",
-            agent=agent,
-            model=model,
-            user_prompt=build_diagram_user_prompt(
-                section_title=section.header.title,
-                hook_body=section.hook.body,
-                explanation_excerpt=section.explanation.body,
-                diagram_slot=_get_diagram_slot(state.contract),
+        result = await asyncio.wait_for(
+            run_llm(
+                generation_id=state.request.generation_id or "",
+                node="diagram_generator",
+                agent=agent,
+                model=model,
+                user_prompt=build_diagram_user_prompt(
+                    section_title=section.header.title,
+                    hook_body=section.hook.body,
+                    explanation_excerpt=section.explanation.body,
+                    diagram_slot=_get_diagram_slot(state.contract),
+                ),
+                generation_mode=state.request.mode,
             ),
-            generation_mode=state.request.mode,
+            timeout=25.0,
         )
 
         diagram = DiagramContent(
@@ -127,6 +132,19 @@ async def diagram_generator(
 
         return {
             "generated_sections": generated,
+            "completed_nodes": ["diagram_generator"],
+        }
+
+    except asyncio.TimeoutError:
+        return {
+            "errors": [
+                PipelineError(
+                    node="diagram_generator",
+                    section_id=sid,
+                    message="Diagram generation timed out (25s) — section delivered without diagram",
+                    recoverable=True,
+                )
+            ],
             "completed_nodes": ["diagram_generator"],
         }
 

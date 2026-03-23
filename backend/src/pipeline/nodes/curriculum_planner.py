@@ -13,11 +13,13 @@ from pydantic import BaseModel
 from pydantic_ai import Agent
 
 from pipeline.contracts import get_preset, validate_preset_for_template
+from pipeline.events import SectionStartedEvent
 from pipeline.prompts.curriculum import (
     build_curriculum_system_prompt,
     build_curriculum_user_prompt,
 )
 from pipeline.providers.registry import get_node_text_model
+from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.state import PipelineError, StyleContext, TextbookPipelineState
 from pipeline.types.requests import SectionPlan
 from pipeline.llm_runner import run_llm
@@ -71,6 +73,23 @@ def _outline_from_seed(state: TextbookPipelineState) -> list[SectionPlan]:
     return outline
 
 
+def _publish_section_titles(
+    generation_id: str,
+    sections: list[SectionPlan],
+) -> None:
+    """Emit SectionStartedEvent per section so the frontend shows the outline immediately."""
+    for plan in sections:
+        publish_runtime_event(
+            generation_id,
+            SectionStartedEvent(
+                generation_id=generation_id,
+                section_id=plan.section_id,
+                title=plan.title,
+                position=plan.position,
+            ),
+        )
+
+
 async def curriculum_planner(
     state: TextbookPipelineState | dict,
     *,
@@ -98,8 +117,10 @@ async def curriculum_planner(
     style_context = _build_style_context(state)
 
     if state.request.seed_document is not None and state.request.seed_document.sections:
+        outline = _outline_from_seed(state)
+        _publish_section_titles(state.request.generation_id or "", outline)
         return {
-            "curriculum_outline": _outline_from_seed(state),
+            "curriculum_outline": outline,
             "style_context": style_context,
             "completed_nodes": ["curriculum_planner"],
         }
@@ -133,6 +154,9 @@ async def curriculum_planner(
                 section_count=state.request.section_count,
             ),
             generation_mode=state.request.mode,
+        )
+        _publish_section_titles(
+            state.request.generation_id or "", result.output.sections
         )
         return {
             "curriculum_outline": result.output.sections,

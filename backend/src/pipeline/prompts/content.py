@@ -15,7 +15,7 @@ from pipeline.contracts import (
     get_generation_guidance,
     get_lesson_flow,
 )
-from pipeline.prompts.shared import shared_context, capacity_reminder
+from pipeline.prompts.shared import shared_context, capacity_reminder_for_fields
 from pipeline.types.section_content import SectionContent
 from pipeline.types.requests import SectionPlan
 
@@ -48,7 +48,7 @@ Required fields (must always be present):
 Optional fields (include only when content genuinely warrants it):
 {chr(10).join(f'  - {f}' for f in optional)}
 
-{capacity_reminder()}
+{capacity_reminder_for_fields(required + optional)}
 
 Output a single SectionContent JSON object.
 Every field name must match the schema exactly (snake_case).

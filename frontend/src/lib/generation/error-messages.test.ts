@@ -3,6 +3,16 @@ import { describe, expect, it } from 'vitest';
 import { friendlyGenerationErrorMessage } from './error-messages';
 
 describe('friendlyGenerationErrorMessage', () => {
+	it('uses the stale generation message when recovery marked the run interrupted', () => {
+		expect(
+			friendlyGenerationErrorMessage(
+				null,
+				'runtime_error',
+				'stale_generation'
+			)
+		).toBe('This generation was interrupted before it finished. Please try again.');
+	});
+
 	it('preserves actionable provider errors', () => {
 		expect(
 			friendlyGenerationErrorMessage(

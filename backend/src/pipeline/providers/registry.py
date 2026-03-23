@@ -56,6 +56,7 @@ NODE_MODEL_SLOTS: dict[str, ModelSlot] = {
     "content_generator": ModelSlot.STANDARD,
     "diagram_generator": ModelSlot.FAST,
     "qc_agent": ModelSlot.FAST,
+    "field_regenerator": ModelSlot.FAST,
 }
 
 _DEFAULT_PROFILES_BY_MODE: dict[GenerationMode, dict[ModelSlot, ModelSpec]] = {

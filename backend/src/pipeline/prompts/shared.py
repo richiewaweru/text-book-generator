@@ -28,20 +28,46 @@ def word_count(text: str) -> int:
     return len(text.strip().split())
 
 
+_CAPACITY_RULES: dict[str, str] = {
+    "hook": "hook.headline 12 words · hook.body 80 words",
+    "explanation": "explanation.body 350 words · emphasis 3 items max",
+    "practice": "practice.problems 2 min / 5 max · hints 3 max per problem",
+    "what_next": "what_next.body 50 words max",
+    "definition": "definition.formal 80 words · definition.plain 60 words",
+    "definition_family": "definition_family.definitions 4 max",
+    "worked_example": "worked_example.steps 6 max",
+    "process": "process.steps 8 max",
+    "glossary": "glossary.terms 8 max (warn at 6)",
+    "insight_strip": "insight_strip.cells 2\u20133",
+    "comparison_grid": "comparison_grid.columns 2\u20134 · rows 6 max",
+    "timeline": "timeline.events 8 max",
+    "pitfall": "pitfall.misconception 20 words · correction 80 words",
+    "diagram": "diagram.caption 60 words",
+    "quiz": "quiz.options 3\u20134",
+    "reflection": "reflection.prompt 40 words max",
+    "prerequisites": "prerequisites.items 4 max",
+    "interview": "interview.prompt 35 words max",
+}
+
+
+def capacity_reminder_for_fields(active_fields: list[str]) -> str:
+    """
+    Emit capacity rules only for fields this template actually uses.
+    Pass the union of required_fields + optional_fields.
+    """
+    rules = [
+        rule for field, rule in _CAPACITY_RULES.items()
+        if field in active_fields
+    ]
+    if not rules:
+        return ""
+    lines = "\n".join(f"- {r}" for r in rules)
+    return f"Capacity rules (hard limits):\n{lines}"
+
+
 def capacity_reminder() -> str:
     """
-    Inline capacity rules for the content generator system prompt.
-    These mirror src/lib/validate.ts exactly.
+    All capacity rules (backward compat for prompts that don't know their fields).
+    Prefer capacity_reminder_for_fields() when active fields are known.
     """
-    return """Capacity rules (hard limits -- do not exceed):
-- hook.headline: 12 words max
-- hook.body: 80 words max
-- explanation.body: 350 words max
-- explanation.emphasis: 3 items max
-- practice.problems: 2 min, 5 max
-- practice hints per problem: 3 max
-- glossary.terms: 8 max
-- worked_example.steps: 6 max
-- what_next.body: 50 words max
-- definition.formal: 80 words max
-- definition.plain: 60 words max"""
+    return capacity_reminder_for_fields(list(_CAPACITY_RULES.keys()))
