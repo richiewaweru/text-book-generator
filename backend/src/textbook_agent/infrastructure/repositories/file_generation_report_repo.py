@@ -36,3 +36,12 @@ class FileGenerationReportRepository(GenerationReportRepository):
             raise FileNotFoundError(str(path))
         raw = await asyncio.to_thread(path.read_text, encoding="utf-8")
         return GenerationReport.model_validate_json(raw)
+
+    async def cleanup_tmp(self, generation_id: str) -> None:
+        path = self._path_for(generation_id)
+        tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+        try:
+            if await asyncio.to_thread(tmp_path.exists):
+                await asyncio.to_thread(tmp_path.unlink)
+        except OSError:
+            pass

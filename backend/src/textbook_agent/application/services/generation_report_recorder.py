@@ -100,9 +100,40 @@ class GenerationReportRecorder:
             self._queue = None
         self._consumer = None
 
-    async def wait_for_idle(self) -> None:
-        if self._queue is not None:
-            await self._queue.join()
+    async def wait_for_idle(self, *, timeout: float = 30.0) -> None:
+        if self._queue is None:
+            return
+        if self._consumer is not None and self._consumer.done():
+            self._drain_dead_queue()
+            return
+        try:
+            await asyncio.wait_for(self._queue.join(), timeout=timeout)
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning(
+                "wait_for_idle timed out after %.1fs for generation=%s",
+                timeout,
+                self._generation.id,
+            )
+            self._drain_dead_queue()
+
+    def _drain_dead_queue(self) -> None:
+        """Mark all pending queue items as done so join() unblocks."""
+        if self._queue is None:
+            return
+        drained = 0
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+                self._queue.task_done()
+                drained += 1
+            except asyncio.QueueEmpty:
+                break
+        if drained:
+            logger.warning(
+                "Drained %d unprocessed events from recorder queue for generation=%s",
+                drained,
+                self._generation.id,
+            )
 
     async def finalize_success(
         self,
@@ -184,6 +215,12 @@ class GenerationReportRecorder:
             event = await self._queue.get()
             try:
                 await self.apply_event(event)
+            except Exception:
+                logger.exception(
+                    "Recorder failed to process event for generation=%s type=%s",
+                    self._generation.id,
+                    event.get("type", "unknown") if isinstance(event, dict) else "unknown",
+                )
             finally:
                 self._queue.task_done()
 

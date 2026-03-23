@@ -129,6 +129,9 @@ class InMemoryReportRepo:
     async def load_report(self, generation_id: str) -> GenerationReport:
         return self.store[generation_id]
 
+    async def cleanup_tmp(self, generation_id: str) -> None:
+        pass
+
 
 @pytest.mark.asyncio
 async def test_recorder_marks_full_success_with_delivered_components() -> None:

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from time import perf_counter
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from pipeline.api import PipelineSectionReport
 from pipeline.events import (
@@ -146,6 +149,7 @@ async def run_section_steps(
         else:
             normalized_steps.append((step.__name__, step))
 
+    completed_node_names: list[str] = []
     for node_name, step in normalized_steps:
         step_started = perf_counter()
 
@@ -179,6 +183,7 @@ async def run_section_steps(
 
         merge_state_updates(raw, result)
         step_state = TextbookPipelineState.parse(raw)
+        completed_node_names.append(node_name)
 
         step_errors = node_error_messages(
             result.get("errors"),
@@ -232,10 +237,24 @@ async def run_section_steps(
                     ),
                 )
 
+        # Short-circuit: if content_generator produced no content for this
+        # section, downstream nodes (diagram, interaction, assembler, QC) will
+        # all fail or no-op.  Skip them to avoid wasted work and cascade errors.
+        if (
+            node_name == "content_generator"
+            and section_id
+            and section_id not in step_state.generated_sections
+        ):
+            logger.warning(
+                "Short-circuiting section %s: content_generator produced no content",
+                section_id,
+            )
+            break
+
     after_state = TextbookPipelineState.parse(raw)
     return _build_section_output(
         before_state,
         after_state,
         section_id=section_id,
-        completed_nodes=[node_name for node_name, _step in normalized_steps],
+        completed_nodes=completed_node_names,
     )
