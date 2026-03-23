@@ -315,6 +315,9 @@ def _log_trace_event(generation_id: str, event) -> None:
         )
 
 
+_GENERATION_JOB_TIMEOUT_SECONDS = 300  # 5-minute hard ceiling
+
+
 async def _run_generation_job(
     generation: Generation,
     command: PipelineCommand,
@@ -378,11 +381,7 @@ async def _run_generation_job(
             quality_passed=False,
             generation_time_seconds=generation_time_seconds,
         )
-        await recorder.wait_for_idle()
-        await recorder.finalize_failure(
-            error=error_message,
-            generation_time_seconds=generation_time_seconds,
-        )
+        # Publish terminal event FIRST so SSE subscribers get it promptly.
         _, _, report_url = _generation_urls(generation.id)
         event_bus.publish(
             generation.id,
@@ -392,12 +391,21 @@ async def _run_generation_job(
                 report_url=report_url,
             ),
         )
+        # Finalize the report before draining the queue — sets outcome/status
+        # so the persisted report is complete even if wait_for_idle times out.
+        await recorder.finalize_failure(
+            error=error_message,
+            generation_time_seconds=generation_time_seconds,
+        )
         await recorder.wait_for_idle()
         recorder.log_final_summary()
 
     started = perf_counter()
     try:
-        result = await run_pipeline_streaming(command, on_event=on_event)
+        result = await asyncio.wait_for(
+            run_pipeline_streaming(command, on_event=on_event),
+            timeout=_GENERATION_JOB_TIMEOUT_SECONDS,
+        )
         completed_at = datetime.now(timezone.utc)
         document = result.document.model_copy(
             update={
@@ -417,11 +425,7 @@ async def _run_generation_job(
             quality_passed=document.quality_passed,
             generation_time_seconds=result.generation_time_seconds,
         )
-        await recorder.wait_for_idle()
-        await recorder.finalize_success(
-            document=document,
-            generation_time_seconds=result.generation_time_seconds,
-        )
+        # Publish terminal event FIRST so SSE subscribers get it promptly.
         _, document_url, report_url = _generation_urls(generation.id)
         event_bus.publish(
             generation.id,
@@ -431,8 +435,24 @@ async def _run_generation_job(
                 report_url=report_url,
             ),
         )
+        await recorder.finalize_success(
+            document=document,
+            generation_time_seconds=result.generation_time_seconds,
+        )
         await recorder.wait_for_idle()
         recorder.log_final_summary()
+    except asyncio.TimeoutError:
+        logger.error(
+            "Generation %s timed out after %ds",
+            generation.id,
+            _GENERATION_JOB_TIMEOUT_SECONDS,
+        )
+        await finalize_failure(
+            error_message=f"Generation timed out after {_GENERATION_JOB_TIMEOUT_SECONDS} seconds",
+            error_type="runtime_error",
+            error_code="generation_timeout",
+            generation_time_seconds=perf_counter() - started,
+        )
     except asyncio.CancelledError:
         logger.warning("Generation %s was interrupted before completion", generation.id)
         await finalize_failure(
@@ -453,6 +473,34 @@ async def _run_generation_job(
     finally:
         await recorder.stop()
         clear_node_attempts(generation.id)
+        # Safety net: if status is still "running", something went wrong.
+        try:
+            current = await gen_repo.find_by_id(generation.id)
+            if current and current.status in ("pending", "running"):
+                logger.error(
+                    "Generation %s ended without completion — forcing failure",
+                    generation.id,
+                )
+                await gen_repo.update_status(
+                    generation.id,
+                    status="failed",
+                    error="Pipeline ended without completion",
+                    error_type="runtime_error",
+                    error_code="orphaned_generation",
+                    quality_passed=False,
+                )
+                event_bus.publish(
+                    generation.id,
+                    ErrorEvent(
+                        generation_id=generation.id,
+                        message="Pipeline ended without completion",
+                    ),
+                )
+        except Exception:
+            logger.exception(
+                "Safety-net cleanup failed for generation %s", generation.id
+            )
+        await report_repo.cleanup_tmp(generation.id)
 
 
 def _validate_template_and_preset(template_id: str, preset_id: str) -> None:
@@ -690,29 +738,46 @@ async def get_generation_events(
         raise HTTPException(status_code=404, detail="Generation not found")
 
     async def stream() -> AsyncIterator[str]:
-        if generation.status == "completed":
-            _, document_url, report_url = _generation_urls(generation_id)
-            yield _sse_payload(
-                CompleteEvent(
-                    generation_id=generation_id,
-                    document_url=document_url,
-                    report_url=report_url,
-                ).model_dump(mode="json", exclude_none=True)
-            )
-            return
-        if generation.status == "failed":
-            _, _, report_url = _generation_urls(generation_id)
-            yield _sse_payload(
-                ErrorEvent(
-                    generation_id=generation_id,
-                    message=generation.error or "Generation failed",
-                    report_url=report_url,
-                ).model_dump(mode="json", exclude_none=True)
-            )
-            return
-
+        # Subscribe FIRST to avoid missing events in the gap between
+        # checking DB status and starting to listen.
         queue = event_bus.subscribe(generation_id)
         try:
+            # Re-read status after subscribing — any event published between
+            # the outer DB read and the subscribe call is now in the queue.
+            current = await gen_repo.find_by_id(generation_id)
+            current_status = current.status if current else generation.status
+
+            if current_status == "completed":
+                _, document_url, report_url = _generation_urls(generation_id)
+                yield _sse_payload(
+                    CompleteEvent(
+                        generation_id=generation_id,
+                        document_url=document_url,
+                        report_url=report_url,
+                    ).model_dump(mode="json", exclude_none=True)
+                )
+                return
+            if current_status == "failed":
+                error_msg = (
+                    current.error if current else generation.error
+                ) or "Generation failed"
+                _, _, report_url = _generation_urls(generation_id)
+                yield _sse_payload(
+                    ErrorEvent(
+                        generation_id=generation_id,
+                        message=error_msg,
+                        report_url=report_url,
+                    ).model_dump(mode="json", exclude_none=True)
+                )
+                return
+
+            # Drain any events that arrived between subscribe and status check.
+            while not queue.empty():
+                event = queue.get_nowait()
+                yield _sse_payload(event)
+                if event.get("type") in {"complete", "error"}:
+                    return
+
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=15)

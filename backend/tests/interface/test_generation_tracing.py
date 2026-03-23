@@ -109,6 +109,9 @@ class InMemoryReportRepo:
     async def load_report(self, generation_id: str) -> GenerationReport:
         return self.store[generation_id]
 
+    async def cleanup_tmp(self, generation_id: str) -> None:
+        pass
+
 
 class StaticProfileRepo:
     def __init__(self, profile: StudentProfile | None) -> None:
