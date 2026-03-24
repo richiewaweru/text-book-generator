@@ -5,8 +5,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from time import perf_counter
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from pipeline.api import PipelineSectionReport
 from pipeline.events import (
     NodeFinishedEvent,
@@ -22,6 +20,8 @@ from pipeline.runtime_diagnostics import (
     publish_runtime_event,
 )
 from pipeline.state import QCReport, RerenderRequest, TextbookPipelineState, merge_state_updates
+
+logger = logging.getLogger(__name__)
 
 SectionStep = Callable[..., Awaitable[dict]]
 NamedSectionStep = tuple[str, SectionStep]
@@ -237,16 +237,24 @@ async def run_section_steps(
                     ),
                 )
 
-        # Short-circuit: if content_generator produced no content for this
-        # section, downstream nodes (diagram, interaction, assembler, QC) will
-        # all fail or no-op.  Skip them to avoid wasted work and cascade errors.
         if (
             node_name == "content_generator"
             and section_id
             and section_id not in step_state.generated_sections
         ):
             logger.warning(
-                "Short-circuiting section %s: content_generator produced no content",
+                "Short-circuiting section %s after content_generator produced no content",
+                section_id,
+            )
+            break
+
+        if (
+            node_name == "section_assembler"
+            and section_id
+            and section_id not in step_state.assembled_sections
+        ):
+            logger.warning(
+                "Short-circuiting section %s after section_assembler produced no assembled section",
                 section_id,
             )
             break

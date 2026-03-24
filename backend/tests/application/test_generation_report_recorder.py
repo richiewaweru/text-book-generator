@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -17,6 +18,7 @@ from pipeline.events import (
     SectionReportUpdatedEvent,
     SectionRetryQueuedEvent,
     SectionStartedEvent,
+    event_bus,
 )
 from pipeline.types.section_content import (
     ExplanationContent,
@@ -130,7 +132,7 @@ class InMemoryReportRepo:
         return self.store[generation_id]
 
     async def cleanup_tmp(self, generation_id: str) -> None:
-        pass
+        _ = generation_id
 
 
 @pytest.mark.asyncio
@@ -430,3 +432,66 @@ async def test_recorder_marks_terminal_failure_after_partial_progress() -> None:
     assert report.summary.ready_sections == 1
     assert report.final_error == "Provider outage"
     assert any(section.section_id == "s-02" and section.status == "failed" for section in report.sections)
+
+
+@pytest.mark.asyncio
+async def test_recorder_consumer_keeps_running_after_bad_event() -> None:
+    generation = _generation("gen-bad-event")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+    processed: list[dict[str, str]] = []
+
+    async def flaky_apply(event) -> None:
+        processed.append(event)
+        if len(processed) == 1:
+            raise RuntimeError("boom")
+
+    recorder.apply_event = flaky_apply  # type: ignore[method-assign]
+
+    await recorder.start()
+    event_bus.publish(generation.id, {"type": "bad"})
+    event_bus.publish(generation.id, {"type": "good"})
+    await asyncio.sleep(0.05)
+
+    assert recorder.consumer_error is not None
+    assert recorder.diagnostics_degraded is True
+    assert recorder._consumer is not None
+    assert recorder._consumer.done() is False
+
+    await recorder.stop()
+
+
+@pytest.mark.asyncio
+async def test_wait_for_idle_drains_when_consumer_is_dead() -> None:
+    generation = _generation("gen-dead-consumer")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+    recorder._queue = asyncio.Queue()
+    recorder._queue.put_nowait({"type": "stuck"})
+
+    async def crash() -> None:
+        raise RuntimeError("consumer died")
+
+    recorder._consumer = asyncio.create_task(crash())
+    await asyncio.sleep(0)
+
+    await recorder.wait_for_idle(timeout=0.01)
+
+    assert recorder.consumer_dead is True
+    assert recorder.dropped_event_count == 1
+    assert recorder.diagnostics_degraded is True
+    assert recorder._consumer.exception() is not None
+
+
+@pytest.mark.asyncio
+async def test_wait_for_idle_times_out_and_drains_pending_queue() -> None:
+    generation = _generation("gen-timeout-drain")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+    recorder._queue = asyncio.Queue()
+    recorder._queue.put_nowait({"type": "pending"})
+
+    await recorder.wait_for_idle(timeout=0.01)
+
+    assert recorder.dropped_event_count == 1
+    assert recorder.diagnostics_degraded is True

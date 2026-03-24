@@ -13,6 +13,28 @@ describe('friendlyGenerationErrorMessage', () => {
 		).toBe('This generation was interrupted before it finished. Please try again.');
 	});
 
+	it('uses the timeout message for timed out generations', () => {
+		expect(
+			friendlyGenerationErrorMessage(
+				null,
+				'runtime_error',
+				'generation_timeout'
+			)
+		).toBe('This generation took too long to finish and was stopped. Please try again.');
+	});
+
+	it('uses the orphaned generation message for forced runtime cleanup', () => {
+		expect(
+			friendlyGenerationErrorMessage(
+				null,
+				'runtime_error',
+				'orphaned_generation'
+			)
+		).toBe(
+			'This generation lost track of its runtime state and was stopped safely. Please try again.'
+		);
+	});
+
 	it('preserves actionable provider errors', () => {
 		expect(
 			friendlyGenerationErrorMessage(
