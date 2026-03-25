@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from pipeline.api import PipelineIssue
+from pipeline.state import NodeFailureDetail
 from pipeline.types.requests import GenerationMode as PipelineMode
 
 
@@ -65,6 +66,10 @@ class GenerationReportSection(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     issues: list[PipelineIssue] = Field(default_factory=list)
     queued_retries: list[GenerationReportRetry] = Field(default_factory=list)
+    validation_repair_attempts: int = 0
+    validation_repair_successes: int = 0
+    diagram_outcome: Literal["success", "timeout", "error", "skipped"] | None = None
+    failure_detail: NodeFailureDetail | None = None
     final_error: str | None = None
     nodes: list[GenerationReportNode] = Field(default_factory=list)
 
@@ -76,6 +81,13 @@ class GenerationReportSummary(BaseModel):
     failed_sections: int = 0
     stalled_sections: int = 0
     retry_count: int = 0
+    llm_transport_retries: int = 0
+    validation_repair_attempts: int = 0
+    validation_repair_successes: int = 0
+    qc_rerenders: int = 0
+    diagram_retries: int = 0
+    diagram_timeout_count: int = 0
+    diagram_skip_count: int = 0
     warning_count: int = 0
     blocking_issue_count: int = 0
     total_llm_calls: int = 0

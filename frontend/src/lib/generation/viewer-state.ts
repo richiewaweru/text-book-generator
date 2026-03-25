@@ -2,8 +2,10 @@ import type { SectionContent } from 'lectio';
 
 import { parseIncomingSection } from '$lib/parse-section';
 import type {
+	FailedSectionEntry,
 	GenerationDocument,
 	PipelineSectionManifestItem,
+	SectionFailedEvent,
 	SectionReadyEvent,
 	SectionStartedEvent
 } from '$lib/types';
@@ -16,7 +18,7 @@ export interface ViewerSectionSlot {
 	section_id: string;
 	title: string;
 	position: number;
-	status: 'ready' | 'pending';
+	status: 'ready' | 'pending' | 'failed';
 	section: SectionContent | null;
 }
 
@@ -49,12 +51,26 @@ function sortSectionsByManifest(
 	});
 }
 
+function sortFailedSections(
+	failedSections: FailedSectionEntry[],
+	manifest: PipelineSectionManifestItem[]
+): FailedSectionEntry[] {
+	const positions = new Map(manifest.map((item) => [item.section_id, item.position]));
+	const fallbackPosition = manifest.length + 1;
+	return [...failedSections].sort((left, right) => {
+		const leftPosition = positions.get(left.section_id) ?? left.position ?? fallbackPosition;
+		const rightPosition = positions.get(right.section_id) ?? right.position ?? fallbackPosition;
+		return leftPosition - rightPosition || left.section_id.localeCompare(right.section_id);
+	});
+}
+
 export function normalizeDocument(document: GenerationDocument): GenerationDocument {
 	const section_manifest = sortManifest(document.section_manifest);
 	return {
 		...document,
 		section_manifest,
-		sections: sortSectionsByManifest(document.sections, section_manifest)
+		sections: sortSectionsByManifest(document.sections, section_manifest),
+		failed_sections: sortFailedSections(document.failed_sections ?? [], section_manifest)
 	};
 }
 
@@ -96,7 +112,10 @@ export function applySectionReady(
 				...document,
 				status: 'running',
 				updated_at: new Date().toISOString(),
-				sections
+				sections,
+				failed_sections: document.failed_sections.filter(
+					(entry) => entry.section_id !== payload.section_id
+				)
 			}),
 			warning: null
 		};
@@ -113,6 +132,43 @@ export function applySectionReady(
 	}
 }
 
+export function applySectionFailed(
+	document: GenerationDocument,
+	payload: SectionFailedEvent
+): GenerationDocument {
+	const failedSections = [...document.failed_sections];
+	const nextFailed: FailedSectionEntry = {
+		section_id: payload.section_id,
+		title: payload.title,
+		position: payload.position,
+		focus: payload.focus ?? null,
+		bridges_from: payload.bridges_from ?? null,
+		bridges_to: payload.bridges_to ?? null,
+		needs_diagram: payload.needs_diagram,
+		needs_worked_example: payload.needs_worked_example,
+		failed_at_node: payload.failed_at_node,
+		error_type: payload.error_type,
+		error_summary: payload.error_summary,
+		attempt_count: payload.attempt_count,
+		can_retry: payload.can_retry,
+		missing_components: payload.missing_components,
+		failure_detail: payload.failure_detail ?? null
+	};
+	const existingIndex = failedSections.findIndex((entry) => entry.section_id === payload.section_id);
+	if (existingIndex >= 0) {
+		failedSections[existingIndex] = nextFailed;
+	} else {
+		failedSections.push(nextFailed);
+	}
+
+	return normalizeDocument({
+		...document,
+		status: 'running',
+		updated_at: new Date().toISOString(),
+		failed_sections: failedSections
+	});
+}
+
 export function buildSectionSlots(
 	document: GenerationDocument | null,
 	sectionCount: number | null
@@ -124,7 +180,9 @@ export function buildSectionSlots(
 	const normalized = document ? normalizeDocument(document) : null;
 	const manifest = normalized?.section_manifest ?? [];
 	const readySections = normalized?.sections ?? [];
+	const failedSections = normalized?.failed_sections ?? [];
 	const readyById = new Map(readySections.map((section) => [section.section_id, section]));
+	const failedById = new Map(failedSections.map((section) => [section.section_id, section]));
 
 	if (manifest.length > 0) {
 		const manifestIds = new Set(manifest.map((item) => item.section_id));
@@ -132,7 +190,11 @@ export function buildSectionSlots(
 			section_id: item.section_id,
 			title: item.title,
 			position: item.position,
-			status: readyById.has(item.section_id) ? 'ready' : 'pending',
+			status: readyById.has(item.section_id)
+				? 'ready'
+				: failedById.has(item.section_id)
+					? 'failed'
+					: 'pending',
 			section: readyById.get(item.section_id) ?? null
 		})) satisfies ViewerSectionSlot[];
 		const orphanSections = readySections
@@ -144,17 +206,27 @@ export function buildSectionSlots(
 				status: 'ready' as const,
 				section
 			}));
-		return [...slots, ...orphanSections];
+		const orphanFailures = failedSections
+			.filter((section) => !manifestIds.has(section.section_id))
+			.map((section, index) => ({
+				section_id: section.section_id,
+				title: section.title,
+				position: manifest.length + orphanSections.length + index + 1,
+				status: 'failed' as const,
+				section: null
+			}));
+		return [...slots, ...orphanSections, ...orphanFailures];
 	}
 
-	const total = Math.max(sectionCount ?? 0, readySections.length);
+	const total = Math.max(sectionCount ?? 0, readySections.length, failedSections.length);
 	return Array.from({ length: total }, (_, index) => {
 		const section = readySections[index] ?? null;
+		const failed = failedSections[index] ?? null;
 		return {
-			section_id: section?.section_id ?? `pending-${index + 1}`,
-			title: section?.header.title ?? `Section ${index + 1}`,
+			section_id: section?.section_id ?? failed?.section_id ?? `pending-${index + 1}`,
+			title: section?.header.title ?? failed?.title ?? `Section ${index + 1}`,
 			position: index + 1,
-			status: section ? 'ready' : 'pending',
+			status: section ? 'ready' : failed ? 'failed' : 'pending',
 			section
 		};
 	});

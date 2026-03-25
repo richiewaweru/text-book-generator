@@ -15,6 +15,7 @@ from pipeline.api import (
     PipelineCommand,
     PipelineDocument,
     PipelineErrorInfo,
+    FailedSectionEntry,
     PipelineResult,
     PipelineSectionManifestItem,
     PipelineSectionReport,
@@ -28,7 +29,7 @@ from pipeline.events import (
     SectionStartedEvent,
 )
 from pipeline.graph import build_graph
-from pipeline.state import PipelineStatus, TextbookPipelineState, merge_state_updates
+from pipeline.state import QCReport, PipelineStatus, TextbookPipelineState, merge_state_updates
 from pipeline.types.section_content import SectionContent
 from pipeline.types.template_contract import TemplateContractSummary
 
@@ -97,6 +98,33 @@ def _build_reports(state: TextbookPipelineState) -> list[PipelineSectionReport]:
     return reports
 
 
+def _build_failed_sections(state: TextbookPipelineState) -> list[FailedSectionEntry]:
+    ready_ids = set(state.assembled_sections)
+    failed_sections = [
+        FailedSectionEntry(
+            section_id=record.section_id,
+            title=record.title,
+            position=record.position,
+            focus=record.focus,
+            bridges_from=record.bridges_from,
+            bridges_to=record.bridges_to,
+            needs_diagram=record.needs_diagram,
+            needs_worked_example=record.needs_worked_example,
+            failed_at_node=record.failed_at_node,
+            error_type=record.error_type,
+            error_summary=record.error_summary,
+            attempt_count=record.attempt_count,
+            can_retry=record.can_retry,
+            missing_components=list(record.missing_components),
+            failure_detail=record.failure_detail,
+        )
+        for record in state.failed_sections.values()
+        if record.section_id not in ready_ids
+    ]
+    failed_sections.sort(key=lambda item: (item.position, item.section_id))
+    return failed_sections
+
+
 def _build_document(
     command: PipelineCommand,
     state: TextbookPipelineState,
@@ -128,11 +156,47 @@ def _build_document(
         status=status,
         section_manifest=_build_section_manifest(state),
         sections=_sorted_sections(state),
+        failed_sections=_build_failed_sections(state),
         qc_reports=reports,
         quality_passed=quality_passed,
         error=error,
         updated_at=datetime.now(timezone.utc),
         completed_at=completed_at,
+    )
+
+
+def _seed_initial_state(
+    *,
+    initial: TextbookPipelineState,
+    command: PipelineCommand,
+) -> TextbookPipelineState:
+    seed = command.seed_document
+    if seed is None or not command.target_section_ids:
+        return initial
+
+    target_ids = set(command.target_section_ids)
+    generated_sections = dict(initial.generated_sections)
+    assembled_sections = dict(initial.assembled_sections)
+    qc_reports = dict(initial.qc_reports)
+
+    for section in seed.sections:
+        if section.section_id in target_ids:
+            continue
+        generated_sections[section.section_id] = section
+        assembled_sections[section.section_id] = section
+
+    for report in seed.qc_reports:
+        section_id = report.get("section_id")
+        if not section_id or section_id in target_ids:
+            continue
+        qc_reports[section_id] = QCReport.model_validate(report)
+
+    return initial.model_copy(
+        update={
+            "generated_sections": generated_sections,
+            "assembled_sections": assembled_sections,
+            "qc_reports": qc_reports,
+        }
     )
 
 
@@ -182,6 +246,7 @@ async def run_pipeline_streaming(
         max_rerenders=command.max_rerenders(),
         status=PipelineStatus.RUNNING,
     )
+    initial = _seed_initial_state(initial=initial, command=command)
     config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 
     await _emit(

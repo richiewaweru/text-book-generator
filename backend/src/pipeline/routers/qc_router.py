@@ -20,6 +20,9 @@ from pipeline.types.requests import GenerationMode
 # Diagram component blocks that retry_diagram handles.
 _DIAGRAM_FIELDS = {"diagram", "diagram_series", "diagram_compare"}
 
+# Interaction/simulation component blocks that retry_interaction handles.
+_INTERACTION_FIELDS = {"simulation", "simulation_block"}
+
 # Text fields that field_regenerator handles (targeted single-field retry).
 _TEXT_FIELDS = {
     "hook", "explanation", "practice", "worked_example",
@@ -30,14 +33,19 @@ _TEXT_FIELDS = {
 def _classify_retry_scope(blocking_issues: list[dict]) -> str:
     """Classify the narrowest retry scope for a set of blocking issues.
 
-    Returns one of: "diagram", "field", "full".
+    Returns one of: "diagram", "interaction", "field", "full".
     """
     blocks = {i.get("block", "") for i in blocking_issues}
     if blocks and blocks <= _DIAGRAM_FIELDS:
         return "diagram"
+    if blocks and blocks <= _INTERACTION_FIELDS:
+        return "interaction"
     if len(blocks) == 1 and blocks <= _TEXT_FIELDS:
         # Single text field failure — can be fixed with a targeted LLM call
         return "field"
+    # Mixed diagram + interaction only (no text) → drain diagram first
+    if blocks and blocks <= (_DIAGRAM_FIELDS | _INTERACTION_FIELDS):
+        return "diagram"
     return "full"
 
 
@@ -107,7 +115,13 @@ def route_after_qc(state: TextbookPipelineState | dict) -> list[Send] | str:
 
         scope = _classify_retry_scope(blocking)
         if scope == "diagram":
+            if state.diagram_retry_count.get(section_id, 0) >= 1:
+                continue  # diagram budget exhausted, accept section without diagram
             sends.append(Send("retry_diagram", base))
+        elif scope == "interaction":
+            if state.interaction_retry_count.get(section_id, 0) >= 1:
+                continue  # interaction budget exhausted, accept section without interaction
+            sends.append(Send("retry_interaction", base))
         elif scope == "field":
             sends.append(Send("retry_field", base))
         elif state.request.mode == GenerationMode.DRAFT:

@@ -1334,6 +1334,7 @@ class TestProcessSectionComposite:
         assert qc_called is False
         assert result["completed_nodes"] == [
             "content_generator",
+            "composition_planner",
             "diagram_generator",
             "interaction_decider",
             "interaction_generator",

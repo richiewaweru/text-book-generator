@@ -83,6 +83,7 @@ describe('client API helpers', () => {
 					status: 'running',
 					section_manifest: [],
 					sections: [],
+					failed_sections: [],
 					qc_reports: [],
 					quality_passed: null,
 					error: null,

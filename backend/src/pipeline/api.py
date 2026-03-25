@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from pipeline.state import NodeFailureDetail
 from pipeline.types.requests import GenerationMode as PipelineMode
 from pipeline.types.requests import PipelineRequest as PipelineCommand
 from pipeline.types.section_content import SectionContent
@@ -58,6 +59,24 @@ class PipelineSectionManifestItem(BaseModel):
     position: int
 
 
+class FailedSectionEntry(BaseModel):
+    section_id: str
+    title: str
+    position: int
+    focus: str | None = None
+    bridges_from: str | None = None
+    bridges_to: str | None = None
+    needs_diagram: bool = False
+    needs_worked_example: bool = False
+    failed_at_node: str
+    error_type: str
+    error_summary: str
+    attempt_count: int = 0
+    can_retry: bool = False
+    missing_components: list[str] = Field(default_factory=list)
+    failure_detail: NodeFailureDetail | None = None
+
+
 class PipelineDocument(BaseModel):
     generation_id: str
     subject: str
@@ -69,6 +88,7 @@ class PipelineDocument(BaseModel):
     status: Literal["pending", "running", "completed", "failed"] = "pending"
     section_manifest: list[PipelineSectionManifestItem] = Field(default_factory=list)
     sections: list[SectionContent] = Field(default_factory=list)
+    failed_sections: list[FailedSectionEntry] = Field(default_factory=list)
     qc_reports: list[PipelineSectionReport] = Field(default_factory=list)
     quality_passed: bool | None = None
     error: str | None = None
@@ -96,6 +116,7 @@ class PipelineResult(BaseModel):
 
 
 __all__ = [
+    "FailedSectionEntry",
     "GradeBand",
     "PipelineCommand",
     "PipelineDocument",

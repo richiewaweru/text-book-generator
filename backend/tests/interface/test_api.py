@@ -116,6 +116,7 @@ def _document(
             for index, section in enumerate(sections or [_section()])
         ],
         sections=sections or [_section()],
+        failed_sections=[],
         qc_reports=[],
         quality_passed=True if status == "completed" else None,
         created_at=_now(),
@@ -765,6 +766,93 @@ class TestGenerationApi:
         assert child is not None
         assert child.source_generation_id == source_id
         assert child.section_count == 1
+
+    async def test_enhance_generation_targets_only_failed_sections_for_partial_draft(self):
+        source_id = "gen-partial-draft"
+        source_document = _document(
+            source_id,
+            mode="draft",
+            sections=[_section("s-01"), _section("s-02")],
+        ).model_copy(
+            update={
+                "section_manifest": [
+                    {"section_id": "s-01", "title": "Section s-01", "position": 1},
+                    {"section_id": "s-02", "title": "Section s-02", "position": 2},
+                    {"section_id": "s-03", "title": "Section s-03", "position": 3},
+                ],
+                "failed_sections": [
+                    {
+                        "section_id": "s-03",
+                        "title": "Section s-03",
+                        "position": 3,
+                        "focus": "Recover the third section",
+                        "needs_diagram": False,
+                        "needs_worked_example": False,
+                        "failed_at_node": "content_generator",
+                        "error_type": "validation",
+                        "error_summary": "Schema validation failed after one repair attempt.",
+                        "attempt_count": 1,
+                        "can_retry": True,
+                        "missing_components": ["section-header", "hook-hero"],
+                    }
+                ],
+                "qc_reports": [
+                    {"section_id": "s-01", "passed": True, "issues": [], "warnings": []},
+                    {"section_id": "s-02", "passed": True, "issues": [], "warnings": []},
+                ],
+            }
+        )
+        path = await DOC_REPO.save_document(source_document)
+        await GEN_REPO.create(
+            Generation(
+                id=source_id,
+                user_id=TEST_USER.id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="draft",
+                status="completed",
+                document_path=path,
+                requested_template_id="guided-concept-path",
+                resolved_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                resolved_preset_id="blue-classroom",
+                section_count=3,
+                quality_passed=False,
+            )
+        )
+
+        async def fake_run_pipeline(command, on_event=None):
+            assert command.target_section_ids == ["s-03"]
+            assert command.seed_document is not None
+            assert [plan.section_id for plan in command.seed_document.section_plans] == [
+                "s-01",
+                "s-02",
+                "s-03",
+            ]
+            assert [section.section_id for section in command.seed_document.sections] == [
+                "s-01",
+                "s-02",
+            ]
+            assert len(command.seed_document.qc_reports) == 2
+            return PipelineResult(
+                document=_document(command.generation_id or "gen-child", mode="balanced"),
+                completed_nodes=["curriculum_planner", "process_section", "qc_agent"],
+                generation_time_seconds=0.01,
+            )
+
+        with patch(
+            "textbook_agent.interface.api.routes.generation.run_pipeline_streaming",
+            side_effect=fake_run_pipeline,
+        ):
+            async with await _client() as client:
+                response = await client.post(
+                    f"/api/v1/generations/{source_id}/enhance",
+                    json={"mode": "balanced", "note": "Recover the failed section only."},
+                    headers=AUTH_HEADERS,
+                )
+                await asyncio.sleep(0.05)
+
+        assert response.status_code == 202
 
     async def test_run_generation_job_marks_cancelled_task_failed(self):
         generation_id = "gen-cancelled"

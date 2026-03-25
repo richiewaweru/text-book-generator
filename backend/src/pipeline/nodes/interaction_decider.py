@@ -7,6 +7,7 @@ generation mode allows interaction work.
 
 from __future__ import annotations
 
+from pipeline.nodes.composition_planner import pick_interaction_type
 from pipeline.state import TextbookPipelineState
 from pipeline.types.section_content import InteractionSpec
 
@@ -16,17 +17,39 @@ def _has_simulation_slot(contract) -> bool:
     return "simulation-block" in components
 
 
-def _pick_simulation_type(state: TextbookPipelineState, section) -> str:
-    subject = state.request.subject.lower()
-    if section.timeline is not None or "history" in subject:
-        return "timeline_scrubber"
-    if section.process is not None:
-        return "equation_reveal"
-    if section.diagram is not None and ("geometry" in subject or "physics" in subject):
-        return "geometry_explorer"
-    if "probability" in subject:
-        return "probability_tree"
-    return "graph_slider"
+def build_interaction_spec(
+    state: TextbookPipelineState,
+    section,
+    *,
+    interaction_type: str | None = None,
+    anchor_block: str | None = None,
+) -> InteractionSpec | None:
+    if not state.request.interactions_enabled():
+        return None
+    if state.contract.interaction_level not in {"medium", "high"}:
+        return None
+    if not _has_simulation_slot(state.contract):
+        return None
+
+    return InteractionSpec(
+        type=interaction_type or pick_interaction_type(state, section),
+        goal=section.header.objective or section.hook.headline,
+        anchor_content={
+            "headline": section.hook.headline,
+            "body": section.explanation.body[:280],
+        },
+        context={
+            "subject": state.request.subject,
+            "grade_band": state.request.grade_band,
+            "section_title": section.header.title,
+            "anchor_block": anchor_block or "explanation",
+        },
+        dimensions={
+            "difficulty": state.request.mode.value,
+            "interaction_level": state.contract.interaction_level,
+        },
+        print_translation="static_diagram",
+    )
 
 
 async def interaction_decider(
@@ -51,24 +74,9 @@ async def interaction_decider(
     if section is None:
         return {"completed_nodes": ["interaction_decider"]}
 
-    spec = InteractionSpec(
-        type=_pick_simulation_type(state, section),
-        goal=section.header.objective or section.hook.headline,
-        anchor_content={
-            "headline": section.hook.headline,
-            "body": section.explanation.body[:280],
-        },
-        context={
-            "subject": state.request.subject,
-            "grade_band": state.request.grade_band,
-            "section_title": section.header.title,
-        },
-        dimensions={
-            "difficulty": state.request.mode.value,
-            "interaction_level": state.contract.interaction_level,
-        },
-        print_translation="static_diagram",
-    )
+    spec = build_interaction_spec(state, section)
+    if spec is None:
+        return {"completed_nodes": ["interaction_decider"]}
 
     return {
         "interaction_specs": {sid: spec},

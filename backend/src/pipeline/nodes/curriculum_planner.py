@@ -49,6 +49,8 @@ def _outline_from_seed(state: TextbookPipelineState) -> list[SectionPlan]:
     seed = state.request.seed_document
     if seed is None:
         return []
+    if seed.section_plans:
+        return [SectionPlan.model_validate(plan) for plan in seed.section_plans]
 
     sections = seed.sections
     outline: list[SectionPlan] = []

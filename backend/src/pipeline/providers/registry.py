@@ -54,6 +54,7 @@ class ModelSpec:
 NODE_MODEL_SLOTS: dict[str, ModelSlot] = {
     "curriculum_planner": ModelSlot.FAST,
     "content_generator": ModelSlot.STANDARD,
+    "content_generator_repair": ModelSlot.STANDARD,
     "diagram_generator": ModelSlot.FAST,
     "qc_agent": ModelSlot.FAST,
     "field_regenerator": ModelSlot.FAST,

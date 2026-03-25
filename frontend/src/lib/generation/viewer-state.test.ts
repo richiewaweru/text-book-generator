@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	applySectionFailed,
 	applySectionReady,
 	applySectionStarted,
 	buildSectionSlots,
@@ -66,6 +67,7 @@ function createDocument(overrides: Partial<GenerationDocument> = {}): Generation
 		status: 'running',
 		section_manifest: [],
 		sections: [],
+		failed_sections: [],
 		qc_reports: [],
 		quality_passed: null,
 		error: null,
@@ -151,6 +153,38 @@ describe('viewer-state helpers', () => {
 			'1:pending:First section',
 			'2:ready:Second section',
 			'3:pending:Third section'
+		]);
+	});
+
+	it('marks failed sections in slots and document state', () => {
+		const document = createDocument({
+			section_manifest: [
+				{ section_id: 's-01', title: 'First section', position: 1 },
+				{ section_id: 's-02', title: 'Second section', position: 2 }
+			]
+		});
+		const failed = applySectionFailed(document, {
+			type: 'section_failed',
+			generation_id: 'gen-123',
+			section_id: 's-02',
+			title: 'Second section',
+			position: 2,
+			failed_at_node: 'content_generator',
+			error_type: 'validation',
+			error_summary: 'Schema validation failed.',
+			needs_diagram: false,
+			needs_worked_example: false,
+			attempt_count: 1,
+			can_retry: true,
+			missing_components: ['section-header'],
+			timestamp: new Date().toISOString()
+		});
+
+		const slots = buildSectionSlots(failed, 2);
+		expect(failed.failed_sections).toHaveLength(1);
+		expect(slots.map((slot) => `${slot.position}:${slot.status}:${slot.title}`)).toEqual([
+			'1:pending:First section',
+			'2:failed:Second section'
 		]);
 	});
 });
