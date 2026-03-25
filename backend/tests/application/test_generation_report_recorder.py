@@ -7,6 +7,7 @@ import pytest
 
 from pipeline.api import PipelineDocument, PipelineSectionReport
 from pipeline.events import (
+    DiagramOutcomeEvent,
     LLMCallFailedEvent,
     LLMCallStartedEvent,
     LLMCallSucceededEvent,
@@ -14,10 +15,13 @@ from pipeline.events import (
     NodeStartedEvent,
     PipelineStartEvent,
     SectionAttemptStartedEvent,
+    SectionFailedEvent,
     SectionReadyEvent,
     SectionReportUpdatedEvent,
     SectionRetryQueuedEvent,
     SectionStartedEvent,
+    ValidationRepairAttemptedEvent,
+    ValidationRepairSucceededEvent,
     event_bus,
 )
 from pipeline.types.section_content import (
@@ -371,10 +375,77 @@ async def test_recorder_tracks_llm_retries_and_qc_rerenders() -> None:
     report = await repo.load_report(generation.id)
     assert report.summary.total_llm_calls == 2
     assert report.summary.retry_count == 1
+    assert report.summary.llm_transport_retries == 1
     assert report.summary.warning_count == 1
     assert report.sections[0].queued_retries[0].next_attempt == 2
     assert report.sections[0].nodes[0].llm_calls[0].status == "failed"
     assert report.sections[0].nodes[0].llm_calls[1].status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_recorder_tracks_failed_sections_repairs_and_diagram_outcomes() -> None:
+    generation = _generation("gen-failure-metrics")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        SectionStartedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            title="Recoverable section",
+            position=1,
+        )
+    )
+    await recorder.apply_event(
+        ValidationRepairAttemptedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            error_summary="Schema validation failed",
+        )
+    )
+    await recorder.apply_event(
+        ValidationRepairSucceededEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+        )
+    )
+    await recorder.apply_event(
+        DiagramOutcomeEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            outcome="skipped",
+        )
+    )
+    await recorder.apply_event(
+        SectionStartedEvent(
+            generation_id=generation.id,
+            section_id="s-02",
+            title="Lost section",
+            position=2,
+        )
+    )
+    await recorder.apply_event(
+        SectionFailedEvent(
+            generation_id=generation.id,
+            section_id="s-02",
+            title="Lost section",
+            position=2,
+            failed_at_node="content_generator",
+            error_type="validation",
+            error_summary="Schema validation failed after repair.",
+            attempt_count=1,
+            can_retry=True,
+            missing_components=["section-header", "hook-hero"],
+        )
+    )
+    await recorder.finalize_failure(error="Generation failed")
+
+    report = await repo.load_report(generation.id)
+    assert report.summary.validation_repair_attempts == 1
+    assert report.summary.validation_repair_successes == 1
+    assert report.summary.diagram_skip_count == 1
+    assert report.summary.failed_sections == 1
+    assert any(section.section_id == "s-02" and section.status == "failed" for section in report.sections)
 
 
 @pytest.mark.asyncio

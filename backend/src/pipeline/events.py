@@ -14,6 +14,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from pipeline.api import PipelineSectionReport
+from pipeline.state import NodeFailureDetail
 from pipeline.types.section_content import SectionContent
 
 
@@ -179,6 +180,62 @@ class SectionRetryQueuedEvent(BaseModel):
     )
 
 
+class SectionFailedEvent(BaseModel):
+    type: Literal["section_failed"] = "section_failed"
+    generation_id: str
+    section_id: str
+    title: str
+    position: int
+    failed_at_node: str
+    error_type: str
+    error_summary: str
+    focus: str | None = None
+    bridges_from: str | None = None
+    bridges_to: str | None = None
+    needs_diagram: bool = False
+    needs_worked_example: bool = False
+    attempt_count: int = 0
+    can_retry: bool = False
+    missing_components: list[str] = Field(default_factory=list)
+    failure_detail: NodeFailureDetail | None = None
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class ValidationRepairAttemptedEvent(BaseModel):
+    type: Literal["validation_repair_attempted"] = "validation_repair_attempted"
+    generation_id: str
+    section_id: str
+    node: str = "content_generator"
+    attempt: int = 1
+    error_summary: str
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class ValidationRepairSucceededEvent(BaseModel):
+    type: Literal["validation_repair_succeeded"] = "validation_repair_succeeded"
+    generation_id: str
+    section_id: str
+    node: str = "content_generator"
+    attempt: int = 1
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class DiagramOutcomeEvent(BaseModel):
+    type: Literal["diagram_outcome"] = "diagram_outcome"
+    generation_id: str
+    section_id: str
+    outcome: Literal["success", "timeout", "error", "skipped"]
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
 PipelineEvent = (
     PipelineStartEvent
     | SectionStartedEvent
@@ -194,6 +251,10 @@ PipelineEvent = (
     | NodeFinishedEvent
     | SectionReportUpdatedEvent
     | SectionRetryQueuedEvent
+    | SectionFailedEvent
+    | ValidationRepairAttemptedEvent
+    | ValidationRepairSucceededEvent
+    | DiagramOutcomeEvent
 )
 
 
@@ -236,10 +297,14 @@ __all__ = [
     "SectionReadyEvent",
     "SectionStartedEvent",
     "SectionAttemptStartedEvent",
+    "SectionFailedEvent",
     "NodeStartedEvent",
     "NodeFinishedEvent",
     "SectionReportUpdatedEvent",
     "SectionRetryQueuedEvent",
+    "ValidationRepairAttemptedEvent",
+    "ValidationRepairSucceededEvent",
+    "DiagramOutcomeEvent",
     "event_bus",
     "LLMCallStartedEvent",
     "LLMCallSucceededEvent",

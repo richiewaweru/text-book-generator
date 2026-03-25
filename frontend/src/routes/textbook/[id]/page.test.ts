@@ -119,6 +119,7 @@ function buildDocument(overrides: Record<string, unknown> = {}) {
 			{ section_id: 's-04', title: 'Section 4', position: 4 }
 		],
 		sections: [],
+		failed_sections: [],
 		qc_reports: [],
 		quality_passed: null,
 		error: null,
@@ -270,5 +271,38 @@ describe('textbook page stream lifecycle', () => {
 		expect(getGenerationDetail).toHaveBeenCalledTimes(2);
 		expect(getGenerationDocument).toHaveBeenCalledTimes(2);
 		expect(screen.getByText(/Generation timed out after 300 seconds\./i)).toBeTruthy();
+	});
+
+	it('shows failed sections as soon as section_failed arrives on the stream', async () => {
+		getGenerationDetail.mockResolvedValueOnce(buildDetail());
+		getGenerationDocument.mockResolvedValueOnce(buildDocument());
+
+		render(TextbookPage);
+
+		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
+		expect(MockEventSource.instances).toHaveLength(1);
+
+		MockEventSource.instances[0].emit('section_failed', {
+			type: 'section_failed',
+			generation_id: 'gen-123',
+			section_id: 's-03',
+			title: 'Section 3',
+			position: 3,
+			failed_at_node: 'content_generator',
+			error_type: 'validation',
+			error_summary: 'Schema validation failed after one repair attempt.',
+			needs_diagram: false,
+			needs_worked_example: false,
+			attempt_count: 1,
+			can_retry: true,
+			missing_components: ['section-header', 'hook-hero']
+		});
+
+		await waitFor(() => expect(screen.getByText(/Failed sections: 1/i)).toBeTruthy());
+		expect(screen.getByText(/Sections Not Completed/i)).toBeTruthy();
+		expect(
+			screen.getByText(/Failed at content_generator: Schema validation failed after one repair attempt\./i)
+		).toBeTruthy();
 	});
 });

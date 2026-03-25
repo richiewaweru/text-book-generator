@@ -56,6 +56,7 @@ describe('LectioDocumentView', () => {
 							hook: { headline: 'How do we measure change at an instant?' }
 						}
 					],
+					failed_sections: [],
 					qc_reports: [],
 					quality_passed: true,
 					error: null,
@@ -91,6 +92,7 @@ describe('LectioDocumentView', () => {
 						{ section_id: 'sec_2', title: 'Instantaneous change', position: 2 }
 					],
 					sections: [],
+					failed_sections: [],
 					qc_reports: [],
 					quality_passed: null,
 					error: null,

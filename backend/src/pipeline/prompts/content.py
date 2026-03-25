@@ -106,3 +106,36 @@ This is a RERENDER. The previous version had this problem:
 Fix only the affected content. Keep everything else the same quality."""
 
     return base
+
+
+def build_content_repair_user_prompt(
+    *,
+    section_plan: SectionPlan,
+    subject: str,
+    context: str,
+    grade_band: str,
+    learner_fit: str,
+    template_id: str,
+    validation_summary: str,
+    rerender_reason: str | None = None,
+    seed_section: SectionContent | None = None,
+    seed_note: str | None = None,
+) -> str:
+    return f"""Your previous response had schema validation issues.
+Fix only the structure so it matches the SectionContent schema exactly.
+Keep the teaching intent, examples, and progression aligned with the requested section.
+
+Validation summary:
+{validation_summary}
+
+{build_content_user_prompt(
+    section_plan=section_plan,
+    subject=subject,
+    context=context,
+    grade_band=grade_band,
+    learner_fit=learner_fit,
+    template_id=template_id,
+    rerender_reason=rerender_reason,
+    seed_section=seed_section,
+    seed_note=seed_note,
+)}"""

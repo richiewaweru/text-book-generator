@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 
@@ -10,6 +12,7 @@ from pipeline.events import (
     NodeFinishedEvent,
     NodeStartedEvent,
     SectionAttemptStartedEvent,
+    SectionFailedEvent,
     SectionReportUpdatedEvent,
     SectionRetryQueuedEvent,
 )
@@ -19,7 +22,16 @@ from pipeline.runtime_diagnostics import (
     node_error_messages,
     publish_runtime_event,
 )
-from pipeline.state import QCReport, RerenderRequest, TextbookPipelineState, merge_state_updates
+from pipeline.state import (
+    FailedSectionRecord,
+    NodeFailureDetail,
+    PipelineError,
+    QCReport,
+    RerenderRequest,
+    TextbookPipelineState,
+    merge_state_updates,
+)
+from pipeline.types.section_content import SectionContent
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +42,10 @@ _SECTION_REPORT_SOURCES = {
     "section_assembler": "assembler",
     "qc_agent": "qc_agent",
 }
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _report_source_for(node_name: str) -> str | None:
@@ -43,6 +59,10 @@ def _coerce_report(report: Any) -> PipelineSectionReport:
 
 def _coerce_rerender_request(request: Any) -> RerenderRequest:
     return request if isinstance(request, RerenderRequest) else RerenderRequest.model_validate(request)
+
+
+def _coerce_failed_section(record: Any) -> FailedSectionRecord:
+    return record if isinstance(record, FailedSectionRecord) else FailedSectionRecord.model_validate(record)
 
 
 def _rerender_request_changed(before: RerenderRequest | None, after: RerenderRequest | None) -> bool:
@@ -79,12 +99,26 @@ def _build_section_output(
 
     if section_id and section_id in after_state.generated_sections:
         output["generated_sections"] = {section_id: after_state.generated_sections[section_id]}
-    if section_id and section_id in after_state.assembled_sections:
-        output["assembled_sections"] = {section_id: after_state.assembled_sections[section_id]}
+    if section_id and section_id in after_state.composition_plans:
+        output["composition_plans"] = {section_id: after_state.composition_plans[section_id]}
     if section_id and section_id in after_state.interaction_specs:
         output["interaction_specs"] = {section_id: after_state.interaction_specs[section_id]}
+    if section_id and section_id in after_state.assembled_sections:
+        output["assembled_sections"] = {section_id: after_state.assembled_sections[section_id]}
     if section_id and section_id in after_state.qc_reports:
         output["qc_reports"] = {section_id: after_state.qc_reports[section_id]}
+    if section_id and section_id in after_state.failed_sections:
+        output["failed_sections"] = {section_id: after_state.failed_sections[section_id]}
+    if section_id and section_id in after_state.diagram_outcomes:
+        output["diagram_outcomes"] = {section_id: after_state.diagram_outcomes[section_id]}
+    if (
+        section_id
+        and after_state.diagram_retry_count.get(section_id)
+        != before_state.diagram_retry_count.get(section_id)
+    ):
+        output["diagram_retry_count"] = {
+            section_id: after_state.diagram_retry_count.get(section_id, 0)
+        }
 
     rerender_updates = _rerender_request_updates(before_state, after_state, section_id)
     if rerender_updates:
@@ -103,7 +137,221 @@ def _build_section_output(
     if new_errors:
         output["errors"] = new_errors
 
+    new_failures = after_state.node_failures[len(before_state.node_failures) :]
+    if new_failures:
+        output["node_failures"] = new_failures
+
     return output
+
+
+def _failure_detail_from_messages(
+    *,
+    node_name: str,
+    section_id: str,
+    messages: list[str],
+) -> NodeFailureDetail:
+    return NodeFailureDetail(
+        node=node_name,
+        section_id=section_id,
+        timestamp=_utc_now_iso(),
+        error_type="missing_content",
+        error_message=" | ".join(messages) if messages else "Section output missing after node execution.",
+        retry_attempt=0,
+        will_retry=False,
+    )
+
+
+def _synthetic_failed_section(
+    *,
+    state: TextbookPipelineState,
+    node_name: str,
+    section_id: str,
+    messages: list[str],
+    missing_components: list[str],
+) -> FailedSectionRecord:
+    plan = state.current_section_plan
+    detail = _failure_detail_from_messages(
+        node_name=node_name,
+        section_id=section_id,
+        messages=messages,
+    )
+    return FailedSectionRecord(
+        section_id=section_id,
+        title=plan.title if plan is not None else section_id,
+        position=plan.position if plan is not None else 0,
+        focus=plan.focus if plan is not None else None,
+        bridges_from=plan.bridges_from if plan is not None else None,
+        bridges_to=plan.bridges_to if plan is not None else None,
+        needs_diagram=plan.needs_diagram if plan is not None else False,
+        needs_worked_example=plan.needs_worked_example if plan is not None else False,
+        failed_at_node=node_name,
+        error_type="missing_content",
+        error_summary=detail.error_message,
+        attempt_count=(state.rerender_count.get(section_id, 0) + 1),
+        can_retry=True,
+        missing_components=missing_components,
+        failure_detail=detail,
+    )
+
+
+def _publish_section_failed(
+    *,
+    generation_id: str,
+    record: FailedSectionRecord,
+) -> None:
+    publish_runtime_event(
+        generation_id,
+        SectionFailedEvent(
+            generation_id=generation_id,
+            section_id=record.section_id,
+            title=record.title,
+            position=record.position,
+            failed_at_node=record.failed_at_node,
+            error_type=record.error_type,
+            error_summary=record.error_summary,
+            focus=record.focus,
+            bridges_from=record.bridges_from,
+            bridges_to=record.bridges_to,
+            needs_diagram=record.needs_diagram,
+            needs_worked_example=record.needs_worked_example,
+            attempt_count=record.attempt_count,
+            can_retry=record.can_retry,
+            missing_components=record.missing_components,
+            failure_detail=record.failure_detail,
+        ),
+    )
+
+
+def _merge_parallel_sections(
+    *,
+    base_state: TextbookPipelineState,
+    left: dict[str, SectionContent],
+    right: dict[str, SectionContent],
+) -> dict[str, SectionContent]:
+    merged: dict[str, SectionContent] = {}
+    section_ids = set(left) | set(right)
+    for section_id in section_ids:
+        base_section = (
+            right.get(section_id)
+            or left.get(section_id)
+            or base_state.generated_sections.get(section_id)
+        )
+        if base_section is None:
+            continue
+        payload = base_section.model_dump(exclude_none=True)
+        if section_id in left:
+            payload.update(left[section_id].model_dump(exclude_none=True))
+        if section_id in right:
+            payload.update(right[section_id].model_dump(exclude_none=True))
+        merged[section_id] = SectionContent.model_validate(payload)
+    return merged
+
+
+async def _run_parallel_phase(
+    state: TextbookPipelineState,
+    *,
+    steps: Sequence[NamedSectionStep],
+    model_overrides: dict | None = None,
+    pre_instrumented: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    generation_id = generation_id_from_state(state)
+    attempt, _ = current_section_attempt(state, state.current_section_id)
+    base_state = state.model_dump()
+
+    async def _call(name: str, fn: SectionStep) -> dict:
+        if name in pre_instrumented:
+            return await fn(dict(base_state), model_overrides=model_overrides)
+        started = perf_counter()
+        publish_runtime_event(
+            generation_id,
+            NodeStartedEvent(
+                generation_id=generation_id,
+                node=name,
+                section_id=state.current_section_id,
+                attempt=attempt,
+            ),
+        )
+        try:
+            result = await fn(dict(base_state), model_overrides=model_overrides)
+        except Exception as exc:
+            publish_runtime_event(
+                generation_id,
+                NodeFinishedEvent(
+                    generation_id=generation_id,
+                    node=name,
+                    section_id=state.current_section_id,
+                    attempt=attempt,
+                    status="failed",
+                    latency_ms=(perf_counter() - started) * 1000.0,
+                    error=str(exc),
+                ),
+            )
+            raise
+        msgs = node_error_messages(
+            result.get("errors"),
+            node=name,
+            section_id=state.current_section_id,
+        )
+        publish_runtime_event(
+            generation_id,
+            NodeFinishedEvent(
+                generation_id=generation_id,
+                node=name,
+                section_id=state.current_section_id,
+                attempt=attempt,
+                status="failed" if msgs else "succeeded",
+                latency_ms=(perf_counter() - started) * 1000.0,
+                error=" | ".join(msgs) if msgs else None,
+            ),
+        )
+        return result
+
+    results = await asyncio.gather(
+        *[_call(name, fn) for name, fn in steps],
+        return_exceptions=True,
+    )
+
+    merged: dict[str, Any] = {}
+    generated_sections: dict[str, SectionContent] = {}
+    for (step_name, _), result in zip(steps, results):
+        if isinstance(result, Exception):
+            merged.setdefault("errors", []).append(
+                PipelineError(
+                    node=step_name,
+                    section_id=state.current_section_id,
+                    message=str(result),
+                    recoverable=True,
+                )
+            )
+            continue
+
+        for key, value in result.items():
+            if key == "generated_sections":
+                generated_sections = _merge_parallel_sections(
+                    base_state=state,
+                    left=generated_sections,
+                    right=value,
+                )
+                merged["generated_sections"] = generated_sections
+            elif key in {
+                "composition_plans",
+                "interaction_specs",
+                "assembled_sections",
+                "qc_reports",
+                "failed_sections",
+                "diagram_outcomes",
+                "diagram_retry_count",
+                "interaction_retry_count",
+                "rerender_requests",
+                "rerender_count",
+            }:
+                merged.setdefault(key, {}).update(value)
+            elif key in {"completed_nodes", "errors", "node_failures"}:
+                merged.setdefault(key, []).extend(value)
+            else:
+                merged[key] = value
+
+    return merged
 
 
 async def run_section_steps(
@@ -242,10 +490,27 @@ async def run_section_steps(
             and section_id
             and section_id not in step_state.generated_sections
         ):
+            emitted_by_node = section_id in result.get("failed_sections", {})
+            record = step_state.failed_sections.get(section_id)
+            if record is None:
+                record = _synthetic_failed_section(
+                    state=step_state,
+                    node_name=node_name,
+                    section_id=section_id,
+                    messages=step_errors,
+                    missing_components=list(step_state.contract.required_components),
+                )
+                step_state.failed_sections[section_id] = record
+                raw["failed_sections"] = dict(step_state.failed_sections)
             logger.warning(
                 "Short-circuiting section %s after content_generator produced no content",
                 section_id,
             )
+            if not emitted_by_node:
+                _publish_section_failed(
+                    generation_id=generation_id,
+                    record=_coerce_failed_section(record),
+                )
             break
 
         if (
@@ -253,10 +518,22 @@ async def run_section_steps(
             and section_id
             and section_id not in step_state.assembled_sections
         ):
+            record = step_state.failed_sections.get(section_id)
+            if record is None:
+                record = _synthetic_failed_section(
+                    state=step_state,
+                    node_name=node_name,
+                    section_id=section_id,
+                    messages=step_errors,
+                    missing_components=list(step_state.contract.required_components),
+                )
+                step_state.failed_sections[section_id] = record
+                raw["failed_sections"] = dict(step_state.failed_sections)
             logger.warning(
                 "Short-circuiting section %s after section_assembler produced no assembled section",
                 section_id,
             )
+            _publish_section_failed(generation_id=generation_id, record=_coerce_failed_section(record))
             break
 
     after_state = TextbookPipelineState.parse(raw)
@@ -266,3 +543,6 @@ async def run_section_steps(
         section_id=section_id,
         completed_nodes=completed_node_names,
     )
+
+
+__all__ = ["run_section_steps", "_run_parallel_phase"]

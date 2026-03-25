@@ -21,6 +21,7 @@ from pipeline.events import (
 from pipeline.nodes.curriculum_planner import curriculum_planner
 from pipeline.nodes.diagram_generator import diagram_generator
 from pipeline.nodes.field_regenerator import field_regenerator
+from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.nodes.process_section import process_section
 from pipeline.nodes.qc_agent import qc_agent
 from pipeline.nodes.section_assembler import section_assembler
@@ -42,6 +43,7 @@ def fan_out_sections(state: TextbookPipelineState | dict) -> list[Send]:
         return []
 
     base = state.model_dump()
+    target_ids = set(state.request.target_section_ids or [])
     return [
         Send("process_section", {
             **base,
@@ -49,6 +51,7 @@ def fan_out_sections(state: TextbookPipelineState | dict) -> list[Send]:
             "current_section_plan": plan.model_dump(),
         })
         for plan in state.curriculum_outline
+        if not target_ids or plan.section_id in target_ids
     ]
 
 
@@ -123,8 +126,31 @@ async def retry_diagram(
     Text content in generated_sections[sid] is preserved exactly.
     Called when QC flags only diagram blocks as blocking.
     """
+    typed = TextbookPipelineState.parse(state)
+    sid = typed.current_section_id
+    prior_outcome = typed.diagram_outcomes.get(sid) if sid else None
+    prior_retry_count = typed.diagram_retry_count.get(sid, 0) if sid else 0
+
+    if prior_outcome == "timeout" or prior_retry_count >= 1:
+        return await run_section_steps(
+            typed,
+            steps=[
+                ("section_assembler", section_assembler),
+                ("qc_agent", qc_agent),
+            ],
+            model_overrides=model_overrides,
+            increment_rerender_count=True,
+        )
+
+    raw_state = typed.model_dump()
+    if sid:
+        raw_state["diagram_retry_count"] = {
+            **typed.diagram_retry_count,
+            sid: prior_retry_count + 1,
+        }
+
     return await run_section_steps(
-        state,
+        raw_state,
         steps=[
             ("diagram_generator", diagram_generator),
             ("section_assembler", section_assembler),
@@ -154,6 +180,41 @@ async def retry_field(
     )
 
 
+async def retry_interaction(
+    state: TextbookPipelineState | dict,
+    *,
+    model_overrides: dict | None = None,
+) -> dict:
+    """
+    Re-run interaction_generator -> section_assembler -> qc_agent only.
+
+    Text content and diagram in generated_sections[sid] are preserved exactly.
+    Called when QC flags only simulation/interaction blocks as blocking.
+    Does NOT consume max_rerenders budget.
+    """
+    typed = TextbookPipelineState.parse(state)
+    sid = typed.current_section_id
+    prior_retry_count = typed.interaction_retry_count.get(sid, 0) if sid else 0
+
+    raw_state = typed.model_dump()
+    if sid:
+        raw_state["interaction_retry_count"] = {
+            **typed.interaction_retry_count,
+            sid: prior_retry_count + 1,
+        }
+
+    return await run_section_steps(
+        raw_state,
+        steps=[
+            ("interaction_generator", interaction_generator),
+            ("section_assembler", section_assembler),
+            ("qc_agent", qc_agent),
+        ],
+        model_overrides=model_overrides,
+        increment_rerender_count=False,  # does NOT consume max_rerenders
+    )
+
+
 def build_graph(checkpointer=None) -> StateGraph:
     workflow = StateGraph(TextbookPipelineState)
 
@@ -162,6 +223,7 @@ def build_graph(checkpointer=None) -> StateGraph:
     workflow.add_node("process_section", process_section)
     workflow.add_node("retry_diagram", retry_diagram)
     workflow.add_node("retry_field", retry_field)
+    workflow.add_node("retry_interaction", retry_interaction)
 
     # Entry point
     workflow.set_entry_point("curriculum_planner")
@@ -182,5 +244,8 @@ def build_graph(checkpointer=None) -> StateGraph:
 
     # Field-level retry: regenerate one text field, then re-evaluate.
     workflow.add_conditional_edges("retry_field", route_after_qc)
+
+    # Interaction-only retry: re-run interaction_generator + assembler + QC.
+    workflow.add_conditional_edges("retry_interaction", route_after_qc)
 
     return workflow.compile(checkpointer=checkpointer or MemorySaver())

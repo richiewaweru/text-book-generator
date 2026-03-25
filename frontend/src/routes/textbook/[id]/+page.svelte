@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import LectioDocumentView from '$lib/components/LectioDocumentView.svelte';
 	import {
+		applySectionFailed,
 		applySectionReady,
 		applySectionStarted,
 		buildSectionSlots,
@@ -20,6 +21,7 @@
 		GenerationDetail,
 		GenerationDocument,
 		QCCompleteEvent,
+		SectionFailedEvent,
 		SectionReadyEvent,
 		SectionStartedEvent
 	} from '$lib/types';
@@ -41,6 +43,9 @@
 	const sectionSlots = $derived(buildSectionSlots(document, plannedSections));
 	const readySectionCount = $derived(
 		sectionSlots.filter((slot) => slot.status === 'ready').length
+	);
+	const failedSectionCount = $derived(
+		sectionSlots.filter((slot) => slot.status === 'failed').length
 	);
 	const streamLabel = $derived(
 		detail?.status === 'completed'
@@ -170,6 +175,17 @@
 			}
 		});
 
+		source.addEventListener('section_failed', (event) => {
+			if (source !== eventSource) {
+				return;
+			}
+			const payload = JSON.parse((event as MessageEvent).data) as SectionFailedEvent;
+			if (!document) {
+				return;
+			}
+			document = applySectionFailed(document, payload);
+		});
+
 		source.addEventListener('qc_complete', (event) => {
 			if (source !== eventSource) {
 				return;
@@ -289,6 +305,9 @@
 			<p>
 				Sections ready: {readySectionCount} / {plannedSections}
 			</p>
+			{#if failedSectionCount > 0}
+				<p>Failed sections: {failedSectionCount}</p>
+			{/if}
 			<p>Stream: {streamLabel}</p>
 			{#if qcSummary}
 				<p>QC: {qcSummary.passed} / {qcSummary.total} passing</p>
@@ -305,6 +324,20 @@
 			Draft mode is the fast seedable pass. Use Enhance Draft to keep the section structure and let
 			the pipeline rework it in balanced mode.
 		</p>
+	{/if}
+
+	{#if document?.failed_sections?.length}
+		<section class="failed-sections">
+			<h2>Sections Not Completed</h2>
+			<ul>
+				{#each document.failed_sections as failed}
+					<li>
+						<strong>{failed.title}</strong>
+						<span>Failed at {failed.failed_at_node}: {failed.error_summary}</span>
+					</li>
+				{/each}
+			</ul>
+		</section>
 	{/if}
 
 	{#if error}
@@ -383,6 +416,7 @@
 	}
 
 	.status-panel,
+	.failed-sections,
 	.warning,
 	.draft-note,
 	.error {
@@ -413,5 +447,17 @@
 		border-color: rgba(169, 129, 37, 0.18);
 		background: rgba(255, 248, 225, 0.92);
 		color: #7f5d13;
+	}
+
+	.failed-sections ul {
+		margin: 0.75rem 0 0 0;
+		padding-left: 1.1rem;
+		display: grid;
+		gap: 0.55rem;
+	}
+
+	.failed-sections li {
+		display: grid;
+		gap: 0.2rem;
 	}
 </style>

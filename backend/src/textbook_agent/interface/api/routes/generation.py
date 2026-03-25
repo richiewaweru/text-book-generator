@@ -140,6 +140,8 @@ def _initial_document(
     *,
     section_manifest: list[PipelineSectionManifestItem] | None = None,
     sections: list | None = None,
+    failed_sections: list | None = None,
+    qc_reports: list | None = None,
     status_value: str = "pending",
 ) -> PipelineDocument:
     now = datetime.now(timezone.utc)
@@ -154,6 +156,8 @@ def _initial_document(
         status=status_value,
         section_manifest=section_manifest or [],
         sections=sections or [],
+        failed_sections=failed_sections or [],
+        qc_reports=qc_reports or [],
         created_at=generation.created_at,
         updated_at=now,
     )
@@ -163,10 +167,11 @@ def _sort_sections_by_manifest(
     sections: list,
     section_manifest: list[PipelineSectionManifestItem],
 ) -> list:
-    if not section_manifest:
+    manifest = _normalize_manifest_items(section_manifest)
+    if not manifest:
         return sections
 
-    positions = {item.section_id: item.position for item in section_manifest}
+    positions = {item.section_id: item.position for item in manifest}
     fallback_position = len(positions) + 1
     return sorted(
         sections,
@@ -183,7 +188,7 @@ def _replace_or_append_manifest_item(
     title: str,
     position: int,
 ) -> PipelineDocument:
-    manifest = list(document.section_manifest)
+    manifest = _normalize_manifest_items(document.section_manifest)
     next_item = PipelineSectionManifestItem(
         section_id=section_id,
         title=title,
@@ -217,10 +222,113 @@ def _replace_or_append_section(document: PipelineDocument, section) -> PipelineD
     return document.model_copy(
         update={
             "sections": _sort_sections_by_manifest(sections, document.section_manifest),
+            "failed_sections": [
+                failed
+                for failed in document.failed_sections
+                if failed.section_id != section.section_id
+            ],
             "updated_at": datetime.now(timezone.utc),
             "status": "running",
         }
     )
+
+
+def _normalize_manifest_items(section_manifest: list) -> list[PipelineSectionManifestItem]:
+    return [
+        item
+        if isinstance(item, PipelineSectionManifestItem)
+        else PipelineSectionManifestItem.model_validate(item)
+        for item in section_manifest
+    ]
+
+
+def _seed_section_plans(document: PipelineDocument) -> list:
+    manifest = _normalize_manifest_items(document.section_manifest)
+    if not manifest and document.sections:
+        manifest = [
+            PipelineSectionManifestItem(
+                section_id=section.section_id,
+                title=section.header.title,
+                position=index + 1,
+            )
+            for index, section in enumerate(document.sections)
+        ]
+
+    sections_by_id = {section.section_id: section for section in document.sections}
+    failed_by_id = {}
+    for failed in document.failed_sections:
+        if isinstance(failed, dict):
+            failed_by_id[failed["section_id"]] = failed
+        else:
+            failed_by_id[failed.section_id] = failed
+    plans = []
+    for index, item in enumerate(sorted(manifest, key=lambda entry: (entry.position, entry.section_id))):
+        section = sections_by_id.get(item.section_id)
+        failed = failed_by_id.get(item.section_id)
+        previous_title = manifest[index - 1].title if index > 0 else None
+        next_title = manifest[index + 1].title if index + 1 < len(manifest) else None
+        if section is not None:
+            focus = section.header.objective or section.hook.headline or section.explanation.body
+            needs_diagram = section.diagram is not None
+            needs_worked_example = section.worked_example is not None or bool(section.worked_examples)
+        else:
+            focus = (
+                failed.get("focus")
+                if isinstance(failed, dict)
+                else failed.focus if failed is not None else None
+            ) or item.title
+            needs_diagram = (
+                failed.get("needs_diagram", False)
+                if isinstance(failed, dict)
+                else failed.needs_diagram if failed is not None else False
+            )
+            needs_worked_example = (
+                failed.get("needs_worked_example", False)
+                if isinstance(failed, dict)
+                else failed.needs_worked_example if failed is not None else False
+            )
+
+        plans.append(
+            {
+                "section_id": item.section_id,
+                "title": item.title,
+                "position": item.position,
+                "focus": focus[:220] if isinstance(focus, str) else focus,
+                "bridges_from": (
+                    failed.get("bridges_from")
+                    if isinstance(failed, dict)
+                    else failed.bridges_from if failed is not None else None
+                )
+                or previous_title,
+                "bridges_to": (
+                    failed.get("bridges_to")
+                    if isinstance(failed, dict)
+                    else failed.bridges_to if failed is not None else None
+                )
+                or next_title,
+                "needs_diagram": needs_diagram,
+                "needs_worked_example": needs_worked_example,
+            }
+        )
+    return plans
+
+
+def _target_section_ids_for_enhance(document: PipelineDocument) -> list[str]:
+    ready_ids = {section.section_id for section in document.sections}
+    failed_ids = [
+        section["section_id"] if isinstance(section, dict) else section.section_id
+        for section in document.failed_sections
+    ]
+    manifest_ids = [
+        item.section_id for item in _normalize_manifest_items(document.section_manifest)
+    ]
+    missing_ids = [section_id for section_id in manifest_ids if section_id not in ready_ids]
+    target_ids = list(dict.fromkeys([*failed_ids, *missing_ids]))
+    if target_ids:
+        return target_ids
+    if manifest_ids:
+        return manifest_ids
+    return [section.section_id for section in document.sections]
 
 
 async def _stream_user_from_token(
@@ -802,6 +910,8 @@ async def enhance_generation(
         generation,
         section_manifest=list(source_document.section_manifest),
         sections=list(source_document.sections),
+        failed_sections=list(source_document.failed_sections),
+        qc_reports=list(source_document.qc_reports),
         status_value="running",
     )
     document_path = await document_repo.save_document(initial_document)
@@ -818,10 +928,19 @@ async def enhance_generation(
         template_id=generation.requested_template_id,
         preset_id=generation.requested_preset_id,
         learner_fit="general",
-        section_count=max(len(source_document.sections), 1),
+        section_count=max(len(source_document.section_manifest), len(source_document.sections), 1),
         mode=req.mode.value,
         source_generation_id=generation_id,
-        seed_document=SeedDocument(sections=source_document.sections, note=req.note),
+        seed_document=SeedDocument(
+            sections=source_document.sections,
+            section_plans=_seed_section_plans(source_document),
+            qc_reports=[
+                report if isinstance(report, dict) else report.model_dump(mode="json")
+                for report in source_document.qc_reports
+            ],
+            note=req.note,
+        ),
+        target_section_ids=_target_section_ids_for_enhance(source_document),
     )
 
     asyncio.create_task(

@@ -21,6 +21,8 @@ class GenerationMode(str, Enum):
 
 class SeedDocument(BaseModel):
     sections: list[SectionContent] = Field(default_factory=list)
+    section_plans: list["SectionPlan"] = Field(default_factory=list)
+    qc_reports: list[dict] = Field(default_factory=list)
     note: str = ""
 
 
@@ -36,6 +38,7 @@ class PipelineRequest(BaseModel):
     generation_id: str | None = None
     source_generation_id: str | None = None
     seed_document: SeedDocument | None = None
+    target_section_ids: list[str] | None = None
 
     @property
     def topic(self) -> str:

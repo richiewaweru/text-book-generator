@@ -87,10 +87,22 @@ def build_diagram_user_prompt(
     hook_body: str,
     explanation_excerpt: str,
     diagram_slot: str,
+    diagram_type: str | None = None,
+    key_concepts: list[str] | None = None,
+    visual_guidance: str | None = None,
 ) -> str:
+    details = ""
+    if diagram_type:
+        details += f"\nPreferred diagram type: {diagram_type}"
+    if key_concepts:
+        details += f"\nKey concepts to visualize: {', '.join(key_concepts)}"
+    if visual_guidance:
+        details += f"\nVisual guidance: {visual_guidance}"
+
     return f"""Section: {section_title}
 Concept summary: {hook_body}
 Explanation (first 200 words): {explanation_excerpt[:800]}
 Diagram slot: {diagram_slot}
+{details}
 
 Generate a diagram that makes the core concept visually clear."""

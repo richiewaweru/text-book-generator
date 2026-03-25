@@ -4,13 +4,13 @@ pipeline.state
 The single state object that flows through the LangGraph pipeline.
 
 Field ownership rules (enforced by convention):
-    curriculum_planner    → curriculum_outline, style_context
-    content_generator     → generated_sections
-    diagram_generator     → generated_sections[id].diagram
-    interaction_decider   → interaction_specs
-    interaction_generator → generated_sections[id].simulation
-    section_assembler     → assembled_sections, qc_reports (capacity warnings)
-    qc_agent              → qc_reports (semantic issues)
+    curriculum_planner    -> curriculum_outline, style_context
+    content_generator     -> generated_sections, failed_sections, node_failures
+    composition_planner   -> composition_plans
+    diagram_generator     -> generated_sections[id].diagram, diagram_outcomes
+    interaction_generator -> generated_sections[id].simulation, interaction_specs
+    section_assembler     -> assembled_sections, qc_reports (capacity warnings)
+    qc_agent              -> qc_reports (semantic issues), rerender_requests
 
 Annotated[list, operator.add] = append-only (LangGraph reducer).
 Plain fields = last-write-wins.
@@ -24,6 +24,7 @@ from typing import Annotated, Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from pipeline.types.composition import CompositionPlan
 from pipeline.types.section_content import InteractionSpec, SectionContent
 from pipeline.types.template_contract import TemplateContractSummary
 from pipeline.types.requests import PipelineRequest, SectionPlan
@@ -31,6 +32,7 @@ from pipeline.types.requests import PipelineRequest, SectionPlan
 
 def _merge_dicts(left: dict, right: dict) -> dict:
     """LangGraph reducer: merge dicts from concurrent fan-out writes."""
+
     return {**left, **right}
 
 
@@ -69,8 +71,6 @@ def merge_state_updates(state: dict[str, Any], output: dict[str, Any]) -> None:
             state[key] = value
 
 
-# ── PIPELINE STATUS ──────────────────────────────────────────────────────────
-
 class PipelineStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -78,31 +78,25 @@ class PipelineStatus(str, Enum):
     ERROR = "error"
 
 
-# ── STYLE CONTEXT ────────────────────────────────────────────────────────────
-
 class StyleContext(BaseModel):
     preset_id: str
     palette: str
     surface_style: str
     density: str
     typography: str
-
     template_id: str
     template_family: str
     interaction_level: str
-
     grade_band: str
     learner_fit: str
 
     def diagram_complexity(self) -> str:
-        if self.grade_band == 'primary' or self.learner_fit == 'scaffolded':
-            return 'simplified'
-        if self.grade_band == 'advanced' or self.learner_fit == 'advanced':
-            return 'detailed'
-        return 'standard'
+        if self.grade_band == "primary" or self.learner_fit == "scaffolded":
+            return "simplified"
+        if self.grade_band == "advanced" or self.learner_fit == "advanced":
+            return "detailed"
+        return "standard"
 
-
-# ── ERROR AND RETRY TYPES ────────────────────────────────────────────────────
 
 class PipelineError(BaseModel):
     node: str
@@ -125,24 +119,48 @@ class QCReport(BaseModel):
     warnings: list[str]
 
 
-# ── PIPELINE STATE ───────────────────────────────────────────────────────────
+class NodeFailureDetail(BaseModel):
+    node: str
+    section_id: str
+    timestamp: str
+    error_type: str
+    error_message: str
+    retry_attempt: int = 0
+    will_retry: bool = False
+
+
+class FailedSectionRecord(BaseModel):
+    section_id: str
+    title: str
+    position: int
+    focus: str | None = None
+    bridges_from: str | None = None
+    bridges_to: str | None = None
+    needs_diagram: bool = False
+    needs_worked_example: bool = False
+    failed_at_node: str
+    error_type: str
+    error_summary: str
+    attempt_count: int = 0
+    can_retry: bool = False
+    missing_components: list[str] = Field(default_factory=list)
+    failure_detail: NodeFailureDetail
+
 
 class TextbookPipelineState(BaseModel):
-
-    # ── INPUT — set once at pipeline start ───────────────────────────────────
     request: PipelineRequest
     contract: TemplateContractSummary
 
-    # ── SET BY curriculum_planner ────────────────────────────────────────────
     curriculum_outline: Optional[list[SectionPlan]] = None
     style_context: Optional[StyleContext] = None
 
-    # ── PER-SECTION WORKING STATE ────────────────────────────────────────────
     current_section_id: Optional[str] = None
     current_section_plan: Optional[SectionPlan] = None
 
-    # ── NODE OUTPUTS ─────────────────────────────────────────────────────────
     generated_sections: Annotated[dict[str, SectionContent], _merge_dicts] = Field(
+        default_factory=dict
+    )
+    composition_plans: Annotated[dict[str, CompositionPlan], _merge_dicts] = Field(
         default_factory=dict
     )
     interaction_specs: Annotated[dict[str, InteractionSpec], _merge_dicts] = Field(
@@ -155,24 +173,37 @@ class TextbookPipelineState(BaseModel):
         default_factory=dict
     )
 
-    # ── QC RETRY ─────────────────────────────────────────────────────────────
-    rerender_requests: Annotated[dict[str, RerenderRequest], _merge_rerender_requests] = Field(
+    rerender_requests: Annotated[
+        dict[str, RerenderRequest],
+        _merge_rerender_requests,
+    ] = Field(default_factory=dict)
+    rerender_count: Annotated[dict[str, int], _merge_dicts] = Field(default_factory=dict)
+    diagram_retry_count: Annotated[dict[str, int], _merge_dicts] = Field(
         default_factory=dict
     )
-    rerender_count: Annotated[dict[str, int], _merge_dicts] = Field(default_factory=dict)
+    interaction_retry_count: Annotated[dict[str, int], _merge_dicts] = Field(
+        default_factory=dict
+    )
     max_rerenders: int = 2
 
-    # ── TRACKING ─────────────────────────────────────────────────────────────
     completed_nodes: Annotated[list[str], operator.add] = Field(default_factory=list)
     errors: Annotated[list[PipelineError], operator.add] = Field(default_factory=list)
+    node_failures: Annotated[list[NodeFailureDetail], operator.add] = Field(
+        default_factory=list
+    )
+    failed_sections: Annotated[dict[str, FailedSectionRecord], _merge_dicts] = Field(
+        default_factory=dict
+    )
+    diagram_outcomes: Annotated[dict[str, str], _merge_dicts] = Field(
+        default_factory=dict
+    )
 
     status: PipelineStatus = PipelineStatus.PENDING
-
-    # ── HELPERS ──────────────────────────────────────────────────────────────
 
     @classmethod
     def parse(cls, raw: "TextbookPipelineState | dict") -> "TextbookPipelineState":
         """Convert LangGraph's dict state into a typed model instance."""
+
         if isinstance(raw, cls):
             return raw
         return cls.model_validate(raw)

@@ -126,6 +126,34 @@ export interface PipelineSectionManifestItem {
 	position: number;
 }
 
+export interface NodeFailureDetail {
+	node: string;
+	section_id: string;
+	timestamp: string;
+	error_type: string;
+	error_message: string;
+	retry_attempt: number;
+	will_retry: boolean;
+}
+
+export interface FailedSectionEntry {
+	section_id: string;
+	title: string;
+	position: number;
+	focus?: string | null;
+	bridges_from?: string | null;
+	bridges_to?: string | null;
+	needs_diagram: boolean;
+	needs_worked_example: boolean;
+	failed_at_node: string;
+	error_type: string;
+	error_summary: string;
+	attempt_count: number;
+	can_retry: boolean;
+	missing_components: string[];
+	failure_detail?: NodeFailureDetail | null;
+}
+
 export interface GenerationIssue {
 	block: string;
 	severity: 'blocking' | 'warning';
@@ -150,6 +178,7 @@ export interface GenerationDocument {
 	status: 'pending' | 'running' | 'completed' | 'failed';
 	section_manifest: PipelineSectionManifestItem[];
 	sections: SectionContent[];
+	failed_sections: FailedSectionEntry[];
 	qc_reports: GenerationSectionReport[];
 	quality_passed: boolean | null;
 	error: string | null;
@@ -185,6 +214,27 @@ export interface SectionReadyEvent {
 	total_sections: number;
 }
 
+export interface SectionFailedEvent {
+	type: 'section_failed';
+	generation_id: string;
+	section_id: string;
+	title: string;
+	position: number;
+	failed_at_node: string;
+	error_type: string;
+	error_summary: string;
+	focus?: string | null;
+	bridges_from?: string | null;
+	bridges_to?: string | null;
+	needs_diagram: boolean;
+	needs_worked_example: boolean;
+	attempt_count: number;
+	can_retry: boolean;
+	missing_components: string[];
+	failure_detail?: NodeFailureDetail | null;
+	timestamp: string;
+}
+
 export interface QCCompleteEvent {
 	type: 'qc_complete';
 	generation_id: string;
@@ -210,6 +260,7 @@ export type GenerationStreamEvent =
 	| PipelineStartEvent
 	| SectionStartedEvent
 	| SectionReadyEvent
+	| SectionFailedEvent
 	| QCCompleteEvent
 	| CompleteEvent
 	| ErrorEvent;

@@ -221,6 +221,14 @@ class GenerationReportRecorder:
             self._handle_section_report_updated(payload)
         elif event_type == "section_retry_queued":
             self._handle_section_retry_queued(payload)
+        elif event_type == "section_failed":
+            self._handle_section_failed(payload)
+        elif event_type == "validation_repair_attempted":
+            self._handle_validation_repair_attempted(payload)
+        elif event_type == "validation_repair_succeeded":
+            self._handle_validation_repair_succeeded(payload)
+        elif event_type == "diagram_outcome":
+            self._handle_diagram_outcome(payload)
         elif event_type == "section_ready":
             self._handle_section_ready(payload)
         elif event_type == "complete":
@@ -271,6 +279,7 @@ class GenerationReportRecorder:
             "updated_at",
             "queued_at",
             "completed_at",
+            "timestamp",
         ):
             if key in payload:
                 parsed = _as_utc(payload[key])
@@ -464,11 +473,34 @@ class GenerationReportRecorder:
             )
         )
 
+    def _handle_section_failed(self, payload: dict[str, Any]) -> None:
+        section = self._ensure_section(payload["section_id"])
+        section.title = payload.get("title", section.title)
+        section.position = payload.get("position", section.position)
+        section.status = "failed"
+        section.final_error = payload.get("error_summary", section.final_error)
+        section.missing_components = list(payload.get("missing_components", section.missing_components))
+        section.failure_detail = payload.get("failure_detail")
+        section.attempt_count = max(section.attempt_count, payload.get("attempt_count", 0))
+
+    def _handle_validation_repair_attempted(self, payload: dict[str, Any]) -> None:
+        section = self._ensure_section(payload["section_id"])
+        section.validation_repair_attempts += 1
+
+    def _handle_validation_repair_succeeded(self, payload: dict[str, Any]) -> None:
+        section = self._ensure_section(payload["section_id"])
+        section.validation_repair_successes += 1
+
+    def _handle_diagram_outcome(self, payload: dict[str, Any]) -> None:
+        section = self._ensure_section(payload["section_id"])
+        section.diagram_outcome = payload.get("outcome")
+
     def _handle_section_ready(self, payload: dict[str, Any]) -> None:
         section = self._ensure_section(payload["section_id"])
         section.status = "ready"
         section.completed_at = _utc_now()
         section.final_error = None
+        section.failure_detail = None
         delivered = self._delivered_components(payload.get("section", {}))
         section.delivered_components = delivered
         section.missing_components = [
@@ -521,6 +553,20 @@ class GenerationReportRecorder:
                 component for component in section.expected_components if component not in delivered
             ]
             section.final_error = None
+
+        for failed_section in document.failed_sections:
+            payload = (
+                failed_section
+                if isinstance(failed_section, dict)
+                else failed_section.model_dump(exclude_none=True)
+            )
+            section = self._ensure_section(payload["section_id"])
+            section.title = payload.get("title", section.title)
+            section.position = payload.get("position", section.position)
+            section.status = "failed"
+            section.final_error = payload.get("error_summary", section.final_error)
+            section.failure_detail = payload.get("failure_detail")
+            section.missing_components = list(payload.get("missing_components", section.missing_components))
 
     def _apply_success_state(
         self,
@@ -602,6 +648,13 @@ class GenerationReportRecorder:
             1 for section in self._sections.values() if section.status == "stalled"
         )
         summary.retry_count = sum(len(section.queued_retries) for section in self._sections.values())
+        summary.validation_repair_attempts = sum(
+            section.validation_repair_attempts for section in self._sections.values()
+        )
+        summary.validation_repair_successes = sum(
+            section.validation_repair_successes for section in self._sections.values()
+        )
+        summary.qc_rerenders = summary.retry_count
         summary.warning_count = sum(len(section.warnings) for section in self._sections.values())
         summary.blocking_issue_count = sum(
             1
@@ -615,11 +668,34 @@ class GenerationReportRecorder:
             for node in list(self._generation_nodes.values()) + list(self._section_nodes.values())
             for llm_call in node.llm_calls
         ]
+        summary.llm_transport_retries = sum(
+            1 for call in llm_calls if call.status == "failed" and call.retryable
+        )
         summary.total_llm_calls = len(llm_calls)
         summary.total_tokens_in = sum(call.tokens_in or 0 for call in llm_calls)
         summary.total_tokens_out = sum(call.tokens_out or 0 for call in llm_calls)
         known_costs = [call.cost_usd for call in llm_calls if call.cost_usd is not None]
         summary.total_cost_usd = sum(known_costs) if known_costs else None
+
+        diagram_nodes_by_section: dict[str, list[GenerationReportNode]] = {}
+        for (section_id, node_name, _attempt), node in self._section_nodes.items():
+            if node_name != "diagram_generator":
+                continue
+            diagram_nodes_by_section.setdefault(section_id, []).append(node)
+        summary.diagram_retries = sum(
+            max(len(nodes) - 1, 0) for nodes in diagram_nodes_by_section.values()
+        )
+        summary.diagram_timeout_count = sum(
+            1
+            for nodes in diagram_nodes_by_section.values()
+            for node in nodes
+            if node.error and "timed out" in node.error.lower()
+        )
+        summary.diagram_skip_count = sum(
+            1
+            for section in self._sections.values()
+            if section.diagram_outcome == "skipped"
+        )
 
         all_nodes = list(self._generation_nodes.values()) + list(self._section_nodes.values())
         slowest_node = max(
@@ -741,10 +817,19 @@ class GenerationReportRecorder:
                 payload.get("next_attempt"),
                 payload.get("reason"),
             )
+        elif payload.get("type") == "section_failed":
+            logger.warning(
+                "Generation report generation=%s section_failed section=%s node=%s error_type=%s error=%s",
+                self._report.generation_id,
+                payload.get("section_id"),
+                payload.get("failed_at_node"),
+                payload.get("error_type"),
+                payload.get("error_summary"),
+            )
 
     def _log_final_summary(self) -> None:
         logger.info(
-            "Generation report summary generation=%s status=%s outcome=%s planned=%s ready=%s missing=%s failed=%s stalled=%s retries=%s warnings=%s blocking_issues=%s tokens_in=%s tokens_out=%s cost_usd=%s slowest_node=%s slowest_section=%s",
+            "Generation report summary generation=%s status=%s outcome=%s planned=%s ready=%s missing=%s failed=%s stalled=%s retries=%s llm_transport_retries=%s validation_repairs=%s validation_repair_successes=%s diagram_retries=%s diagram_timeouts=%s diagram_skips=%s warnings=%s blocking_issues=%s tokens_in=%s tokens_out=%s cost_usd=%s slowest_node=%s slowest_section=%s",
             self._report.generation_id,
             self._report.status,
             self._report.outcome or "-",
@@ -754,6 +839,12 @@ class GenerationReportRecorder:
             self._report.summary.failed_sections,
             self._report.summary.stalled_sections,
             self._report.summary.retry_count,
+            self._report.summary.llm_transport_retries,
+            self._report.summary.validation_repair_attempts,
+            self._report.summary.validation_repair_successes,
+            self._report.summary.diagram_retries,
+            self._report.summary.diagram_timeout_count,
+            self._report.summary.diagram_skip_count,
             self._report.summary.warning_count,
             self._report.summary.blocking_issue_count,
             self._report.summary.total_tokens_in,
