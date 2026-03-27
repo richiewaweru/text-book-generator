@@ -81,9 +81,9 @@ function buildSpec(): PlanningGenerationSpec {
 
 function buildContract(): StudioTemplateContract {
 	return {
-		id: 'process-trainer',
-		name: 'Process Trainer',
-		family: 'process-procedure',
+		id: 'procedure',
+		name: 'Procedure',
+		family: 'procedure',
 		intent: 'teach-procedure',
 		tagline: 'Turn a repeatable procedure into a clear sequence.',
 		reading_style: 'process-led',
@@ -133,8 +133,8 @@ describe('template swap', () => {
 
 		const swapped = swapTemplateInSpec(buildSpec(), buildContract());
 
-		expect(swapped.template_id).toBe('process-trainer');
-		expect(swapped.template_decision.chosen_name).toBe('Process Trainer');
+		expect(swapped.template_id).toBe('procedure');
+		expect(swapped.template_decision.chosen_name).toBe('Procedure');
 		expect(swapped.sections[0].selected_components).toEqual(['process-steps']);
 		expect(swapped.sections[0].visual_policy).toBeNull();
 	});

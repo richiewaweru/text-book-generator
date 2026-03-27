@@ -159,6 +159,16 @@ class PlanningTemplateContract(BaseModel):
     why_this_template_exists: str = ""
     generation_guidance: dict[str, str | list[str]] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _hydrate_legacy_fields(self) -> "PlanningTemplateContract":
+        if not self.always_present and self.required_components:
+            self.always_present = list(dict.fromkeys(self.required_components))
+        if not self.available_components:
+            self.available_components = list(
+                dict.fromkeys([*self.required_components, *self.optional_components])
+            )
+        return self
+
 
 class TemplateAlternative(BaseModel):
     template_id: str

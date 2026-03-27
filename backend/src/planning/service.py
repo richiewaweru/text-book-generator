@@ -31,6 +31,7 @@ class PlanningService:
         run_llm_fn: Callable[..., Awaitable[Any]],
         generation_id: str = "",
         emit: PlanningEmitter | None = None,
+        llm_generation_mode: Any = "draft",
     ) -> PlanningGenerationSpec:
         normalized = normalize_brief(brief)
         selected_contract, decision = choose_template(normalized, contracts)
@@ -74,6 +75,7 @@ class PlanningService:
             model=model,
             run_llm_fn=run_llm_fn,
             generation_id=generation_id,
+            generation_mode=llm_generation_mode,
         )
         if refined is not None:
             for section, refined_section in zip(sections, refined.sections, strict=True):

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 
 from pipeline.contracts import get_contract, list_template_ids, validate_preset_for_template
@@ -44,6 +45,7 @@ from textbook_agent.interface.api.routes.generation import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["brief"])
+logger = logging.getLogger(__name__)
 
 
 def _legacy_live_safe_templates() -> list[TemplateSummary]:
@@ -87,9 +89,19 @@ async def _load_profile(
 @router.post("/brief", response_model=GenerationSpec)
 async def create_brief(
     brief: BriefRequest,
+    response: Response,
     current_user: User = Depends(get_current_user),
     profile_repo: StudentProfileRepository = Depends(get_student_profile_repository),
 ) -> GenerationSpec:
+    logger.warning(
+        "Deprecated POST /api/v1/brief used by user_id=%s; prefer /api/v1/brief/stream + /api/v1/brief/commit",
+        current_user.id,
+    )
+    response.headers["Deprecation"] = "true"
+    response.headers["Warning"] = (
+        '299 - "Deprecated endpoint; use /api/v1/brief/stream and /api/v1/brief/commit."'
+    )
+
     profile = await _load_profile(current_user, profile_repo)
     templates = _legacy_live_safe_templates()
     if not templates:
@@ -146,6 +158,7 @@ async def stream_brief(
                     model=model,
                     run_llm_fn=run_llm,
                     emit=emit,
+                    llm_generation_mode=PipelineGenerationMode.DRAFT,
                 )
                 await queue.put(
                     {

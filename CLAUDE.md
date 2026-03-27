@@ -16,8 +16,11 @@
 
 ## Key Runtime Contracts
 - The shell owns auth, profiles, persistence, HTTP routes, and SSE transport.
+- The shell-owned planning layer lives in `backend/src/planning/` and feeds Teacher Studio.
 - The pipeline owns prompts, contract loading, providers, graph orchestration, QC, and Lectio document assembly.
 - The canonical saved artifact is a JSON `PipelineDocument`.
+- `/studio` is the canonical teacher lesson-creation route.
+- `GET /api/v1/contracts`, `POST /api/v1/brief/stream`, and `POST /api/v1/brief/commit` are the live planning endpoints.
 - Public textbook viewing is generation-centric: `/textbook/[id]` maps to a generation ID, hydrates from `/document`, and streams updates from `/events`.
 - The pipeline must never import `textbook_agent`.
 
@@ -33,3 +36,7 @@
 - `docs/project/SETUP.md`
 - `docs/project/DEVELOPMENT_WORKFLOW.md`
 - `docs/project/SCHEMAS.md`
+
+## Contract Sync
+- Export the live Lectio contract catalog from `C:\Projects\lectio` into `backend/contracts/` with `npm run export-contracts`.
+- The Textbook repo should treat the exported Lectio JSON as the planning/template source of truth.

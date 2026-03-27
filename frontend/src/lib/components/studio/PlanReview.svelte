@@ -1,7 +1,12 @@
 <script lang="ts">
-	import { get } from 'svelte/store';
-
 	import { contracts, editedSpec, planDraft, planningMs, updateSection } from '$lib/stores/studio';
+	import {
+		componentLabel,
+		isHeavyComponent,
+		roleLabel,
+		roleTone,
+		visualPolicyLabel
+	} from '$lib/studio/presentation';
 	import type { StudioTemplateContract } from '$lib/types';
 
 	interface Props {
@@ -10,9 +15,86 @@
 		onCommit: () => void;
 		onTemplateSwap: (contract: StudioTemplateContract) => void;
 		errorMessage?: string | null;
+		catalogError?: string | null;
 	}
 
-	let { busy = false, onBack, onCommit, onTemplateSwap, errorMessage = null }: Props = $props();
+	type ReviewTemplateCard = {
+		contract: StudioTemplateContract;
+		fitScore: number | null;
+		selected: boolean;
+		reason: string;
+		label: string;
+	};
+
+	let {
+		busy = false,
+		onBack,
+		onCommit,
+		onTemplateSwap,
+		errorMessage = null,
+		catalogError = null
+	}: Props = $props();
+
+	let expandedSections = $state<Record<string, boolean>>({});
+
+	const templateCards = $derived.by(() => {
+		if (!$editedSpec) {
+			return [] as ReviewTemplateCard[];
+		}
+
+		const contractsById = new Map($contracts.map((contract) => [contract.id, contract]));
+		const cards: ReviewTemplateCard[] = [];
+		const selectedId = $editedSpec.template_id;
+		const seen = new Set<string>();
+
+		function pushCard(
+			templateId: string,
+			fitScore: number | null,
+			reason: string,
+			label: string
+		): void {
+			if (seen.has(templateId)) {
+				return;
+			}
+			const contract = contractsById.get(templateId);
+			if (!contract) {
+				return;
+			}
+			seen.add(templateId);
+			cards.push({
+				contract,
+				fitScore,
+				selected: templateId === selectedId,
+				reason,
+				label
+			});
+		}
+
+		pushCard(
+			selectedId,
+			$editedSpec.template_decision.chosen_id === selectedId
+				? $editedSpec.template_decision.fit_score
+				: null,
+			$editedSpec.template_decision.rationale,
+			selectedId === $planDraft.template_decision?.chosen_id ? 'Best fit' : 'Current selection'
+		);
+
+		$editedSpec.template_decision.alternatives.forEach((alternative, index) => {
+			pushCard(
+				alternative.template_id,
+				alternative.fit_score,
+				alternative.why_not_chosen,
+				`Alternative ${index + 1}`
+			);
+		});
+
+		return cards;
+	});
+
+	const templateChanged = $derived(
+		Boolean($planDraft.template_decision) &&
+			$editedSpec?.template_id !== $planDraft.template_decision?.chosen_id
+	);
 
 	function handleTitleInput(sectionId: string, title: string) {
 		updateSection(sectionId, (section) => ({
@@ -24,39 +106,51 @@
 	function handleFocusInput(sectionId: string, focusNote: string) {
 		updateSection(sectionId, (section) => ({
 			...section,
-			focus_note: focusNote || null
+			focus_note: focusNote.trim() ? focusNote : null
 		}));
 	}
 
-	function formatElapsed(ms: number): string {
-		if (!ms) return 'Just now';
-		return `${(ms / 1000).toFixed(1)}s`;
+	function toggleSection(sectionId: string) {
+		expandedSections = {
+			...expandedSections,
+			[sectionId]: !expandedSections[sectionId]
+		};
 	}
 
-	function selectedTemplateId(): string {
-		return get(editedSpec)?.template_id ?? '';
+	function handleTemplateSelect(contract: StudioTemplateContract) {
+		if (busy || !$editedSpec || contract.id === $editedSpec.template_id) {
+			return;
+		}
+		onTemplateSwap(contract);
+	}
+
+	function formatElapsed(ms: number): string {
+		if (!ms) {
+			return 'Just now';
+		}
+		return `${(ms / 1000).toFixed(1)}s`;
 	}
 </script>
 
 {#if $editedSpec}
 	<section class="review-shell">
-		<div class="review-header">
+		<header class="review-header">
 			<div>
 				<p class="eyebrow">Review</p>
 				<h2>Approve the plan before generation</h2>
 				<p class="lede">
-					Check the template choice, edit the section language, then commit the exact plan that
-					should drive generation.
+					This is the only hard gate in the studio. Check the structure, refine the wording, and
+					commit the exact plan you want the generator to follow.
 				</p>
 			</div>
 			<div class="review-meta">
 				<span class="meta-pill">{$editedSpec.sections.length} sections</span>
 				<span class="meta-pill">Planned in {formatElapsed($planningMs)}</span>
 			</div>
-		</div>
+		</header>
 
 		{#if errorMessage}
-			<p class="notice notice-error">{errorMessage}</p>
+			<p class="notice notice-error" role="alert">{errorMessage}</p>
 		{/if}
 
 		{#if $planDraft.error}
@@ -68,104 +162,140 @@
 		{/if}
 
 		<section class="summary-panel">
-			<div>
-				<p class="label">Chosen template</p>
-				<h3>{$editedSpec.template_decision.chosen_name}</h3>
+			<div class="summary-topline">
+				<div>
+					<p class="label">Template decision</p>
+					<h3>{$editedSpec.template_decision.chosen_name}</h3>
+				</div>
+				<span class="score-pill">Fit {$editedSpec.template_decision.fit_score.toFixed(2)}</span>
+			</div>
+			<div class="rationale-box">
 				<p>{$editedSpec.lesson_rationale}</p>
 			</div>
-			<div class="summary-side">
-				<span class="score-pill">
-					Fit {$editedSpec.template_decision.fit_score.toFixed(2)}
-				</span>
-				<p class="small-copy">{$editedSpec.template_decision.rationale}</p>
-			</div>
+			<p class="small-copy">{$editedSpec.template_decision.rationale}</p>
+			{#if templateChanged}
+				<p class="template-updated">Template updated during review. Section defaults were re-derived locally.</p>
+			{/if}
 		</section>
 
 		<section class="template-panel">
-			<div class="template-panel-header">
+			<div class="panel-header">
 				<div>
-					<p class="label">Swap template</p>
-					<h3>Try another Lectio shape</h3>
+					<p class="label">Ranked alternatives</p>
+					<h3>Try another safe Lectio shape</h3>
 				</div>
-				<p class="small-copy">This stays client-side until you commit.</p>
+				<p class="small-copy">Swapping stays client-side until you commit.</p>
 			</div>
 
-			<div class="template-grid">
-				{#each $contracts as contract}
-					<button
-						type="button"
-						class:template-selected={selectedTemplateId() === contract.id}
-						class="template-option"
-						onclick={() => onTemplateSwap(contract)}
-						disabled={busy}
-					>
-						<div class="template-option-topline">
-							<strong>{contract.name}</strong>
-							<span>{contract.family}</span>
-						</div>
-						<p>{contract.tagline}</p>
-					</button>
-				{/each}
-			</div>
+			{#if catalogError}
+				<p class="notice notice-error">{catalogError}</p>
+			{:else if templateCards.length}
+				<div class="template-grid">
+					{#each templateCards as card}
+						<button
+							type="button"
+							class:selected-template={card.selected}
+							class="template-card"
+							onclick={() => handleTemplateSelect(card.contract)}
+							disabled={busy}
+						>
+							<div class="template-card-topline">
+								<div>
+									<p class="template-label">{card.label}</p>
+									<strong>{card.contract.name}</strong>
+								</div>
+								{#if card.fitScore !== null}
+									<span class="fit-chip">{card.fitScore.toFixed(2)}</span>
+								{/if}
+							</div>
+							<p>{card.contract.tagline}</p>
+							<small>{card.reason}</small>
+						</button>
+					{/each}
+				</div>
+			{:else}
+				<p class="small-copy">Template alternatives will appear here once the contract catalog is available.</p>
+			{/if}
 		</section>
 
 		<section class="section-panel">
-			<div class="template-panel-header">
+			<div class="panel-header">
 				<div>
-					<p class="label">Section plan</p>
-					<h3>Edit the wording</h3>
+					<p class="label">Sections</p>
+					<h3>Edit titles and focus notes</h3>
 				</div>
-				<p class="small-copy">Titles and focus notes are editable before commit.</p>
+				<p class="small-copy">Roles and components stay read-only in phase 1.</p>
 			</div>
 
 			<div class="section-list">
 				{#each $editedSpec.sections as section}
 					<article class="section-card">
-						<div class="section-card-topline">
-							<div class="section-heading">
-								<span class="order-pill">0{section.order}</span>
-								<span class="role-pill">{section.role}</span>
+						<div class="section-header">
+							<div class="section-title-wrap">
+								<span class="order-pill">{String(section.order).padStart(2, '0')}</span>
+								<input
+									class="section-title-input"
+									type="text"
+									value={section.title}
+									aria-label={`Section ${section.order} title`}
+									oninput={(event) =>
+										handleTitleInput(section.id, (event.currentTarget as HTMLInputElement).value)}
+									disabled={busy}
+								/>
 							</div>
-							<div class="component-list">
-								{#each section.selected_components as component}
-									<span>{component}</span>
-								{/each}
+							<div class="section-tags">
+								<span class={`role-pill role-${roleTone(section.role)}`}>{roleLabel(section.role)}</span>
+								{#if visualPolicyLabel(section.visual_policy)}
+									<span class="visual-pill">{visualPolicyLabel(section.visual_policy)}</span>
+								{/if}
+								<button class="toggle-pill" type="button" onclick={() => toggleSection(section.id)}>
+									{expandedSections[section.id] ? 'Hide details' : 'Details'}
+								</button>
 							</div>
 						</div>
 
-						<label class="field">
-							<span>Section title</span>
-							<input
-								type="text"
-								value={section.title}
-								oninput={(event) =>
-									handleTitleInput(section.id, (event.currentTarget as HTMLInputElement).value)}
-								disabled={busy}
-							/>
-						</label>
+						<div class="component-row">
+							{#each section.selected_components as component}
+								<span class:heavy-chip={isHeavyComponent(component)} class="component-chip">
+									{componentLabel(component)}
+								</span>
+							{/each}
+						</div>
 
-						<label class="field">
-							<span>Focus note</span>
-							<textarea
-								rows="3"
-								value={section.focus_note ?? section.objective ?? ''}
-								oninput={(event) =>
-									handleFocusInput(section.id, (event.currentTarget as HTMLTextAreaElement).value)}
-								disabled={busy}
-							></textarea>
-						</label>
+						{#if expandedSections[section.id]}
+							<div class="section-detail">
+								{#if section.objective || section.rationale}
+									<p class="section-copy">{section.objective || section.rationale}</p>
+								{/if}
+								<label class="field">
+									<span>Focus note</span>
+									<textarea
+										rows="3"
+										value={section.focus_note ?? ''}
+										placeholder="Add a focus note for the generator (optional)"
+										aria-label={`Section ${section.order} focus note`}
+										oninput={(event) =>
+											handleFocusInput(section.id, (event.currentTarget as HTMLTextAreaElement).value)}
+										disabled={busy}
+									></textarea>
+								</label>
+							</div>
+						{/if}
 					</article>
 				{/each}
 			</div>
 		</section>
 
 		<div class="actions">
-			<button class="secondary-button" type="button" onclick={onBack} disabled={busy}>
-				Refine brief
-			</button>
-			<button class="primary-button" type="button" onclick={onCommit} disabled={busy}>
-				{busy ? 'Starting generation...' : 'Commit and generate'}
-			</button>
+			<div class="action-copy">Nothing generates until you explicitly approve this plan.</div>
+			<div class="action-buttons">
+				<button class="secondary-button" type="button" onclick={onBack} disabled={busy}>
+					&lt;- Edit intent
+				</button>
+				<button class="primary-button" type="button" onclick={onCommit} disabled={busy}>
+					{busy ? 'Starting generation...' : 'Generate lesson ->'}
+				</button>
+			</div>
 		</div>
 	</section>
 {/if}
@@ -178,9 +308,12 @@
 
 	.review-header,
 	.review-meta,
-	.summary-panel,
-	.template-panel-header,
-	.section-card-topline,
+	.summary-topline,
+	.panel-header,
+	.section-header,
+	.section-title-wrap,
+	.section-tags,
+	.action-buttons,
 	.actions {
 		display: flex;
 		justify-content: space-between;
@@ -189,18 +322,24 @@
 	}
 
 	.review-meta,
-	.section-heading,
-	.component-list {
-		display: flex;
-		flex-wrap: wrap;
+	.component-row,
+	.template-grid {
+		display: grid;
+	}
+
+	.review-meta {
+		grid-auto-flow: row;
 		gap: 0.5rem;
 	}
 
 	.eyebrow,
-	.label {
+	.label,
+	.template-label,
+	.field span {
 		margin: 0;
 		font-size: 0.76rem;
-		letter-spacing: 0.14em;
+		font-weight: 700;
+		letter-spacing: 0.12em;
 		text-transform: uppercase;
 		color: #6b7c88;
 	}
@@ -212,152 +351,245 @@
 	}
 
 	.lede,
-	.small-copy {
+	.small-copy,
+	.section-copy,
+	.action-copy {
 		color: #625a50;
 		line-height: 1.6;
 	}
 
 	.meta-pill,
 	.score-pill,
+	.fit-chip,
 	.order-pill,
 	.role-pill,
-	.component-list span {
+	.visual-pill,
+	.toggle-pill,
+	.component-chip {
 		display: inline-flex;
 		align-items: center;
 		border-radius: 999px;
-		padding: 0.35rem 0.7rem;
-		font-size: 0.78rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
+		padding: 0.3rem 0.68rem;
+		font-size: 0.76rem;
+		font-weight: 700;
 	}
 
 	.meta-pill,
 	.score-pill,
-	.order-pill,
-	.role-pill {
-		background: rgba(25, 45, 60, 0.08);
-		color: #24343f;
-	}
-
-	.component-list span {
-		background: rgba(29, 158, 117, 0.09);
-		color: #0b6a52;
-		font-size: 0.74rem;
-	}
-
-	.notice {
-		margin: 0;
-		border-radius: 1rem;
-		padding: 0.9rem 1rem;
-	}
-
-	.notice-error {
-		background: rgba(255, 242, 238, 0.94);
-		color: #7d3524;
-	}
-
-	.notice-warn {
-		background: rgba(255, 248, 225, 0.92);
-		color: #7f5d13;
+	.fit-chip,
+	.toggle-pill {
+		background: #f1ece4;
+		color: #4f5c65;
 	}
 
 	.summary-panel,
 	.template-panel,
-	.section-panel {
+	.section-panel,
+	.actions {
 		display: grid;
 		gap: 0.9rem;
 		border: 0.5px solid rgba(36, 52, 63, 0.12);
-		border-radius: 1.4rem;
-		background: rgba(255, 255, 255, 0.84);
-		padding: 1.15rem;
+		border-radius: 1.35rem;
+		background: #fffdf9;
+		padding: 1.1rem;
 	}
 
-	.summary-side {
+	.rationale-box {
+		border-radius: 1rem;
+		background: #e1f5ee;
+		padding: 0.9rem 1rem;
+		color: #085041;
+	}
+
+	.template-updated {
+		color: #0b6a52;
+		font-size: 0.88rem;
+		font-weight: 600;
+	}
+
+	.notice {
+		margin: 0;
+		border-radius: 0.95rem;
+		padding: 0.85rem 0.95rem;
+	}
+
+	.notice-error {
+		background: #fff2ee;
+		color: #7d3524;
+	}
+
+	.notice-warn {
+		background: #fff8e4;
+		color: #805d16;
+	}
+
+	.template-grid {
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 0.8rem;
+	}
+
+	.template-card,
+	.section-card {
 		display: grid;
-		justify-items: end;
-		gap: 0.55rem;
-		max-width: 24rem;
+		gap: 0.7rem;
+		border-radius: 1rem;
+		border: 0.5px solid rgba(36, 52, 63, 0.1);
+		background: #f8f4ec;
+		padding: 0.95rem;
+		text-align: left;
 	}
 
-	.template-grid,
+	.template-card {
+		cursor: pointer;
+	}
+
+	.template-card-topline {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.6rem;
+		align-items: start;
+	}
+
+	.template-card p,
+	.template-card small {
+		color: #625a50;
+		line-height: 1.55;
+	}
+
+	.selected-template {
+		border-color: rgba(29, 158, 117, 0.42);
+		background: #eef8f4;
+	}
+
 	.section-list {
 		display: grid;
 		gap: 0.8rem;
 	}
 
-	.template-grid {
-		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-	}
-
-	.template-option,
-	.section-card {
-		display: grid;
-		gap: 0.8rem;
-		border-radius: 1.1rem;
-		border: 0.5px solid rgba(36, 52, 63, 0.1);
-		background: linear-gradient(180deg, rgba(247, 245, 240, 0.92), rgba(255, 255, 255, 0.9));
-		padding: 0.95rem;
-		text-align: left;
-	}
-
-	.template-option {
-		cursor: pointer;
-	}
-
-	.template-option-topline {
-		display: flex;
-		justify-content: space-between;
-		gap: 0.5rem;
+	.section-header {
 		align-items: center;
 	}
 
-	.template-option-topline span {
-		color: #6b7c88;
-		font-size: 0.8rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
+	.section-title-wrap {
+		flex: 1;
+		align-items: center;
 	}
 
-	.template-option p {
-		color: #655c52;
-		line-height: 1.55;
+	.order-pill {
+		background: #f1ece4;
+		color: #4f5c65;
 	}
 
-	.template-selected {
-		border-color: rgba(29, 158, 117, 0.52);
-		background: linear-gradient(180deg, rgba(225, 245, 238, 0.88), rgba(255, 255, 255, 0.94));
-	}
-
-	.field {
-		display: grid;
-		gap: 0.45rem;
-	}
-
-	.field span {
-		font-size: 0.86rem;
-		font-weight: 600;
-		color: #24343f;
-	}
-
-	input,
+	.section-title-input,
 	textarea {
-		border: 0.5px solid rgba(36, 52, 63, 0.12);
+		width: 100%;
+		border: 0.5px solid rgba(36, 52, 63, 0.14);
 		border-radius: 0.9rem;
-		padding: 0.72rem 0.85rem;
-		font: inherit;
-		background: #f7f4ee;
+		padding: 0.72rem 0.82rem;
+		background: #fffdf9;
 		color: #1d1b17;
+		font: inherit;
 	}
 
 	textarea {
 		resize: vertical;
 	}
 
+	.section-title-input:focus,
+	textarea:focus {
+		outline: 2px solid rgba(29, 158, 117, 0.18);
+		outline-offset: 1px;
+		border-color: rgba(29, 158, 117, 0.42);
+	}
+
+	.section-tags,
+	.component-row {
+		flex-wrap: wrap;
+	}
+
+	.component-row {
+		display: flex;
+		gap: 0.45rem;
+	}
+
+	.component-chip {
+		background: #ffffff;
+		color: #4f5c65;
+		border: 0.5px solid rgba(36, 52, 63, 0.1);
+	}
+
+	.heavy-chip {
+		background: #fff2d8;
+		color: #6a3a04;
+		border-color: rgba(186, 117, 23, 0.28);
+	}
+
+	.role-pill {
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+
+	.role-intro {
+		background: #e6f1fb;
+		color: #185fa5;
+	}
+
+	.role-explain {
+		background: #eeedfe;
+		color: #3c3489;
+	}
+
+	.role-practice {
+		background: #faeeda;
+		color: #633806;
+	}
+
+	.role-summary {
+		background: #eaf3de;
+		color: #3b6d11;
+	}
+
+	.role-neutral {
+		background: #f1ece4;
+		color: #4f5c65;
+	}
+
+	.visual-pill {
+		background: #fff8e4;
+		color: #805d16;
+	}
+
+	.toggle-pill {
+		border: none;
+		cursor: pointer;
+	}
+
+	.section-detail {
+		display: grid;
+		gap: 0.8rem;
+		padding-top: 0.1rem;
+	}
+
+	.field {
+		display: grid;
+		gap: 0.42rem;
+	}
+
+	.actions {
+		position: sticky;
+		bottom: 0;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		background:
+			linear-gradient(180deg, rgba(255, 253, 249, 0.92), rgba(255, 253, 249, 0.98)),
+			#fffdf9;
+	}
+
 	.primary-button,
 	.secondary-button {
 		border: none;
 		border-radius: 0.95rem;
-		padding: 0.72rem 1.15rem;
+		padding: 0.72rem 1.1rem;
 		font: inherit;
 		font-weight: 700;
 		cursor: pointer;
@@ -369,30 +601,41 @@
 	}
 
 	.secondary-button {
-		background: rgba(36, 67, 106, 0.08);
-		color: #24436a;
+		background: #f1ece4;
+		color: #4f5c65;
 	}
 
 	.primary-button:disabled,
 	.secondary-button:disabled,
-	.template-option:disabled,
-	input:disabled,
+	.template-card:disabled,
+	.section-title-input:disabled,
 	textarea:disabled {
 		cursor: not-allowed;
-		opacity: 0.65;
+		opacity: 0.68;
 	}
 
-	@media (max-width: 720px) {
+	@media (max-width: 820px) {
 		.review-header,
-		.summary-panel,
-		.template-panel-header,
-		.section-card-topline,
+		.summary-topline,
+		.panel-header,
+		.section-header,
+		.section-title-wrap,
+		.section-tags,
 		.actions {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.actions {
+			grid-template-columns: 1fr;
+		}
+
+		.action-buttons {
 			flex-direction: column;
 		}
 
-		.summary-side {
-			justify-items: start;
+		.action-buttons button {
+			width: 100%;
 		}
 	}
 </style>

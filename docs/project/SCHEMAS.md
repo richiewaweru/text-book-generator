@@ -2,6 +2,7 @@
 
 Current schema source of truth lives in:
 
+- `backend/src/planning/models.py`
 - `backend/src/pipeline/api.py`
 - `backend/src/pipeline/types/`
 - `backend/src/textbook_agent/domain/entities/`
@@ -39,6 +40,25 @@ Current schema source of truth lives in:
 
 ## Public Request DTOs
 
+### `StudioBriefRequest`
+- `intent`
+- `audience`
+- `prior_knowledge`
+- `extra_context`
+- `signals.topic_type`
+- `signals.learning_outcome`
+- `signals.class_style[]`
+- `signals.format`
+- `preferences.tone`
+- `preferences.reading_level`
+- `preferences.explanation_style`
+- `preferences.example_style`
+- `preferences.brevity`
+- `constraints.more_practice`
+- `constraints.keep_short`
+- `constraints.use_visuals`
+- `constraints.print_first`
+
 ### `GenerationRequest`
 - `subject`
 - `context`
@@ -58,6 +78,38 @@ Current schema source of truth lives in:
 - `source_generation_id`
 - `events_url`
 - `document_url`
+
+### `PlanningGenerationSpec`
+- `id`
+- `template_id`
+- `preset_id`
+- `template_decision`
+- `lesson_rationale`
+- `directives`
+- `committed_budgets`
+- ordered `sections`
+- optional `warning`
+- `source_brief_id`
+- `source_brief`
+- `status`: `draft | reviewed | committed`
+
+### `StudioTemplateContract`
+- exported JSON contract served by `GET /api/v1/contracts`
+- includes `available_components`, `component_budget`, `max_per_section`, `section_role_defaults`, and `signal_affinity`
+- current harmonised catalog ids:
+  - `classification`
+  - `compare-and-apply`
+  - `concept-compact`
+  - `diagram-led`
+  - `formal-track`
+  - `guided-concept-path`
+  - `guided-discovery`
+  - `interactive-lab`
+  - `low-load`
+  - `open-canvas`
+  - `procedure`
+  - `timeline`
+  - `visual-led`
 
 ## Pipeline Document
 
@@ -98,10 +150,19 @@ Closed event union emitted by the pipeline and transported by the shell:
 - `complete`
 - `error`
 
+Planning stream events emitted by `POST /api/v1/brief/stream`:
+
+- `template_selected`
+- `section_planned`
+- `plan_complete`
+- `plan_error`
+
 ## Viewer Contract
 
 - The public viewer identity is the generation ID.
 - The frontend hydrates from `/api/v1/generations/{id}/document`.
 - Live progress arrives from `/api/v1/generations/{id}/events`.
+- Teacher lesson creation now lives at `/studio` with the state flow `idle -> planning -> reviewing -> generating`.
+- `POST /api/v1/brief` remains available only as a deprecated compatibility shim.
 - Raw filesystem paths stay internal implementation details.
 - HTML artifacts are no longer part of the live viewer contract.

@@ -111,9 +111,9 @@ def _fake_live_safe_catalog() -> dict[str, SimpleNamespace]:
             intent="teach one concept clearly",
             learner_fit=["secondary", "mixed-ability"],
         ),
-        "timeline-narrative": SimpleNamespace(
-            id="timeline-narrative",
-            name="Timeline Narrative",
+        "timeline": SimpleNamespace(
+            id="timeline",
+            name="Timeline",
             intent="sequence events or developments",
             learner_fit=["secondary"],
         ),
@@ -296,6 +296,9 @@ class TestBriefApi:
         assert payload["preset_id"] == "blue-classroom"
         assert payload["section_count"] == 3
         assert payload["source_brief"]["intent"] == brief.intent
+        assert response.headers["Deprecation"] == "true"
+        assert "/api/v1/brief/stream" in response.headers["Warning"]
+        assert "/api/v1/brief/commit" in response.headers["Warning"]
 
     async def test_brief_filters_out_non_live_safe_templates(self):
         _install_overrides(TEST_PROFILE)
@@ -324,7 +327,7 @@ class TestBriefApi:
             patch.object(
                 brief_routes,
                 "list_template_ids",
-                return_value=["guided-concept-path", "timeline-narrative"],
+                return_value=["guided-concept-path", "timeline"],
             ),
             patch.object(
                 brief_routes,
@@ -347,7 +350,7 @@ class TestBriefApi:
 
         assert response.status_code == 200
         assert "guided-concept-path" in captured["system_prompt"]
-        assert "timeline-narrative" not in captured["system_prompt"]
+        assert "timeline" not in captured["system_prompt"]
 
     async def test_brief_falls_back_after_invalid_output(self):
         _install_overrides(TEST_PROFILE)
@@ -464,8 +467,18 @@ class TestBriefApi:
         contract = _planning_contract()
         spec = _planning_spec()
 
-        async def fake_plan(self, brief, *, contracts, model, run_llm_fn, generation_id="", emit=None):
-            _ = (brief, contracts, model, run_llm_fn, generation_id)
+        async def fake_plan(
+            self,
+            brief,
+            *,
+            contracts,
+            model,
+            run_llm_fn,
+            generation_id="",
+            emit=None,
+            llm_generation_mode="draft",
+        ):
+            _ = (brief, contracts, model, run_llm_fn, generation_id, llm_generation_mode)
             assert emit is not None
             await emit(
                 {

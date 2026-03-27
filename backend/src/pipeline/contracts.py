@@ -99,6 +99,31 @@ def _load_preset_registry() -> dict[str, dict]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _required_components(contract: dict) -> list[str]:
+    required = contract.get("required_components")
+    if isinstance(required, list):
+        return required
+
+    always_present = contract.get("always_present")
+    if isinstance(always_present, list):
+        return always_present
+
+    return []
+
+
+def _optional_components(contract: dict) -> list[str]:
+    optional = contract.get("optional_components")
+    if isinstance(optional, list):
+        return optional
+
+    available = contract.get("available_components")
+    if not isinstance(available, list):
+        return []
+
+    required = set(_required_components(contract))
+    return [component_id for component_id in available if component_id not in required]
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 def get_contract(template_id: str) -> TemplateContractSummary:
@@ -128,7 +153,7 @@ def get_required_fields(template_id: str) -> list[str]:
     field_map = _load_field_map()
     return [
         field_map[cid]
-        for cid in contract["required_components"]
+        for cid in _required_components(contract)
         if cid in field_map
     ]
 
@@ -138,17 +163,17 @@ def get_optional_fields(template_id: str) -> list[str]:
     field_map = _load_field_map()
     return [
         field_map[cid]
-        for cid in contract["optional_components"]
+        for cid in _optional_components(contract)
         if cid in field_map
     ]
 
 
 def get_generation_guidance(template_id: str) -> dict:
-    return _load_contract_raw(template_id)["generation_guidance"]
+    return _load_contract_raw(template_id).get("generation_guidance", {})
 
 
 def get_lesson_flow(template_id: str) -> list[str]:
-    return _load_contract_raw(template_id)["lesson_flow"]
+    return _load_contract_raw(template_id).get("lesson_flow", [])
 
 
 def validate_section_for_template(
@@ -159,7 +184,7 @@ def validate_section_for_template(
     field_map = _load_field_map()
     contract = _load_contract_raw(template_id)
 
-    for component_id in contract["required_components"]:
+    for component_id in _required_components(contract):
         field = field_map.get(component_id)
         if field is None:
             continue

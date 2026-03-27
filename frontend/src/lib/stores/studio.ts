@@ -112,7 +112,10 @@ export function completePlanning(spec: PlanningGenerationSpec, elapsedMs: number
 		warning: spec.warning,
 		lesson_rationale: spec.lesson_rationale
 	}));
-	editedSpec.set(spec);
+	editedSpec.set({
+		...spec,
+		status: 'reviewed'
+	});
 	planningMs.set(elapsedMs);
 	studioState.set('reviewing');
 }
