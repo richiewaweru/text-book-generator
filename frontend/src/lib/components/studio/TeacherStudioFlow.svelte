@@ -9,6 +9,7 @@
 	import PlanReview from '$lib/components/studio/PlanReview.svelte';
 	import PlanStream from '$lib/components/studio/PlanStream.svelte';
 	import {
+		appendPlannedSection,
 		beginPlanning,
 		briefDraft,
 		completePlanning,
@@ -16,10 +17,10 @@
 		editedSpec,
 		failPlanning,
 		generationState,
-		planDraft,
 		returnToIdle,
 		setContracts,
 		setGenerationAccepted,
+		setTemplateDecision,
 		studioState
 	} from '$lib/stores/studio';
 	import { swapTemplateInSpec } from '$lib/studio/template-swap';
@@ -28,6 +29,13 @@
 		PlanningTemplateSelectedEvent,
 		StudioTemplateContract
 	} from '$lib/types';
+
+	const stages = [
+		{ key: 'idle', label: 'Intent capture' },
+		{ key: 'planning', label: 'Plan streaming' },
+		{ key: 'reviewing', label: 'Review and edit' },
+		{ key: 'generating', label: 'Live generation' }
+	] as const;
 
 	let catalogError = $state<string | null>(null);
 	let planningError = $state<string | null>(null);
@@ -40,19 +48,22 @@
 			: $studioState === 'planning'
 				? 'Live planning'
 				: $studioState === 'reviewing'
-					? 'Review'
-					: 'Generating'
+					? 'Review gate'
+					: 'Generating in place'
 	);
+
+	const currentStageIndex = $derived(stages.findIndex((stage) => stage.key === $studioState));
+
+	function errorMessage(error: unknown, fallback: string): string {
+		return error instanceof ApiError || error instanceof Error ? error.message : fallback;
+	}
 
 	async function loadContractCatalog() {
 		try {
 			setContracts(await listContracts());
 			catalogError = null;
 		} catch (error) {
-			catalogError =
-				error instanceof ApiError || error instanceof Error
-					? error.message
-					: 'Failed to load template contracts.';
+			catalogError = errorMessage(error, 'Failed to load template contracts.');
 		}
 	}
 
@@ -68,20 +79,16 @@
 			for await (const event of streamPlan(request)) {
 				if (event.event === 'template_selected') {
 					const payload = (event as PlanningTemplateSelectedEvent).data;
-					planDraft.update((draft) => ({
-						...draft,
-						template_decision: payload.template_decision,
-						lesson_rationale: payload.lesson_rationale,
-						warning: payload.warning
-					}));
+					setTemplateDecision(
+						payload.template_decision,
+						payload.lesson_rationale,
+						payload.warning
+					);
 					continue;
 				}
 
 				if (event.event === 'section_planned') {
-					planDraft.update((draft) => ({
-						...draft,
-						sections: [...draft.sections, event.data.section]
-					}));
+					appendPlannedSection(event.data.section);
 					continue;
 				}
 
@@ -101,11 +108,11 @@
 				}
 			}
 		} catch (error) {
-			planningError =
-				error instanceof ApiError || error instanceof Error
-					? error.message
-					: 'Planning failed before a reviewable draft was returned.';
-			returnToIdle();
+			planningError = errorMessage(
+				error,
+				'Planning failed before a reviewable draft was returned.'
+			);
+			failPlanning(planningError);
 		}
 	}
 
@@ -133,20 +140,26 @@
 			studioState.set('generating');
 		} catch (error) {
 			studioState.set('reviewing');
-			commitError =
-				error instanceof ApiError || error instanceof Error
-					? error.message
-					: 'Failed to start generation.';
+			commitError = errorMessage(error, 'Failed to start generation.');
 		} finally {
 			committing = false;
 		}
 	}
 
 	function handleBackToBrief() {
+		planningError = null;
+		commitError = null;
+		returnToIdle();
+	}
+
+	function handleRetryPlanning() {
+		planningError = null;
 		returnToIdle();
 	}
 
 	function handleResetFromGeneration() {
+		planningError = null;
+		commitError = null;
 		returnToIdle();
 	}
 
@@ -163,80 +176,64 @@
 			<p class="eyebrow">Studio</p>
 			<h1>Teacher lesson studio</h1>
 			<p class="lede">
-				Plan first, review explicitly, then watch generation unfold inside the workspace instead
-				of being pushed straight into a separate page.
+				Capture intent, watch the plan assemble, review the exact structure, then stay inside the
+				workspace while the lesson generates.
 			</p>
 		</div>
 
 		<div class="studio-status">
 			<span class="status-pill">{stateSummary}</span>
+			<span class="catalog-pill">
+				{$contracts.length || 0} live-safe template{$contracts.length === 1 ? '' : 's'}
+			</span>
 			<a href="/dashboard" class="dashboard-link">Back to dashboard</a>
 		</div>
 	</header>
 
-	<div class="studio-grid">
-		<div class="main-stage">
-			{#if planningError}
-				<p class="notice notice-error">{planningError}</p>
-			{/if}
+	<ol class="stage-list" aria-label="Studio stages">
+		{#each stages as stage, index}
+			<li
+				class:stage-current={index === currentStageIndex}
+				class:stage-complete={index < currentStageIndex}
+				class="stage-item"
+			>
+				<span class="stage-number">{index + 1}</span>
+				<div>
+					<strong>{stage.label}</strong>
+					<p>{stage.key}</p>
+				</div>
+			</li>
+		{/each}
+	</ol>
 
-			{#if $studioState === 'idle'}
-				<IntentForm onSubmit={handlePlan} />
-			{:else if $studioState === 'planning'}
-				<PlanStream />
-			{:else if $studioState === 'reviewing'}
-				<PlanReview
-					busy={committing}
-					onBack={handleBackToBrief}
-					onCommit={handleCommit}
-					onTemplateSwap={handleTemplateSwap}
-					errorMessage={commitError}
-				/>
-			{:else if $generationState.accepted}
-				<GenerationView accepted={$generationState.accepted} onReset={handleResetFromGeneration} />
-			{/if}
-		</div>
+	{#if catalogError && $studioState !== 'reviewing'}
+		<p class="notice notice-error">{catalogError}</p>
+	{/if}
 
-		<aside class="context-rail">
-			<section class="rail-panel">
-				<p class="rail-label">Workspace flow</p>
-				<ol class="flow-list">
-					<li class:flow-active={$studioState === 'idle'}>Capture teaching intent</li>
-					<li class:flow-active={$studioState === 'planning'}>Stream the structure</li>
-					<li class:flow-active={$studioState === 'reviewing'}>Review and swap templates</li>
-					<li class:flow-active={$studioState === 'generating'}>Generate in place</li>
-				</ol>
-			</section>
-
-			<section class="rail-panel">
-				<p class="rail-label">Template catalog</p>
-				<strong>{$contracts.length} live-safe templates</strong>
-				<p class="rail-copy">
-					The review state can switch between live-safe Lectio templates without another planner
-					round-trip.
-				</p>
-				{#if catalogError}
-					<p class="notice notice-error">{catalogError}</p>
-				{/if}
-			</section>
-
-			<section class="rail-panel rail-panel-muted">
-				<p class="rail-label">Current draft</p>
-				<p class="rail-copy">
-					Intent: {$briefDraft.intent || 'Waiting for a lesson brief.'}
-				</p>
-				<p class="rail-copy">
-					Audience: {$briefDraft.audience || 'No audience set yet.'}
-				</p>
-			</section>
-		</aside>
+	<div class="main-stage">
+		{#if $studioState === 'idle'}
+			<IntentForm onSubmit={handlePlan} />
+		{:else if $studioState === 'planning'}
+			<PlanStream errorMessage={planningError} onRetry={handleRetryPlanning} />
+		{:else if $studioState === 'reviewing'}
+			<PlanReview
+				busy={committing}
+				onBack={handleBackToBrief}
+				onCommit={handleCommit}
+				onTemplateSwap={handleTemplateSwap}
+				errorMessage={commitError}
+				catalogError={catalogError}
+			/>
+		{:else if $generationState.accepted}
+			<GenerationView accepted={$generationState.accepted} onReset={handleResetFromGeneration} />
+		{/if}
 	</div>
 </section>
 
 <style>
 	.studio-shell {
 		display: grid;
-		gap: 1.25rem;
+		gap: 1rem;
 	}
 
 	.studio-header,
@@ -247,11 +244,11 @@
 		align-items: start;
 	}
 
-	.eyebrow,
-	.rail-label {
-		margin: 0;
+	.eyebrow {
+		margin: 0 0 0.35rem 0;
 		font-size: 0.76rem;
-		letter-spacing: 0.14em;
+		font-weight: 700;
+		letter-spacing: 0.12em;
 		text-transform: uppercase;
 		color: #6b7c88;
 	}
@@ -262,7 +259,7 @@
 	}
 
 	h1 {
-		font-size: clamp(2rem, 3vw, 2.8rem);
+		font-size: clamp(2rem, 3vw, 2.7rem);
 	}
 
 	.lede {
@@ -273,10 +270,13 @@
 	}
 
 	.studio-status {
+		flex-wrap: wrap;
 		align-items: center;
+		justify-content: flex-end;
 	}
 
 	.status-pill,
+	.catalog-pill,
 	.dashboard-link {
 		display: inline-flex;
 		align-items: center;
@@ -289,86 +289,96 @@
 	}
 
 	.status-pill {
-		background: rgba(29, 158, 117, 0.12);
-		color: #0b6a52;
+		background: #e1f5ee;
+		color: #085041;
+	}
+
+	.catalog-pill {
+		background: #f1ece4;
+		color: #4f5c65;
 	}
 
 	.dashboard-link {
-		background: rgba(36, 67, 106, 0.08);
-		color: #24436a;
+		background: #f1ece4;
+		color: #4f5c65;
 	}
 
-	.studio-grid {
+	.stage-list {
 		display: grid;
-		grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.9fr);
-		gap: 1rem;
-		align-items: start;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 0.75rem;
+		padding: 0;
+		margin: 0;
+		list-style: none;
+	}
+
+	.stage-item {
+		display: flex;
+		gap: 0.8rem;
+		align-items: center;
+		border-radius: 1.1rem;
+		border: 0.5px solid rgba(36, 52, 63, 0.12);
+		background: #f8f4ec;
+		padding: 0.85rem 0.95rem;
+		color: #625a50;
+	}
+
+	.stage-item strong {
+		display: block;
+		color: #1d1b17;
+	}
+
+	.stage-item p {
+		font-size: 0.8rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: #8a8176;
+	}
+
+	.stage-number {
+		display: grid;
+		place-items: center;
+		width: 2rem;
+		height: 2rem;
+		border-radius: 999px;
+		background: #fffdf9;
+		color: #4f5c65;
+		font-weight: 700;
+	}
+
+	.stage-current {
+		border-color: rgba(29, 158, 117, 0.35);
+		background: #eef8f4;
+	}
+
+	.stage-current .stage-number,
+	.stage-complete .stage-number {
+		background: #1d9e75;
+		color: #e1f5ee;
+	}
+
+	.stage-complete {
+		background: #fffdf9;
 	}
 
 	.main-stage {
 		display: grid;
-		gap: 1rem;
-	}
-
-	.context-rail {
-		display: grid;
-		gap: 0.9rem;
-		position: sticky;
-		top: 1rem;
-	}
-
-	.rail-panel {
-		display: grid;
-		gap: 0.6rem;
-		border-radius: 1.3rem;
-		border: 0.5px solid rgba(36, 52, 63, 0.12);
-		background: rgba(255, 255, 255, 0.74);
-		padding: 1rem;
-		backdrop-filter: blur(12px);
-	}
-
-	.rail-panel-muted {
-		background:
-			linear-gradient(180deg, rgba(236, 246, 242, 0.78), rgba(255, 255, 255, 0.74)),
-			rgba(255, 255, 255, 0.74);
-	}
-
-	.rail-copy {
-		color: #625a50;
-		line-height: 1.55;
-	}
-
-	.flow-list {
-		display: grid;
-		gap: 0.6rem;
-		padding-left: 1.1rem;
-		margin: 0;
-		color: #625a50;
-	}
-
-	.flow-active {
-		color: #0b6a52;
-		font-weight: 700;
 	}
 
 	.notice {
 		margin: 0;
-		border-radius: 1rem;
-		padding: 0.9rem 1rem;
+		border-radius: 0.95rem;
+		padding: 0.85rem 0.95rem;
 	}
 
 	.notice-error {
-		background: rgba(255, 242, 238, 0.94);
+		background: #fff2ee;
 		color: #7d3524;
 	}
 
-	@media (max-width: 980px) {
-		.studio-grid {
-			grid-template-columns: 1fr;
-		}
-
-		.context-rail {
-			position: static;
+	@media (max-width: 900px) {
+		.stage-list {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 	}
 
@@ -377,6 +387,10 @@
 		.studio-status {
 			flex-direction: column;
 			align-items: stretch;
+		}
+
+		.stage-list {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

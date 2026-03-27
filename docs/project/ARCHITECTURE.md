@@ -5,6 +5,7 @@
 The repo now uses a `Shell + Pipeline` architecture.
 
 - `backend/src/textbook_agent/` is the product shell.
+- `backend/src/planning/` is the shell-owned planning package for Teacher Studio.
 - `backend/src/pipeline/` is the standalone generation engine.
 - `frontend/` is the native Lectio client.
 
@@ -24,14 +25,28 @@ The shell keeps the DDD-style layering inside `backend/src/textbook_agent/`.
 ## Pipeline Rules
 
 - The shell may import the pipeline.
+- The shell may import `planning`.
+- `planning` must not import `pipeline`.
 - The pipeline must never import `textbook_agent`.
 - The pipeline owns prompts, contract loading, provider registry, graph state, nodes, QC, retries, and Lectio document assembly.
-- The shell owns auth, profiles, persistence, HTTP routes, SSE transport, and generation history.
+- The shell owns auth, profiles, persistence, HTTP routes, Teacher Studio planning, SSE transport, and generation history.
 - All live generation flows through `pipeline.run` / `pipeline.api`.
+
+## Planning Rules
+
+- `backend/src/planning/` normalizes teacher intent, scores templates, composes sections, routes visuals, and performs the single planning refinement call.
+- Planning emits `PlanningGenerationSpec` artifacts for review. It does not generate lesson content.
+- Routes under `textbook_agent/interface/api/routes/brief.py` are the only place that should adapt planning outputs into pipeline generation requests.
+- The exported Lectio contracts in `backend/contracts/` are sourced from the harmonised Lectio catalog in `C:\Projects\lectio` via `npm run export-contracts`.
 
 ## Runtime Boundaries
 
 - Canonical artifact: structured JSON `PipelineDocument`
+- Canonical teacher creation route: `/studio`
+- Planning catalog endpoint: `GET /api/v1/contracts`
+- Planning stream endpoint: `POST /api/v1/brief/stream`
+- Planning commit-and-start endpoint: `POST /api/v1/brief/commit`
+- Legacy compatibility path: `POST /api/v1/brief` (deprecated shim)
 - Streaming transport: authenticated SSE at `/api/v1/generations/{id}/events`
 - Document hydration: `/api/v1/generations/{id}/document`
 - Legacy HTML renderer and iframe viewer are removed from the live architecture

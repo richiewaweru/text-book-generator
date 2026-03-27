@@ -12,7 +12,6 @@ from planning.models import (
     PlanningSectionPlan,
     PlanningTemplateContract,
 )
-from pipeline.types.requests import GenerationMode as PipelineGenerationMode
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +60,7 @@ async def refine_plan_text(
     model: Any,
     run_llm_fn: Callable[..., Awaitable[Any]],
     generation_id: str = "",
+    generation_mode: Any = "draft",
 ) -> PlanningRefinementOutput | None:
     agent = Agent(
         model=model,
@@ -77,7 +77,7 @@ async def refine_plan_text(
                 agent=agent,
                 model=model,
                 user_prompt=user_prompt,
-                generation_mode=PipelineGenerationMode.DRAFT,
+                generation_mode=generation_mode,
             )
             output = result.output
             if output is None or len(output.sections) != len(sections):

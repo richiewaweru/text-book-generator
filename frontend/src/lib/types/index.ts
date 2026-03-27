@@ -333,6 +333,7 @@ export type {
 	Brevity,
 	ClassStyle,
 	DeliveryPreferences,
+	ExampleStyle,
 	ExplanationStyle,
 	GenerationDirectives,
 	LearningOutcome,

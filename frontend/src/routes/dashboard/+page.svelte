@@ -3,15 +3,14 @@
 	import { goto } from '$app/navigation';
 	import { fromStore } from 'svelte/store';
 	import { basePresetMap, templateRegistryMap } from 'lectio';
-	import TeacherStudio from '$lib/components/TeacherStudio.svelte';
 	import { isApiError } from '$lib/api/errors';
 	import { getOnboardingRoute, resolveDashboardProfileFailure } from '$lib/auth/routing';
-	import { startGeneration, enhanceGeneration, getGenerations } from '$lib/api/client';
+	import { enhanceGeneration, getGenerations } from '$lib/api/client';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import { getProfile } from '$lib/api/profile';
 	import { authUser, logout } from '$lib/stores/auth';
 	import { getTextbookRoute } from '$lib/navigation/textbook';
-	import type { GenerationRequest, StudentProfile, GenerationHistoryItem } from '$lib/types';
+	import type { StudentProfile, GenerationHistoryItem } from '$lib/types';
 
 	const user = fromStore(authUser);
 
@@ -55,20 +54,6 @@
 			}
 		}
 	});
-
-	async function handleGenerate(request: GenerationRequest) {
-		generating = true;
-		errorMessage = null;
-
-		try {
-			const accepted = await startGeneration(request);
-			goto(getTextbookRoute(accepted.generation_id));
-		} catch (err) {
-			errorMessage = err instanceof Error ? err.message : 'Generation failed.';
-		} finally {
-			generating = false;
-		}
-	}
 
 	async function handleEnhance(id: string) {
 		generating = true;
@@ -151,17 +136,29 @@
 		<section class="generate-section">
 			<h2>Teacher Studio</h2>
 			<p>
-				Start with a plain-language brief, review the structured plan, and then generate into the
-				live Blue Classroom runtime.
+				The canonical lesson-creation flow now lives in the dedicated studio route. Open it to move
+				through intent capture, streamed planning, review, and live generation in one workspace.
 			</p>
-			<div class="studio-entry">
-				<p class="studio-entry-copy">
-					The dedicated studio route now keeps planning, review, and live generation in one
-					workspace.
-				</p>
-				<a href="/studio" class="studio-link">Open full studio</a>
+			<div class="studio-entry studio-entry-prominent">
+				<div class="studio-entry-copy">
+					<p class="studio-kicker">Canonical flow</p>
+					<h3>Create a lesson in Studio</h3>
+					<p>
+						Teachers now plan first, review explicitly, and watch sections generate live without
+						leaving the workspace.
+					</p>
+					<div class="studio-features">
+						<span>Intent capture</span>
+						<span>Streamed planning</span>
+						<span>Editable review</span>
+						<span>Live generation</span>
+					</div>
+				</div>
+				<div class="studio-entry-actions">
+					<a href="/studio" class="studio-link">Open Studio</a>
+					<button class="ghost-link" onclick={() => goto('/studio')}>Resume planning</button>
+				</div>
 			</div>
-			<TeacherStudio onsubmit={handleGenerate} disabled={generating} />
 		</section>
 
 		{#if errorMessage}
@@ -304,7 +301,8 @@
 
 	.edit-profile-btn,
 	.enhance-link,
-	.studio-link {
+	.studio-link,
+	.ghost-link {
 		border-radius: 999px;
 		border: 1px solid rgba(36, 52, 63, 0.18);
 		background: rgba(36, 52, 63, 0.05);
@@ -325,14 +323,61 @@
 		margin: 1rem 0;
 	}
 
+	.studio-entry-prominent {
+		align-items: stretch;
+		padding: 1.1rem 1.15rem;
+	}
+
 	.studio-entry-copy {
-		margin: 0;
+		display: grid;
+		gap: 0.45rem;
 		color: #655c52;
+	}
+
+	.studio-entry-copy p,
+	.studio-entry-copy h3 {
+		margin: 0;
+	}
+
+	.studio-kicker {
+		font-size: 0.76rem;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: #6b7c88;
+	}
+
+	.studio-features {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+		margin-top: 0.2rem;
+	}
+
+	.studio-features span {
+		border-radius: 999px;
+		background: rgba(29, 158, 117, 0.1);
+		padding: 0.22rem 0.65rem;
+		font-size: 0.78rem;
+		color: #0b6a52;
+	}
+
+	.studio-entry-actions {
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		justify-content: center;
+		min-width: 12rem;
 	}
 
 	.studio-link {
 		text-decoration: none;
 		white-space: nowrap;
+		text-align: center;
+	}
+
+	.ghost-link {
+		background: rgba(255, 255, 255, 0.7);
 	}
 
 	.history-list {
@@ -428,6 +473,10 @@
 		.studio-entry,
 		.history-item {
 			display: grid;
+		}
+
+		.studio-entry-actions {
+			min-width: auto;
 		}
 	}
 </style>

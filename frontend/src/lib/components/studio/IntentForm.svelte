@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { get } from 'svelte/store';
 
-	import { briefDraft } from '$lib/stores/studio';
+	import { briefDraft, emptyDraft } from '$lib/stores/studio';
 	import type {
 		Brevity,
 		ClassStyle,
+		ExampleStyle,
 		ExplanationStyle,
 		LearningOutcome,
 		LessonFormat,
@@ -23,10 +24,16 @@
 	type PreferenceKey = keyof UserBriefDraft['preferences'];
 	type ConstraintKey = keyof UserBriefDraft['constraints'];
 
+	const defaultDraft = emptyDraft();
+	const initialDraft = get(briefDraft);
+
 	let { disabled = false, onSubmit }: Props = $props();
-	let showPriorKnowledge = $state(false);
-	let showPreferences = $state(false);
+	let showPriorKnowledge = $state(
+		Boolean(initialDraft.prior_knowledge.trim() || initialDraft.extra_context.trim())
+	);
+	let showPreferences = $state(hasCustomPreferences(initialDraft));
 	let validationMessage = $state<string | null>(null);
+	let signalWarning = $state<string | null>(null);
 
 	const topicTypes: Array<{ label: string; value: TopicType }> = [
 		{ label: 'Concept / idea', value: 'concept' },
@@ -74,27 +81,57 @@
 		{ label: 'Balanced', value: 'balanced' }
 	];
 
+	const exampleStyles: Array<{ label: string; value: ExampleStyle }> = [
+		{ label: 'Everyday examples', value: 'everyday' },
+		{ label: 'Academic examples', value: 'academic' },
+		{ label: 'Exam-style examples', value: 'exam' }
+	];
+
 	const brevityOptions: Array<{ label: string; value: Brevity }> = [
 		{ label: 'Concise', value: 'tight' },
 		{ label: 'Balanced', value: 'balanced' },
 		{ label: 'Expanded', value: 'expanded' }
 	];
 
+	function hasAnySignals(draft: UserBriefDraft): boolean {
+		return Boolean(
+			draft.signals.topic_type ||
+				draft.signals.learning_outcome ||
+				draft.signals.format ||
+				draft.signals.class_style.length
+		);
+	}
+
+	function hasCustomPreferences(draft: UserBriefDraft): boolean {
+		return (
+			draft.preferences.tone !== defaultDraft.preferences.tone ||
+			draft.preferences.reading_level !== defaultDraft.preferences.reading_level ||
+			draft.preferences.explanation_style !== defaultDraft.preferences.explanation_style ||
+			draft.preferences.example_style !== defaultDraft.preferences.example_style ||
+			draft.preferences.brevity !== defaultDraft.preferences.brevity
+		);
+	}
+
 	function updateBrief(patch: Partial<UserBriefDraft>) {
 		briefDraft.update((draft) => ({
 			...draft,
 			...patch
 		}));
+		validationMessage = null;
 	}
 
 	function updateSignals<K extends SignalKey>(key: K, value: UserBriefDraft['signals'][K]) {
-		briefDraft.update((draft) => ({
-			...draft,
-			signals: {
-				...draft.signals,
-				[key]: value
-			}
-		}));
+		briefDraft.update((draft) => {
+			const nextDraft = {
+				...draft,
+				signals: {
+					...draft.signals,
+					[key]: value
+				}
+			};
+			signalWarning = hasAnySignals(nextDraft) ? null : signalWarning;
+			return nextDraft;
+		});
 	}
 
 	function updatePreferences<K extends PreferenceKey>(
@@ -138,35 +175,56 @@
 		updateSignals('class_style', [...current, value]);
 	}
 
+	function clearDraft() {
+		briefDraft.set(emptyDraft());
+		showPriorKnowledge = false;
+		showPreferences = false;
+		validationMessage = null;
+		signalWarning = null;
+	}
+
+	function classStyleLocked(value: ClassStyle): boolean {
+		const current = $briefDraft.signals.class_style;
+		return current.length >= 3 && !current.includes(value);
+	}
+
 	function handleSubmit(event: SubmitEvent) {
 		event.preventDefault();
 
 		const draft = get(briefDraft);
 		if (!draft.intent.trim() || !draft.audience.trim()) {
-			validationMessage = 'Intent and audience are both required.';
+			validationMessage = 'Intent and audience are both required before planning can start.';
 			return;
 		}
 
 		validationMessage = null;
+		signalWarning = hasAnySignals(draft)
+			? null
+			: 'No learning signals were selected, so planning will fall back to defaults. You can still continue.';
 		onSubmit();
 	}
 </script>
 
 <form class="studio-form" onsubmit={handleSubmit}>
-	<div class="form-card">
-		<div class="heading">
+	<section class="form-card">
+		<header class="heading">
 			<div>
-				<p class="eyebrow">Teacher Studio</p>
-				<h1>Shape the lesson before generation</h1>
+				<p class="eyebrow">Intent capture</p>
+				<h2>Shape the lesson before generation</h2>
 				<p class="lede">
-					Capture the teaching intent, signal the learning shape, then let the planner assemble
-					a reviewable lesson structure.
+					Give the planner the topic, the class context, and a few learning signals. We keep the
+					draft intact if you come back to refine it.
 				</p>
 			</div>
-		</div>
+			<div class="draft-note">Draft restored automatically when you return from review.</div>
+		</header>
 
 		{#if validationMessage}
-			<p class="notice notice-error">{validationMessage}</p>
+			<p class="notice notice-error" role="alert">{validationMessage}</p>
+		{/if}
+
+		{#if signalWarning}
+			<p class="notice notice-warn" role="status">{signalWarning}</p>
 		{/if}
 
 		<div class="field-grid">
@@ -175,7 +233,7 @@
 				<input
 					type="text"
 					value={$briefDraft.intent}
-					placeholder="Explain photosynthesis to Year 10 students"
+					placeholder="What do you want to teach?"
 					oninput={(event) =>
 						updateBrief({ intent: (event.currentTarget as HTMLInputElement).value })}
 					disabled={disabled}
@@ -187,7 +245,7 @@
 				<input
 					type="text"
 					value={$briefDraft.audience}
-					placeholder="Year 10, mixed ability, 45-minute class"
+					placeholder="Who is this for? Grade, ability, any notes."
 					oninput={(event) =>
 						updateBrief({ audience: (event.currentTarget as HTMLInputElement).value })}
 					disabled={disabled}
@@ -249,7 +307,7 @@
 			</div>
 
 			<div class="signal-block">
-				<p class="signal-title">Learning outcome</p>
+				<p class="signal-title">What should students leave with?</p>
 				<div class="chip-row">
 					{#each learningOutcomes as option}
 						<button
@@ -265,20 +323,24 @@
 			</div>
 
 			<div class="signal-block">
-				<p class="signal-title">How the class learns</p>
+				<div class="signal-header">
+					<p class="signal-title">How does this class learn?</p>
+					<p class="helper">Select up to 3</p>
+				</div>
 				<div class="chip-row">
 					{#each classStyles as option}
 						<button
 							type="button"
 							class:chip-selected={$briefDraft.signals.class_style.includes(option.value)}
+							class:chip-disabled={classStyleLocked(option.value)}
 							class="chip"
 							onclick={() => toggleClassStyle(option.value)}
+							disabled={classStyleLocked(option.value)}
 						>
 							{option.label}
 						</button>
 					{/each}
 				</div>
-				<p class="helper">Select up to 3.</p>
 			</div>
 
 			<div class="signal-block">
@@ -299,7 +361,7 @@
 		</div>
 
 		<button class="toggle-link" type="button" onclick={() => (showPreferences = !showPreferences)}>
-			{showPreferences ? '-' : '+'} Tone and style preferences
+			{showPreferences ? '-' : '+'} Tone and style preferences (optional)
 		</button>
 
 		{#if showPreferences}
@@ -344,6 +406,22 @@
 							)}
 					>
 						{#each explanationStyles as option}
+							<option value={option.value}>{option.label}</option>
+						{/each}
+					</select>
+				</label>
+
+				<label class="field">
+					<span>Example style</span>
+					<select
+						value={$briefDraft.preferences.example_style}
+						onchange={(event) =>
+							updatePreferences(
+								'example_style',
+								(event.currentTarget as HTMLSelectElement).value as ExampleStyle
+							)}
+					>
+						{#each exampleStyles as option}
 							<option value={option.value}>{option.label}</option>
 						{/each}
 					</select>
@@ -405,16 +483,19 @@
 					onchange={(event) =>
 						updateConstraints('print_first', (event.currentTarget as HTMLInputElement).checked)}
 				/>
-				<span>Print first</span>
+				<span>Optimise for print layout</span>
 			</label>
 		</div>
 
 		<div class="actions">
+			<button class="secondary-button" type="button" onclick={clearDraft} disabled={disabled}>
+				Clear draft
+			</button>
 			<button class="primary-button" type="submit" disabled={disabled}>
-				Build lesson plan
+				Build lesson plan ->
 			</button>
 		</div>
-	</div>
+	</section>
 </form>
 
 <style>
@@ -426,52 +507,80 @@
 		display: grid;
 		gap: 1rem;
 		border: 0.5px solid rgba(36, 52, 63, 0.12);
-		border-radius: 1.5rem;
-		background: rgba(255, 255, 255, 0.82);
-		padding: 1.5rem;
+		border-radius: 1.35rem;
+		background: #fffdf9;
+		padding: 1.3rem;
 	}
 
-	.heading h1,
+	.heading {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		align-items: start;
+	}
+
+	.heading h2,
 	.heading p {
 		margin: 0;
 	}
 
+	.eyebrow,
+	.signal-title,
+	.field span {
+		font-size: 0.78rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
 	.eyebrow {
 		margin: 0 0 0.35rem 0;
-		font-size: 0.76rem;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
 		color: #6b7c88;
 	}
 
 	.lede {
 		margin-top: 0.45rem;
-		max-width: 60ch;
-		color: #625a50;
+		max-width: 62ch;
+		color: #5f584f;
 		line-height: 1.6;
+	}
+
+	.draft-note {
+		max-width: 18rem;
+		border-radius: 0.95rem;
+		background: #f6f2ea;
+		padding: 0.8rem 0.9rem;
+		color: #6e665c;
+		font-size: 0.85rem;
+		line-height: 1.5;
 	}
 
 	.notice {
 		margin: 0;
-		border-radius: 1rem;
-		padding: 0.85rem 1rem;
+		border-radius: 0.95rem;
+		padding: 0.85rem 0.95rem;
 	}
 
 	.notice-error {
-		background: rgba(255, 242, 238, 0.94);
+		background: #fff2ee;
 		color: #7d3524;
+	}
+
+	.notice-warn {
+		background: #fff8e4;
+		color: #805d16;
 	}
 
 	.field-grid,
 	.preference-grid {
 		display: grid;
 		gap: 0.9rem;
-		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 	}
 
 	.field {
 		display: grid;
-		gap: 0.4rem;
+		gap: 0.42rem;
 	}
 
 	.field-wide {
@@ -480,19 +589,17 @@
 
 	.field span,
 	.signal-title {
-		font-size: 0.9rem;
-		font-weight: 600;
 		color: #24343f;
 	}
 
 	input,
 	textarea,
 	select {
-		border: 0.5px solid rgba(36, 52, 63, 0.12);
+		border: 0.5px solid rgba(36, 52, 63, 0.14);
 		border-radius: 0.9rem;
-		padding: 0.72rem 0.85rem;
+		padding: 0.75rem 0.85rem;
 		font: inherit;
-		background: #f7f4ee;
+		background: #f8f4ec;
 		color: #1d1b17;
 	}
 
@@ -500,28 +607,43 @@
 		resize: vertical;
 	}
 
+	input:focus,
+	textarea:focus,
+	select:focus {
+		outline: 2px solid rgba(29, 158, 117, 0.18);
+		outline-offset: 1px;
+		border-color: rgba(29, 158, 117, 0.42);
+	}
+
 	.toggle-link {
 		justify-self: start;
 		border: none;
 		background: transparent;
 		padding: 0;
-		color: #35526a;
+		color: #0b6a52;
 		font: inherit;
-		font-weight: 600;
+		font-weight: 700;
 		cursor: pointer;
 	}
 
 	.signal-stack {
 		display: grid;
-		gap: 0.85rem;
+		gap: 0.8rem;
 	}
 
 	.signal-block {
 		display: grid;
 		gap: 0.55rem;
 		border-radius: 1rem;
-		background: #f4f1ea;
-		padding: 0.9rem;
+		background: #f4efe6;
+		padding: 0.95rem;
+	}
+
+	.signal-header {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.8rem;
+		align-items: baseline;
 	}
 
 	.chip-row {
@@ -533,12 +655,20 @@
 	.chip {
 		border: 0.5px solid rgba(36, 52, 63, 0.16);
 		border-radius: 999px;
-		background: white;
-		padding: 0.35rem 0.8rem;
+		background: #fffdf9;
+		padding: 0.38rem 0.82rem;
 		font: inherit;
 		font-size: 0.84rem;
-		color: #57636d;
+		color: #4f5c65;
 		cursor: pointer;
+		transition:
+			border-color 140ms ease,
+			background-color 140ms ease,
+			color 140ms ease;
+	}
+
+	.chip:hover:not(:disabled) {
+		border-color: rgba(29, 158, 117, 0.3);
 	}
 
 	.chip-selected {
@@ -547,16 +677,23 @@
 		color: #085041;
 	}
 
+	.chip-disabled,
+	.chip:disabled {
+		cursor: not-allowed;
+		opacity: 0.48;
+	}
+
 	.helper {
 		margin: 0;
 		font-size: 0.8rem;
-		color: #766d63;
+		color: #72695f;
 	}
 
 	.constraint-row {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.9rem 1.25rem;
+		padding-top: 0.1rem;
 	}
 
 	.toggle {
@@ -566,33 +703,61 @@
 		color: #24343f;
 	}
 
-	.actions {
-		display: flex;
-		justify-content: flex-end;
+	.toggle input {
+		margin: 0;
+		accent-color: #1d9e75;
 	}
 
-	.primary-button {
+	.actions {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.8rem;
+		align-items: center;
+		padding-top: 0.15rem;
+	}
+
+	.primary-button,
+	.secondary-button {
 		border: none;
 		border-radius: 0.95rem;
-		background: #1d9e75;
-		padding: 0.7rem 1.15rem;
-		color: #e1f5ee;
+		padding: 0.72rem 1.15rem;
 		font: inherit;
 		font-weight: 700;
 		cursor: pointer;
 	}
 
-	.primary-button:disabled {
+	.primary-button {
+		background: #1d9e75;
+		color: #e1f5ee;
+	}
+
+	.secondary-button {
+		background: #f1ece4;
+		color: #4f5c65;
+	}
+
+	.primary-button:disabled,
+	.secondary-button:disabled,
+	input:disabled,
+	textarea:disabled,
+	select:disabled {
 		cursor: not-allowed;
-		opacity: 0.65;
+		opacity: 0.68;
 	}
 
 	@media (max-width: 720px) {
+		.heading,
+		.signal-header,
 		.actions {
-			justify-content: stretch;
+			flex-direction: column;
+			align-items: stretch;
 		}
 
-		.primary-button {
+		.draft-note {
+			max-width: none;
+		}
+
+		.actions button {
 			width: 100%;
 		}
 	}

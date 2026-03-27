@@ -892,6 +892,15 @@ async def _run_generation_job(
             error_code=error_code,
             generation_time_seconds=generation_time_seconds,
         )
+        await _save_report_snapshot_with_timeout(
+            report_repo=report_repo,
+            generation_id=generation.id,
+            report=recorder.build_failure_snapshot(
+                error=error_message,
+                generation_time_seconds=generation_time_seconds,
+            ),
+            phase="failure_initial_snapshot",
+        )
         event_bus.publish(
             generation.id,
             _error_event(generation.id, error_message),

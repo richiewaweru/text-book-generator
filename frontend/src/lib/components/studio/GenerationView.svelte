@@ -6,8 +6,8 @@
 		getGenerationDetail,
 		getGenerationDocument
 	} from '$lib/api/client';
-	import LectioDocumentView from '$lib/components/LectioDocumentView.svelte';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
+	import { buildSectionPreview } from '$lib/generation/preview';
 	import {
 		applySectionFailed,
 		applySectionReady,
@@ -15,12 +15,14 @@
 		buildSectionSlots,
 		normalizeDocument
 	} from '$lib/generation/viewer-state';
-	import { setGenerationBanner, setGenerationDocument } from '$lib/stores/studio';
+	import { generationState, setGenerationBanner, setGenerationDocument } from '$lib/stores/studio';
+	import { roleLabel } from '$lib/studio/presentation';
 	import type {
 		ErrorEvent,
 		GenerationAccepted,
 		GenerationDetail,
 		GenerationDocument,
+		PlanningGenerationSpec,
 		ProgressUpdateEvent,
 		QCCompleteEvent,
 		SectionFailedEvent,
@@ -33,6 +35,8 @@
 		onReset: () => void;
 	}
 
+	const MAX_RECONNECT_ATTEMPTS = 3;
+
 	let { accepted, onReset }: Props = $props();
 
 	let detail = $state<GenerationDetail | null>(null);
@@ -44,27 +48,94 @@
 	let qcSummary = $state<{ passed: number; total: number } | null>(null);
 	let progressUpdate = $state<ProgressUpdateEvent | null>(null);
 	let viewerWarning = $state<string | null>(null);
+	let activeSectionId = $state<string | null>(null);
+	let reconnectAttempts = $state(0);
 	let eventSource: EventSource | null = null;
+	let reconnectTimer: number | null = null;
 	let streamClosedTerminally = false;
 	let streamErrorRecoveryAttempted = false;
 
 	const generationId = $derived(accepted.generation_id);
 	const sectionSlots = $derived(buildSectionSlots(document, plannedSections));
+	const failureMap = $derived(new Map((document?.failed_sections ?? []).map((entry) => [entry.section_id, entry])));
 	const readySectionCount = $derived(
 		sectionSlots.filter((slot) => slot.status === 'ready').length
 	);
 	const failedSectionCount = $derived(
 		sectionSlots.filter((slot) => slot.status === 'failed').length
 	);
-	const streamLabel = $derived(
-		detail?.status === 'completed'
-			? detail.quality_passed === false
-				? 'completed with QC issues'
-				: 'complete'
-			: detail?.status === 'failed'
-				? 'failed'
-				: progressUpdate?.label ?? streamState
-	);
+	const isLive = $derived(detail?.status === 'pending' || detail?.status === 'running');
+	const lessonFormat = $derived(resolveLessonFormat(detail?.planning_spec ?? null));
+	const templateName = $derived(formatTemplateName(detail));
+	const viewerTitle = $derived(document?.subject || detail?.subject || 'Live lesson');
+	const showFullLesson = $derived(detail?.status === 'completed');
+
+	function isStudioPlanningSpec(value: unknown): value is PlanningGenerationSpec {
+		return Boolean(
+			value &&
+				typeof value === 'object' &&
+				'source_brief' in value &&
+				'template_decision' in value
+		);
+	}
+
+	function resolveLessonFormat(spec: GenerationDetail['planning_spec']): string {
+		if (isStudioPlanningSpec(spec)) {
+			const format = spec.source_brief.signals.format;
+			if (format === 'printed-booklet') return 'Printed booklet';
+			if (format === 'screen-based') return 'Screen-based';
+			if (format === 'both') return 'Print + screen';
+		}
+		return 'Live runtime';
+	}
+
+	function formatTemplateName(nextDetail: GenerationDetail | null): string {
+		const templateId = nextDetail?.resolved_template_id ?? nextDetail?.requested_template_id ?? '';
+		if (!templateId) {
+			return 'Template loading';
+		}
+		return templateId
+			.split('-')
+			.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+			.join(' ');
+	}
+
+	function sectionRoleByPosition(position: number): string | null {
+		const spec = detail?.planning_spec;
+		if (!isStudioPlanningSpec(spec)) {
+			return null;
+		}
+		const section = spec.sections.find((entry) => entry.order === position);
+		return section ? roleLabel(section.role) : null;
+	}
+
+	function sectionStatus(slot: (typeof sectionSlots)[number]): 'complete' | 'active' | 'waiting' | 'failed' {
+		if (slot.status === 'failed') {
+			return 'failed';
+		}
+		if (slot.status === 'ready') {
+			return 'complete';
+		}
+		if (slot.section_id === activeSectionId) {
+			return 'active';
+		}
+		return 'waiting';
+	}
+
+	function statusLabel(slot: (typeof sectionSlots)[number]): string {
+		const status = sectionStatus(slot);
+		if (status === 'complete') return 'Complete';
+		if (status === 'active') return progressUpdate?.label ?? 'Generating...';
+		if (status === 'failed') return 'Failed';
+		return 'Waiting';
+	}
+
+	function clearReconnectTimer() {
+		if (reconnectTimer !== null) {
+			window.clearTimeout(reconnectTimer);
+			reconnectTimer = null;
+		}
+	}
 
 	function closeStream(source: EventSource | null = eventSource) {
 		source?.close();
@@ -113,6 +184,8 @@
 
 		streamClosedTerminally = true;
 		streamState = 'complete';
+		activeSectionId = null;
+		clearReconnectTimer();
 		setGenerationBanner(null);
 		closeStream(source);
 		await refresh(id);
@@ -146,6 +219,7 @@
 		if (detail?.status === 'completed' || detail?.status === 'failed') {
 			streamClosedTerminally = true;
 			streamState = 'complete';
+			activeSectionId = null;
 			setGenerationBanner(null);
 			closeStream(source);
 			if (detail.status === 'failed') {
@@ -157,14 +231,65 @@
 		return false;
 	}
 
+	function scheduleReconnect(source: EventSource, id: string) {
+		if (source !== eventSource) {
+			return;
+		}
+
+		closeStream(source);
+		clearReconnectTimer();
+
+		if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+			streamState = 'complete';
+			setGenerationBanner(
+				'Connection lost. Generation may still complete in the background. Check the dashboard history if this lesson does not reopen.'
+			);
+			return;
+		}
+
+		reconnectAttempts += 1;
+		streamState = 'reconnecting';
+		const delayMs = 600 * 2 ** (reconnectAttempts - 1);
+		setGenerationBanner(
+			`Connection lost. Reconnecting to the live generation stream (attempt ${reconnectAttempts} of ${MAX_RECONNECT_ATTEMPTS})...`
+		);
+
+		reconnectTimer = window.setTimeout(async () => {
+			try {
+				await refresh(id);
+				if (detail?.status === 'completed' || detail?.status === 'failed') {
+					streamState = 'complete';
+					setGenerationBanner(null);
+					return;
+				}
+			} catch {
+				// Keep the last known state visible and continue with reconnect.
+			}
+
+			connectStream(id);
+		}, delayMs);
+	}
+
 	function connectStream(id: string) {
+		clearReconnectTimer();
 		closeStream();
 		const source = new EventSource(buildGenerationEventsUrl(id));
 		eventSource = source;
 		streamClosedTerminally = false;
 		streamErrorRecoveryAttempted = false;
-		streamState = 'connected';
-		setGenerationBanner('Live generation connected.');
+		streamState = reconnectAttempts > 0 ? 'reconnecting' : 'connected';
+		setGenerationBanner(reconnectAttempts > 0 ? 'Reconnecting to live generation...' : 'Live generation connected.');
+
+		source.addEventListener('open', () => {
+			if (source !== eventSource) return;
+			streamState = 'connected';
+			if (reconnectAttempts > 0) {
+				setGenerationBanner('Live generation reconnected.');
+			} else {
+				setGenerationBanner('Live generation connected.');
+			}
+			reconnectAttempts = 0;
+		});
 
 		source.addEventListener('pipeline_start', (event) => {
 			if (source !== eventSource) return;
@@ -175,11 +300,15 @@
 		source.addEventListener('progress_update', (event) => {
 			if (source !== eventSource) return;
 			progressUpdate = JSON.parse((event as MessageEvent).data) as ProgressUpdateEvent;
+			if (progressUpdate.section_id) {
+				activeSectionId = progressUpdate.section_id;
+			}
 		});
 
 		source.addEventListener('section_started', (event) => {
 			if (source !== eventSource || !document) return;
 			const payload = JSON.parse((event as MessageEvent).data) as SectionStartedEvent;
+			activeSectionId = payload.section_id;
 			syncDocument(applySectionStarted(document, payload));
 		});
 
@@ -187,6 +316,9 @@
 			if (source !== eventSource || !document) return;
 			const payload = JSON.parse((event as MessageEvent).data) as SectionReadyEvent;
 			plannedSections = payload.total_sections;
+			if (activeSectionId === payload.section_id) {
+				activeSectionId = null;
+			}
 			const result = applySectionReady(document, payload);
 			syncDocument(result.document);
 			if (result.warning) {
@@ -197,6 +329,9 @@
 		source.addEventListener('section_failed', (event) => {
 			if (source !== eventSource || !document) return;
 			const payload = JSON.parse((event as MessageEvent).data) as SectionFailedEvent;
+			if (activeSectionId === payload.section_id) {
+				activeSectionId = null;
+			}
 			syncDocument(applySectionFailed(document, payload));
 		});
 
@@ -232,8 +367,7 @@
 				return;
 			}
 
-			streamState = 'reconnecting';
-			setGenerationBanner('Reconnecting to the live generation stream...');
+			scheduleReconnect(source, id);
 		});
 	}
 
@@ -244,9 +378,12 @@
 		plannedSections = null;
 		progressUpdate = null;
 		viewerWarning = null;
+		activeSectionId = null;
+		reconnectAttempts = 0;
 		streamClosedTerminally = false;
 		streamErrorRecoveryAttempted = false;
 		setGenerationBanner(null);
+		clearReconnectTimer();
 		closeStream();
 
 		try {
@@ -277,51 +414,45 @@
 
 		void loadGeneration(generationId);
 		return () => {
+			clearReconnectTimer();
 			closeStream();
 			setGenerationBanner(null);
 		};
 	});
 
 	onDestroy(() => {
+		clearReconnectTimer();
 		closeStream();
 		setGenerationBanner(null);
 	});
 </script>
 
 <section class="generation-shell">
-	<div class="generation-header">
+	<header class="generation-header">
 		<div>
 			<p class="eyebrow">Generating</p>
-			<h2>Lesson in progress</h2>
+			<h2>Generation stays inside the studio</h2>
 			<p class="lede">
-				The committed plan is now driving the live Lectio generation stream. Sections will appear
-				here as soon as they are ready.
+				Read completed sections while the remaining ones are still writing. Failures stay local to
+				the section that hit trouble.
 			</p>
 		</div>
 		<div class="header-actions">
-			<a class="open-link" href={`/textbook/${generationId}`}>Open full lesson</a>
+			{#if showFullLesson}
+				<a class="open-link" href={`/textbook/${generationId}`}>View full lesson -></a>
+			{/if}
 			<button class="secondary-button" type="button" onclick={onReset}>Create another lesson</button>
 		</div>
-	</div>
+	</header>
 
-	<div class="status-grid">
-		<div class="status-card">
-			<span class="status-label">Status</span>
-			<strong>{streamLabel}</strong>
+	{#if $generationState.connectionBanner}
+		<div class="notice notice-info" role="status">
+			<p>{$generationState.connectionBanner}</p>
+			{#if streamState === 'complete' && !showFullLesson}
+				<a href="/dashboard" class="dashboard-link">Open dashboard history</a>
+			{/if}
 		</div>
-		<div class="status-card">
-			<span class="status-label">Sections ready</span>
-			<strong>{readySectionCount}{plannedSections ? ` / ${plannedSections}` : ''}</strong>
-		</div>
-		<div class="status-card">
-			<span class="status-label">Failed sections</span>
-			<strong>{failedSectionCount}</strong>
-		</div>
-		<div class="status-card">
-			<span class="status-label">QC</span>
-			<strong>{qcSummary ? `${qcSummary.passed} / ${qcSummary.total}` : 'Pending'}</strong>
-		</div>
-	</div>
+	{/if}
 
 	{#if viewerWarning}
 		<p class="notice notice-warn">{viewerWarning}</p>
@@ -329,16 +460,124 @@
 
 	{#if error}
 		<p class="notice notice-error">{error}</p>
-	{:else if loading}
+	{/if}
+
+	{#if loading}
 		<div class="loading-panel" aria-busy="true">
-			<div class="skeleton-line short"></div>
-			<div class="skeleton-line"></div>
-			<div class="skeleton-line"></div>
+			<div class="skeleton-sidebar"></div>
+			<div class="skeleton-viewer"></div>
 		</div>
-	{:else if document}
-		<LectioDocumentView {document} sectionSlots={sectionSlots} />
 	{:else}
-		<p class="notice">Waiting for the first generation update.</p>
+		<div class="workspace">
+			<aside class="progress-rail">
+				<section class="rail-card">
+					<p class="rail-label">Progress</p>
+					<div class="progress-list">
+						<div class="progress-row">
+							<span class="progress-dot progress-dot-complete"></span>
+							<div>
+								<strong>Planning</strong>
+								<p>Done</p>
+							</div>
+						</div>
+
+						{#each sectionSlots as slot}
+							<div class="progress-row">
+								<span class={`progress-dot progress-dot-${sectionStatus(slot)}`}></span>
+								<div>
+									<strong>Section {slot.position}</strong>
+									<p>{statusLabel(slot)}</p>
+								</div>
+							</div>
+						{/each}
+					</div>
+				</section>
+
+				<section class="rail-card">
+					<p class="rail-label">Lesson</p>
+					<div class="meta-list">
+						<div>
+							<span>Template</span>
+							<strong>{templateName}</strong>
+						</div>
+						<div>
+							<span>Sections</span>
+							<strong>{plannedSections ?? sectionSlots.length ?? 0}</strong>
+						</div>
+						<div>
+							<span>Format</span>
+							<strong>{lessonFormat}</strong>
+						</div>
+						<div>
+							<span>QC</span>
+							<strong>{qcSummary ? `${qcSummary.passed} / ${qcSummary.total}` : 'Pending'}</strong>
+						</div>
+						<div>
+							<span>Ready</span>
+							<strong>{readySectionCount}</strong>
+						</div>
+						<div>
+							<span>Failed</span>
+							<strong>{failedSectionCount}</strong>
+						</div>
+					</div>
+				</section>
+			</aside>
+
+			<section class="viewer">
+				<div class="viewer-header">
+					<div>
+						<p class="viewer-label">Live workspace</p>
+						<h3>{viewerTitle}</h3>
+					</div>
+					{#if isLive}
+						<span class="live-badge">Live</span>
+					{:else}
+						<span class="complete-badge">{detail?.status === 'failed' ? 'Stopped' : 'Complete'}</span>
+					{/if}
+				</div>
+
+				<div class="viewer-sections">
+					{#if sectionSlots.length}
+						{#each sectionSlots as slot}
+							{@const slotStatus = sectionStatus(slot)}
+							{@const role = sectionRoleByPosition(slot.position)}
+							<article class={`viewer-section viewer-section-${slotStatus}`}>
+								<div class="viewer-section-label">
+									Section {slot.position}{role ? ` · ${role}` : ''}
+								</div>
+								<h4>{slot.title}</h4>
+
+								{#if slotStatus === 'complete' && slot.section}
+									<p>{buildSectionPreview(slot.section)}</p>
+								{:else if slotStatus === 'active'}
+									<div class="active-row">
+										<span class="active-dot"></span>
+										<p>{progressUpdate?.label ?? 'Writing section content...'}</p>
+									</div>
+								{:else if slotStatus === 'failed'}
+									<p>
+										{failureMap.get(slot.section_id)?.error_summary ??
+											'This section could not be generated.'}
+									</p>
+									{#if failureMap.get(slot.section_id)?.can_retry}
+										<small>Retry controls are not in phase 1, but the rest of the lesson stays readable.</small>
+									{/if}
+								{:else}
+									<p>Waiting to start...</p>
+								{/if}
+							</article>
+						{/each}
+					{:else}
+						<article class="viewer-section viewer-section-waiting">
+							<div class="viewer-section-label">Section stream</div>
+							<h4>Waiting for the first section</h4>
+							<p>The generation worker has not published the first section yet.</p>
+						</article>
+					{/if}
+				</div>
+			</section>
+		</div>
 	{/if}
 </section>
 
@@ -349,7 +588,9 @@
 	}
 
 	.generation-header,
-	.header-actions {
+	.header-actions,
+	.viewer-header,
+	.active-row {
 		display: flex;
 		justify-content: space-between;
 		gap: 1rem;
@@ -357,75 +598,38 @@
 	}
 
 	.eyebrow,
-	.status-label {
+	.rail-label,
+	.viewer-label,
+	.viewer-section-label {
 		margin: 0;
 		font-size: 0.76rem;
-		letter-spacing: 0.14em;
+		font-weight: 700;
+		letter-spacing: 0.12em;
 		text-transform: uppercase;
 		color: #6b7c88;
 	}
 
 	h2,
+	h3,
+	h4,
 	p {
 		margin: 0;
 	}
 
 	.lede {
-		margin-top: 0.4rem;
-		max-width: 58ch;
+		max-width: 60ch;
 		color: #625a50;
 		line-height: 1.6;
 	}
 
-	.header-actions {
-		align-items: center;
-	}
-
-	.status-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-		gap: 0.8rem;
-	}
-
-	.status-card {
-		display: grid;
-		gap: 0.35rem;
-		border: 0.5px solid rgba(36, 52, 63, 0.12);
-		border-radius: 1.1rem;
-		background: rgba(255, 255, 255, 0.82);
-		padding: 0.9rem;
-	}
-
-	.status-card strong {
-		color: #1d1b17;
-		font-size: 1.05rem;
-		text-transform: capitalize;
-	}
-
-	.notice,
-	.loading-panel {
-		border-radius: 1rem;
-		padding: 0.95rem 1rem;
-		background: rgba(255, 255, 255, 0.82);
-	}
-
-	.notice-warn {
-		background: rgba(255, 248, 225, 0.92);
-		color: #7f5d13;
-	}
-
-	.notice-error {
-		background: rgba(255, 242, 238, 0.94);
-		color: #7d3524;
-	}
-
 	.open-link,
-	.secondary-button {
+	.secondary-button,
+	.dashboard-link {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
 		border-radius: 0.95rem;
-		padding: 0.72rem 1.15rem;
+		padding: 0.72rem 1.1rem;
 		font: inherit;
 		font-weight: 700;
 		text-decoration: none;
@@ -436,28 +640,217 @@
 		color: #e1f5ee;
 	}
 
-	.secondary-button {
+	.secondary-button,
+	.dashboard-link {
 		border: none;
-		background: rgba(36, 67, 106, 0.08);
-		color: #24436a;
+		background: #f1ece4;
+		color: #4f5c65;
 		cursor: pointer;
 	}
 
-	.skeleton-line {
-		height: 0.8rem;
-		border-radius: 999px;
-		background: linear-gradient(
-			90deg,
-			rgba(229, 224, 214, 0.7),
-			rgba(247, 243, 236, 0.95),
-			rgba(229, 224, 214, 0.7)
-		);
+	.notice,
+	.loading-panel {
+		border-radius: 1rem;
+		padding: 0.95rem 1rem;
+	}
+
+	.notice-info {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		align-items: center;
+		background: #eef8f4;
+		color: #0b6a52;
+	}
+
+	.notice-warn {
+		background: #fff8e4;
+		color: #805d16;
+	}
+
+	.notice-error {
+		background: #fff2ee;
+		color: #7d3524;
+	}
+
+	.loading-panel,
+	.workspace {
+		display: grid;
+		grid-template-columns: 220px minmax(0, 1fr);
+		gap: 1rem;
+	}
+
+	.skeleton-sidebar,
+	.skeleton-viewer {
+		border-radius: 1.1rem;
+		background: linear-gradient(90deg, #ece4d6, #f8f4ec, #ece4d6);
 		background-size: 200% 100%;
 		animation: shimmer 1.25s linear infinite;
 	}
 
-	.skeleton-line.short {
-		width: 48%;
+	.skeleton-sidebar {
+		min-height: 18rem;
+	}
+
+	.skeleton-viewer {
+		min-height: 24rem;
+	}
+
+	.progress-rail {
+		display: grid;
+		gap: 0.8rem;
+		align-content: start;
+	}
+
+	.rail-card,
+	.viewer {
+		display: grid;
+		gap: 0.9rem;
+		border: 0.5px solid rgba(36, 52, 63, 0.12);
+		border-radius: 1.25rem;
+		background: #fffdf9;
+		padding: 1rem;
+	}
+
+	.progress-list,
+	.meta-list,
+	.viewer-sections {
+		display: grid;
+		gap: 0.7rem;
+	}
+
+	.progress-row {
+		display: flex;
+		gap: 0.65rem;
+		align-items: start;
+	}
+
+	.progress-row strong,
+	.meta-list strong,
+	.viewer h4 {
+		color: #1d1b17;
+	}
+
+	.progress-row p,
+	.meta-list span,
+	.viewer-section p,
+	.viewer-section small {
+		color: #625a50;
+		line-height: 1.55;
+	}
+
+	.progress-dot,
+	.active-dot {
+		flex-shrink: 0;
+		border-radius: 999px;
+	}
+
+	.progress-dot {
+		width: 0.65rem;
+		height: 0.65rem;
+		margin-top: 0.35rem;
+		background: #c8beb0;
+	}
+
+	.progress-dot-complete {
+		background: #1d9e75;
+	}
+
+	.progress-dot-active {
+		background: #1d9e75;
+		animation: pulse 1.2s ease-in-out infinite;
+	}
+
+	.progress-dot-waiting {
+		background: #d6cdc1;
+	}
+
+	.progress-dot-failed {
+		background: #c8822a;
+	}
+
+	.meta-list {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.meta-list div {
+		display: grid;
+		gap: 0.2rem;
+	}
+
+	.viewer-header {
+		align-items: center;
+		border-bottom: 0.5px solid rgba(36, 52, 63, 0.08);
+		padding-bottom: 0.9rem;
+	}
+
+	.live-badge,
+	.complete-badge {
+		display: inline-flex;
+		align-items: center;
+		border-radius: 999px;
+		padding: 0.36rem 0.72rem;
+		font-size: 0.78rem;
+		font-weight: 700;
+	}
+
+	.live-badge {
+		background: #e1f5ee;
+		color: #085041;
+	}
+
+	.complete-badge {
+		background: #f1ece4;
+		color: #4f5c65;
+	}
+
+	.viewer-section {
+		display: grid;
+		gap: 0.4rem;
+		border-radius: 1rem;
+		padding: 0.95rem 1rem;
+		border: 0.5px solid rgba(36, 52, 63, 0.08);
+	}
+
+	.viewer-section-complete {
+		background: #fffdf9;
+	}
+
+	.viewer-section-active {
+		background: #eef8f4;
+		border-color: rgba(29, 158, 117, 0.24);
+	}
+
+	.viewer-section-waiting {
+		background: #f6f1e8;
+		opacity: 0.72;
+	}
+
+	.viewer-section-failed {
+		background: #fff5e8;
+		border-color: rgba(186, 117, 23, 0.22);
+	}
+
+	.active-row {
+		justify-content: flex-start;
+		align-items: center;
+	}
+
+	.active-dot {
+		width: 0.55rem;
+		height: 0.55rem;
+		background: #1d9e75;
+		animation: pulse 1.2s ease-in-out infinite;
+	}
+
+	@keyframes pulse {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.3;
+		}
 	}
 
 	@keyframes shimmer {
@@ -469,11 +862,33 @@
 		}
 	}
 
+	@media (prefers-reduced-motion: reduce) {
+		.progress-dot-active,
+		.active-dot,
+		.skeleton-sidebar,
+		.skeleton-viewer {
+			animation: none;
+		}
+	}
+
+	@media (max-width: 900px) {
+		.loading-panel,
+		.workspace {
+			grid-template-columns: 1fr;
+		}
+	}
+
 	@media (max-width: 720px) {
 		.generation-header,
-		.header-actions {
+		.header-actions,
+		.notice-info,
+		.viewer-header {
 			flex-direction: column;
 			align-items: stretch;
+		}
+
+		.header-actions > * {
+			width: 100%;
 		}
 	}
 </style>

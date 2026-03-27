@@ -12,6 +12,17 @@ from planning.models import (
 )
 
 
+def _fallback_components(
+    contract: PlanningTemplateContract,
+    role: str,
+    defaults: tuple[str, ...],
+) -> list[str]:
+    if contract.section_role_defaults.get(role):
+        return list(contract.section_role_defaults[role])
+    pool = {*(contract.always_present or []), *(contract.available_components or [])}
+    return [component for component in defaults if component in pool]
+
+
 def build_fallback_spec(
     *,
     brief: StudioBriefRequest,
@@ -45,7 +56,11 @@ def build_fallback_spec(
                 role="intro",
                 title="Introduction",
                 objective="Set the lesson up clearly.",
-                selected_components=["hook-hero"],
+                selected_components=_fallback_components(
+                    contract,
+                    "intro",
+                    ("hook-hero", "callout-block", "key-fact"),
+                ),
                 rationale="Starts with a focused introduction.",
             ),
             PlanningSectionPlan(
@@ -54,7 +69,11 @@ def build_fallback_spec(
                 role="explain",
                 title="Explanation",
                 objective="Explain the central idea plainly.",
-                selected_components=["explanation-block"],
+                selected_components=_fallback_components(
+                    contract,
+                    "explain",
+                    ("explanation-block", "definition-card", "worked-example-card"),
+                ),
                 rationale="Provides the core explanation in the middle of the lesson.",
             ),
             PlanningSectionPlan(
@@ -63,7 +82,11 @@ def build_fallback_spec(
                 role="summary",
                 title="Summary",
                 objective="Close the lesson and point to what comes next.",
-                selected_components=["what-next-bridge"],
+                selected_components=_fallback_components(
+                    contract,
+                    "summary",
+                    ("summary-block", "what-next-bridge", "reflection-prompt"),
+                ),
                 rationale="Closes the arc cleanly.",
             ),
         ],

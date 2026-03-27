@@ -1,25 +1,15 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { briefDraft, emptyDraft, returnToIdle, setContracts } from '$lib/stores/studio';
+import { contracts, editedSpec, emptyPlanDraft, planDraft, planningMs } from '$lib/stores/studio';
+import type { PlanningGenerationSpec, StudioTemplateContract } from '$lib/types';
 
-const { commitPlan, listContracts, streamPlan } = vi.hoisted(() => ({
-	commitPlan: vi.fn(),
-	listContracts: vi.fn(),
-	streamPlan: vi.fn()
-}));
+import PlanReview from './PlanReview.svelte';
 
-vi.mock('$lib/api/brief', () => ({
-	commitPlan,
-	listContracts,
-	streamPlan
-}));
-
-import TeacherStudioFlow from './TeacherStudioFlow.svelte';
-
-function buildContracts() {
+function buildContracts(): StudioTemplateContract[] {
 	return [
 		{
 			id: 'guided-concept-path',
@@ -101,11 +91,50 @@ function buildContracts() {
 			allowed_presets: ['blue-classroom'],
 			why_this_template_exists: '',
 			generation_guidance: {}
+		},
+		{
+			id: 'classification',
+			name: 'Classification',
+			family: 'classification',
+			intent: 'organize-knowledge',
+			tagline: 'Sort ideas into a crisp set of distinctions.',
+			reading_style: 'comparison-led',
+			tags: [],
+			best_for: [],
+			not_ideal_for: [],
+			learner_fit: [],
+			subjects: [],
+			interaction_level: 'medium',
+			lesson_flow: [],
+			required_components: ['hook-hero'],
+			optional_components: [],
+			always_present: ['section-header', 'hook-hero'],
+			available_components: ['section-header', 'hook-hero', 'comparison-grid'],
+			component_budget: {},
+			max_per_section: {},
+			default_behaviours: {},
+			section_role_defaults: {
+				intro: ['hook-hero'],
+				compare: ['comparison-grid'],
+				summary: []
+			},
+			signal_affinity: {
+				topic_type: {},
+				learning_outcome: {},
+				class_style: {},
+				format: {}
+			},
+			layout_notes: [],
+			responsive_rules: [],
+			print_rules: [],
+			allowed_presets: ['blue-classroom'],
+			why_this_template_exists: '',
+			generation_guidance: {}
 		}
 	];
 }
 
-function buildSpec() {
+function buildSpec(): PlanningGenerationSpec {
 	return {
 		id: 'plan-1',
 		template_id: 'guided-concept-path',
@@ -119,12 +148,12 @@ function buildSpec() {
 				{
 					template_id: 'procedure',
 					template_name: 'Procedure',
-					fit_score: 0.74,
-					why_not_chosen: 'More procedural than this lesson needs.'
+					fit_score: 0.73,
+					why_not_chosen: 'More procedural than this brief needs.'
 				}
 			]
 		},
-		lesson_rationale: 'Good for first exposure.',
+		lesson_rationale: 'This structure balances explanation and practice.',
 		directives: {
 			tone_profile: 'supportive',
 			reading_level: 'standard',
@@ -138,26 +167,32 @@ function buildSpec() {
 			{
 				id: 'section-1',
 				order: 1,
-				role: 'process',
-				title: 'Show the method',
-				objective: 'Teach the sequence.',
-				focus_note: 'Lead with the anchor question.',
-				selected_components: ['explanation-block'],
-				visual_policy: null,
+				role: 'practice',
+				title: 'Try the method',
+				objective: 'Apply the sequence.',
+				focus_note: null,
+				selected_components: ['practice-stack', 'diagram-block'],
+				visual_policy: {
+					required: true,
+					intent: 'demonstrate_process',
+					mode: 'image',
+					goal: 'Show the steps clearly.',
+					style_notes: 'Educational diagram.'
+				},
 				generation_notes: null,
-				rationale: 'Process first.'
+				rationale: 'Practice follows explanation.'
 			}
 		],
 		warning: null,
 		source_brief_id: 'brief-1',
 		source_brief: {
-			intent: 'Teach fractions',
-			audience: 'Year 5',
+			intent: 'Teach long division',
+			audience: 'Year 6',
 			prior_knowledge: '',
 			extra_context: '',
 			signals: {
-				topic_type: 'concept',
-				learning_outcome: 'understand-why',
+				topic_type: 'process',
+				learning_outcome: 'be-able-to-do',
 				class_style: [],
 				format: 'both'
 			},
@@ -171,79 +206,57 @@ function buildSpec() {
 			constraints: {
 				more_practice: false,
 				keep_short: false,
-				use_visuals: false,
+				use_visuals: true,
 				print_first: false
 			}
 		},
-		status: 'draft'
+		status: 'reviewed'
 	};
 }
 
-describe('TeacherStudioFlow', () => {
+describe('PlanReview', () => {
 	beforeEach(() => {
-		briefDraft.set(emptyDraft());
-		returnToIdle();
-		setContracts([]);
-		listContracts.mockResolvedValue(buildContracts());
-		commitPlan.mockReset();
+		contracts.set(buildContracts());
+		editedSpec.set(buildSpec());
+		planDraft.set({
+			...emptyPlanDraft(),
+			template_decision: buildSpec().template_decision
+		});
+		planningMs.set(740);
 	});
 
 	afterEach(() => {
 		cleanup();
-		listContracts.mockReset();
-		streamPlan.mockReset();
 	});
 
-	it('moves from intent capture into review and supports client-side template swap', async () => {
-		let releasePlan!: () => void;
-		const planGate = new Promise<void>((resolve) => {
-			releasePlan = resolve;
+	it('shows only ranked alternatives rather than the full catalog', () => {
+		render(PlanReview, {
+			props: {
+				onBack: vi.fn(),
+				onCommit: vi.fn(),
+				onTemplateSwap: vi.fn()
+			}
 		});
 
-		streamPlan.mockImplementation(async function* () {
-			yield {
-				event: 'template_selected',
-				data: {
-					template_decision: buildSpec().template_decision,
-					lesson_rationale: 'Good for first exposure.',
-					warning: null
-				}
-			};
-			yield {
-				event: 'section_planned',
-				data: {
-					section: buildSpec().sections[0]
-				}
-			};
-			await planGate;
-			yield {
-				event: 'plan_complete',
-				data: {
-					spec: buildSpec()
-				}
-			};
+		expect(screen.getByRole('button', { name: /procedure/i })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: /classification/i })).toBeNull();
+	});
+
+	it('opens section details and persists focus-note edits into the shared spec', async () => {
+		render(PlanReview, {
+			props: {
+				onBack: vi.fn(),
+				onCommit: vi.fn(),
+				onTemplateSwap: vi.fn()
+			}
 		});
 
-		render(TeacherStudioFlow);
-
-		await fireEvent.input(screen.getByLabelText(/what do you want to teach\?/i), {
-			target: { value: 'Teach fractions' }
+		await fireEvent.click(screen.getByRole('button', { name: /details/i }));
+		await fireEvent.input(screen.getByLabelText(/section 1 focus note/i), {
+			target: { value: 'Keep the example concrete.' }
 		});
-		await fireEvent.input(screen.getByLabelText(/who is this for\?/i), {
-			target: { value: 'Year 5' }
-		});
-		await fireEvent.click(screen.getByRole('button', { name: /build lesson plan/i }));
 
-		expect(screen.getByText(/building the lesson structure in view/i)).toBeTruthy();
-
-		releasePlan();
-
-		await waitFor(() => expect(screen.getByText(/approve the plan before generation/i)).toBeTruthy());
-		expect(screen.getByDisplayValue('Show the method')).toBeTruthy();
-
-		await fireEvent.click(screen.getByRole('button', { name: /procedure/i }));
-
-		await waitFor(() => expect(screen.getByText(/template updated during review/i)).toBeTruthy());
-		expect(screen.getByText(/process steps/i)).toBeTruthy();
+		expect(get(editedSpec)?.sections[0].focus_note).toBe('Keep the example concrete.');
+		expect(screen.getByText(/image diagram/i)).toBeTruthy();
 	});
 });
