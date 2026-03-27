@@ -1,12 +1,14 @@
 """
 Prompt builders for the diagram_generator node.
 
-System prompt: fixed per style context (SVG rules, style instructions).
+System prompt: fixed per style context (structured spec rules, style instructions).
 User prompt: variable per section (title, hook, explanation excerpt).
 
 Style maps translate Lectio preset semantics into diagram instructions.
 The pipeline never gets hex values from presets -- it gets semantic
 descriptors (palette, surface_style) and translates them here.
+
+Output is a structured DiagramSpec (JSON) rendered client-side, not raw SVG.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from pipeline.state import StyleContext
 
 
 # -- Style translation maps ---------------------------------------------------
-# These translate Lectio preset semantics into SVG diagram instructions.
+# These translate Lectio preset semantics into diagram spec instructions.
 
 SURFACE_TO_DIAGRAM_STYLE: dict[str, str] = {
     "crisp": "clean lines, sharp edges, professional weight strokes, minimal decoration",
@@ -37,9 +39,9 @@ TYPOGRAPHY_TO_LABELS: dict[str, str] = {
 }
 
 COMPLEXITY_TO_DETAIL: dict[str, str] = {
-    "simplified": "3-4 elements max, large labels, no sub-labels, no arrows unless essential",
-    "standard": "up to 6 labelled elements, clear hierarchy, arrows for relationships",
-    "detailed": "up to 8 elements, can include sub-labels, formal notation where appropriate",
+    "simplified": "3-4 elements max, large labels, no sub-labels",
+    "standard": "up to 6 labelled elements, clear hierarchy",
+    "detailed": "up to 8 elements, can include sub-labels",
 }
 
 
@@ -63,21 +65,33 @@ Complexity: {detail}"""
 def build_diagram_system_prompt(ctx: StyleContext) -> str:
     style_instruction = build_diagram_style_instruction(ctx)
 
-    return f"""You generate SVG diagrams for educational content.
+    return f"""You design diagrams for educational content by outputting structured JSON specs.
+The specs are rendered client-side — you do NOT generate SVG or HTML.
 
 {style_instruction}
 
-SVG rules:
-- viewBox="0 0 600 400" always
-- xmlns="http://www.w3.org/2000/svg" always
-- No external resources, no <image> tags, no CSS classes
-- All styling via inline attributes (stroke, fill, font-size)
-- Text must be readable at 300px wide (minimum 11px font-size)
-- Caption: max 60 words, plain language
-- alt_text: max 80 words, describes the diagram for screen readers
+Diagram types:
+- "process-flow": steps connected by arrows (horizontal or vertical)
+- "hierarchy": parent-child tree structure
+- "compare": side-by-side comparison layout
+- "cycle": circular process with repeating steps
+- "concept-map": interconnected concepts with labeled relationships
+
+Element placement:
+- Use a 600×400 coordinate space (x: 0-600, y: 0-400)
+- Default element size: 120×60. Adjust for label length.
+- Shapes: "rect", "circle", "diamond", "rounded-rect"
+- Set emphasis=true for the most important element(s)
+
+Connections:
+- Use from_id/to_id referencing element ids
+- Styles: "solid" for primary flow, "dashed" for optional/conditional, "arrow" (default) for directed
+
+Caption: max 60 words, plain language.
+alt_text: max 80 words, describes the diagram for screen readers.
 
 Output a JSON object with exactly these fields:
-  svg_content, caption, alt_text
+  spec (object with type, title, elements, connections, layout_hint), caption, alt_text
 
 Output only valid JSON. No preamble, no markdown fences."""
 
@@ -105,4 +119,5 @@ Explanation (first 200 words): {explanation_excerpt[:800]}
 Diagram slot: {diagram_slot}
 {details}
 
-Generate a diagram that makes the core concept visually clear."""
+Generate a structured diagram spec that makes the core concept visually clear.
+Keep to 3-6 elements for clarity. Use meaningful connections."""

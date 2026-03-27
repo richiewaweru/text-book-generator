@@ -75,6 +75,13 @@ def _outline_from_seed(state: TextbookPipelineState) -> list[SectionPlan]:
     return outline
 
 
+def _outline_from_request(state: TextbookPipelineState) -> list[SectionPlan]:
+    supplied = state.request.section_plans or []
+    outline = [SectionPlan.model_validate(plan) for plan in supplied]
+    outline.sort(key=lambda item: (item.position, item.section_id))
+    return outline
+
+
 def _publish_section_titles(
     generation_id: str,
     sections: list[SectionPlan],
@@ -117,6 +124,15 @@ async def curriculum_planner(
         }
 
     style_context = _build_style_context(state)
+
+    if state.request.section_plans:
+        outline = _outline_from_request(state)
+        _publish_section_titles(state.request.generation_id or "", outline)
+        return {
+            "curriculum_outline": outline,
+            "style_context": style_context,
+            "completed_nodes": ["curriculum_planner"],
+        }
 
     if state.request.seed_document is not None and state.request.seed_document.sections:
         outline = _outline_from_seed(state)

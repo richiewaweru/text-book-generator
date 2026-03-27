@@ -56,6 +56,42 @@ export interface ProfileCreateRequest {
 	learner_description: string;
 }
 
+export interface BriefRequest {
+	intent: string;
+	audience: string;
+	extra_context: string;
+}
+
+export interface OutlineSection {
+	section_id: string;
+	position: number;
+	title: string;
+	focus: string;
+}
+
+export interface SectionPlan extends OutlineSection {
+	role: string | null;
+	required_components: string[];
+	optional_components: string[];
+	interaction_policy: string | null;
+	diagram_policy: string | null;
+	enrichment_enabled: boolean;
+	continuity_notes: string | null;
+}
+
+export interface GenerationSpec {
+	template_id: string;
+	preset_id: string;
+	mode: GenerationMode;
+	section_count: number;
+	sections: SectionPlan[];
+	warning: string | null;
+	rationale: string;
+	source_brief: BriefRequest;
+}
+
+export type BriefResponse = GenerationSpec;
+
 export interface GenerationRequest {
 	subject: string;
 	context: string;
@@ -63,9 +99,13 @@ export interface GenerationRequest {
 	template_id: string;
 	preset_id: string;
 	section_count?: number;
+	generation_spec?: GenerationSpec | null;
 }
 
 export interface EnhanceGenerationRequest {
+	scope?: 'document' | 'section' | 'component';
+	section_id?: string;
+	component?: string;
 	mode: Exclude<GenerationMode, 'draft'>;
 	note?: string;
 }
@@ -77,6 +117,7 @@ export interface GenerationAccepted {
 	source_generation_id?: string;
 	events_url: string;
 	document_url: string;
+	report_url?: string;
 }
 
 export interface GenerationHistoryItem {
@@ -118,6 +159,7 @@ export interface GenerationDetail {
 	created_at: string | null;
 	completed_at: string | null;
 	document_path: string | null;
+	planning_spec: GenerationSpec | null;
 }
 
 export interface PipelineSectionManifestItem {
@@ -242,10 +284,29 @@ export interface QCCompleteEvent {
 	total: number;
 }
 
+export type ProgressUpdateStage =
+	| 'planning'
+	| 'generating_section'
+	| 'generating_diagram'
+	| 'checking_quality'
+	| 'repairing'
+	| 'finalizing'
+	| 'complete'
+	| 'failed';
+
+export interface ProgressUpdateEvent {
+	type: 'progress_update';
+	generation_id: string;
+	stage: ProgressUpdateStage;
+	label: string;
+	section_id?: string | null;
+}
+
 export interface CompleteEvent {
 	type: 'complete';
 	generation_id: string;
 	document_url?: string;
+	report_url?: string;
 	completed_at: string;
 }
 
@@ -253,6 +314,7 @@ export interface ErrorEvent {
 	type: 'error';
 	generation_id: string;
 	message: string;
+	report_url?: string;
 	completed_at: string;
 }
 
@@ -262,5 +324,6 @@ export type GenerationStreamEvent =
 	| SectionReadyEvent
 	| SectionFailedEvent
 	| QCCompleteEvent
+	| ProgressUpdateEvent
 	| CompleteEvent
 	| ErrorEvent;

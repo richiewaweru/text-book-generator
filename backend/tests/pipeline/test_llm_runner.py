@@ -128,7 +128,7 @@ async def test_retry_429_honors_retry_after_header() -> None:
 async def test_run_llm_times_out_calls() -> None:
     agent = MagicMock()
 
-    async def slow_run(*, user_prompt: str):
+    async def slow_run(*, user_prompt: str, **kwargs):
         _ = user_prompt
         await asyncio.sleep(0.05)
         return SimpleNamespace(usage=SimpleNamespace(input_tokens=1, output_tokens=1))
@@ -152,7 +152,7 @@ async def test_draft_concurrency_cap_limits_parallel_runs() -> None:
     peak = 0
     lock = asyncio.Lock()
 
-    async def run(*, user_prompt: str):
+    async def run(*, user_prompt: str, **kwargs):
         nonlocal current, peak
         _ = user_prompt
         async with lock:

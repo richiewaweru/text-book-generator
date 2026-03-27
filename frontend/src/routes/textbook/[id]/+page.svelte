@@ -21,6 +21,7 @@
 		GenerationDetail,
 		GenerationDocument,
 		QCCompleteEvent,
+		ProgressUpdateEvent,
 		SectionFailedEvent,
 		SectionReadyEvent,
 		SectionStartedEvent
@@ -36,6 +37,7 @@
 	let streamState = $state<'idle' | 'connected' | 'reconnecting' | 'complete'>('idle');
 	let plannedSections = $state<number | null>(null);
 	let qcSummary = $state<{ passed: number; total: number } | null>(null);
+	let progressUpdate = $state<ProgressUpdateEvent | null>(null);
 	let viewerWarning = $state<string | null>(null);
 	let eventSource: EventSource | null = null;
 	let streamClosedTerminally = false;
@@ -54,13 +56,99 @@
 				: 'complete'
 			: detail?.status === 'failed'
 				? 'failed'
-				: streamState
+				: progressUpdate?.label ?? streamState
 	);
+	const progressStageLabel = $derived(
+		progressUpdate?.stage ? progressUpdate.stage.replaceAll('_', ' ') : null
+	);
+	const sectionTitleMap = $derived(buildSectionTitleMap(document));
+	const weakSections = $derived(buildWeakSectionSummaries(document, sectionTitleMap));
 
 	function closeStream(source: EventSource | null = eventSource) {
 		source?.close();
 		if (source === eventSource) {
 			eventSource = null;
+		}
+	}
+
+	function buildSectionTitleMap(nextDocument: GenerationDocument | null): Map<string, string> {
+		const map = new Map<string, string>();
+		if (!nextDocument) {
+			return map;
+		}
+
+		for (const item of nextDocument.section_manifest) {
+			map.set(item.section_id, item.title);
+		}
+		for (const section of nextDocument.sections) {
+			map.set(section.section_id, section.header.title);
+		}
+		for (const failed of nextDocument.failed_sections) {
+			map.set(failed.section_id, failed.title);
+		}
+
+		return map;
+	}
+
+	function buildWeakSectionSummaries(
+		nextDocument: GenerationDocument | null,
+		titleMap: Map<string, string>
+	): Array<{
+		section_id: string;
+		title: string;
+		warning: string;
+		issues: GenerationDocument['qc_reports'][number]['issues'];
+	}> {
+		if (!nextDocument) {
+			return [];
+		}
+
+		const failedIds = new Set(nextDocument.failed_sections.map((entry) => entry.section_id));
+
+		return nextDocument.qc_reports
+			.filter((report) => !failedIds.has(report.section_id))
+			.filter((report) => !report.passed || report.warnings.length > 0)
+			.map((report) => ({
+				section_id: report.section_id,
+				title: titleMap.get(report.section_id) ?? report.section_id,
+				warning:
+					report.warnings[0] ??
+					report.issues[0]?.message ??
+					'This section may benefit from another pass.',
+				issues: report.issues
+			}));
+	}
+
+	function hasDiagramIssue(issues: GenerationDocument['qc_reports'][number]['issues']): boolean {
+		return issues.some((issue) => issue.block.includes('diagram'));
+	}
+
+	async function requestEnhancement(options: {
+		scope: 'section' | 'component';
+		sectionId: string;
+		component?: string;
+		label: string;
+	}) {
+		if (!generationId) {
+			return;
+		}
+
+		enhancing = true;
+		error = null;
+
+		try {
+			const accepted = await enhanceGeneration(generationId, {
+				mode: 'balanced',
+				scope: options.scope,
+				section_id: options.sectionId,
+				component: options.component,
+				note: options.label
+			});
+			goto(`/textbook/${accepted.generation_id}`);
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to enhance draft.';
+		} finally {
+			enhancing = false;
 		}
 	}
 
@@ -147,6 +235,13 @@
 			plannedSections = payload.section_count;
 		});
 
+		source.addEventListener('progress_update', (event) => {
+			if (source !== eventSource) {
+				return;
+			}
+			progressUpdate = JSON.parse((event as MessageEvent).data) as ProgressUpdateEvent;
+		});
+
 		source.addEventListener('section_started', (event) => {
 			if (source !== eventSource) {
 				return;
@@ -224,6 +319,7 @@
 		error = null;
 		qcSummary = null;
 		plannedSections = null;
+		progressUpdate = null;
 		viewerWarning = null;
 		streamClosedTerminally = false;
 		streamErrorRecoveryAttempted = false;
@@ -268,6 +364,23 @@
 		}
 	}
 
+	async function handleSectionEnhance(sectionId: string) {
+		await requestEnhancement({
+			scope: 'section',
+			sectionId,
+			label: 'Improve this section'
+		});
+	}
+
+	async function handleDiagramEnhance(sectionId: string) {
+		await requestEnhancement({
+			scope: 'component',
+			sectionId,
+			component: 'diagram',
+			label: 'Retry the diagram'
+		});
+	}
+
 	$effect(() => {
 		if (!generationId) {
 			return;
@@ -309,6 +422,10 @@
 				<p>Failed sections: {failedSectionCount}</p>
 			{/if}
 			<p>Stream: {streamLabel}</p>
+			{#if progressUpdate && detail?.status !== 'completed' && detail?.status !== 'failed'}
+				<p>Progress: {progressUpdate.label}</p>
+				<p>Stage: {progressStageLabel}</p>
+			{/if}
 			{#if qcSummary}
 				<p>QC: {qcSummary.passed} / {qcSummary.total} passing</p>
 			{/if}
@@ -332,8 +449,66 @@
 			<ul>
 				{#each document.failed_sections as failed}
 					<li>
-						<strong>{failed.title}</strong>
-						<span>Failed at {failed.failed_at_node}: {failed.error_summary}</span>
+						<div class="section-summary">
+							<strong>{failed.title}</strong>
+							<span>Failed at {failed.failed_at_node}: {failed.error_summary}</span>
+						</div>
+						<div class="section-actions">
+							<button
+								type="button"
+								class="section-action"
+								onclick={() => handleSectionEnhance(failed.section_id)}
+								disabled={enhancing}
+							>
+								Improve section
+							</button>
+							{#if failed.needs_diagram || failed.missing_components.some((component) => component.includes('diagram'))}
+								<button
+									type="button"
+									class="section-action"
+									onclick={() => handleDiagramEnhance(failed.section_id)}
+									disabled={enhancing}
+								>
+									Retry diagram
+								</button>
+							{/if}
+						</div>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+
+	{#if weakSections.length}
+		<section class="weak-sections">
+			<h2>Sections Needing Another Pass</h2>
+			<ul>
+				{#each weakSections as weak}
+					<li>
+						<div class="section-summary">
+							<strong>{weak.title}</strong>
+							<span>{weak.warning}</span>
+						</div>
+						<div class="section-actions">
+							<button
+								type="button"
+								class="section-action"
+								onclick={() => handleSectionEnhance(weak.section_id)}
+								disabled={enhancing}
+							>
+								Improve section
+							</button>
+							{#if hasDiagramIssue(weak.issues)}
+								<button
+									type="button"
+									class="section-action"
+									onclick={() => handleDiagramEnhance(weak.section_id)}
+									disabled={enhancing}
+								>
+									Retry diagram
+								</button>
+							{/if}
+						</div>
 					</li>
 				{/each}
 			</ul>
@@ -417,6 +592,7 @@
 
 	.status-panel,
 	.failed-sections,
+	.weak-sections,
 	.warning,
 	.draft-note,
 	.error {
@@ -459,5 +635,32 @@
 	.failed-sections li {
 		display: grid;
 		gap: 0.2rem;
+	}
+
+	.section-summary {
+		display: grid;
+		gap: 0.15rem;
+	}
+
+	.section-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.55rem;
+		margin-top: 0.45rem;
+	}
+
+	.section-action {
+		border-radius: 999px;
+		border: 1px solid rgba(36, 67, 106, 0.16);
+		background: rgba(36, 67, 106, 0.06);
+		color: #24436a;
+		padding: 0.45rem 0.8rem;
+		font: inherit;
+		cursor: pointer;
+	}
+
+	.section-action:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 </style>

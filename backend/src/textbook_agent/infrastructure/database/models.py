@@ -74,6 +74,7 @@ class GenerationModel(Base):
     quality_passed = Column(Boolean, nullable=True)
     generation_time_seconds = Column(Float, nullable=True)
     source_generation_id = Column(String, nullable=True, index=True)
+    planning_spec_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
 

@@ -2,11 +2,14 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 from pipeline.api import PipelineDocument, PipelineResult
 from pipeline.events import SectionReadyEvent, SectionStartedEvent
+from pipeline.types.requests import SectionPlan
+from textbook_agent.application.dtos import BriefRequest, GenerationSpec
 from pipeline.types.section_content import (
     ExplanationContent,
     HookHeroContent,
@@ -122,6 +125,48 @@ def _document(
         created_at=_now(),
         updated_at=_now(),
         completed_at=_now() if status == "completed" else None,
+    )
+
+
+def _generation_spec() -> GenerationSpec:
+    return GenerationSpec(
+        template_id="guided-concept-path",
+        preset_id="blue-classroom",
+        mode="balanced",
+        section_count=3,
+        sections=[
+            SectionPlan(
+                section_id="section-1",
+                position=1,
+                title="Limits first look",
+                focus="Introduce the core idea of approaching a value.",
+                role="intro",
+            ),
+            SectionPlan(
+                section_id="section-2",
+                position=2,
+                title="Work a limit",
+                focus="Show a concrete worked example.",
+                role="develop",
+                needs_worked_example=True,
+                required_components=["worked_example"],
+            ),
+            SectionPlan(
+                section_id="section-3",
+                position=3,
+                title="Check understanding",
+                focus="End with practice and a short summary bridge.",
+                role="practice",
+                required_components=["practice", "what_next"],
+            ),
+        ],
+        warning=None,
+        rationale="Guided concept path suits a compact calculus lesson.",
+        source_brief=BriefRequest(
+            intent="Teach limits",
+            audience="High school calculus students",
+            extra_context="Keep it concise.",
+        ),
     )
 
 
@@ -276,6 +321,19 @@ app.dependency_overrides[get_student_profile_repository] = override_profile_repo
 app.dependency_overrides[get_user_repository] = override_user_repo
 app.dependency_overrides[get_report_repository] = override_report_repo
 
+
+@pytest.fixture(autouse=True)
+def _install_dependency_overrides():
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_current_user] = override_current_user
+    app.dependency_overrides[get_generation_repository] = override_generation_repo
+    app.dependency_overrides[get_document_repository] = override_document_repo
+    app.dependency_overrides[get_student_profile_repository] = override_profile_repo
+    app.dependency_overrides[get_user_repository] = override_user_repo
+    app.dependency_overrides[get_report_repository] = override_report_repo
+    yield
+    app.dependency_overrides.clear()
+
 JWT_HANDLER = get_jwt_handler()
 AUTH_HEADERS = {
     "Authorization": f"Bearer {JWT_HANDLER.create_access_token(TEST_USER.id, TEST_USER.email)}"
@@ -334,12 +392,54 @@ class TestGenerationApi:
         payload = response.json()
         assert payload["mode"] == "balanced"
         assert payload["events_url"].endswith("/events")
-        assert payload["report_url"].endswith("/report")
-        generation = await GEN_REPO.find_by_id(payload["generation_id"])
-        assert generation is not None
-        assert generation.requested_template_id == "guided-concept-path"
-        assert generation.requested_preset_id == "blue-classroom"
-        assert generation.section_count == 4
+
+    async def test_create_generation_uses_generation_spec_as_source_of_truth(self):
+        captured: dict[str, object] = {}
+        spec = _generation_spec()
+
+        async def fake_run_pipeline(command, on_event=None):
+            captured["command"] = command
+            return PipelineResult(
+                document=_document(command.generation_id or "gen-spec", mode="balanced"),
+                completed_nodes=["curriculum_planner", "process_section", "qc_agent"],
+                generation_time_seconds=0.01,
+            )
+
+        with patch(
+            "textbook_agent.interface.api.routes.generation.run_pipeline_streaming",
+            side_effect=fake_run_pipeline,
+        ):
+            async with await _client() as client:
+                response = await client.post(
+                    "/api/v1/generations",
+                    json={
+                        "subject": "Teach limits",
+                        "context": "legacy context should be ignored",
+                        "mode": "draft",
+                        "template_id": "timeline-narrative",
+                        "preset_id": "blue-classroom",
+                        "section_count": 1,
+                        "generation_spec": spec.model_dump(mode="json"),
+                    },
+                    headers=AUTH_HEADERS,
+                )
+                await asyncio.sleep(0.05)
+
+        assert response.status_code == 202
+        command = captured["command"]
+        assert command.template_id == spec.template_id
+        assert command.section_count == spec.section_count
+        assert command.section_plans is not None
+        assert len(command.section_plans) == 3
+        assert "Reviewed lesson plan:" in command.context
+        accepted = response.json()
+        assert accepted["report_url"].endswith("/report")
+        stored = await GEN_REPO.find_by_id(accepted["generation_id"])
+        assert stored is not None
+        assert stored.planning_spec_json is not None
+        assert stored.requested_template_id == "guided-concept-path"
+        assert stored.requested_preset_id == "blue-classroom"
+        assert stored.section_count == 3
 
     async def test_create_generation_rejects_invalid_template_pair(self):
         async with await _client() as client:
@@ -526,6 +626,7 @@ class TestGenerationApi:
             )
         assert response.status_code == 200
         assert "event: complete" in response.text
+        assert "event: progress_update" in response.text
         assert "/report" in response.text
 
     async def test_events_endpoint_returns_terminal_error_for_failed_generation(self):
@@ -564,6 +665,7 @@ class TestGenerationApi:
 
         assert response.status_code == 200
         assert "event: error" in response.text
+        assert "event: progress_update" in response.text
         assert "interrupted before it finished" in response.text
 
     async def test_streaming_partial_saves_keep_manifest_and_section_order(self):
@@ -854,6 +956,112 @@ class TestGenerationApi:
 
         assert response.status_code == 202
 
+    async def test_enhance_generation_targets_one_section_when_requested(self):
+        source_id = "gen-section-target"
+        spec = _generation_spec()
+        source_document = _document(
+            source_id,
+            mode="draft",
+            sections=[_section("section-1"), _section("section-2"), _section("section-3")],
+        )
+        path = await DOC_REPO.save_document(source_document)
+        await GEN_REPO.create(
+            Generation(
+                id=source_id,
+                user_id=TEST_USER.id,
+                subject="Teach limits",
+                context="Explain limits",
+                mode="draft",
+                status="completed",
+                document_path=path,
+                requested_template_id="guided-concept-path",
+                resolved_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                resolved_preset_id="blue-classroom",
+                section_count=3,
+                planning_spec_json=spec.model_dump_json(),
+            )
+        )
+
+        async def fake_run_pipeline(command, on_event=None):
+            assert command.target_section_ids == ["section-2"]
+            assert command.target_component is None
+            assert len(command.section_plans or []) == 3
+            return PipelineResult(
+                document=_document(command.generation_id or "gen-section-child", mode="balanced"),
+                completed_nodes=["curriculum_planner", "process_section", "qc_agent"],
+                generation_time_seconds=0.01,
+            )
+
+        with patch(
+            "textbook_agent.interface.api.routes.generation.run_pipeline_streaming",
+            side_effect=fake_run_pipeline,
+        ):
+            async with await _client() as client:
+                response = await client.post(
+                    f"/api/v1/generations/{source_id}/enhance",
+                    json={"mode": "balanced", "scope": "section", "section_id": "section-2"},
+                    headers=AUTH_HEADERS,
+                )
+                await asyncio.sleep(0.05)
+
+        assert response.status_code == 202
+
+    async def test_enhance_generation_targets_diagram_component_when_requested(self):
+        source_id = "gen-diagram-target"
+        spec = _generation_spec()
+        source_document = _document(
+            source_id,
+            mode="draft",
+            sections=[_section("section-1")],
+        )
+        path = await DOC_REPO.save_document(source_document)
+        await GEN_REPO.create(
+            Generation(
+                id=source_id,
+                user_id=TEST_USER.id,
+                subject="Teach limits",
+                context="Explain limits",
+                mode="draft",
+                status="completed",
+                document_path=path,
+                requested_template_id="guided-concept-path",
+                resolved_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                resolved_preset_id="blue-classroom",
+                section_count=1,
+                planning_spec_json=spec.model_dump_json(),
+            )
+        )
+
+        async def fake_run_pipeline(command, on_event=None):
+            assert command.target_section_ids == ["section-1"]
+            assert command.target_component == "diagram"
+            return PipelineResult(
+                document=_document(command.generation_id or "gen-diagram-child", mode="balanced"),
+                completed_nodes=["curriculum_planner", "process_section", "qc_agent"],
+                generation_time_seconds=0.01,
+            )
+
+        with patch(
+            "textbook_agent.interface.api.routes.generation.run_pipeline_streaming",
+            side_effect=fake_run_pipeline,
+        ):
+            async with await _client() as client:
+                response = await client.post(
+                    f"/api/v1/generations/{source_id}/enhance",
+                    json={
+                        "mode": "balanced",
+                        "scope": "component",
+                        "section_id": "section-1",
+                        "component": "diagram",
+                    },
+                    headers=AUTH_HEADERS,
+                )
+                await asyncio.sleep(0.05)
+
+        assert response.status_code == 202
+
     async def test_run_generation_job_marks_cancelled_task_failed(self):
         generation_id = "gen-cancelled"
         generation = Generation(
@@ -1096,7 +1304,7 @@ class TestGenerationApi:
                 generation_time_seconds=0.05,
             )
 
-        monkeypatch.setattr(generation_routes, "_GENERATION_JOB_TIMEOUT_SECONDS", 0.01)
+        monkeypatch.setattr(generation_routes, "_generation_job_timeout", lambda n: 0.01)
         with patch.object(
             generation_routes,
             "run_pipeline_streaming",

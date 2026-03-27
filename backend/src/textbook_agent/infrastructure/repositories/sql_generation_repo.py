@@ -32,6 +32,7 @@ class SqlGenerationRepository(GenerationRepository):
             quality_passed=generation.quality_passed,
             generation_time_seconds=generation.generation_time_seconds,
             source_generation_id=generation.source_generation_id,
+            planning_spec_json=generation.planning_spec_json,
             created_at=generation.created_at,
             completed_at=generation.completed_at,
         )
@@ -118,6 +119,7 @@ class SqlGenerationRepository(GenerationRepository):
             quality_passed=model.quality_passed,
             generation_time_seconds=model.generation_time_seconds,
             source_generation_id=model.source_generation_id,
+            planning_spec_json=model.planning_spec_json,
             created_at=model.created_at,
             completed_at=model.completed_at,
         )

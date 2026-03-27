@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -98,6 +98,7 @@ function buildDetail(overrides: Record<string, unknown> = {}) {
 		completed_at: null,
 		document_path: 'memory://gen-123',
 		report_url: '/api/v1/generations/gen-123/report',
+		planning_spec: null,
 		...overrides
 	};
 }
@@ -304,5 +305,121 @@ describe('textbook page stream lifecycle', () => {
 		expect(
 			screen.getByText(/Failed at content_generator: Schema validation failed after one repair attempt\./i)
 		).toBeTruthy();
+	});
+
+	it('shows progress updates from the stream and exposes targeted enhancement controls', async () => {
+		getGenerationDetail.mockResolvedValueOnce(
+			buildDetail({
+				status: 'running',
+				mode: 'balanced',
+				quality_passed: null
+			})
+		);
+		getGenerationDocument.mockResolvedValueOnce(buildDocument());
+
+		render(TextbookPage);
+
+		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
+		expect(MockEventSource.instances).toHaveLength(1);
+
+		MockEventSource.instances[0].emit('progress_update', {
+			type: 'progress_update',
+			generation_id: 'gen-123',
+			stage: 'planning',
+			label: 'Planning lesson structure'
+		});
+
+		await waitFor(() => expect(screen.getByText(/Progress: Planning lesson structure/i)).toBeTruthy());
+		expect(screen.getByText(/Stage: planning/i)).toBeTruthy();
+	});
+
+	it('sends targeted enhancement requests for failed and weak sections', async () => {
+		getGenerationDetail.mockResolvedValueOnce(
+			buildDetail({
+				status: 'completed',
+				mode: 'draft',
+				quality_passed: false,
+				completed_at: '2026-03-23T00:01:00Z'
+			})
+		);
+		getGenerationDocument.mockResolvedValueOnce(
+			buildDocument({
+				status: 'completed',
+				failed_sections: [
+					{
+						section_id: 's-01',
+						title: 'Section 1',
+						position: 1,
+						focus: 'Focus one',
+						bridges_from: null,
+						bridges_to: null,
+						needs_diagram: false,
+						needs_worked_example: false,
+						failed_at_node: 'content_generator',
+						error_type: 'validation',
+						error_summary: 'Missing practice',
+						attempt_count: 1,
+						can_retry: true,
+						missing_components: ['practice'],
+						failure_detail: null
+					}
+				],
+				qc_reports: [
+					{
+						section_id: 's-02',
+						passed: false,
+						issues: [{ block: 'diagram', severity: 'blocking', message: 'Need diagram' }],
+						warnings: ['Needs a diagram']
+					}
+				],
+				sections: [{ section_id: 's-02', header: { title: 'Section 2' } }],
+				section_manifest: [
+					{ section_id: 's-01', title: 'Section 1', position: 1 },
+					{ section_id: 's-02', title: 'Section 2', position: 2 }
+				],
+				quality_passed: false,
+				completed_at: '2026-03-23T00:01:00Z'
+			})
+		);
+		enhanceGeneration
+			.mockResolvedValueOnce({
+				generation_id: 'gen-124',
+				status: 'pending',
+				mode: 'balanced',
+				events_url: '/api/v1/generations/gen-124/events',
+				document_url: '/api/v1/generations/gen-124/document'
+			})
+			.mockResolvedValueOnce({
+				generation_id: 'gen-125',
+				status: 'pending',
+				mode: 'balanced',
+				events_url: '/api/v1/generations/gen-125/events',
+				document_url: '/api/v1/generations/gen-125/document'
+			});
+
+		render(TextbookPage);
+
+		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
+
+		await fireEvent.click(screen.getAllByRole('button', { name: /improve section/i })[0]);
+
+		expect(enhanceGeneration).toHaveBeenCalledWith('gen-123', {
+			mode: 'balanced',
+			scope: 'section',
+			section_id: 's-01',
+			note: 'Improve this section'
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /retry diagram/i }));
+
+		expect(enhanceGeneration).toHaveBeenCalledWith('gen-123', {
+			mode: 'balanced',
+			scope: 'component',
+			section_id: 's-02',
+			component: 'diagram',
+			note: 'Retry the diagram'
+		});
 	});
 });

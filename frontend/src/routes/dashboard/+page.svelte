@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { fromStore } from 'svelte/store';
 	import { basePresetMap, templateRegistryMap } from 'lectio';
-	import ProfileForm from '$lib/components/ProfileForm.svelte';
+	import TeacherStudio from '$lib/components/TeacherStudio.svelte';
 	import { isApiError } from '$lib/api/errors';
 	import { getOnboardingRoute, resolveDashboardProfileFailure } from '$lib/auth/routing';
 	import { startGeneration, enhanceGeneration, getGenerations } from '$lib/api/client';
@@ -149,9 +149,12 @@
 		</section>
 
 		<section class="generate-section">
-			<h2>Generate a Lesson</h2>
-			<p>Choose the local Lectio template and the live Blue Classroom preset directly in the frontend, then let the pipeline stream sections into the saved document.</p>
-			<ProfileForm onsubmit={handleGenerate} disabled={generating} />
+			<h2>Teacher Studio</h2>
+			<p>
+				Start with a plain-language brief, review the structured plan, and then generate into the
+				live Blue Classroom runtime.
+			</p>
+			<TeacherStudio onsubmit={handleGenerate} disabled={generating} />
 		</section>
 
 		{#if errorMessage}

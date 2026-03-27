@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import pytest
-
 from pipeline.graph import fan_out_sections
 from pipeline.run import _seed_initial_state
-from pipeline.state import QCReport, StyleContext, TextbookPipelineState
+from pipeline.state import StyleContext, TextbookPipelineState
 from pipeline.types.requests import PipelineRequest, SectionPlan, SeedDocument
 from pipeline.types.section_content import (
     ExplanationContent,

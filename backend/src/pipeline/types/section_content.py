@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ── SHARED PRIMITIVES ────────────────────────────────────────────────────────
@@ -255,6 +255,36 @@ class PitfallContent(BaseModel):
 
 # ── GROUP 6 — DIAGRAMS ──────────────────────────────────────────────────────
 
+
+class DiagramElement(BaseModel):
+    """One visual element in a structured diagram spec."""
+    id: str
+    label: str
+    x: float
+    y: float
+    width: float = 120
+    height: float = 60
+    shape: Literal["rect", "circle", "diamond", "rounded-rect"] = "rounded-rect"
+    emphasis: bool = False
+
+
+class DiagramConnection(BaseModel):
+    """A directed edge between two diagram elements."""
+    from_id: str
+    to_id: str
+    label: Optional[str] = None
+    style: Literal["solid", "dashed", "arrow"] = "arrow"
+
+
+class DiagramSpec(BaseModel):
+    """Structured diagram specification — rendered client-side instead of raw SVG."""
+    type: Literal["process-flow", "hierarchy", "compare", "cycle", "concept-map"]
+    title: str
+    elements: list[DiagramElement]
+    connections: list[DiagramConnection] = Field(default_factory=list)
+    layout_hint: Literal["horizontal", "vertical", "radial"] = "horizontal"
+
+
 class DiagramCallout(BaseModel):
     id: str
     x: float
@@ -264,7 +294,8 @@ class DiagramCallout(BaseModel):
 
 
 class DiagramContent(BaseModel):
-    svg_content: str
+    svg_content: str = ""
+    spec: Optional[DiagramSpec] = None
     caption: str
     alt_text: str
     zoom_label: Optional[str] = None
@@ -327,6 +358,46 @@ class SimulationContent(BaseModel):
     html_content: Optional[str] = None
     fallback_diagram: Optional[DiagramContent] = None
     explanation: Optional[str] = None
+
+
+# ── PHASED SUB-SCHEMAS (used by split content_generator) ────────────────────
+
+
+class CoreContent(BaseModel):
+    """Phase 1: Foundation content — required in every section."""
+
+    section_id: str
+    template_id: str
+    header: SectionHeaderContent
+    hook: HookHeroContent
+    explanation: ExplanationContent
+
+
+class PracticePhaseContent(BaseModel):
+    """Phase 2: Practice and reinforcement."""
+
+    practice: PracticeContent
+    what_next: WhatNextContent
+    pitfall: Optional[PitfallContent] = None
+    pitfalls: Optional[list[PitfallContent]] = None
+    prerequisites: Optional[PrerequisiteContent] = None
+
+
+class EnrichmentPhaseContent(BaseModel):
+    """Phase 3: Optional enrichment components."""
+
+    worked_example: Optional[WorkedExampleContent] = None
+    worked_examples: Optional[list[WorkedExampleContent]] = None
+    process: Optional[ProcessContent] = None
+    definition: Optional[DefinitionContent] = None
+    definition_family: Optional[DefinitionFamilyContent] = None
+    quiz: Optional[QuizContent] = None
+    reflection: Optional[ReflectionContent] = None
+    glossary: Optional[GlossaryContent] = None
+    comparison_grid: Optional[ComparisonGridContent] = None
+    timeline: Optional[TimelineContent] = None
+    insight_strip: Optional[InsightStripContent] = None
+    interview: Optional[InterviewContent] = None
 
 
 # ── THE FULL SECTION OBJECT ─────────────────────────────────────────────────

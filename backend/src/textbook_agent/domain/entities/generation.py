@@ -25,6 +25,7 @@ class Generation(BaseModel):
     quality_passed: bool | None = None
     generation_time_seconds: float | None = None
     source_generation_id: str | None = None
+    planning_spec_json: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
 
