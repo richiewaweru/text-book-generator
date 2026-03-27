@@ -6,12 +6,20 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from planning.models import PlanningGenerationSpec, PlanningTemplateContract, StudioBriefRequest
 from pipeline.types.requests import SectionPlan
 from textbook_agent.application.dtos.brief import BriefRequest, GenerationSpec
+from textbook_agent.application.dtos.generation_request import GenerationAcceptedResponse
 from textbook_agent.domain.entities.student_profile import StudentProfile
 from textbook_agent.domain.entities.user import User
+from textbook_agent.domain.value_objects import GenerationMode
 from textbook_agent.interface.api.app import app
-from textbook_agent.interface.api.dependencies import get_student_profile_repository
+from textbook_agent.interface.api.dependencies import (
+    get_document_repository,
+    get_generation_repository,
+    get_report_repository,
+    get_student_profile_repository,
+)
 from textbook_agent.interface.api.middleware.auth_middleware import get_current_user
 from textbook_agent.interface.api.routes import brief as brief_routes
 
@@ -80,7 +88,19 @@ def _install_overrides(profile: StudentProfile | None) -> None:
     async def override_profile_repo():
         return StaticProfileRepo(profile)
 
+    async def override_generation_repo():
+        return SimpleNamespace()
+
+    async def override_document_repo():
+        return SimpleNamespace()
+
+    async def override_report_repo():
+        return SimpleNamespace()
+
     app.dependency_overrides[get_student_profile_repository] = override_profile_repo
+    app.dependency_overrides[get_generation_repository] = override_generation_repo
+    app.dependency_overrides[get_document_repository] = override_document_repo
+    app.dependency_overrides[get_report_repository] = override_report_repo
 
 
 def _fake_live_safe_catalog() -> dict[str, SimpleNamespace]:
@@ -98,6 +118,133 @@ def _fake_live_safe_catalog() -> dict[str, SimpleNamespace]:
             learner_fit=["secondary"],
         ),
     }
+
+
+def _planning_contract() -> PlanningTemplateContract:
+    return PlanningTemplateContract(
+        id="guided-concept-path",
+        name="Guided Concept Path",
+        family="guided-concept",
+        intent="introduce-concept",
+        tagline="Lead with need, then explain.",
+        reading_style="linear-guided",
+        interaction_level="medium",
+        lesson_flow=["Hook", "Explain", "Practice", "What next"],
+        required_components=["section-header", "hook-hero", "practice-stack"],
+        optional_components=["diagram-block"],
+        always_present=["section-header", "hook-hero", "what-next-bridge"],
+        available_components=[
+            "section-header",
+            "hook-hero",
+            "practice-stack",
+            "what-next-bridge",
+            "diagram-block",
+        ],
+        component_budget={"practice-stack": 1},
+        max_per_section={"practice-stack": 1},
+        default_behaviours={},
+        section_role_defaults={
+            "intro": ["hook-hero"],
+            "explain": ["diagram-block"],
+            "practice": ["practice-stack"],
+            "summary": ["what-next-bridge"],
+        },
+        signal_affinity={
+            "topic_type": {"concept": 0.9},
+            "learning_outcome": {"understand-why": 0.9},
+            "class_style": {},
+            "format": {"both": 0.8},
+        },
+        layout_notes=[],
+        responsive_rules=[],
+        print_rules=[],
+        allowed_presets=["blue-classroom"],
+        why_this_template_exists="Baseline teaching template.",
+        generation_guidance={
+            "tone": "clear",
+            "pacing": "steady",
+            "chunking": "medium",
+            "emphasis": "explain first",
+            "avoid": ["overload"],
+        },
+    )
+
+
+def _studio_brief() -> StudioBriefRequest:
+    return StudioBriefRequest(
+        intent="Teach ecosystems to Year 9 students",
+        audience="Year 9 mixed ability",
+        prior_knowledge="Basic food chains",
+        extra_context="Use a river ecosystem example.",
+        signals={
+            "topic_type": "concept",
+            "learning_outcome": "understand-why",
+            "class_style": ["engages-with-visuals"],
+            "format": "both",
+        },
+        preferences={
+            "tone": "supportive",
+            "reading_level": "standard",
+            "explanation_style": "balanced",
+            "example_style": "everyday",
+            "brevity": "balanced",
+        },
+        constraints={
+            "more_practice": False,
+            "keep_short": False,
+            "use_visuals": True,
+            "print_first": False,
+        },
+    )
+
+
+def _planning_spec() -> PlanningGenerationSpec:
+    return PlanningGenerationSpec(
+        id="plan-123",
+        template_id="guided-concept-path",
+        preset_id="blue-classroom",
+        template_decision={
+            "chosen_id": "guided-concept-path",
+            "chosen_name": "Guided Concept Path",
+            "rationale": "Best fit for first exposure.",
+            "fit_score": 0.93,
+            "alternatives": [],
+        },
+        lesson_rationale="This structure introduces the concept before guided practice.",
+        directives={
+            "tone_profile": "supportive",
+            "reading_level": "standard",
+            "explanation_style": "balanced",
+            "example_style": "everyday",
+            "scaffold_level": "medium",
+            "brevity": "balanced",
+        },
+        committed_budgets={"practice-stack": 1},
+        sections=[
+            {
+                "id": "section-1",
+                "order": 1,
+                "role": "intro",
+                "title": "Why ecosystems matter",
+                "objective": "Frame the lesson with a concrete setting.",
+                "focus_note": "Open with a local river example.",
+                "selected_components": ["hook-hero"],
+                "visual_policy": {
+                    "required": True,
+                    "intent": "show_realism",
+                    "mode": "image",
+                    "goal": "Anchor the topic in a real ecosystem.",
+                    "style_notes": "Natural classroom-safe reference image.",
+                },
+                "generation_notes": None,
+                "rationale": "Start with a vivid example.",
+            }
+        ],
+        warning=None,
+        source_brief_id="brief-123",
+        source_brief=_studio_brief(),
+        status="draft",
+    )
 
 
 class TestBriefApi:
@@ -291,3 +438,119 @@ class TestBriefApi:
         assert response.status_code == 200
         assert "Grade band: secondary" in captured["system_prompt"]
         assert "Prefers clear examples and short explanations." in captured["system_prompt"]
+
+    async def test_contracts_lists_live_safe_planning_contracts(self):
+        _install_overrides(TEST_PROFILE)
+        contract = _planning_contract()
+
+        with patch.object(brief_routes, "_planning_live_safe_templates", return_value=[contract]):
+            async with _client() as client:
+                response = await client.get("/api/v1/contracts")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload[0]["id"] == "guided-concept-path"
+        assert payload[0]["available_components"] == [
+            "section-header",
+            "hook-hero",
+            "practice-stack",
+            "what-next-bridge",
+            "diagram-block",
+        ]
+        assert payload[0]["signal_affinity"]["topic_type"]["concept"] == 0.9
+
+    async def test_stream_brief_emits_template_section_and_complete_events(self):
+        _install_overrides(TEST_PROFILE)
+        contract = _planning_contract()
+        spec = _planning_spec()
+
+        async def fake_plan(self, brief, *, contracts, model, run_llm_fn, generation_id="", emit=None):
+            _ = (brief, contracts, model, run_llm_fn, generation_id)
+            assert emit is not None
+            await emit(
+                {
+                    "event": "template_selected",
+                    "data": {
+                        "template_decision": spec.template_decision.model_dump(mode="json"),
+                        "lesson_rationale": spec.lesson_rationale,
+                        "warning": spec.warning,
+                    },
+                }
+            )
+            await emit(
+                {
+                    "event": "section_planned",
+                    "data": {"section": spec.sections[0].model_dump(mode="json")},
+                }
+            )
+            return spec
+
+        with (
+            patch.object(brief_routes, "_planning_live_safe_templates", return_value=[contract]),
+            patch.object(brief_routes, "get_node_text_model", return_value=object()),
+            patch.object(brief_routes, "run_llm"),
+            patch.object(brief_routes.PlanningService, "plan", new=fake_plan),
+        ):
+            async with _client() as client:
+                response = await client.post(
+                    "/api/v1/brief/stream",
+                    json=_studio_brief().model_dump(mode="json"),
+                )
+
+        assert response.status_code == 200
+        assert "event: template_selected" in response.text
+        assert "event: section_planned" in response.text
+        assert "event: plan_complete" in response.text
+        assert "Why ecosystems matter" in response.text
+
+    async def test_commit_brief_starts_generation_with_committed_planning_spec(self):
+        _install_overrides(TEST_PROFILE)
+        spec = _planning_spec()
+        captured: dict[str, object] = {}
+
+        async def fake_enqueue_generation(**kwargs):
+            captured.update(kwargs)
+            return GenerationAcceptedResponse(
+                generation_id="gen-123",
+                status="pending",
+                mode=GenerationMode.BALANCED,
+                events_url="/api/v1/generations/gen-123/events",
+                document_url="/api/v1/generations/gen-123/document",
+                report_url="/api/v1/generations/gen-123/report",
+            )
+
+        with (
+            patch.object(brief_routes, "enqueue_generation", side_effect=fake_enqueue_generation),
+            patch.object(
+                brief_routes,
+                "_context_from_planning_spec",
+                return_value="Reviewed lesson plan",
+            ),
+            patch.object(
+                brief_routes,
+                "_pipeline_sections_from_planning_spec",
+                return_value=[
+                    SectionPlan(
+                        section_id="section-1",
+                        position=1,
+                        title="Why ecosystems matter",
+                        focus="Open with a river ecosystem example.",
+                        role="intro",
+                    )
+                ],
+            ),
+        ):
+            async with _client() as client:
+                response = await client.post(
+                    "/api/v1/brief/commit",
+                    json=spec.model_dump(mode="json"),
+                )
+
+        assert response.status_code == 200
+        assert response.json()["generation_id"] == "gen-123"
+        assert captured["subject"] == "Teach ecosystems to Year 9 students"
+        assert captured["context"] == "Reviewed lesson plan"
+        assert captured["mode"] == GenerationMode.BALANCED
+        assert captured["template_id"] == "guided-concept-path"
+        assert len(captured["section_plans"]) == 1
+        assert '"status":"committed"' in captured["planning_spec_json"]

@@ -8,7 +8,7 @@ npm run export-contracts in the Lectio library.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class GenerationGuidance(BaseModel):
@@ -19,23 +19,42 @@ class GenerationGuidance(BaseModel):
     avoid: list[str]
 
 
+class SignalAffinity(BaseModel):
+    topic_type: dict[str, float] = Field(default_factory=dict)
+    learning_outcome: dict[str, float] = Field(default_factory=dict)
+    class_style: dict[str, float] = Field(default_factory=dict)
+    format: dict[str, float] = Field(default_factory=dict)
+
+
 class TemplateContractSummary(BaseModel):
     id: str
     name: str
     family: str
     intent: str
     tagline: str
-    lesson_flow: list[str]
-    required_components: list[str]
-    optional_components: list[str]
-    default_behaviours: dict[str, str]
+    reading_style: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    lesson_flow: list[str] = Field(default_factory=list)
+    required_components: list[str] = Field(default_factory=list)
+    optional_components: list[str] = Field(default_factory=list)
+    always_present: list[str] = Field(default_factory=list)
+    available_components: list[str] = Field(default_factory=list)
+    component_budget: dict[str, int] = Field(default_factory=dict)
+    max_per_section: dict[str, int] = Field(default_factory=dict)
+    default_behaviours: dict[str, str] = Field(default_factory=dict)
+    section_role_defaults: dict[str, list[str]] = Field(default_factory=dict)
+    signal_affinity: SignalAffinity = Field(default_factory=SignalAffinity)
     generation_guidance: GenerationGuidance
-    best_for: list[str]
-    not_ideal_for: list[str]
-    learner_fit: list[str]
-    subjects: list[str]
+    best_for: list[str] = Field(default_factory=list)
+    not_ideal_for: list[str] = Field(default_factory=list)
+    learner_fit: list[str] = Field(default_factory=list)
+    subjects: list[str] = Field(default_factory=list)
     interaction_level: str
-    allowed_presets: list[str] = []
+    layout_notes: list[str] = Field(default_factory=list)
+    responsive_rules: list[str] = Field(default_factory=list)
+    print_rules: list[str] = Field(default_factory=list)
+    why_this_template_exists: str = ""
+    allowed_presets: list[str] = Field(default_factory=list)
 
 
 class TemplatePresetSummary(BaseModel):

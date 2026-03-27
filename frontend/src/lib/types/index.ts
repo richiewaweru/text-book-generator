@@ -1,4 +1,5 @@
 import type { SectionContent } from 'lectio';
+import type { PlanningGenerationSpec } from './studio';
 
 export type Depth = 'survey' | 'standard' | 'deep';
 export type GenerationMode = 'draft' | 'balanced' | 'strict';
@@ -159,7 +160,7 @@ export interface GenerationDetail {
 	created_at: string | null;
 	completed_at: string | null;
 	document_path: string | null;
-	planning_spec: GenerationSpec | null;
+	planning_spec: GenerationSpec | PlanningGenerationSpec | null;
 }
 
 export interface PipelineSectionManifestItem {
@@ -327,3 +328,36 @@ export type GenerationStreamEvent =
 	| ProgressUpdateEvent
 	| CompleteEvent
 	| ErrorEvent;
+
+export type {
+	Brevity,
+	ClassStyle,
+	DeliveryPreferences,
+	ExplanationStyle,
+	GenerationDirectives,
+	LearningOutcome,
+	LessonFormat,
+	PlanningCompleteEvent,
+	PlanningErrorEvent,
+	PlanningGenerationSpec,
+	PlanningSectionPlan,
+	PlanningSectionPlannedEvent,
+	PlanningStreamEvent,
+	PlanningTemplateSelectedEvent,
+	PlanDraft,
+	ReadingLevel,
+	SectionGenerationNotes,
+	SectionRole,
+	StudioBriefRequest,
+	StudioGenerationState,
+	StudioState,
+	StudioTemplateContract,
+	TeacherConstraints,
+	TeacherSignals,
+	TemplateAlternative,
+	TemplateDecision,
+	TopicType,
+	Tone,
+	UserBriefDraft,
+	VisualPolicy
+} from './studio';

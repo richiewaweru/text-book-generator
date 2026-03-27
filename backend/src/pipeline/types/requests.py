@@ -65,7 +65,19 @@ class SectionPlan(BaseModel):
     title: str
     position: int
     focus: str
-    role: Literal["intro", "develop", "practice", "synthesis"] = "develop"
+    role: Literal[
+        "intro",
+        "develop",
+        "practice",
+        "synthesis",
+        "explain",
+        "summary",
+        "process",
+        "compare",
+        "timeline",
+        "visual",
+        "discover",
+    ] = "develop"
     bridges_from: str | None = None
     bridges_to: str | None = None
     needs_diagram: bool = False

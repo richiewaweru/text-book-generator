@@ -25,7 +25,8 @@ from pipeline.events import (
 )
 from pipeline.runtime_diagnostics import clear_node_attempts
 from pipeline.run import run_pipeline_streaming
-from pipeline.types.requests import SeedDocument
+from pipeline.types.requests import SectionPlan, SeedDocument
+from planning.models import PlanningGenerationSpec, PlanningSectionPlan
 from textbook_agent.application.dtos import (
     EnhanceGenerationRequest,
     GenerationAcceptedResponse,
@@ -163,6 +164,52 @@ def _generation_urls(generation_id: str) -> tuple[str, str, str]:
     )
 
 
+def _pipeline_section_from_planning(
+    section: PlanningSectionPlan,
+    *,
+    always_present: list[str],
+) -> SectionPlan:
+    selected = list(dict.fromkeys([*always_present, *section.selected_components]))
+    bridges_from = None
+    bridges_to = None
+    visual_required = bool(section.visual_policy and section.visual_policy.required)
+    needs_diagram = visual_required or any(component.startswith("diagram") for component in selected)
+    needs_worked_example = any(component == "worked-example-card" for component in selected)
+    interaction_required = any(component == "simulation-block" for component in selected)
+    focus = section.focus_note or section.objective or section.rationale or section.title
+    return SectionPlan(
+        section_id=section.id,
+        title=section.title,
+        position=section.order,
+        focus=focus,
+        role=section.role,
+        bridges_from=bridges_from,
+        bridges_to=bridges_to,
+        needs_diagram=needs_diagram,
+        needs_worked_example=needs_worked_example,
+        required_components=selected,
+        optional_components=[],
+        interaction_policy="required" if interaction_required else "allowed",
+        diagram_policy="required" if visual_required else "allowed",
+        continuity_notes=section.rationale,
+    )
+
+
+def _pipeline_sections_from_planning_spec(spec: PlanningGenerationSpec) -> list[SectionPlan]:
+    contract = get_contract(spec.template_id)
+    always_present = contract.always_present or contract.required_components
+    sections = [
+        _pipeline_section_from_planning(section, always_present=always_present)
+        for section in spec.sections
+    ]
+    for index, section in enumerate(sections):
+        if index > 0:
+            section.bridges_from = sections[index - 1].title
+        if index + 1 < len(sections):
+            section.bridges_to = sections[index + 1].title
+    return sections
+
+
 def _context_from_generation_spec(
     spec: GenerationSpec,
     *,
@@ -183,6 +230,31 @@ def _context_from_generation_spec(
         )
         if section.continuity_notes:
             lines.append(f"Continuity: {section.continuity_notes}")
+    if spec.warning:
+        lines.append("")
+        lines.append(f"Planning warning: {spec.warning}")
+    return "\n".join(lines)
+
+
+def _context_from_planning_spec(
+    spec: PlanningGenerationSpec,
+    *,
+    subject: str,
+) -> str:
+    lines = [
+        subject,
+        f"Audience: {spec.source_brief.audience}",
+    ]
+    if spec.source_brief.prior_knowledge:
+        lines.append(f"Prior knowledge: {spec.source_brief.prior_knowledge}")
+    if spec.source_brief.extra_context:
+        lines.append(f"Additional context: {spec.source_brief.extra_context}")
+    lines.append("")
+    lines.append("Reviewed lesson plan:")
+    for section in spec.sections:
+        suffix = f" [{section.role}]"
+        summary = section.focus_note or section.objective or section.rationale
+        lines.append(f"Section {section.order}: {section.title}{suffix} - {summary}")
     if spec.warning:
         lines.append("")
         lines.append(f"Planning warning: {spec.warning}")
@@ -268,10 +340,20 @@ def _section_plans_for_follow_up(
         try:
             spec = GenerationSpec.model_validate_json(generation.planning_spec_json)
         except Exception:
-            logger.warning(
-                "Generation %s planning_spec_json could not be parsed; falling back to seeded section plans",
-                generation.id,
-            )
+            try:
+                planning_spec = PlanningGenerationSpec.model_validate_json(
+                    generation.planning_spec_json
+                )
+            except Exception:
+                logger.warning(
+                    "Generation %s planning_spec_json could not be parsed; falling back to seeded section plans",
+                    generation.id,
+                )
+            else:
+                return [
+                    section.model_dump()
+                    for section in _pipeline_sections_from_planning_spec(planning_spec)
+                ]
         else:
             return [section.model_dump() for section in spec.sections]
     return _seed_section_plans(source_document)
@@ -1028,6 +1110,78 @@ def _validate_template_and_preset(template_id: str, preset_id: str) -> None:
         )
 
 
+async def enqueue_generation(
+    *,
+    current_user: User,
+    profile: StudentProfile | None,
+    gen_repo: GenerationRepository,
+    document_repo: DocumentRepository,
+    report_repo: GenerationReportRepository,
+    subject: str,
+    context: str,
+    mode: GenerationMode,
+    template_id: str,
+    preset_id: str,
+    section_count: int,
+    section_plans: list | None,
+    planning_spec_json: str | None,
+) -> GenerationAcceptedResponse:
+    _validate_template_and_preset(template_id, preset_id)
+    if profile is None:
+        raise HTTPException(status_code=409, detail="Complete your profile first")
+
+    generation_id = str(uuid.uuid4())
+    generation = Generation(
+        id=generation_id,
+        user_id=current_user.id,
+        subject=subject,
+        context=context,
+        mode=mode,
+        requested_template_id=template_id,
+        requested_preset_id=preset_id,
+        section_count=section_count,
+        planning_spec_json=planning_spec_json,
+    )
+    initial_document = _initial_document(generation)
+    document_path = await document_repo.save_document(initial_document)
+    generation.document_path = document_path
+    await gen_repo.create(generation)
+
+    command = PipelineCommand(
+        generation_id=generation_id,
+        subject=subject,
+        context=context,
+        grade_band=_grade_band(profile),
+        template_id=template_id,
+        preset_id=preset_id,
+        learner_fit="general",
+        section_count=section_count,
+        mode=mode.value,
+        section_plans=section_plans,
+    )
+
+    asyncio.create_task(
+        _run_generation_job(
+            generation,
+            command,
+            gen_repo,
+            document_repo,
+            report_repo,
+            initial_document,
+        )
+    )
+
+    events_url, document_url, report_url = _generation_urls(generation_id)
+    return GenerationAcceptedResponse(
+        generation_id=generation_id,
+        status="pending",
+        mode=mode,
+        events_url=events_url,
+        document_url=document_url,
+        report_url=report_url,
+    )
+
+
 @router.post("/generations", status_code=202, response_model=GenerationAcceptedResponse)
 async def create_generation(
     req: GenerationRequest,
@@ -1048,60 +1202,21 @@ async def create_generation(
         planning_spec_json,
     ) = _effective_generation_payload(req)
 
-    _validate_template_and_preset(effective_template_id, effective_preset_id)
     profile = await profile_repo.find_by_user_id(current_user.id)
-    if profile is None:
-        raise HTTPException(status_code=409, detail="Complete your profile first")
-
-    generation_id = str(uuid.uuid4())
-    generation = Generation(
-        id=generation_id,
-        user_id=current_user.id,
+    return await enqueue_generation(
+        current_user=current_user,
+        profile=profile,
+        gen_repo=gen_repo,
+        document_repo=document_repo,
+        report_repo=report_repo,
         subject=effective_subject,
         context=effective_context,
         mode=effective_mode,
-        requested_template_id=effective_template_id,
-        requested_preset_id=effective_preset_id,
-        section_count=effective_section_count,
-        planning_spec_json=planning_spec_json,
-    )
-    initial_document = _initial_document(generation)
-    document_path = await document_repo.save_document(initial_document)
-    generation.document_path = document_path
-    await gen_repo.create(generation)
-
-    command = PipelineCommand(
-        generation_id=generation_id,
-        subject=effective_subject,
-        context=effective_context,
-        grade_band=_grade_band(profile),
         template_id=effective_template_id,
         preset_id=effective_preset_id,
-        learner_fit="general",
         section_count=effective_section_count,
-        mode=effective_mode.value,
         section_plans=effective_section_plans,
-    )
-
-    asyncio.create_task(
-        _run_generation_job(
-            generation,
-            command,
-            gen_repo,
-            document_repo,
-            report_repo,
-            initial_document,
-        )
-    )
-
-    events_url, document_url, report_url = _generation_urls(generation_id)
-    return GenerationAcceptedResponse(
-        generation_id=generation_id,
-        status="pending",
-        mode=effective_mode,
-        events_url=events_url,
-        document_url=document_url,
-        report_url=report_url,
+        planning_spec_json=planning_spec_json,
     )
 
 

@@ -46,7 +46,15 @@
 
 <header>
 	<nav>
-		<a href={authed.current ? '/dashboard' : '/'} class="brand">Textbook Agent</a>
+		<div class="nav-left">
+			<a href={authed.current ? '/dashboard' : '/'} class="brand">Textbook Agent</a>
+			{#if authed.current && user.current}
+				<div class="nav-links">
+					<a href="/dashboard" class="nav-link">Dashboard</a>
+					<a href="/studio" class="nav-link">Studio</a>
+				</div>
+			{/if}
+		</div>
 		{#if authed.current && user.current}
 			<div class="nav-right">
 				{#if user.current.picture_url}
@@ -93,6 +101,14 @@
 		margin: 0 auto;
 	}
 
+	.nav-left,
+	.nav-links,
+	.nav-right {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
 	.brand {
 		font-weight: 700;
 		font-size: 1.1rem;
@@ -100,10 +116,10 @@
 		text-decoration: none;
 	}
 
-	.nav-right {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
+	.nav-link {
+		color: #5f574d;
+		text-decoration: none;
+		font-size: 0.92rem;
 	}
 
 	.avatar {
@@ -136,5 +152,14 @@
 		max-width: 1200px;
 		margin: 0 auto;
 		padding: 1.5rem;
+	}
+
+	@media (max-width: 720px) {
+		nav,
+		.nav-left,
+		.nav-links,
+		.nav-right {
+			flex-wrap: wrap;
+		}
 	}
 </style>

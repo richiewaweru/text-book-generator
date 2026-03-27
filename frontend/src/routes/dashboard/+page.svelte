@@ -154,6 +154,13 @@
 				Start with a plain-language brief, review the structured plan, and then generate into the
 				live Blue Classroom runtime.
 			</p>
+			<div class="studio-entry">
+				<p class="studio-entry-copy">
+					The dedicated studio route now keeps planning, review, and live generation in one
+					workspace.
+				</p>
+				<a href="/studio" class="studio-link">Open full studio</a>
+			</div>
 			<TeacherStudio onsubmit={handleGenerate} disabled={generating} />
 		</section>
 
@@ -296,13 +303,36 @@
 	}
 
 	.edit-profile-btn,
-	.enhance-link {
+	.enhance-link,
+	.studio-link {
 		border-radius: 999px;
 		border: 1px solid rgba(36, 52, 63, 0.18);
 		background: rgba(36, 52, 63, 0.05);
 		color: #24343f;
 		padding: 0.45rem 0.85rem;
 		cursor: pointer;
+	}
+
+	.studio-entry {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.9rem 1rem;
+		border-radius: 18px;
+		background: rgba(255, 255, 255, 0.58);
+		border: 1px solid rgba(36, 52, 63, 0.08);
+		margin: 1rem 0;
+	}
+
+	.studio-entry-copy {
+		margin: 0;
+		color: #655c52;
+	}
+
+	.studio-link {
+		text-decoration: none;
+		white-space: nowrap;
 	}
 
 	.history-list {
@@ -395,6 +425,7 @@
 	}
 
 	@media (max-width: 720px) {
+		.studio-entry,
 		.history-item {
 			display: grid;
 		}
