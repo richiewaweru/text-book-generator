@@ -20,6 +20,7 @@ from .dependencies import get_document_repository, get_report_repository
 from .generation_recovery import mark_stale_generations_failed
 from .middleware.error_handler import register_error_handlers
 from .routes.auth import router as auth_router
+from .routes.brief import router as brief_router
 from .routes.generation import router as generation_router
 from .routes.health import router as health_router
 from .routes.profile import router as profile_router
@@ -85,6 +86,7 @@ async def _reset_legacy_generation_table_if_needed() -> bool:
             "quality_passed",
             "generation_time_seconds",
             "source_generation_id",
+            "planning_spec_json",
             "created_at",
             "completed_at",
         }
@@ -180,6 +182,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(profile_router)
+    app.include_router(brief_router)
     app.include_router(generation_router)
 
     return app

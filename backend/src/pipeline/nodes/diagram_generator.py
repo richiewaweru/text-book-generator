@@ -23,19 +23,19 @@ from pipeline.providers.registry import get_node_text_model
 from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.state import PipelineError, TextbookPipelineState
 from pipeline.types.requests import GenerationMode
-from pipeline.types.section_content import DiagramContent
+from pipeline.types.section_content import DiagramContent, DiagramSpec
 from pipeline.llm_runner import run_llm
 
 _DIAGRAM_COMPONENTS = {"diagram-block", "diagram-series", "diagram-compare"}
 _DIAGRAM_TIMEOUTS = {
-    GenerationMode.DRAFT: 20.0,
+    GenerationMode.DRAFT: 30.0,
     GenerationMode.BALANCED: 35.0,
     GenerationMode.STRICT: 45.0,
 }
 
 
 class DiagramOutput(BaseModel):
-    svg_content: str
+    spec: DiagramSpec
     caption: str
     alt_text: str
 
@@ -150,7 +150,7 @@ async def diagram_generator(
         )
 
         diagram = DiagramContent(
-            svg_content=result.output.svg_content,
+            spec=result.output.spec,
             caption=result.output.caption,
             alt_text=result.output.alt_text,
         )

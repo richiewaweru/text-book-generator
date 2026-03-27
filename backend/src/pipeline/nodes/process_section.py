@@ -19,6 +19,9 @@ from pipeline.nodes.section_assembler import section_assembler
 from pipeline.nodes.section_runner import _run_parallel_phase, run_section_steps
 from pipeline.state import TextbookPipelineState, merge_state_updates
 
+_DIAGRAM_COMPONENT_TARGETS = {"diagram", "diagram_compare", "diagram_series"}
+_INTERACTION_COMPONENT_TARGETS = {"simulation", "simulation_block"}
+
 
 async def _run_interaction_path(
     state: TextbookPipelineState,
@@ -45,6 +48,7 @@ async def process_section(
     """Run the phased per-section pipeline and merge the step outputs."""
 
     typed = TextbookPipelineState.parse(state)
+    target_component = typed.request.target_component
 
     phase1 = await run_section_steps(
         typed,
@@ -65,15 +69,27 @@ async def process_section(
     merge_state_updates(raw_state, phase2)
     typed = TextbookPipelineState.parse(raw_state)
 
-    phase3 = await _run_parallel_phase(
-        typed,
-        steps=[
-            ("diagram_generator", diagram_generator),
-            ("interaction_path", _run_interaction_path),
-        ],
-        pre_instrumented=frozenset({"interaction_path"}),
-        model_overrides=model_overrides,
-    )
+    if target_component in _DIAGRAM_COMPONENT_TARGETS:
+        phase3 = await run_section_steps(
+            typed,
+            steps=[("diagram_generator", diagram_generator)],
+            model_overrides=model_overrides,
+        )
+    elif target_component in _INTERACTION_COMPONENT_TARGETS:
+        phase3 = await _run_interaction_path(
+            typed,
+            model_overrides=model_overrides,
+        )
+    else:
+        phase3 = await _run_parallel_phase(
+            typed,
+            steps=[
+                ("diagram_generator", diagram_generator),
+                ("interaction_path", _run_interaction_path),
+            ],
+            pre_instrumented=frozenset({"interaction_path"}),
+            model_overrides=model_overrides,
+        )
     merge_state_updates(raw_state, phase3)
     typed = TextbookPipelineState.parse(raw_state)
 

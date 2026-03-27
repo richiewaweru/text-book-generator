@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,6 +9,41 @@ def _default_env_file() -> Path:
     """Resolve the backend-local .env file regardless of the current working directory."""
 
     return Path(__file__).resolve().parents[4] / ".env"
+
+
+def _normalize_path_env(var_name: str, *, base_dir: Path) -> None:
+    raw = os.getenv(var_name)
+    if not raw:
+        return
+
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        return
+
+    os.environ[var_name] = str((base_dir / candidate).resolve())
+
+
+def _normalize_sqlite_database_url(var_name: str, *, base_dir: Path) -> None:
+    raw = os.getenv(var_name)
+    if not raw or not raw.startswith("sqlite"):
+        return
+
+    _, separator, path_part = raw.partition(":///")
+    if separator != ":///" or not path_part:
+        return
+
+    path = Path(path_part)
+    if path.is_absolute():
+        return
+
+    resolved = (base_dir / path).resolve().as_posix()
+    os.environ[var_name] = f"{raw[: raw.index(':///') + 4]}{resolved}"
+
+
+def _normalize_backend_local_env_paths(env_file: Path) -> None:
+    base_dir = env_file.parent
+    _normalize_path_env("LECTIO_CONTRACTS_DIR", base_dir=base_dir)
+    _normalize_sqlite_database_url("DATABASE_URL", base_dir=base_dir)
 
 
 def bootstrap_environment(env_file: str | Path | None = None) -> Path:
@@ -21,6 +57,7 @@ def bootstrap_environment(env_file: str | Path | None = None) -> Path:
 
     target = Path(env_file) if env_file is not None else _default_env_file()
     load_dotenv(target, override=False)
+    _normalize_backend_local_env_paths(target)
     return target
 
 

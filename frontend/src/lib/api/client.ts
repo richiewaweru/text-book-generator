@@ -1,4 +1,6 @@
 import type {
+	BriefRequest,
+	BriefResponse,
 	EnhanceGenerationRequest,
 	GenerationAccepted,
 	GenerationDetail,
@@ -32,6 +34,16 @@ export async function startGeneration(request: GenerationRequest): Promise<Gener
 		body: JSON.stringify(request)
 	});
 	await ensureOk(response, 'Generation failed.');
+	return response.json();
+}
+
+export async function planBrief(request: BriefRequest): Promise<BriefResponse> {
+	const response = await apiFetch('/api/v1/brief', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(request)
+	});
+	await ensureOk(response, 'Brief planning failed.');
 	return response.json();
 }
 

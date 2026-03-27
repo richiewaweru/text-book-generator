@@ -24,6 +24,9 @@ def build_interaction_spec(
     interaction_type: str | None = None,
     anchor_block: str | None = None,
 ) -> InteractionSpec | None:
+    plan = state.current_section_plan
+    if plan is not None and plan.interaction_policy == "disabled":
+        return None
     if not state.request.interactions_enabled():
         return None
     if state.contract.interaction_level not in {"medium", "high"}:
@@ -62,6 +65,10 @@ async def interaction_decider(
     _ = model_overrides
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
+    plan = state.current_section_plan
+
+    if plan is not None and plan.interaction_policy == "disabled":
+        return {"completed_nodes": ["interaction_decider"]}
 
     if not state.request.interactions_enabled():
         return {"completed_nodes": ["interaction_decider"]}

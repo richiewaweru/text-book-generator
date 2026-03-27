@@ -3,6 +3,7 @@ from .generation_request import (
     GenerationAcceptedResponse,
     GenerationRequest,
 )
+from .brief import BriefRequest, GenerationSpec
 from .generation_report import (
     GenerationReport,
     GenerationReportLLMAttempt,
@@ -21,6 +22,8 @@ from .generation_status import (
 )
 
 __all__ = [
+    "BriefRequest",
+    "GenerationSpec",
     "GenerationRequest",
     "GenerationAcceptedResponse",
     "EnhanceGenerationRequest",

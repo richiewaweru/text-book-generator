@@ -7,6 +7,7 @@ Input types for the generation pipeline.
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, Field
 
@@ -37,8 +38,10 @@ class PipelineRequest(BaseModel):
     mode: GenerationMode = GenerationMode.BALANCED
     generation_id: str | None = None
     source_generation_id: str | None = None
+    section_plans: list["SectionPlan"] | None = None
     seed_document: SeedDocument | None = None
     target_section_ids: list[str] | None = None
+    target_component: str | None = None
 
     @property
     def topic(self) -> str:
@@ -62,7 +65,14 @@ class SectionPlan(BaseModel):
     title: str
     position: int
     focus: str
+    role: Literal["intro", "develop", "practice", "synthesis"] = "develop"
     bridges_from: str | None = None
     bridges_to: str | None = None
     needs_diagram: bool = False
     needs_worked_example: bool = False
+    required_components: list[str] = Field(default_factory=list)
+    optional_components: list[str] = Field(default_factory=list)
+    interaction_policy: Literal["required", "allowed", "disabled"] = "allowed"
+    diagram_policy: Literal["required", "allowed", "disabled"] = "allowed"
+    enrichment_enabled: bool = True
+    continuity_notes: str | None = None

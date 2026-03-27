@@ -14,6 +14,32 @@ def _has_diagram_slot(contract) -> bool:
     return bool({"diagram-block", "diagram-series", "diagram-compare"} & components)
 
 
+def _diagram_allowed(state: TextbookPipelineState) -> bool:
+    plan = state.current_section_plan
+    if plan is None:
+        return False
+    if plan.diagram_policy == "disabled":
+        return False
+    if not _has_diagram_slot(state.contract):
+        return False
+    return plan.diagram_policy == "required" or bool(plan.needs_diagram)
+
+
+def _interaction_allowed(state: TextbookPipelineState) -> bool:
+    plan = state.current_section_plan
+    if plan is None:
+        return False
+    if plan.interaction_policy == "disabled":
+        return False
+    if not state.request.interactions_enabled():
+        return False
+    if state.contract.interaction_level not in {"medium", "high"}:
+        return False
+    if not _has_simulation_slot(state.contract):
+        return False
+    return True
+
+
 def _diagram_type(section) -> str:
     if section.process is not None:
         return "process"
@@ -51,12 +77,8 @@ async def composition_planner(
         return {"completed_nodes": ["composition_planner"]}
 
     plan = state.current_section_plan
-    diagram_enabled = _has_diagram_slot(state.contract) and bool(plan and plan.needs_diagram)
-    interaction_enabled = (
-        state.request.interactions_enabled()
-        and state.contract.interaction_level in {"medium", "high"}
-        and _has_simulation_slot(state.contract)
-    )
+    diagram_enabled = _diagram_allowed(state)
+    interaction_enabled = _interaction_allowed(state)
 
     key_concepts = []
     if section.definition is not None:
@@ -67,21 +89,25 @@ async def composition_planner(
         diagram=DiagramPlan(
             enabled=diagram_enabled,
             reasoning=(
-                "The section plan flagged this section as visually helpful."
+                "The reviewed section plan requires or strongly prefers a diagram."
                 if diagram_enabled
-                else "This section should stay text-first."
+                else "The reviewed section plan keeps this section text-first."
             ),
             diagram_type=_diagram_type(section) if diagram_enabled else None,
             focus_area="process" if section.process is not None else "explanation",
             key_concepts=key_concepts[:4],
-            visual_guidance=plan.focus if plan is not None else None,
+            visual_guidance=(
+                f"{plan.focus}. {plan.continuity_notes}"
+                if plan is not None and plan.continuity_notes
+                else plan.focus if plan is not None else None
+            ),
         ),
         interaction=InteractionPlan(
             enabled=interaction_enabled,
             reasoning=(
-                "Interactions are enabled for this template and mode."
+                "The reviewed section plan allows an interaction for this section."
                 if interaction_enabled
-                else "This template or mode does not require an interaction."
+                else "This section should not add an interaction in the current plan."
             ),
             interaction_type=pick_interaction_type(state, section) if interaction_enabled else None,
             anchor_block=(

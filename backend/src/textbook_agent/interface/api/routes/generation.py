@@ -30,6 +30,7 @@ from textbook_agent.application.dtos import (
     EnhanceGenerationRequest,
     GenerationAcceptedResponse,
     GenerationRequest,
+    GenerationSpec,
 )
 from textbook_agent.application.services.generation_report_recorder import (
     GenerationReportRecorder,
@@ -67,6 +68,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["generation"])
 
+_DIAGRAM_COMPONENT_TARGETS = {"diagram", "diagram_compare", "diagram_series"}
+_INTERACTION_COMPONENT_TARGETS = {"simulation", "simulation_block"}
+_TEXT_COMPONENT_TARGETS = {
+    "hook",
+    "explanation",
+    "practice",
+    "worked_example",
+    "definition",
+    "pitfall",
+    "glossary",
+    "what_next",
+}
+
 
 def _history_item(generation: Generation) -> dict:
     return {
@@ -87,6 +101,19 @@ def _history_item(generation: Generation) -> dict:
         "created_at": generation.created_at.isoformat() if generation.created_at else None,
         "completed_at": generation.completed_at.isoformat() if generation.completed_at else None,
     }
+
+
+def _planning_spec_payload(generation: Generation) -> dict | None:
+    if not generation.planning_spec_json:
+        return None
+    try:
+        return json.loads(generation.planning_spec_json)
+    except json.JSONDecodeError:
+        logger.warning(
+            "Generation %s has invalid planning_spec_json payload",
+            generation.id,
+        )
+        return None
 
 
 def _detail_item(generation: Generation) -> dict:
@@ -112,6 +139,7 @@ def _detail_item(generation: Generation) -> dict:
         "completed_at": generation.completed_at.isoformat() if generation.completed_at else None,
         "document_path": generation.document_path,
         "report_url": report_url,
+        "planning_spec": _planning_spec_payload(generation),
     }
 
 
@@ -133,6 +161,187 @@ def _generation_urls(generation_id: str) -> tuple[str, str, str]:
         f"/api/v1/generations/{generation_id}/document",
         f"/api/v1/generations/{generation_id}/report",
     )
+
+
+def _context_from_generation_spec(
+    spec: GenerationSpec,
+    *,
+    subject: str,
+) -> str:
+    lines = [
+        subject,
+        f"Audience: {spec.source_brief.audience}",
+    ]
+    if spec.source_brief.extra_context:
+        lines.append(f"Additional context: {spec.source_brief.extra_context}")
+    lines.append("")
+    lines.append("Reviewed lesson plan:")
+    for section in spec.sections:
+        suffix = f" [{section.role}]" if section.role else ""
+        lines.append(
+            f"Section {section.position}: {section.title}{suffix} - {section.focus}"
+        )
+        if section.continuity_notes:
+            lines.append(f"Continuity: {section.continuity_notes}")
+    if spec.warning:
+        lines.append("")
+        lines.append(f"Planning warning: {spec.warning}")
+    return "\n".join(lines)
+
+
+def _effective_generation_spec(req: GenerationRequest) -> GenerationSpec | None:
+    return req.generation_spec
+
+
+def _effective_generation_payload(
+    req: GenerationRequest,
+) -> tuple[str, str, GenerationMode, str, str, int, list | None, str | None]:
+    spec = _effective_generation_spec(req)
+    if spec is None:
+        return (
+            req.subject,
+            req.context,
+            req.mode,
+            req.template_id,
+            req.preset_id,
+            req.section_count,
+            None,
+            None,
+        )
+
+    return (
+        req.subject or spec.source_brief.intent,
+        _context_from_generation_spec(
+            spec,
+            subject=req.subject or spec.source_brief.intent,
+        ),
+        GenerationMode(spec.mode.value),
+        spec.template_id,
+        spec.preset_id,
+        spec.section_count,
+        spec.sections,
+        spec.model_dump_json(),
+    )
+
+
+def _enhancement_scope_targets(
+    *,
+    req: EnhanceGenerationRequest,
+    source_document: PipelineDocument,
+) -> tuple[list[str], str | None]:
+    manifest_ids = {
+        item.section_id for item in _normalize_manifest_items(source_document.section_manifest)
+    }
+    ready_ids = {section.section_id for section in source_document.sections}
+    known_ids = manifest_ids | ready_ids
+
+    if req.scope == "document":
+        return _target_section_ids_for_enhance(source_document), None
+
+    if not req.section_id:
+        raise HTTPException(status_code=400, detail="section_id is required for targeted enhancement")
+
+    if req.section_id not in known_ids:
+        raise HTTPException(status_code=404, detail="Section not found in source generation")
+
+    if req.scope == "section":
+        return [req.section_id], None
+
+    component = (req.component or "").strip()
+    if not component:
+        raise HTTPException(status_code=400, detail="component is required for component enhancement")
+    if component not in (_DIAGRAM_COMPONENT_TARGETS | _INTERACTION_COMPONENT_TARGETS | _TEXT_COMPONENT_TARGETS):
+        raise HTTPException(status_code=400, detail=f"Unsupported enhancement component '{component}'")
+    if component in (_DIAGRAM_COMPONENT_TARGETS | _INTERACTION_COMPONENT_TARGETS) and req.section_id not in ready_ids:
+        raise HTTPException(
+            status_code=409,
+            detail="Diagram or interaction enhancement requires an existing section to seed from",
+        )
+    return [req.section_id], component
+
+
+def _section_plans_for_follow_up(
+    generation: Generation,
+    source_document: PipelineDocument,
+) -> list:
+    if generation.planning_spec_json:
+        try:
+            spec = GenerationSpec.model_validate_json(generation.planning_spec_json)
+        except Exception:
+            logger.warning(
+                "Generation %s planning_spec_json could not be parsed; falling back to seeded section plans",
+                generation.id,
+            )
+        else:
+            return [section.model_dump() for section in spec.sections]
+    return _seed_section_plans(source_document)
+
+
+def _progress_updates_for_event(event: dict) -> list[dict]:
+    event_type = event.get("type")
+    if event_type == "pipeline_start":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "planning",
+            "label": "Planning lesson structure",
+        }]
+    if event_type == "section_started":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "generating_section",
+            "section_id": event.get("section_id"),
+            "label": f"Generating {event.get('title', 'section')}",
+        }]
+    if event_type == "node_started":
+        node = event.get("node")
+        if node == "diagram_generator":
+            return [{
+                "type": "progress_update",
+                "generation_id": event.get("generation_id", ""),
+                "stage": "generating_diagram",
+                "section_id": event.get("section_id"),
+                "label": "Generating diagram",
+            }]
+        if node == "qc_agent":
+            return [{
+                "type": "progress_update",
+                "generation_id": event.get("generation_id", ""),
+                "stage": "checking_quality",
+                "section_id": event.get("section_id"),
+                "label": "Checking quality",
+            }]
+    if event_type in {"section_retry_queued", "section_attempt_started"}:
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "repairing",
+            "section_id": event.get("section_id"),
+            "label": "Repairing section",
+        }]
+    if event_type == "qc_complete":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "finalizing",
+            "label": "Finalizing lesson",
+        }]
+    if event_type == "complete":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "complete",
+            "label": "Lesson ready",
+        }]
+    if event_type == "error":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "failed",
+            "label": event.get("message", "Generation failed"),
+        }]
+    return []
 
 
 def _initial_document(
@@ -423,7 +632,22 @@ def _log_trace_event(generation_id: str, event) -> None:
         )
 
 
-_GENERATION_JOB_TIMEOUT_SECONDS = 300.0
+_GENERATION_JOB_TIMEOUT_MIN = 120.0
+_GENERATION_JOB_TIMEOUT_PER_SECTION = 90.0
+_GENERATION_JOB_TIMEOUT_MAX = 720.0
+
+
+def _generation_job_timeout(section_count: int) -> float:
+    """Compute generation timeout based on section count.
+
+    Formula: 120 + 90 * N, capped at 720s.
+    1 section → 210s, 2 → 300s, 4 → 480s, 7+ → 720s.
+    """
+    return min(
+        _GENERATION_JOB_TIMEOUT_MIN
+        + _GENERATION_JOB_TIMEOUT_PER_SECTION * max(section_count, 1),
+        _GENERATION_JOB_TIMEOUT_MAX,
+    )
 _RECORDER_WAIT_TIMEOUT_SECONDS = 5.0
 _RECORDER_FINALIZE_TIMEOUT_SECONDS = 5.0
 _REPORT_SNAPSHOT_TIMEOUT_SECONDS = 5.0
@@ -656,6 +880,8 @@ async def _run_generation_job(
             )
         recorder.log_final_summary()
 
+    timeout_seconds = _generation_job_timeout(command.section_count)
+
     try:
         await recorder.start()
         document_path = await document_repo.save_document(document)
@@ -667,7 +893,7 @@ async def _run_generation_job(
 
         result = await asyncio.wait_for(
             run_pipeline_streaming(command, on_event=on_event),
-            timeout=_GENERATION_JOB_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
         )
         completed_at = datetime.now(timezone.utc)
         document = result.document.model_copy(
@@ -694,12 +920,12 @@ async def _run_generation_job(
         logger.error(
             "Generation %s timed out after %.0fs",
             generation.id,
-            _GENERATION_JOB_TIMEOUT_SECONDS,
+            timeout_seconds,
         )
         try:
             await finalize_failure(
                 error_message=(
-                    f"Generation timed out after {int(_GENERATION_JOB_TIMEOUT_SECONDS)} seconds."
+                    f"Generation timed out after {int(timeout_seconds)} seconds."
                 ),
                 error_type="runtime_error",
                 error_code=_GENERATION_TIMEOUT_ERROR_CODE,
@@ -811,7 +1037,18 @@ async def create_generation(
     document_repo: DocumentRepository = Depends(get_document_repository),
     report_repo: GenerationReportRepository = Depends(get_report_repository),
 ):
-    _validate_template_and_preset(req.template_id, req.preset_id)
+    (
+        effective_subject,
+        effective_context,
+        effective_mode,
+        effective_template_id,
+        effective_preset_id,
+        effective_section_count,
+        effective_section_plans,
+        planning_spec_json,
+    ) = _effective_generation_payload(req)
+
+    _validate_template_and_preset(effective_template_id, effective_preset_id)
     profile = await profile_repo.find_by_user_id(current_user.id)
     if profile is None:
         raise HTTPException(status_code=409, detail="Complete your profile first")
@@ -820,12 +1057,13 @@ async def create_generation(
     generation = Generation(
         id=generation_id,
         user_id=current_user.id,
-        subject=req.subject,
-        context=req.context,
-        mode=req.mode,
-        requested_template_id=req.template_id,
-        requested_preset_id=req.preset_id,
-        section_count=req.section_count,
+        subject=effective_subject,
+        context=effective_context,
+        mode=effective_mode,
+        requested_template_id=effective_template_id,
+        requested_preset_id=effective_preset_id,
+        section_count=effective_section_count,
+        planning_spec_json=planning_spec_json,
     )
     initial_document = _initial_document(generation)
     document_path = await document_repo.save_document(initial_document)
@@ -834,14 +1072,15 @@ async def create_generation(
 
     command = PipelineCommand(
         generation_id=generation_id,
-        subject=req.subject,
-        context=req.context,
+        subject=effective_subject,
+        context=effective_context,
         grade_band=_grade_band(profile),
-        template_id=req.template_id,
-        preset_id=req.preset_id,
+        template_id=effective_template_id,
+        preset_id=effective_preset_id,
         learner_fit="general",
-        section_count=req.section_count,
-        mode=req.mode.value,
+        section_count=effective_section_count,
+        mode=effective_mode.value,
+        section_plans=effective_section_plans,
     )
 
     asyncio.create_task(
@@ -859,7 +1098,7 @@ async def create_generation(
     return GenerationAcceptedResponse(
         generation_id=generation_id,
         status="pending",
-        mode=req.mode,
+        mode=effective_mode,
         events_url=events_url,
         document_url=document_url,
         report_url=report_url,
@@ -885,12 +1124,14 @@ async def enhance_generation(
     source_generation = await gen_repo.find_by_id(generation_id)
     if source_generation is None or source_generation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
-    if source_generation.mode != GenerationMode.DRAFT:
-        raise HTTPException(status_code=409, detail="Only draft generations can be enhanced")
     if source_generation.status != "completed" or not source_generation.document_path:
-        raise HTTPException(status_code=409, detail="Draft is not ready for enhancement")
+        raise HTTPException(status_code=409, detail="Generation is not ready for enhancement")
 
     source_document = await document_repo.load_document(source_generation.document_path)
+    target_section_ids, target_component = _enhancement_scope_targets(
+        req=req,
+        source_document=source_document,
+    )
     child_generation_id = str(uuid.uuid4())
     generation = Generation(
         id=child_generation_id,
@@ -905,6 +1146,7 @@ async def enhance_generation(
         or source_generation.requested_preset_id,
         section_count=source_generation.section_count,
         source_generation_id=generation_id,
+        planning_spec_json=source_generation.planning_spec_json,
     )
     initial_document = _initial_document(
         generation,
@@ -931,16 +1173,18 @@ async def enhance_generation(
         section_count=max(len(source_document.section_manifest), len(source_document.sections), 1),
         mode=req.mode.value,
         source_generation_id=generation_id,
+        section_plans=_section_plans_for_follow_up(source_generation, source_document),
         seed_document=SeedDocument(
             sections=source_document.sections,
-            section_plans=_seed_section_plans(source_document),
+            section_plans=_section_plans_for_follow_up(source_generation, source_document),
             qc_reports=[
                 report if isinstance(report, dict) else report.model_dump(mode="json")
                 for report in source_document.qc_reports
             ],
             note=req.note,
         ),
-        target_section_ids=_target_section_ids_for_enhance(source_document),
+        target_section_ids=target_section_ids,
+        target_component=target_component,
     )
 
     asyncio.create_task(
@@ -1036,25 +1280,33 @@ async def get_generation_events(
         raise HTTPException(status_code=404, detail="Generation not found")
 
     async def stream() -> AsyncIterator[str]:
+        async def emit_event_payloads(event_payload: dict) -> AsyncIterator[str]:
+            yield _sse_payload(event_payload)
+            for progress_update in _progress_updates_for_event(event_payload):
+                yield _sse_payload(progress_update)
+
         queue = event_bus.subscribe(generation_id)
         try:
             current = await gen_repo.find_by_id(generation_id)
             while not queue.empty():
                 event = queue.get_nowait()
-                yield _sse_payload(event)
+                async for payload in emit_event_payloads(event):
+                    yield payload
                 if event.get("type") in {"complete", "error"}:
                     return
 
             if current is not None and current.status == "completed":
-                yield _sse_payload(_complete_event(generation_id).model_dump(mode="json", exclude_none=True))
+                terminal = _complete_event(generation_id).model_dump(mode="json", exclude_none=True)
+                async for payload in emit_event_payloads(terminal):
+                    yield payload
                 return
             if current is not None and current.status == "failed":
-                yield _sse_payload(
-                    _error_event(
-                        generation_id,
-                        current.error or "Generation failed",
-                    ).model_dump(mode="json", exclude_none=True)
-                )
+                terminal = _error_event(
+                    generation_id,
+                    current.error or "Generation failed",
+                ).model_dump(mode="json", exclude_none=True)
+                async for payload in emit_event_payloads(terminal):
+                    yield payload
                 return
 
             while True:
@@ -1078,10 +1330,11 @@ async def get_generation_events(
                             ).model_dump(mode="json", exclude_none=True)
                         )
                         return
-                    yield ": keep-alive\n\n"
-                    continue
+                        yield ": keep-alive\n\n"
+                        continue
 
-                yield _sse_payload(event)
+                async for payload in emit_event_payloads(event):
+                    yield payload
                 if event["type"] in {"complete", "error"}:
                     break
         finally:

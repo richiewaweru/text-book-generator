@@ -175,6 +175,7 @@ class TestRuntimeDiagnostics:
                             section_count INTEGER,
                             quality_passed BOOLEAN,
                             generation_time_seconds FLOAT,
+                            planning_spec_json TEXT,
                             source_generation_id VARCHAR,
                             created_at DATETIME NOT NULL,
                             completed_at DATETIME

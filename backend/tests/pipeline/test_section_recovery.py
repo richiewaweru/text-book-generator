@@ -7,7 +7,7 @@ import pytest
 from pipeline.graph import retry_diagram
 from pipeline.nodes import content_generator as content_generator_module
 from pipeline.nodes import process_section as process_section_module
-from pipeline.state import QCReport, StyleContext, TextbookPipelineState
+from pipeline.state import QCReport, RerenderRequest, StyleContext, TextbookPipelineState
 from pipeline.types.composition import CompositionPlan, DiagramPlan, InteractionPlan
 from pipeline.types.requests import PipelineRequest, SectionPlan
 from pipeline.types.section_content import (
@@ -157,6 +157,20 @@ def _state(**overrides) -> TextbookPipelineState:
     return TextbookPipelineState(**defaults)
 
 
+def _rerender_state(**overrides) -> TextbookPipelineState:
+    """State with a pending rerender — forces monolithic content_generator path."""
+    return _state(
+        rerender_requests={
+            "s-01": RerenderRequest(
+                section_id="s-01",
+                block_type="hook",
+                reason="Weak hook needs improvement",
+            )
+        },
+        **overrides,
+    )
+
+
 @pytest.mark.asyncio
 async def test_content_generator_repairs_one_validation_failure(monkeypatch) -> None:
     calls: list[str] = []
@@ -174,7 +188,7 @@ async def test_content_generator_repairs_one_validation_failure(monkeypatch) -> 
     monkeypatch.setattr(content_generator_module, "run_llm", fake_run_llm)
     monkeypatch.setattr(content_generator_module, "publish_runtime_event", lambda generation_id, event: events.append(event))
 
-    result = await content_generator_module.content_generator(_state())
+    result = await content_generator_module.content_generator(_rerender_state())
 
     assert result["generated_sections"]["s-01"].section_id == "s-01"
     assert "failed_sections" not in result
@@ -198,7 +212,7 @@ async def test_content_generator_persists_failed_section_after_repair_failure(mo
     monkeypatch.setattr(content_generator_module, "run_llm", fake_run_llm)
     monkeypatch.setattr(content_generator_module, "publish_runtime_event", lambda generation_id, event: events.append(event))
 
-    result = await content_generator_module.content_generator(_state())
+    result = await content_generator_module.content_generator(_rerender_state())
 
     assert "generated_sections" in result
     assert "s-01" not in result["generated_sections"]

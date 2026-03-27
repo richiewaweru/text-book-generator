@@ -173,17 +173,22 @@ async def _run_agent_with_limits(
     retry_policy: RetryPolicy,
     generation_mode: GenerationMode,
     slot: ModelSlot,
+    model_settings: dict | None = None,
 ) -> Any:
     semaphore = _draft_semaphore(generation_mode=generation_mode, slot=slot)
+    run_kwargs: dict[str, Any] = {"user_prompt": user_prompt}
+    if model_settings:
+        run_kwargs["model_settings"] = model_settings
+
     if semaphore is None:
         return await asyncio.wait_for(
-            agent.run(user_prompt=user_prompt),
+            agent.run(**run_kwargs),
             timeout=retry_policy.call_timeout_seconds,
         )
 
     async with semaphore:
         return await asyncio.wait_for(
-            agent.run(user_prompt=user_prompt),
+            agent.run(**run_kwargs),
             timeout=retry_policy.call_timeout_seconds,
         )
 
@@ -278,6 +283,7 @@ async def run_llm(
     retry_policy: RetryPolicy | None = None,
     spec: ModelSpec | None = None,
     generation_mode: GenerationMode = GenerationMode.BALANCED,
+    model_settings: dict | None = None,
 ) -> Any:
     """
     Central choke point for LLM calls: retries + tracing events + cost accounting.
@@ -302,6 +308,17 @@ async def run_llm(
         if effective_spec.family == ModelFamily.OPENAI_COMPATIBLE
         else None
     )
+
+    # Auto-inject prompt caching for Anthropic models.  The system prompt and
+    # tool schema (output_type JSON Schema) are identical across sections within
+    # one generation, so caching avoids re-processing ~4 000 tokens on calls 2+.
+    effective_settings: dict | None = None
+    if effective_spec.family == ModelFamily.ANTHROPIC:
+        effective_settings = dict(model_settings or {})
+        effective_settings.setdefault("anthropic_cache_instructions", True)
+        effective_settings.setdefault("anthropic_cache_tool_definitions", True)
+    elif model_settings:
+        effective_settings = model_settings
 
     publish = _should_publish_events(generation_id)
     if not publish:
@@ -337,6 +354,7 @@ async def run_llm(
                 retry_policy=retry_policy,
                 generation_mode=generation_mode,
                 slot=slot,
+                model_settings=effective_settings,
             )
             latency_ms = (time.perf_counter() - started_at) * 1000.0
 
