@@ -6,9 +6,15 @@
 	interface Props {
 		document: GenerationDocument;
 		sectionSlots?: ViewerSectionSlot[];
+		/** When set and `document.status === 'completed'`, shows "Export for Builder" in the lesson header. */
+		onExportForBuilder?: () => void;
 	}
 
-	let { document, sectionSlots = undefined }: Props = $props();
+	let { document, sectionSlots = undefined, onExportForBuilder = undefined }: Props = $props();
+
+	const showExportForBuilder = $derived(
+		document.status === 'completed' && typeof onExportForBuilder === 'function'
+	);
 
 	const template = $derived(templateRegistryMap[document.template_id]);
 	const preset = $derived(basePresetMap[document.preset_id] ?? null);
@@ -30,10 +36,20 @@
 						</p>
 					</div>
 
-					<div class="document-meta">
-						<span>{template.contract.name}</span>
-						<span>{document.mode.toUpperCase()}</span>
-						<span>{resolvedSectionSlots.length} sections</span>
+					<div class="lesson-header-actions">
+						{#if showExportForBuilder}
+							<button
+								type="button"
+								class="export-builder-btn"
+								onclick={() => onExportForBuilder?.()}
+							>
+								Export for Builder
+							</button>
+						{/if}
+						<div class="document-meta">
+							<span>{template.contract.name}</span>
+							<span>{resolvedSectionSlots.length} sections</span>
+						</div>
 					</div>
 				</div>
 			</header>
@@ -63,6 +79,35 @@
 {/if}
 
 <style>
+	.lesson-header-actions {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.75rem;
+	}
+
+	@media (min-width: 1024px) {
+		.lesson-header-actions {
+			align-items: flex-end;
+		}
+	}
+
+	.export-builder-btn {
+		flex-shrink: 0;
+		padding: 0.5rem 1rem;
+		font-size: 0.9rem;
+		font-weight: 600;
+		color: #0f172a;
+		background: #e2e8f0;
+		border: 1px solid #cbd5e1;
+		border-radius: 0.375rem;
+		cursor: pointer;
+	}
+
+	.export-builder-btn:hover {
+		background: #cbd5e1;
+	}
+
 	.document-meta {
 		display: grid;
 		gap: 0.55rem;

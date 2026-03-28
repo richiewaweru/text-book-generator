@@ -331,20 +331,6 @@
 				</div>
 			{/if}
 		</div>
-		{#if document?.status === 'completed'}
-			<button
-				type="button"
-				class="export-builder-btn"
-				onclick={() => {
-					const currentDocument = document;
-					if (!currentDocument) return;
-					const lesson = exportToLessonDocument(currentDocument);
-					downloadLessonDocument(lesson);
-				}}
-			>
-				Export for Builder
-			</button>
-		{/if}
 	</div>
 
 	{#if plannedSections !== null}
@@ -407,7 +393,16 @@
 	{:else if loading}
 		<p>Loading generation...</p>
 	{:else if document}
-		<LectioDocumentView {document} sectionSlots={sectionSlots} />
+		<LectioDocumentView
+			{document}
+			sectionSlots={sectionSlots}
+			onExportForBuilder={() => {
+				const currentDocument = document;
+				if (!currentDocument) return;
+				const lesson = exportToLessonDocument(currentDocument);
+				downloadLessonDocument(lesson);
+			}}
+		/>
 	{:else}
 		<p>No document is available yet.</p>
 	{/if}
@@ -424,23 +419,6 @@
 		justify-content: space-between;
 		gap: 1rem;
 		align-items: start;
-	}
-
-	.export-builder-btn {
-		flex-shrink: 0;
-		align-self: center;
-		padding: 0.5rem 1rem;
-		font-size: 0.9rem;
-		font-weight: 600;
-		color: #0f172a;
-		background: #e2e8f0;
-		border: 1px solid #cbd5e1;
-		border-radius: 0.375rem;
-		cursor: pointer;
-	}
-
-	.export-builder-btn:hover {
-		background: #cbd5e1;
 	}
 
 	.eyebrow {
