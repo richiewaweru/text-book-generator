@@ -219,6 +219,12 @@ async def commit_brief(
     document_repo: DocumentRepository = Depends(get_document_repository),
     report_repo: GenerationReportRepository = Depends(get_report_repository),
 ) -> GenerationAcceptedResponse:
+    if not validate_preset_for_template(spec.template_id, spec.preset_id):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid template/preset combination: {spec.template_id}/{spec.preset_id}",
+        )
+
     profile = await _load_profile(current_user, profile_repo)
     committed = spec.model_copy(update={"status": "committed"})
     return await enqueue_generation(

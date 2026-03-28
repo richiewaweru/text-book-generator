@@ -4,6 +4,8 @@ from planning.models import (
     NormalizedBrief,
     PlanningSectionPlan,
     PlanningTemplateContract,
+    PlanningVisualIntent,
+    PlanningVisualMode,
     VisualPolicy,
 )
 
@@ -20,6 +22,23 @@ _SPATIAL_HINTS = {
     "planet",
     "cycle",
     "photosynthesis",
+    "geography",
+    "architecture",
+    "geology",
+    "organ",
+    "molecule",
+    "skeleton",
+    "volcano",
+    "ocean",
+    "continent",
+    "mountain",
+    "weather",
+    "circuit",
+    "engine",
+    "building",
+    "bridge",
+    "solar",
+    "galaxy",
 }
 
 
@@ -27,7 +46,7 @@ def _classify_spatial(brief: NormalizedBrief) -> bool:
     return any(keyword in _SPATIAL_HINTS for keyword in brief.keyword_profile)
 
 
-def _visual_intent(section: PlanningSectionPlan) -> str:
+def _visual_intent(section: PlanningSectionPlan) -> PlanningVisualIntent:
     if section.role == "process":
         return "demonstrate_process"
     if section.role == "compare":
@@ -37,7 +56,7 @@ def _visual_intent(section: PlanningSectionPlan) -> str:
     return "explain_structure"
 
 
-def _visual_mode(brief: NormalizedBrief, intent: str) -> str:
+def _visual_mode(brief: NormalizedBrief, intent: str) -> PlanningVisualMode:
     if brief.brief.constraints.print_first or brief.resolved_format == "printed-booklet":
         return "svg"
     if intent in {"show_realism", "demonstrate_process", "compare_variants"}:

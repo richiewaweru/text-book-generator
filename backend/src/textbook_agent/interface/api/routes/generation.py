@@ -177,6 +177,8 @@ def _pipeline_section_from_planning(
     needs_worked_example = any(component == "worked-example-card" for component in selected)
     interaction_required = any(component == "simulation-block" for component in selected)
     focus = section.focus_note or section.objective or section.rationale or section.title
+    if not focus:
+        focus = f"Section {section.order}"
     return SectionPlan(
         section_id=section.id,
         title=section.title,

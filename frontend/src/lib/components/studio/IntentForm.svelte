@@ -25,13 +25,12 @@
 	type ConstraintKey = keyof UserBriefDraft['constraints'];
 
 	const defaultDraft = emptyDraft();
-	const initialDraft = get(briefDraft);
 
 	let { disabled = false, onSubmit }: Props = $props();
 	let showPriorKnowledge = $state(
-		Boolean(initialDraft.prior_knowledge.trim() || initialDraft.extra_context.trim())
+		Boolean($briefDraft.prior_knowledge.trim() || $briefDraft.extra_context.trim())
 	);
-	let showPreferences = $state(hasCustomPreferences(initialDraft));
+	let showPreferences = $state(hasCustomPreferences($briefDraft));
 	let validationMessage = $state<string | null>(null);
 	let signalWarning = $state<string | null>(null);
 
