@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import LectioDocumentView from '$lib/components/LectioDocumentView.svelte';
 	import {
@@ -9,12 +8,8 @@
 		buildSectionSlots,
 		normalizeDocument
 	} from '$lib/generation/viewer-state';
-	import {
-		buildGenerationEventsUrl,
-		enhanceGeneration,
-		getGenerationDetail,
-		getGenerationDocument
-	} from '$lib/api/client';
+	import { buildGenerationEventsUrl, getGenerationDetail, getGenerationDocument } from '$lib/api/client';
+	import { downloadLessonDocument, exportToLessonDocument } from '$lib/generation/export-document';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import type {
 		ErrorEvent,
@@ -33,7 +28,6 @@
 	let document = $state<GenerationDocument | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
-	let enhancing = $state(false);
 	let streamState = $state<'idle' | 'connected' | 'reconnecting' | 'complete'>('idle');
 	let plannedSections = $state<number | null>(null);
 	let qcSummary = $state<{ passed: number; total: number } | null>(null);
@@ -117,39 +111,6 @@
 					'This section may benefit from another pass.',
 				issues: report.issues
 			}));
-	}
-
-	function hasDiagramIssue(issues: GenerationDocument['qc_reports'][number]['issues']): boolean {
-		return issues.some((issue) => issue.block.includes('diagram'));
-	}
-
-	async function requestEnhancement(options: {
-		scope: 'section' | 'component';
-		sectionId: string;
-		component?: string;
-		label: string;
-	}) {
-		if (!generationId) {
-			return;
-		}
-
-		enhancing = true;
-		error = null;
-
-		try {
-			const accepted = await enhanceGeneration(generationId, {
-				mode: 'balanced',
-				scope: options.scope,
-				section_id: options.sectionId,
-				component: options.component,
-				note: options.label
-			});
-			goto(`/textbook/${accepted.generation_id}`);
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to enhance draft.';
-		} finally {
-			enhancing = false;
-		}
 	}
 
 	function applyGenerationSnapshot(nextDetail: GenerationDetail, nextDocument: GenerationDocument) {
@@ -346,41 +307,6 @@
 		}
 	}
 
-	async function handleEnhance() {
-		if (!generationId) {
-			return;
-		}
-
-		enhancing = true;
-		error = null;
-
-		try {
-			const accepted = await enhanceGeneration(generationId, { mode: 'balanced' });
-			goto(`/textbook/${accepted.generation_id}`);
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to enhance draft.';
-		} finally {
-			enhancing = false;
-		}
-	}
-
-	async function handleSectionEnhance(sectionId: string) {
-		await requestEnhancement({
-			scope: 'section',
-			sectionId,
-			label: 'Improve this section'
-		});
-	}
-
-	async function handleDiagramEnhance(sectionId: string) {
-		await requestEnhancement({
-			scope: 'component',
-			sectionId,
-			component: 'diagram',
-			label: 'Retry the diagram'
-		});
-	}
-
 	$effect(() => {
 		if (!generationId) {
 			return;
@@ -400,15 +326,23 @@
 			{#if detail}
 				<div class="meta">
 					<span class="status status-{detail.status}">{detail.status}</span>
-					<span class="mode">{detail.mode.toUpperCase()}</span>
 					<span>{detail.resolved_template_id ?? detail.requested_template_id}</span>
 					<span>{detail.resolved_preset_id ?? detail.requested_preset_id}</span>
 				</div>
 			{/if}
 		</div>
-		{#if detail?.mode === 'draft' && detail.status === 'completed'}
-			<button class="enhance-button" onclick={handleEnhance} disabled={enhancing}>
-				{enhancing ? 'Enhancing...' : 'Enhance Draft'}
+		{#if document?.status === 'completed'}
+			<button
+				type="button"
+				class="export-builder-btn"
+				onclick={() => {
+					const currentDocument = document;
+					if (!currentDocument) return;
+					const lesson = exportToLessonDocument(currentDocument);
+					downloadLessonDocument(lesson);
+				}}
+			>
+				Export for Builder
 			</button>
 		{/if}
 	</div>
@@ -436,13 +370,6 @@
 		<div class="warning"><strong>Viewer warning:</strong> {viewerWarning}</div>
 	{/if}
 
-	{#if detail?.mode === 'draft'}
-		<p class="draft-note">
-			Draft mode is the fast seedable pass. Use Enhance Draft to keep the section structure and let
-			the pipeline rework it in balanced mode.
-		</p>
-	{/if}
-
 	{#if document?.failed_sections?.length}
 		<section class="failed-sections">
 			<h2>Sections Not Completed</h2>
@@ -452,26 +379,6 @@
 						<div class="section-summary">
 							<strong>{failed.title}</strong>
 							<span>Failed at {failed.failed_at_node}: {failed.error_summary}</span>
-						</div>
-						<div class="section-actions">
-							<button
-								type="button"
-								class="section-action"
-								onclick={() => handleSectionEnhance(failed.section_id)}
-								disabled={enhancing}
-							>
-								Improve section
-							</button>
-							{#if failed.needs_diagram || failed.missing_components.some((component) => component.includes('diagram'))}
-								<button
-									type="button"
-									class="section-action"
-									onclick={() => handleDiagramEnhance(failed.section_id)}
-									disabled={enhancing}
-								>
-									Retry diagram
-								</button>
-							{/if}
 						</div>
 					</li>
 				{/each}
@@ -488,26 +395,6 @@
 						<div class="section-summary">
 							<strong>{weak.title}</strong>
 							<span>{weak.warning}</span>
-						</div>
-						<div class="section-actions">
-							<button
-								type="button"
-								class="section-action"
-								onclick={() => handleSectionEnhance(weak.section_id)}
-								disabled={enhancing}
-							>
-								Improve section
-							</button>
-							{#if hasDiagramIssue(weak.issues)}
-								<button
-									type="button"
-									class="section-action"
-									onclick={() => handleDiagramEnhance(weak.section_id)}
-									disabled={enhancing}
-								>
-									Retry diagram
-								</button>
-							{/if}
 						</div>
 					</li>
 				{/each}
@@ -539,6 +426,23 @@
 		align-items: start;
 	}
 
+	.export-builder-btn {
+		flex-shrink: 0;
+		align-self: center;
+		padding: 0.5rem 1rem;
+		font-size: 0.9rem;
+		font-weight: 600;
+		color: #0f172a;
+		background: #e2e8f0;
+		border: 1px solid #cbd5e1;
+		border-radius: 0.375rem;
+		cursor: pointer;
+	}
+
+	.export-builder-btn:hover {
+		background: #cbd5e1;
+	}
+
 	.eyebrow {
 		margin: 0 0 0.3rem 0;
 		font-size: 0.78rem;
@@ -560,8 +464,7 @@
 		color: #5d554a;
 	}
 
-	.status,
-	.mode {
+	.status {
 		padding: 0.2rem 0.55rem;
 		border-radius: 999px;
 		font-size: 0.76rem;
@@ -585,32 +488,15 @@
 		color: #8d3a26;
 	}
 
-	.mode {
-		background: rgba(36, 52, 63, 0.08);
-		color: #24343f;
-	}
-
 	.status-panel,
 	.failed-sections,
 	.weak-sections,
 	.warning,
-	.draft-note,
 	.error {
 		padding: 1rem;
 		border-radius: 18px;
 		background: rgba(255, 251, 244, 0.84);
 		border: 1px solid rgba(36, 52, 63, 0.1);
-	}
-
-	.enhance-button {
-		border-radius: 999px;
-		border: none;
-		background: linear-gradient(135deg, #1f3d52, #325d78);
-		color: #fff;
-		padding: 0.7rem 1rem;
-		cursor: pointer;
-		font: inherit;
-		font-weight: 600;
 	}
 
 	.error {
@@ -642,25 +528,4 @@
 		gap: 0.15rem;
 	}
 
-	.section-actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.55rem;
-		margin-top: 0.45rem;
-	}
-
-	.section-action {
-		border-radius: 999px;
-		border: 1px solid rgba(36, 67, 106, 0.16);
-		background: rgba(36, 67, 106, 0.06);
-		color: #24436a;
-		padding: 0.45rem 0.8rem;
-		font: inherit;
-		cursor: pointer;
-	}
-
-	.section-action:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
 </style>
