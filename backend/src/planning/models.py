@@ -192,6 +192,12 @@ class VisualPolicy(BaseModel):
     goal: str | None = None
     style_notes: str | None = None
 
+    @model_validator(mode="after")
+    def _mode_required_when_visual_required(self) -> "VisualPolicy":
+        if self.required and (self.mode is None or self.intent is None):
+            raise ValueError("VisualPolicy: mode and intent must be set when required=True")
+        return self
+
 
 class SectionGenerationNotes(BaseModel):
     tone_override: str | None = None

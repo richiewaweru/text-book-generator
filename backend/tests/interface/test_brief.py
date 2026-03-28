@@ -533,6 +533,7 @@ class TestBriefApi:
             )
 
         with (
+            patch.object(brief_routes, "validate_preset_for_template", return_value=True),
             patch.object(brief_routes, "enqueue_generation", side_effect=fake_enqueue_generation),
             patch.object(
                 brief_routes,
@@ -567,3 +568,17 @@ class TestBriefApi:
         assert captured["template_id"] == "guided-concept-path"
         assert len(captured["section_plans"]) == 1
         assert '"status":"committed"' in captured["planning_spec_json"]
+
+    async def test_commit_brief_rejects_invalid_template_preset_combination(self):
+        _install_overrides(TEST_PROFILE)
+        spec = _planning_spec()
+
+        with patch.object(brief_routes, "validate_preset_for_template", return_value=False):
+            async with _client() as client:
+                response = await client.post(
+                    "/api/v1/brief/commit",
+                    json=spec.model_dump(mode="json"),
+                )
+
+        assert response.status_code == 422
+        assert "Invalid template/preset combination" in response.json()["detail"]

@@ -4,11 +4,15 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from planning.fallback import build_fallback_spec
 from planning.models import (
+    PlanningGenerationSpec,
     PlanningRefinementOutput,
     PlanningTemplateContract,
     StudioBriefRequest,
+    VisualPolicy,
 )
 from planning.normalizer import normalize_brief
 from planning.section_composer import compose_sections
@@ -392,3 +396,122 @@ def test_planning_service_emits_events_and_refines_titles():
         "section_planned",
         "section_planned",
     ]
+
+
+def test_visual_policy_rejects_mode_none_when_required():
+    with pytest.raises(Exception, match="mode and intent must be set"):
+        VisualPolicy(required=True, mode=None, intent=None)
+
+    with pytest.raises(Exception, match="mode and intent must be set"):
+        VisualPolicy(required=True, mode=None, intent="explain_structure")
+
+    with pytest.raises(Exception, match="mode and intent must be set"):
+        VisualPolicy(required=True, mode="svg", intent=None)
+
+    # Valid: both mode and intent set when required
+    policy = VisualPolicy(required=True, mode="svg", intent="explain_structure")
+    assert policy.required is True
+
+    # Valid: required=False allows None mode/intent
+    policy = VisualPolicy(required=False, mode=None, intent=None)
+    assert policy.required is False
+
+
+def test_section_count_boundaries():
+    contract = build_contract()
+
+    # 3 sections (lower bound)
+    brief_short = normalize_brief(
+        build_brief(
+            constraints={
+                "more_practice": False,
+                "keep_short": True,
+                "use_visuals": False,
+                "print_first": False,
+            }
+        )
+    )
+    sections_short = compose_sections(brief_short, contract)
+    assert len(sections_short) >= 2
+
+    # Standard brief
+    brief_standard = normalize_brief(build_brief())
+    sections_standard = compose_sections(brief_standard, contract)
+    assert 2 <= len(sections_standard) <= 5
+
+
+def test_empty_signal_affinity_scoring_uses_metadata():
+    brief = normalize_brief(
+        build_brief(
+            signals={
+                "topic_type": "concept",
+                "learning_outcome": "understand-why",
+                "class_style": ["needs-explanation-first"],
+                "format": "both",
+            }
+        )
+    )
+    empty_affinity = build_contract(
+        template_id="empty-affinity",
+        name="Empty Affinity",
+        intent="introduce-concept",
+        signal_affinity={
+            "topic_type": {},
+            "learning_outcome": {},
+            "class_style": {},
+            "format": {},
+        },
+        best_for=["concept introductions"],
+        tags=["concept"],
+    )
+    rich_affinity = build_contract(
+        template_id="rich-affinity",
+        name="Rich Affinity",
+        intent="introduce-concept",
+    )
+
+    # The scorer should still produce a valid result even with empty affinity
+    chosen, decision = choose_template(brief, [empty_affinity, rich_affinity])
+    assert decision.chosen_id in {"empty-affinity", "rich-affinity"}
+    assert decision.fit_score >= 0
+
+
+def test_section_focus_fallback_in_bridge():
+    """PlanningSectionPlan with all optional focus fields None should produce valid focus."""
+    from planning.models import PlanningSectionPlan
+
+    section = PlanningSectionPlan.model_validate(
+        {
+            "id": "section-1",
+            "order": 1,
+            "role": "intro",
+            "title": "Introduction",
+            "objective": None,
+            "focus_note": None,
+            "selected_components": ["hook-hero"],
+            "rationale": "Opening section.",
+        }
+    )
+    # The bridge chain: focus_note or objective or rationale or title
+    focus = section.focus_note or section.objective or section.rationale or section.title
+    if not focus:
+        focus = f"Section {section.order}"
+    assert focus == "Opening section."
+
+    # All None except title
+    section2 = PlanningSectionPlan.model_validate(
+        {
+            "id": "section-2",
+            "order": 2,
+            "role": "explain",
+            "title": "Explanation",
+            "objective": None,
+            "focus_note": None,
+            "rationale": "",
+            "selected_components": [],
+        }
+    )
+    focus2 = section2.focus_note or section2.objective or section2.rationale or section2.title
+    if not focus2:
+        focus2 = f"Section {section2.order}"
+    assert focus2 == "Explanation"

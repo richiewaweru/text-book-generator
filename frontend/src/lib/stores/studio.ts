@@ -112,6 +112,7 @@ export function completePlanning(spec: PlanningGenerationSpec, elapsedMs: number
 		warning: spec.warning,
 		lesson_rationale: spec.lesson_rationale
 	}));
+	// Override status to 'reviewed' — the teacher has now seen and can edit the plan
 	editedSpec.set({
 		...spec,
 		status: 'reviewed'

@@ -100,12 +100,17 @@
 					continue;
 				}
 
-				const payload = (event as PlanningErrorEvent).data;
-				completePlanning(payload.spec, performance.now() - startedAt);
-				failPlanning(payload.warning ?? 'Planning fell back to defaults. Review carefully.');
-				if (!get(contracts).length) {
-					await loadContractCatalog();
+				if (event.event === 'plan_error') {
+					const payload = (event as PlanningErrorEvent).data;
+					completePlanning(payload.spec, performance.now() - startedAt);
+					failPlanning(payload.warning ?? 'Planning fell back to defaults. Review carefully.');
+					if (!get(contracts).length) {
+						await loadContractCatalog();
+					}
+					continue;
 				}
+
+				// Ignore unrecognized event types for forward compatibility
 			}
 		} catch (error) {
 			planningError = errorMessage(

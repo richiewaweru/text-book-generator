@@ -10,6 +10,9 @@
 	let { errorMessage = null, onRetry = () => {} }: Props = $props();
 
 	const progressValue = $derived.by(() => {
+		if ($planDraft.is_complete) {
+			return 100;
+		}
 		if (errorMessage) {
 			return Math.max(26, Math.min(84, 18 + $planDraft.sections.length * 14));
 		}

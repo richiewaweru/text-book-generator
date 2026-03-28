@@ -82,6 +82,9 @@ async def refine_plan_text(
             output = result.output
             if output is None or len(output.sections) != len(sections):
                 raise ValueError("Planning refinement returned an unexpected section count.")
+            for refined_section in output.sections:
+                if not refined_section.title or not refined_section.title.strip():
+                    raise ValueError("Refined section has empty title.")
             return output
         except Exception as exc:
             logger.warning("Planning refinement attempt %s failed: %s", attempt + 1, exc)
