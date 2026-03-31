@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 from tools.agent.extract_release_notes import extract_release_notes
 

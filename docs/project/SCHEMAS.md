@@ -2,11 +2,13 @@
 
 Current schema source of truth lives in:
 
+- `backend/src/core/database/models.py`
 - `backend/src/planning/models.py`
 - `backend/src/pipeline/api.py`
 - `backend/src/pipeline/types/`
-- `backend/src/textbook_agent/domain/entities/`
-- `backend/src/textbook_agent/application/dtos/`
+- `backend/src/core/entities/`
+- `backend/src/generation/dtos/`
+- `backend/src/planning/dtos.py`
 
 ## Shell Entities
 
@@ -15,7 +17,6 @@ Current schema source of truth lives in:
 - `user_id`
 - `subject`
 - `context`
-- `mode`: `draft | balanced | strict`
 - `status`: `pending | running | completed | failed`
 - `document_path`
 - `error`
@@ -27,7 +28,7 @@ Current schema source of truth lives in:
 - `resolved_preset_id`
 - `quality_passed`
 - `generation_time_seconds`
-- `source_generation_id`
+- `planning_spec_json`
 - `created_at`
 - `completed_at`
 
@@ -59,25 +60,34 @@ Current schema source of truth lives in:
 - `constraints.use_visuals`
 - `constraints.print_first`
 
+### `BriefRequest`
+- `intent`
+- `audience`
+- optional `extra_context`
+
+### `GenerationSpec`
+- `template_id`
+- `preset_id`
+- `section_count`
+- ordered `sections`
+- optional `warning`
+- `rationale`
+- `source_brief`
+
 ### `GenerationRequest`
 - `subject`
 - `context`
-- `mode`
 - `template_id`
 - `preset_id`
 - optional `section_count`
-
-### `EnhanceGenerationRequest`
-- `mode`
-- optional `note`
+- optional `generation_spec`
 
 ### `GenerationAcceptedResponse`
 - `generation_id`
 - `status`
-- `mode`
-- `source_generation_id`
 - `events_url`
 - `document_url`
+- `report_url`
 
 ### `PlanningGenerationSpec`
 - `id`
@@ -117,10 +127,8 @@ Current schema source of truth lives in:
 - `generation_id`
 - `subject`
 - `context`
-- `mode`
 - `template_id`
 - `preset_id`
-- optional `source_generation_id`
 - `status`
 - ordered `sections: SectionContent[]`
 - `qc_reports`
@@ -135,7 +143,7 @@ Current schema source of truth lives in:
 ### Current Simulation Gate
 
 - `SectionContent` supports an optional `simulation` block.
-- The pipeline only attempts to populate it outside `draft` mode.
+- The pipeline only attempts to populate it when the selected slot and template contract allow it.
 - A generated `simulation` block is only visible to users when the selected Lectio template actually includes a `simulation-block` component slot.
 - The shipped public template set does not currently expose that slot, so simulation remains latent in the runtime for now.
 

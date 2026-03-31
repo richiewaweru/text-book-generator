@@ -2,41 +2,32 @@
 
 ## Strategy
 
-The repo now uses a `Shell + Pipeline` architecture.
+The repo now uses a `Core + Generation + Planning + Pipeline` architecture.
 
-- `backend/src/textbook_agent/` is the product shell.
-- `backend/src/planning/` is the shell-owned planning package for Teacher Studio.
+- `backend/src/core/` holds shared infrastructure: config, auth, database, error handling, shared events, and generic LLM helpers.
+- `backend/src/generation/` owns generation persistence, orchestration, and SSE transport.
+- `backend/src/planning/` owns Teacher Studio planning.
 - `backend/src/pipeline/` is the standalone generation engine.
-- `frontend/` is the native Lectio client.
+- `backend/src/app.py` assembles the FastAPI application.
+- `frontend/` is the native Lectio client and can also be served statically from Docker.
 
 Architecture guard: `python tools/agent/check_architecture.py --format text`
 
-## Shell Rules
+## Boundary Rules
 
-The shell keeps the DDD-style layering inside `backend/src/textbook_agent/`.
-
-| Layer | May import from | Must NOT import from |
-| --- | --- | --- |
-| `domain/` | nothing (self-contained) | application, infrastructure, interface |
-| `application/` | domain | infrastructure, interface |
-| `infrastructure/` | domain | application, interface |
-| `interface/` | domain, application, infrastructure | -- |
-
-## Pipeline Rules
-
-- The shell may import the pipeline.
-- The shell may import `planning`.
-- `planning` must not import `pipeline`.
-- The pipeline must never import `textbook_agent`.
+- `core/` must not import from `generation`, `planning`, or `pipeline`.
+- `generation/` may import `core`, `planning`, and `pipeline`.
+- `planning/` may import `core` and the generation bridge, but must not import pipeline LLM internals.
+- `pipeline/` must never import `generation` or `planning`.
 - The pipeline owns prompts, contract loading, provider registry, graph state, nodes, QC, retries, and Lectio document assembly.
-- The shell owns auth, profiles, persistence, HTTP routes, Teacher Studio planning, SSE transport, and generation history.
+- The generation app owns auth, profiles, persistence, HTTP routes, Teacher Studio planning, SSE transport, and generation history.
 - All live generation flows through `pipeline.run` / `pipeline.api`.
 
 ## Planning Rules
 
 - `backend/src/planning/` normalizes teacher intent, scores templates, composes sections, routes visuals, and performs the single planning refinement call.
 - Planning emits `PlanningGenerationSpec` artifacts for review. It does not generate lesson content.
-- Routes under `textbook_agent/interface/api/routes/brief.py` are the only place that should adapt planning outputs into pipeline generation requests.
+- Routes under `planning/routes.py` are the only place that should adapt planning outputs into generation requests.
 - The exported Lectio contracts in `backend/contracts/` are sourced from the harmonised Lectio catalog in `C:\Projects\lectio` via `npm run export-contracts`.
 
 ## Runtime Boundaries
@@ -51,15 +42,11 @@ The shell keeps the DDD-style layering inside `backend/src/textbook_agent/`.
 - Document hydration: `/api/v1/generations/{id}/document`
 - Legacy HTML renderer and iframe viewer are removed from the live architecture
 
-## Current Simulation Status
+## Current LLM Routing
 
-- The pipeline can generate `simulation` content only when:
-  - mode is `balanced` or `strict`
-  - the selected template contract advertises `interactionLevel` of `medium` or `high`
-  - the selected template includes a `simulation-block` slot
-- The Lectio frontend can already render a scaffolded `SimulationBlock`.
-- The current public Lectio template registry shipped to this app does not yet expose a `simulation-block`, so simulation cannot appear in normal end-to-end generation yet.
-- The next simulation milestone belongs in Lectio first: add a public template with `simulation-block`, render it in the template layout, export contracts again, then validate end-to-end in `Textbook agent`.
+- Model routing is slot-based and mode-free.
+- Pipeline LLM helpers resolve concrete models through the shared `core/llm/` layer.
+- Planning uses its own planning-specific LLM config instead of borrowing pipeline defaults.
 
 ## Snapshot References
 

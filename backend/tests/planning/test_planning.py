@@ -8,7 +8,6 @@ import pytest
 
 from planning.fallback import build_fallback_spec
 from planning.models import (
-    PlanningGenerationSpec,
     PlanningRefinementOutput,
     PlanningTemplateContract,
     StudioBriefRequest,
@@ -346,7 +345,6 @@ def test_planning_service_emits_events_and_refines_titles():
         emitted.append(payload)
 
     async def fake_run_llm_fn(**kwargs):
-        assert kwargs["generation_mode"] == "shell-draft"
         return SimpleNamespace(
             output=PlanningRefinementOutput.model_validate(
                 {
@@ -385,7 +383,6 @@ def test_planning_service_emits_events_and_refines_titles():
                 model=object(),
                 run_llm_fn=fake_run_llm_fn,
                 emit=fake_emit,
-                llm_generation_mode="shell-draft",
             )
         )
 

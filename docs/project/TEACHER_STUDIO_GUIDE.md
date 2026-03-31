@@ -548,7 +548,7 @@ Result: spec with diagram-block removed, components re-mapped
 
 ## Backend: File-by-File Breakdown
 
-### 1. `backend/src/textbook_agent/interface/api/routes/brief.py` (242 lines)
+### 1. `backend/src/planning/routes.py` (242 lines)
 
 **Purpose:** FastAPI routes for planning & generation.
 
@@ -1019,7 +1019,7 @@ service.plan(StudioBriefRequest)
 
 ---
 
-### 10. `backend/src/textbook_agent/interface/api/routes/generation.py` (lines 167-210)
+### 10. `backend/src/generation/routes.py` (lines 167-210)
 
 **Purpose:** Bridge between planning and pipeline. Maps `PlanningGenerationSpec` → `PipelineRequest`.
 
@@ -1322,4 +1322,3 @@ GenerationView
 | **Bridge** | generation.py | PlanningGenerationSpec | map to pipeline model | PipelineRequest |
 | **Generation** | pipeline/ | PipelineRequest | generate lesson content | sections + report |
 | **Frontend Viewer** | GenerationView.svelte | SSE events | stream sections | rendered lesson |
-

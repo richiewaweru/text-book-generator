@@ -1,19 +1,8 @@
 from __future__ import annotations
 
 from pipeline.graph import fan_out_sections
-from pipeline.run import _seed_initial_state
 from pipeline.state import StyleContext, TextbookPipelineState
-from pipeline.types.requests import PipelineRequest, SectionPlan, SeedDocument
-from pipeline.types.section_content import (
-    ExplanationContent,
-    HookHeroContent,
-    PracticeContent,
-    PracticeProblem,
-    PracticeHint,
-    SectionContent,
-    SectionHeaderContent,
-    WhatNextContent,
-)
+from pipeline.types.requests import PipelineRequest, SectionPlan
 from pipeline.types.template_contract import GenerationGuidance, TemplateContractSummary
 
 
@@ -94,119 +83,31 @@ def _style_context() -> StyleContext:
     )
 
 
-def _section(sid: str) -> SectionContent:
-    return SectionContent(
-        section_id=sid,
-        template_id="guided-concept-path",
-        header=SectionHeaderContent(
-            title=f"Section {sid}",
-            subject="Mathematics",
-            grade_band="secondary",
-        ),
-        hook=HookHeroContent(
-            headline="Why this matters",
-            body="A compelling hook body",
-            anchor="derivatives",
-        ),
-        explanation=ExplanationContent(
-            body="The explanation of the concept",
-            emphasis=["key point 1", "key point 2"],
-        ),
-        practice=PracticeContent(
-            problems=[
-                PracticeProblem(
-                    difficulty="warm",
-                    question="What is 2+2?",
-                    hints=[PracticeHint(level=1, text="Think about it")],
-                )
-            ]
-        ),
-        what_next=WhatNextContent(body="Next we cover integrals", next="Integrals"),
-    )
-
-
-def _state_with_curriculum(
-    plans: list[str],
-    *,
-    target_section_ids: list[str] | None = None,
-) -> TextbookPipelineState:
-    request = _request(target_section_ids=target_section_ids or [])
+def _state_with_curriculum(plans: list[str]) -> TextbookPipelineState:
     return TextbookPipelineState(
-        request=request,
+        request=_request(),
         contract=_contract(),
-        curriculum_outline=[
-            _plan(sid, position=i + 1) for i, sid in enumerate(plans)
-        ],
+        curriculum_outline=[_plan(sid, position=index + 1) for index, sid in enumerate(plans)],
         style_context=_style_context(),
     )
 
 
-# ---------------------------------------------------------------------------
-# fan_out_sections tests
-# ---------------------------------------------------------------------------
-
-
-def test_fan_out_sections_filters_to_target_ids() -> None:
-    state = _state_with_curriculum(
-        plans=["s-01", "s-02", "s-03"],
-        target_section_ids=["s-02"],
-    )
+def test_fan_out_sections_runs_all_sections() -> None:
+    state = _state_with_curriculum(["s-01", "s-02", "s-03"])
     sends = fan_out_sections(state)
-    assert len(sends) == 1
-    assert sends[0].arg["current_section_id"] == "s-02"
 
-
-def test_fan_out_sections_runs_all_without_target_ids() -> None:
-    state = _state_with_curriculum(plans=["s-01", "s-02", "s-03"])
-    sends = fan_out_sections(state)
     assert len(sends) == 3
-    ids = {s.arg["current_section_id"] for s in sends}
-    assert ids == {"s-01", "s-02", "s-03"}
+    ids = [send.arg["current_section_id"] for send in sends]
+    assert ids == ["s-01", "s-02", "s-03"]
 
 
-# ---------------------------------------------------------------------------
-# _seed_initial_state tests
-# ---------------------------------------------------------------------------
+def test_initial_pipeline_state_does_not_preseed_any_sections() -> None:
+    state = _state_with_curriculum(["s-01", "s-02"])
+
+    assert state.generated_sections == {}
+    assert state.assembled_sections == {}
+    assert state.failed_sections == {}
 
 
-def test_seed_initial_state_pre_populates_non_targeted_sections() -> None:
-    seed = SeedDocument(
-        sections=[_section("s-01"), _section("s-02")],
-    )
-    command = _request(
-        seed_document=seed,
-        target_section_ids=["s-02"],
-    )
-    plans = [_plan("s-01", 1), _plan("s-02", 2)]
-    initial = TextbookPipelineState(
-        request=command,
-        contract=_contract(),
-        curriculum_outline=plans,
-        style_context=_style_context(),
-    )
-    seeded = _seed_initial_state(initial=initial, command=command)
-
-    # s-01 is not targeted → pre-seeded into assembled_sections
-    assert "s-01" in seeded.assembled_sections
-    assert seeded.assembled_sections["s-01"].section_id == "s-01"
-    # s-02 is targeted → must NOT be pre-seeded
-    assert "s-02" not in seeded.assembled_sections
-
-
-def test_seed_initial_state_does_not_seed_targeted_section() -> None:
-    seed = SeedDocument(sections=[_section("s-01")])
-    command = _request(
-        seed_document=seed,
-        target_section_ids=["s-01"],
-    )
-    plans = [_plan("s-01", 1)]
-    initial = TextbookPipelineState(
-        request=command,
-        contract=_contract(),
-        curriculum_outline=plans,
-        style_context=_style_context(),
-    )
-    seeded = _seed_initial_state(initial=initial, command=command)
-
-    assert "s-01" not in seeded.assembled_sections
-    assert "s-01" not in seeded.generated_sections
+def test_pipeline_request_uses_fixed_rerender_budget() -> None:
+    assert _request().max_rerenders() == 2

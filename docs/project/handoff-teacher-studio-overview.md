@@ -62,7 +62,7 @@ Steps one through four are deterministic. The refinement step is the only LLM ca
 
 ## Backend: Public Routes
 
-**Location**: `backend/src/textbook_agent/interface/api/routes/brief.py`
+**Location**: `backend/src/planning/routes.py`
 
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
@@ -73,7 +73,7 @@ Steps one through four are deterministic. The refinement step is the only LLM ca
 
 ### Generation bridge
 
-**Location**: `backend/src/textbook_agent/interface/api/routes/generation.py`
+**Location**: `backend/src/generation/routes.py`
 
 The bridge converts `PlanningGenerationSpec` into pipeline generation requests, carries section focus and ordering forward, and builds the context string used by the pipeline.
 

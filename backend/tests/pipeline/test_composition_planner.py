@@ -4,7 +4,7 @@ import pytest
 
 from pipeline.nodes.composition_planner import composition_planner, pick_interaction_type
 from pipeline.state import StyleContext, TextbookPipelineState
-from pipeline.types.requests import GenerationMode, PipelineRequest, SectionPlan
+from pipeline.types.requests import PipelineRequest, SectionPlan
 from pipeline.types.section_content import (
     ExplanationContent,
     HookHeroContent,
@@ -179,9 +179,9 @@ async def test_diagram_disabled_when_plan_says_no() -> None:
 
 
 @pytest.mark.asyncio
-async def test_interaction_disabled_in_draft_mode() -> None:
+async def test_interaction_disabled_when_plan_policy_disables_it() -> None:
     state = _state(
-        request=_request(mode=GenerationMode.DRAFT),
+        current_section_plan=_plan("s-01").model_copy(update={"interaction_policy": "disabled"}),
         generated_sections={"s-01": _section("s-01")},
     )
     result = await composition_planner(state)
@@ -193,7 +193,7 @@ async def test_interaction_disabled_in_draft_mode() -> None:
 @pytest.mark.asyncio
 async def test_interaction_type_history_subject_gives_timeline_scrubber() -> None:
     state = _state(
-        request=_request(subject="History", mode=GenerationMode.BALANCED),
+        request=_request(subject="History"),
         generated_sections={"s-01": _section("s-01")},
     )
     result = await composition_planner(state)

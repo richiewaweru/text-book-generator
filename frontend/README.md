@@ -19,3 +19,4 @@ npm run test
 - Textbooks render natively with Lectio components; the legacy HTML `iframe` viewer is no longer part of the live app.
 - The frontend imports `lectio/theme.css` so previews and generated documents use Lectio's shared runtime visuals.
 - Only the fully wired `blue-classroom` preset is exposed in-product right now; other preset ids remain supported in data but are not yet live UI choices.
+- Docker builds serve the compiled static app from `nginx:alpine`; build-time `PUBLIC_API_URL` and `VITE_GOOGLE_CLIENT_ID` must be provided through compose or `docker build`.

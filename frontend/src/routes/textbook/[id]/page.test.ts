@@ -1,26 +1,18 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-	goto,
 	pageState,
 	getGenerationDetail,
 	getGenerationDocument,
-	buildGenerationEventsUrl,
-	enhanceGeneration
+	buildGenerationEventsUrl
 } = vi.hoisted(() => ({
-	goto: vi.fn(),
 	pageState: { params: { id: 'gen-123' } },
 	getGenerationDetail: vi.fn(),
 	getGenerationDocument: vi.fn(),
-	buildGenerationEventsUrl: vi.fn((id: string) => `/api/v1/generations/${id}/events`),
-	enhanceGeneration: vi.fn()
-}));
-
-vi.mock('$app/navigation', () => ({
-	goto
+	buildGenerationEventsUrl: vi.fn((id: string) => `/api/v1/generations/${id}/events`)
 }));
 
 vi.mock('$app/state', () => ({
@@ -30,8 +22,7 @@ vi.mock('$app/state', () => ({
 vi.mock('$lib/api/client', () => ({
 	getGenerationDetail,
 	getGenerationDocument,
-	buildGenerationEventsUrl,
-	enhanceGeneration
+	buildGenerationEventsUrl
 }));
 
 vi.mock('$lib/components/LectioDocumentView.svelte', async () => ({
@@ -77,14 +68,12 @@ class MockEventSource {
 }
 
 function buildDetail(overrides: Record<string, unknown> = {}) {
-	return {
-		id: 'gen-123',
-		subject: 'Algebra',
-		context: 'Explain algebra',
-		status: 'running',
-		mode: 'draft',
-		source_generation_id: null,
-		error: null,
+		return {
+			id: 'gen-123',
+			subject: 'Algebra',
+			context: 'Explain algebra',
+			status: 'running',
+			error: null,
 		error_type: null,
 		error_code: null,
 		requested_template_id: 'guided-concept-path',
@@ -104,15 +93,13 @@ function buildDetail(overrides: Record<string, unknown> = {}) {
 }
 
 function buildDocument(overrides: Record<string, unknown> = {}) {
-	return {
-		generation_id: 'gen-123',
-		subject: 'Algebra',
-		context: 'Explain algebra',
-		mode: 'draft',
-		template_id: 'guided-concept-path',
-		preset_id: 'blue-classroom',
-		source_generation_id: null,
-		status: 'running',
+		return {
+			generation_id: 'gen-123',
+			subject: 'Algebra',
+			context: 'Explain algebra',
+			template_id: 'guided-concept-path',
+			preset_id: 'blue-classroom',
+			status: 'running',
 		section_manifest: [
 			{ section_id: 's-01', title: 'Section 1', position: 1 },
 			{ section_id: 's-02', title: 'Section 2', position: 2 },
@@ -134,11 +121,9 @@ function buildDocument(overrides: Record<string, unknown> = {}) {
 describe('textbook page stream lifecycle', () => {
 	beforeEach(() => {
 		MockEventSource.instances = [];
-		goto.mockReset();
 		getGenerationDetail.mockReset();
 		getGenerationDocument.mockReset();
 		buildGenerationEventsUrl.mockClear();
-		enhanceGeneration.mockReset();
 		vi.stubGlobal('EventSource', MockEventSource);
 	});
 
@@ -307,11 +292,10 @@ describe('textbook page stream lifecycle', () => {
 		).toBeTruthy();
 	});
 
-	it('shows progress updates from the stream and exposes targeted enhancement controls', async () => {
+	it('shows progress updates from the stream and keeps section panels informational', async () => {
 		getGenerationDetail.mockResolvedValueOnce(
 			buildDetail({
 				status: 'running',
-				mode: 'balanced',
 				quality_passed: null
 			})
 		);
@@ -334,11 +318,10 @@ describe('textbook page stream lifecycle', () => {
 		expect(screen.getByText(/Stage: planning/i)).toBeTruthy();
 	});
 
-	it('sends targeted enhancement requests for failed and weak sections', async () => {
+	it('renders failed and weak sections without enhancement actions', async () => {
 		getGenerationDetail.mockResolvedValueOnce(
 			buildDetail({
 				status: 'completed',
-				mode: 'draft',
 				quality_passed: false,
 				completed_at: '2026-03-23T00:01:00Z'
 			})
@@ -382,44 +365,19 @@ describe('textbook page stream lifecycle', () => {
 				completed_at: '2026-03-23T00:01:00Z'
 			})
 		);
-		enhanceGeneration
-			.mockResolvedValueOnce({
-				generation_id: 'gen-124',
-				status: 'pending',
-				mode: 'balanced',
-				events_url: '/api/v1/generations/gen-124/events',
-				document_url: '/api/v1/generations/gen-124/document'
-			})
-			.mockResolvedValueOnce({
-				generation_id: 'gen-125',
-				status: 'pending',
-				mode: 'balanced',
-				events_url: '/api/v1/generations/gen-125/events',
-				document_url: '/api/v1/generations/gen-125/document'
-			});
 
 		render(TextbookPage);
 
 		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
 
-		await fireEvent.click(screen.getAllByRole('button', { name: /improve section/i })[0]);
-
-		expect(enhanceGeneration).toHaveBeenCalledWith('gen-123', {
-			mode: 'balanced',
-			scope: 'section',
-			section_id: 's-01',
-			note: 'Improve this section'
-		});
-
-		await fireEvent.click(screen.getByRole('button', { name: /retry diagram/i }));
-
-		expect(enhanceGeneration).toHaveBeenCalledWith('gen-123', {
-			mode: 'balanced',
-			scope: 'component',
-			section_id: 's-02',
-			component: 'diagram',
-			note: 'Retry the diagram'
-		});
+		expect(screen.getByText(/Sections Not Completed/i)).toBeTruthy();
+		expect(screen.getByText(/Section 1/i)).toBeTruthy();
+		expect(screen.getByText(/Failed at content_generator: Missing practice/i)).toBeTruthy();
+		expect(screen.getByText(/Sections Needing Another Pass/i)).toBeTruthy();
+		expect(screen.getByText(/Section 2/i)).toBeTruthy();
+		expect(screen.getByText(/Needs a diagram/i)).toBeTruthy();
+		expect(screen.queryByRole('button', { name: /improve section/i })).toBeNull();
+		expect(screen.queryByRole('button', { name: /retry diagram/i })).toBeNull();
 	});
 });

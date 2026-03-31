@@ -36,14 +36,19 @@ frontend/node_modules/
 frontend/.svelte-kit/
 frontend/build/
 frontend/dist/
+frontend/vendor/lectio/node_modules/
+!frontend/vendor/lectio/dist/
+!frontend/vendor/lectio/dist/**
 
 # Testing
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Pipeline — Lectio contract exports (generated, not committed)
-backend/contracts/
+# Pipeline contracts exported from Lectio
+backend/contracts/*
+!backend/contracts/.gitkeep
+!backend/contracts/*.json
 
 # Root scratch/output directories (not part of the project)
 outputs/

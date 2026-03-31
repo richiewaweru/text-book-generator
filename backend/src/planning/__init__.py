@@ -10,7 +10,7 @@ from .models import (
     TemplateDecision,
     VisualPolicy,
 )
-from .service import PlanningService
+from .service import BriefPlannerService, PlanningService, TemplateSummary
 
 __all__ = [
     "DeliveryPreferences",
@@ -20,8 +20,10 @@ __all__ = [
     "PlanningService",
     "PlanningTemplateContract",
     "StudioBriefRequest",
+    "BriefPlannerService",
     "TeacherConstraints",
     "TeacherSignals",
+    "TemplateSummary",
     "TemplateDecision",
     "VisualPolicy",
 ]

@@ -7,16 +7,13 @@ User prompt: variable per section (plan, subject, grade, learner fit, rerender r
 
 from __future__ import annotations
 
-import json
-
 from pipeline.contracts import (
-    get_required_fields,
-    get_optional_fields,
     get_generation_guidance,
     get_lesson_flow,
+    get_optional_fields,
+    get_required_fields,
 )
-from pipeline.prompts.shared import shared_context, capacity_reminder_for_fields
-from pipeline.types.section_content import SectionContent
+from pipeline.prompts.shared import capacity_reminder_for_fields, shared_context
 from pipeline.types.requests import SectionPlan
 
 
@@ -40,7 +37,7 @@ def build_content_system_prompt(
     template_family: str,
 ) -> str:
     guidance = get_generation_guidance(template_id)
-    lesson_flow = " \u2192 ".join(get_lesson_flow(template_id))
+    lesson_flow = " -> ".join(get_lesson_flow(template_id))
     required = get_required_fields(template_id)
     optional = get_optional_fields(template_id)
 
@@ -78,8 +75,6 @@ def build_content_user_prompt(
     learner_fit: str,
     template_id: str,
     rerender_reason: str | None = None,
-    seed_section: SectionContent | None = None,
-    seed_note: str | None = None,
 ) -> str:
     base = f"""Section to generate:
   section_id: {section_plan.section_id}
@@ -98,20 +93,6 @@ Grade level: {grade_band}
 Learner type: {learner_fit}
 
 {_section_plan_policy_block(section_plan)}"""
-
-    if seed_section is not None:
-        base += f"""
-
-Use this prior draft section as seed material. Keep the same section_id and overall teaching intent,
-but improve clarity, correctness, pacing, and completeness for the requested mode:
-
-{json.dumps(seed_section.model_dump(exclude_none=True), indent=2)}"""
-
-    if seed_note:
-        base += f"""
-
-Enhancement note:
-  {seed_note}"""
 
     if rerender_reason:
         base += f"""
@@ -135,15 +116,16 @@ def build_content_repair_user_prompt(
     validation_summary: str,
     validation_errors: list[dict[str, str]] = (),
     rerender_reason: str | None = None,
-    seed_section: SectionContent | None = None,
-    seed_note: str | None = None,
 ) -> str:
     if validation_errors:
         error_lines = "\n".join(
             f"  - Field `{e['field']}`: {e['message']}"
             for e in validation_errors
         )
-        error_block = f"Fix ONLY these specific fields while keeping all other content intact:\n{error_lines}"
+        error_block = (
+            "Fix ONLY these specific fields while keeping all other content intact:\n"
+            f"{error_lines}"
+        )
     else:
         error_block = f"Validation summary:\n{validation_summary}"
 
@@ -161,20 +143,25 @@ Match the SectionContent schema exactly.
     learner_fit=learner_fit,
     template_id=template_id,
     rerender_reason=rerender_reason,
-    seed_section=seed_section,
-    seed_note=seed_note,
 )}"""
 
-
-# ── Phase-specific prompt builders for split content generation ──────────────
 
 # Fields belonging to each generation phase.
 CORE_FIELDS = {"header", "hook", "explanation"}
 PRACTICE_FIELDS = {"practice", "what_next", "pitfall", "pitfalls", "prerequisites"}
 ENRICHMENT_FIELDS = {
-    "worked_example", "worked_examples", "process",
-    "definition", "definition_family", "quiz", "reflection",
-    "glossary", "comparison_grid", "timeline", "insight_strip", "interview",
+    "worked_example",
+    "worked_examples",
+    "process",
+    "definition",
+    "definition_family",
+    "quiz",
+    "reflection",
+    "glossary",
+    "comparison_grid",
+    "timeline",
+    "insight_strip",
+    "interview",
 }
 # Diagram and simulation fields are handled by dedicated nodes, not content phases.
 _EXTERNAL_FIELDS = {"diagram", "diagram_compare", "diagram_series", "simulation"}
@@ -275,8 +262,6 @@ def build_core_user_prompt(
     learner_fit: str,
     template_id: str,
     rerender_reason: str | None = None,
-    seed_section: SectionContent | None = None,
-    seed_note: str | None = None,
 ) -> str:
     """User prompt for Phase 1: header + hook + explanation."""
     base = f"""Generate the CORE content for this section (header, hook, explanation).
@@ -297,19 +282,8 @@ Learner type: {learner_fit}
 
 {_section_plan_policy_block(section_plan)}"""
 
-    if seed_section is not None:
-        base += f"""
-
-Use this prior draft as seed. Preserve intent, improve clarity:
-  header: {json.dumps(seed_section.header.model_dump(exclude_none=True))}
-  hook: {json.dumps(seed_section.hook.model_dump(exclude_none=True))}
-  explanation: {json.dumps(seed_section.explanation.model_dump(exclude_none=True))}"""
-
-    if seed_note:
-        base += f"\n\nEnhancement note: {seed_note}"
-
     if rerender_reason:
-        base += f"\n\nRERENDER — fix this problem: {rerender_reason}"
+        base += f"\n\nRERENDER - fix this problem: {rerender_reason}"
 
     return base
 
@@ -339,7 +313,7 @@ Core content already generated:
 {core_summary}
 
 Generate practice problems, what_next bridge, and any applicable pitfall/prerequisites.
-{f"RERENDER — fix: {rerender_reason}" if rerender_reason else ""}"""
+{f"RERENDER - fix: {rerender_reason}" if rerender_reason else ""}"""
 
 
 def build_enrichment_user_prompt(
@@ -370,4 +344,4 @@ Core content already generated:
 
 Generate these enrichment fields: {fields_block}
 Include only fields that genuinely add value. Omit any that feel forced.
-{f"RERENDER — fix: {rerender_reason}" if rerender_reason else ""}"""
+{f"RERENDER - fix: {rerender_reason}" if rerender_reason else ""}"""

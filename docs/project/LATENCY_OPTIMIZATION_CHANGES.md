@@ -55,14 +55,14 @@ The hard ceiling for the entire generation job is a flat 300 seconds, set in the
 
 ### Where it lives
 
-[generation.py:426](../backend/src/textbook_agent/interface/api/routes/generation.py#L426):
+[generation.py:426](../backend/src/generation/routes.py#L426):
 
 ```python
 # BEFORE
 _GENERATION_JOB_TIMEOUT_SECONDS = 300.0
 ```
 
-The timeout is consumed at [generation.py:668-670](../backend/src/textbook_agent/interface/api/routes/generation.py#L668-L670):
+The timeout is consumed at [generation.py:668-670](../backend/src/generation/routes.py#L668-L670):
 
 ```python
 result = await asyncio.wait_for(
@@ -116,7 +116,7 @@ result = await asyncio.wait_for(
 )
 ```
 
-Also update the error message at [generation.py:700-702](../backend/src/textbook_agent/interface/api/routes/generation.py#L700-L702) to report the actual timeout used:
+Also update the error message at [generation.py:700-702](../backend/src/generation/routes.py#L700-L702) to report the actual timeout used:
 
 ```python
 # BEFORE
@@ -372,7 +372,7 @@ Medium. pydantic-ai's `run_stream()` API may behave differently from `run()` in 
 
 ### What it is today
 
-The SSE stream at [generation.py:1038-1088](../backend/src/textbook_agent/interface/api/routes/generation.py#L1038-L1088) already streams events per section. And the `on_event` callback at [generation.py:556-569](../backend/src/textbook_agent/interface/api/routes/generation.py#L556-L569) already saves the document when a section is ready:
+The SSE stream at [generation.py:1038-1088](../backend/src/generation/routes.py#L1038-L1088) already streams events per section. And the `on_event` callback at [generation.py:556-569](../backend/src/generation/routes.py#L556-L569) already saves the document when a section is ready:
 
 ```python
 async def on_event(event) -> None:

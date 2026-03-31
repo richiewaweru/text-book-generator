@@ -8,21 +8,24 @@
 
 ## Backend
 - Package manager: `uv`
-- Shell source root: `backend/src/textbook_agent/`
+- Shared core source root: `backend/src/core/`
+- Generation app source root: `backend/src/generation/`
+- Planning source root: `backend/src/planning/`
 - Pipeline source root: `backend/src/pipeline/`
-- Entry point: `uvicorn textbook_agent.interface.api.app:app`
+- Entry point: `uvicorn app:app`
 - Validation: `python tools/agent/validate_repo.py --scope all`
 - Architecture guard: `python tools/agent/check_architecture.py --format text`
 
 ## Key Runtime Contracts
-- The shell owns auth, profiles, persistence, HTTP routes, and SSE transport.
-- The shell-owned planning layer lives in `backend/src/planning/` and feeds Teacher Studio.
+- The core owns auth primitives, shared database access, and generic infrastructure.
+- The generation app owns auth-aware HTTP, persistence, generation orchestration, and SSE transport.
+- The planning app owns Teacher Studio flows and feeds generation.
 - The pipeline owns prompts, contract loading, providers, graph orchestration, QC, and Lectio document assembly.
 - The canonical saved artifact is a JSON `PipelineDocument`.
 - `/studio` is the canonical teacher lesson-creation route.
 - `GET /api/v1/contracts`, `POST /api/v1/brief/stream`, and `POST /api/v1/brief/commit` are the live planning endpoints.
 - Public textbook viewing is generation-centric: `/textbook/[id]` maps to a generation ID, hydrates from `/document`, and streams updates from `/events`.
-- The pipeline must never import `textbook_agent`.
+- The pipeline must never import `generation` or `planning`.
 
 ## Frontend
 - Package manager: `npm`

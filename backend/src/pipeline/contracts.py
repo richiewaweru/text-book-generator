@@ -210,6 +210,18 @@ def get_capacity_limits(component_id: str) -> dict:
     return registry[component_id].get("capacity", {})
 
 
+def get_component_registry_entry(component_id: str) -> dict | None:
+    """Return raw registry metadata for a component, or None if unknown."""
+    registry = _load_component_registry()
+    return registry.get(component_id)
+
+
+def get_section_field_for_component(component_id: str) -> str | None:
+    """Map component id to SectionContent field name (from exported field map)."""
+    field_map = _load_field_map()
+    return field_map.get(component_id)
+
+
 def get_allowed_presets(template_id: str) -> list[str]:
     return _load_contract_raw(template_id).get("allowed_presets", [])
 

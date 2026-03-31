@@ -1,19 +1,23 @@
 # Textbook Generation Agent
 
-AI-powered shell + pipeline system for generating personalized Lectio-native textbooks from learner context.
+AI-powered core + generation + planning + pipeline system for generating personalized Lectio-native textbooks from learner context.
 
 ## Quick Start
 
 Use the live project docs in [`docs/project/`](docs/project/README.md). The versioned `docs/v0.1.0/` set is archival.
 
 ```bash
-# Backend
+# Full stack with Docker
+cp .env.example .env
+docker compose up --build
+
+# Native backend
 cd backend
 uv sync --all-extras
 cp .env.example .env
-uv run uvicorn textbook_agent.interface.api.app:app --reload
+uv run uvicorn app:app --reload
 
-# Frontend
+# Native frontend
 cd frontend
 npm ci
 cp .env.example .env
@@ -47,11 +51,14 @@ npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\
 
 ## Current Architecture
 
-- Product shell in `backend/src/textbook_agent/`
+- Shared infrastructure in `backend/src/core/`
+- Generation app in `backend/src/generation/`
+- Planning in `backend/src/planning/`
 - Generation engine in `backend/src/pipeline/`
+- FastAPI composition entrypoint in `backend/src/app.py`
 - SvelteKit frontend in `frontend/` with native Lectio rendering
 - JSON document persistence plus authenticated SSE streaming
-- Draft, balanced, and strict generation modes with draft enhancement as a seeded upgrade path
+- Slot-based model routing and a single generation path
 
 ## Live Docs
 

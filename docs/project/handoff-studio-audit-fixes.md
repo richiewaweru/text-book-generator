@@ -31,14 +31,14 @@ This follow-up handoff covers the bugs fixed after a deeper audit against the st
 - **Fix**: Added a model validator that rejects required visual policies unless both `mode` and `intent` are present
 
 #### 2. `/api/v1/brief/commit` was missing template and preset validation
-- **File**: `backend/src/textbook_agent/interface/api/routes/brief.py`
+- **File**: `backend/src/planning/routes.py`
 - **Bug**: Invalid template and preset combinations could reach generation and fail too late
 - **Fix**: Added explicit validation before enqueueing generation so the route returns `422` with a clear error
 
 ### Medium severity
 
 #### 3. Generation bridge focus text could collapse to empty
-- **File**: `backend/src/textbook_agent/interface/api/routes/generation.py`
+- **File**: `backend/src/generation/routes.py`
 - **Bug**: The bridge could theoretically emit an empty focus string when optional fields were blank
 - **Fix**: Added a final fallback of `Section {order}`
 
@@ -99,8 +99,8 @@ This follow-up handoff covers the bugs fixed after a deeper audit against the st
 - `backend/src/planning/models.py`
 - `backend/src/planning/prompt_builder.py`
 - `backend/src/planning/visual_router.py`
-- `backend/src/textbook_agent/interface/api/routes/brief.py`
-- `backend/src/textbook_agent/interface/api/routes/generation.py`
+- `backend/src/planning/routes.py`
+- `backend/src/generation/routes.py`
 - `backend/tests/interface/test_brief.py`
 - `backend/tests/planning/test_planning.py`
 - `frontend/src/lib/components/studio/IntentForm.svelte`
@@ -120,7 +120,7 @@ This follow-up handoff covers the bugs fixed after a deeper audit against the st
 
 ## Architecture Notes
 
-- `backend/src/planning/` remains isolated from `pipeline/` and `textbook_agent/`
+- `backend/src/planning/` remains isolated from `pipeline/`
 - The shell imports both planning and pipeline code
 - The generation bridge in `routes/generation.py` maps `PlanningGenerationSpec` into pipeline request types
 - Richer planning roles are preserved at the bridge boundary instead of forcing planning code to depend on pipeline internals

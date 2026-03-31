@@ -45,36 +45,6 @@ def _build_style_context(state: TextbookPipelineState) -> StyleContext:
     )
 
 
-def _outline_from_seed(state: TextbookPipelineState) -> list[SectionPlan]:
-    seed = state.request.seed_document
-    if seed is None:
-        return []
-    if seed.section_plans:
-        return [SectionPlan.model_validate(plan) for plan in seed.section_plans]
-
-    sections = seed.sections
-    outline: list[SectionPlan] = []
-    for index, section in enumerate(sections, start=1):
-        previous_title = sections[index - 2].header.title if index > 1 else None
-        next_title = sections[index].header.title if index < len(sections) else None
-        focus = section.header.objective or section.hook.headline or section.explanation.body
-        outline.append(
-            SectionPlan(
-                section_id=section.section_id,
-                title=section.header.title,
-                position=index,
-                focus=focus[:220],
-                bridges_from=previous_title,
-                bridges_to=next_title,
-                needs_diagram=section.diagram is not None,
-                needs_worked_example=(
-                    section.worked_example is not None or bool(section.worked_examples)
-                ),
-            )
-        )
-    return outline
-
-
 def _outline_from_request(state: TextbookPipelineState) -> list[SectionPlan]:
     supplied = state.request.section_plans or []
     outline = [SectionPlan.model_validate(plan) for plan in supplied]
@@ -134,19 +104,9 @@ async def curriculum_planner(
             "completed_nodes": ["curriculum_planner"],
         }
 
-    if state.request.seed_document is not None and state.request.seed_document.sections:
-        outline = _outline_from_seed(state)
-        _publish_section_titles(state.request.generation_id or "", outline)
-        return {
-            "curriculum_outline": outline,
-            "style_context": style_context,
-            "completed_nodes": ["curriculum_planner"],
-        }
-
     model = get_node_text_model(
         "curriculum_planner",
         model_overrides=model_overrides,
-        generation_mode=state.request.mode,
     )
     agent = Agent(
         model=model,
@@ -171,7 +131,6 @@ async def curriculum_planner(
                 learner_fit=state.request.learner_fit,
                 section_count=state.request.section_count,
             ),
-            generation_mode=state.request.mode,
         )
         _publish_section_titles(
             state.request.generation_id or "", result.output.sections

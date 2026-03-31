@@ -14,7 +14,7 @@
 | --- | --- |
 | `backend-quality` | Ruff lint + pytest |
 | `frontend-quality` | Svelte type-check + build |
-| `architecture-guard` | Shell DDD boundaries plus pipeline no-import-back-into-shell rules |
+| `architecture-guard` | Shell/core/pipeline boundary rules plus no-import-back-into-shell checks |
 | `agent-governance` | PR structure and process compliance |
 
 All checks must pass before merge.
@@ -27,19 +27,23 @@ Before testing textbook generation in dev:
 
 ```bash
 curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:5173/src/lib/api/client.ts
+curl http://127.0.0.1:5173
 ```
 
 Verify that:
 
 - `/health` returns the current runtime fingerprint (`instance_id`, `started_at`, `pipeline_architecture`)
-- the served frontend client bundle points to the intended backend target
-- both checks agree on the canonical `5173 -> 8000` path before starting new generations
+- the frontend root responds on the expected port
+- the backend and frontend agree on the configured API origin before starting new generations
+
+For Docker-based verification, use `docker compose up --build` from the repo root and confirm the `backend` and `frontend` services both report healthy.
 
 ## Execution Boundary
 
 - `agents/` -- universal standards and workflows (portable, agent-agnostic)
 - `tools/agent/` -- project-local validation scripts (reads `context-summary.yaml`)
-- `backend/src/textbook_agent/` -- product shell (auth, profiles, persistence, HTTP)
+- `backend/src/core/` -- shared infrastructure and shared auth/profile/user primitives
+- `backend/src/generation/` -- generation app (HTTP, persistence, generation orchestration)
+- `backend/src/planning/` -- Teacher Studio planning layer
 - `backend/src/pipeline/` -- standalone generation engine
 - `.github/workflows/` -- CI runners that call `tools/agent/` scripts

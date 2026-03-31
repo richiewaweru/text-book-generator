@@ -22,7 +22,6 @@ from pipeline.events import (
 )
 from pipeline.llm_runner import RetryPolicy, run_llm
 from pipeline.providers.registry import ModelFamily, ModelSlot, describe_text_model
-from pipeline.types.requests import GenerationMode
 
 
 def test_describe_text_model_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -80,7 +79,7 @@ async def test_retry_transient_model_http_error_then_success() -> None:
         ],
     )
 
-    with patch("pipeline.llm_runner.event_bus") as bus:
+    with patch("core.events.event_bus") as bus:
         bus.publish = MagicMock(side_effect=capture)
         result = await run_llm(
             generation_id="gen-retry",
@@ -88,7 +87,6 @@ async def test_retry_transient_model_http_error_then_success() -> None:
             agent=agent,
             user_prompt="hi",
             retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0),
-            generation_mode=GenerationMode.BALANCED,
         )
 
     assert result is ok
@@ -96,9 +94,15 @@ async def test_retry_transient_model_http_error_then_success() -> None:
 
     failed = [event for _, event in published if isinstance(event, LLMCallFailedEvent)]
     assert len(failed) == 1
+    assert failed[0].trace_id == "gen-retry"
+    assert failed[0].generation_id == "gen-retry"
+    assert failed[0].caller == "curriculum_planner"
     assert failed[0].retryable is True
     succeeded = [event for _, event in published if isinstance(event, LLMCallSucceededEvent)]
     assert len(succeeded) == 1
+    assert succeeded[0].trace_id == "gen-retry"
+    assert succeeded[0].generation_id == "gen-retry"
+    assert succeeded[0].caller == "curriculum_planner"
 
 
 async def test_retry_429_honors_retry_after_header() -> None:
@@ -109,9 +113,9 @@ async def test_retry_429_honors_retry_after_header() -> None:
     agent.run = AsyncMock(side_effect=[throttled, ok])
 
     with (
-        patch("pipeline.llm_runner.event_bus.publish"),
-        patch("pipeline.llm_runner.random.uniform", return_value=0.0),
-        patch("pipeline.llm_runner.asyncio.sleep", new_callable=AsyncMock) as sleep,
+        patch("core.events.event_bus.publish"),
+        patch("core.llm.runner.random.uniform", return_value=0.0),
+        patch("core.llm.runner.asyncio.sleep", new_callable=AsyncMock) as sleep,
     ):
         await run_llm(
             generation_id="gen-retry-after",
@@ -119,7 +123,6 @@ async def test_retry_429_honors_retry_after_header() -> None:
             agent=agent,
             user_prompt="hi",
             retry_policy=RetryPolicy(max_attempts=2),
-            generation_mode=GenerationMode.BALANCED,
         )
 
     sleep.assert_awaited_once_with(6.0)
@@ -135,7 +138,7 @@ async def test_run_llm_times_out_calls() -> None:
 
     agent.run = slow_run
 
-    with patch("pipeline.llm_runner.event_bus.publish"):
+    with patch("core.events.event_bus.publish"):
         with pytest.raises(asyncio.TimeoutError):
             await run_llm(
                 generation_id="gen-timeout",
@@ -143,11 +146,9 @@ async def test_run_llm_times_out_calls() -> None:
                 agent=agent,
                 user_prompt="hi",
                 retry_policy=RetryPolicy(max_attempts=1, call_timeout_seconds=0.01),
-                generation_mode=GenerationMode.BALANCED,
             )
 
-
-async def test_draft_concurrency_cap_limits_parallel_runs() -> None:
+async def test_parallel_runs_are_not_mode_capped() -> None:
     current = 0
     peak = 0
     lock = asyncio.Lock()
@@ -165,7 +166,7 @@ async def test_draft_concurrency_cap_limits_parallel_runs() -> None:
 
     agent = SimpleNamespace(run=run)
 
-    with patch("pipeline.llm_runner.event_bus.publish"):
+    with patch("core.events.event_bus.publish"):
         await asyncio.gather(
             *[
                 run_llm(
@@ -175,13 +176,12 @@ async def test_draft_concurrency_cap_limits_parallel_runs() -> None:
                     user_prompt=f"hi-{index}",
                     slot=ModelSlot.FAST,
                     retry_policy=RetryPolicy(max_attempts=1, call_timeout_seconds=1.0),
-                    generation_mode=GenerationMode.DRAFT,
                 )
                 for index in range(5)
             ]
         )
 
-    assert peak == 2
+    assert peak == 5
 
 
 async def test_no_retry_on_user_error() -> None:
@@ -193,7 +193,7 @@ async def test_no_retry_on_user_error() -> None:
     agent = MagicMock()
     agent.run = AsyncMock(side_effect=UserError("bad prompt"))
 
-    with patch("pipeline.llm_runner.event_bus") as bus:
+    with patch("core.events.event_bus") as bus:
         bus.publish = MagicMock(side_effect=capture)
         with pytest.raises(UserError):
             await run_llm(
@@ -202,7 +202,6 @@ async def test_no_retry_on_user_error() -> None:
                 agent=agent,
                 user_prompt="hi",
                 retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0),
-                generation_mode=GenerationMode.BALANCED,
             )
 
     assert agent.run.call_count == 1
@@ -215,7 +214,7 @@ async def test_no_retry_on_non_transient_http_error() -> None:
     agent = MagicMock()
     agent.run = AsyncMock(side_effect=ModelHTTPError(401, "m", None))
 
-    with patch("pipeline.llm_runner.event_bus.publish"):
+    with patch("core.events.event_bus.publish"):
         with pytest.raises(ModelHTTPError):
             await run_llm(
                 generation_id="gen-401",
@@ -223,7 +222,6 @@ async def test_no_retry_on_non_transient_http_error() -> None:
                 agent=agent,
                 user_prompt="hi",
                 retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0),
-                generation_mode=GenerationMode.BALANCED,
             )
 
     assert agent.run.call_count == 1
@@ -240,7 +238,7 @@ async def test_effective_spec_uses_test_model_in_events_and_zero_cost() -> None:
     agent = MagicMock()
     agent.run = AsyncMock(return_value=ok)
 
-    with patch("pipeline.llm_runner.event_bus") as bus:
+    with patch("core.events.event_bus") as bus:
         bus.publish = MagicMock(side_effect=capture)
         await run_llm(
             generation_id="gen-test",
@@ -248,17 +246,21 @@ async def test_effective_spec_uses_test_model_in_events_and_zero_cost() -> None:
             agent=agent,
             model=model,
             user_prompt="hi",
-            generation_mode=GenerationMode.BALANCED,
         )
 
     started = [event for event in published if isinstance(event, LLMCallStartedEvent)]
     assert started
+    assert started[0].trace_id == "gen-test"
+    assert started[0].generation_id == "gen-test"
+    assert started[0].caller == "curriculum_planner"
     assert started[0].slot == "fast"
     assert started[0].family == "test"
     assert started[0].model_name == "TestModel"
 
     succeeded = [event for event in published if isinstance(event, LLMCallSucceededEvent)]
     assert succeeded
+    assert succeeded[0].trace_id == "gen-test"
+    assert succeeded[0].generation_id == "gen-test"
     assert succeeded[0].slot == "fast"
     assert succeeded[0].family == "test"
     assert succeeded[0].model_name == "TestModel"
@@ -282,7 +284,7 @@ async def test_unknown_openai_compatible_pricing_emits_none_and_endpoint_host() 
     agent = MagicMock()
     agent.run = AsyncMock(return_value=ok)
 
-    with patch("pipeline.llm_runner.event_bus") as bus:
+    with patch("core.events.event_bus") as bus:
         bus.publish = MagicMock(side_effect=capture)
         await run_llm(
             generation_id="gen-groq",
@@ -290,11 +292,12 @@ async def test_unknown_openai_compatible_pricing_emits_none_and_endpoint_host() 
             agent=agent,
             model=model,
             user_prompt="hi",
-            generation_mode=GenerationMode.BALANCED,
         )
 
     succeeded = [event for event in published if isinstance(event, LLMCallSucceededEvent)]
     assert succeeded
+    assert succeeded[0].trace_id == "gen-groq"
+    assert succeeded[0].generation_id == "gen-groq"
     assert succeeded[0].slot == "fast"
     assert succeeded[0].family == "openai_compatible"
     assert succeeded[0].model_name == "llama3-8b-8192"
@@ -308,22 +311,20 @@ async def test_skips_event_bus_when_generation_id_blank() -> None:
         return_value=SimpleNamespace(usage=SimpleNamespace(input_tokens=1, output_tokens=2)),
     )
 
-    with patch("pipeline.llm_runner.event_bus.publish") as publish:
+    with patch("core.events.event_bus.publish") as publish:
         await run_llm(
             generation_id="",
             node="curriculum_planner",
             agent=agent,
             user_prompt="hi",
-            generation_mode=GenerationMode.BALANCED,
         )
         publish.assert_not_called()
 
-    with patch("pipeline.llm_runner.event_bus.publish") as publish:
+    with patch("core.events.event_bus.publish") as publish:
         await run_llm(
             generation_id="   ",
             node="curriculum_planner",
             agent=agent,
             user_prompt="hi",
-            generation_mode=GenerationMode.BALANCED,
         )
         publish.assert_not_called()

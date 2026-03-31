@@ -61,8 +61,6 @@ function buildDetail(overrides: Record<string, unknown> = {}) {
 		subject: 'Fractions',
 		context: 'Explain fractions',
 		status: 'running',
-		mode: 'draft',
-		source_generation_id: null,
 		error: null,
 		error_type: null,
 		error_code: null,
@@ -161,10 +159,8 @@ function buildDocument(overrides: Record<string, unknown> = {}) {
 		generation_id: 'gen-123',
 		subject: 'Fractions',
 		context: 'Explain fractions',
-		mode: 'draft',
 		template_id: 'guided-concept-path',
 		preset_id: 'blue-classroom',
-		source_generation_id: null,
 		status: 'running',
 		section_manifest: [
 			{ section_id: 's-01', title: 'What fractions mean', position: 1 },
@@ -242,7 +238,6 @@ describe('GenerationView', () => {
 				accepted: {
 					generation_id: 'gen-123',
 					status: 'running',
-					mode: 'draft',
 					events_url: '/api/v1/generations/gen-123/events',
 					document_url: '/api/v1/generations/gen-123/document'
 				},

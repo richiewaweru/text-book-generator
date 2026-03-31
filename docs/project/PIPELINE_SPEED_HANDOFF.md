@@ -366,7 +366,7 @@ Run a calculus lesson (4 sections, `guided-concept-path`, `blue-classroom`) befo
 - **No Lectio changes** — rendering is unaffected
 - **No state schema changes** — existing `TextbookPipelineState` fields suffice
 - **No contract changes** — template contracts stay as-is
-- `pipeline` must never import `textbook_agent` (shell boundary)
+- `pipeline` must never import `generation` or `planning` (app boundary)
 - `BASE_PEDAGOGICAL_RULES` in `domain/prompts/base_prompt.py` are sacred — do not modify
 
 ---

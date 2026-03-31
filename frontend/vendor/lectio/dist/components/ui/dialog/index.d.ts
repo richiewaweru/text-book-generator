@@ -1,0 +1,10 @@
+import { Dialog as DialogPrimitive } from 'bits-ui';
+declare const Root: import("svelte").Component<import("bits-ui").AlertDialogRootPropsWithoutHTML, {}, "open">;
+declare const Trigger: import("svelte").Component<DialogPrimitive.TriggerProps, {}, "ref">;
+declare const Portal: import("svelte").Component<import("bits-ui").PortalProps, {}, "">;
+declare const Overlay: import("svelte").Component<DialogPrimitive.OverlayProps, {}, "ref">;
+declare const Content: import("svelte").Component<DialogPrimitive.ContentProps, {}, "ref">;
+declare const Close: import("svelte").Component<DialogPrimitive.TriggerProps, {}, "ref">;
+declare const Title: import("svelte").Component<DialogPrimitive.TitleProps, {}, "ref">;
+declare const Description: import("svelte").Component<DialogPrimitive.DescriptionProps, {}, "ref">;
+export { Root, Root as Dialog, Trigger, Trigger as DialogTrigger, Portal, Portal as DialogPortal, Overlay, Overlay as DialogOverlay, Content, Content as DialogContent, Close, Close as DialogClose, Title, Title as DialogTitle, Description, Description as DialogDescription, };

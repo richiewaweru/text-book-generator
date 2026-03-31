@@ -2,7 +2,6 @@ import type { SectionContent } from 'lectio';
 import type { PlanningGenerationSpec } from './studio';
 
 export type Depth = 'survey' | 'standard' | 'deep';
-export type GenerationMode = 'draft' | 'balanced' | 'strict';
 export type NotationLanguage = 'plain' | 'math_notation' | 'python' | 'pseudocode';
 export type EducationLevel =
 	| 'elementary'
@@ -83,7 +82,6 @@ export interface SectionPlan extends OutlineSection {
 export interface GenerationSpec {
 	template_id: string;
 	preset_id: string;
-	mode: GenerationMode;
 	section_count: number;
 	sections: SectionPlan[];
 	warning: string | null;
@@ -96,26 +94,15 @@ export type BriefResponse = GenerationSpec;
 export interface GenerationRequest {
 	subject: string;
 	context: string;
-	mode: GenerationMode;
 	template_id: string;
 	preset_id: string;
 	section_count?: number;
 	generation_spec?: GenerationSpec | null;
 }
 
-export interface EnhanceGenerationRequest {
-	scope?: 'document' | 'section' | 'component';
-	section_id?: string;
-	component?: string;
-	mode: Exclude<GenerationMode, 'draft'>;
-	note?: string;
-}
-
 export interface GenerationAccepted {
 	generation_id: string;
 	status: string;
-	mode: GenerationMode;
-	source_generation_id?: string;
 	events_url: string;
 	document_url: string;
 	report_url?: string;
@@ -125,8 +112,6 @@ export interface GenerationHistoryItem {
 	id: string;
 	subject: string;
 	status: 'pending' | 'running' | 'completed' | 'failed';
-	mode: GenerationMode;
-	source_generation_id: string | null;
 	error_type: string | null;
 	error_code: string | null;
 	requested_template_id: string;
@@ -145,8 +130,6 @@ export interface GenerationDetail {
 	subject: string;
 	context: string;
 	status: 'pending' | 'running' | 'completed' | 'failed';
-	mode: GenerationMode;
-	source_generation_id: string | null;
 	error: string | null;
 	error_type: string | null;
 	error_code: string | null;
@@ -214,10 +197,8 @@ export interface GenerationDocument {
 	generation_id: string;
 	subject: string;
 	context: string;
-	mode: GenerationMode;
 	template_id: string;
 	preset_id: string;
-	source_generation_id: string | null;
 	status: 'pending' | 'running' | 'completed' | 'failed';
 	section_manifest: PipelineSectionManifestItem[];
 	sections: SectionContent[];
@@ -236,7 +217,6 @@ export interface PipelineStartEvent {
 	section_count: number;
 	template_id: string;
 	preset_id: string;
-	mode: GenerationMode;
 	started_at: string;
 }
 

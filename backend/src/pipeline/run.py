@@ -29,7 +29,7 @@ from pipeline.events import (
     SectionStartedEvent,
 )
 from pipeline.graph import build_graph
-from pipeline.state import QCReport, PipelineStatus, TextbookPipelineState, merge_state_updates
+from pipeline.state import PipelineStatus, TextbookPipelineState, merge_state_updates
 from pipeline.types.section_content import SectionContent
 from pipeline.types.template_contract import TemplateContractSummary
 
@@ -149,10 +149,8 @@ def _build_document(
         generation_id=command.generation_id or "",
         subject=command.subject,
         context=command.context,
-        mode=command.mode,
         template_id=command.template_id,
         preset_id=command.preset_id,
-        source_generation_id=command.source_generation_id,
         status=status,
         section_manifest=_build_section_manifest(state),
         sections=_sorted_sections(state),
@@ -163,42 +161,6 @@ def _build_document(
         updated_at=datetime.now(timezone.utc),
         completed_at=completed_at,
     )
-
-
-def _seed_initial_state(
-    *,
-    initial: TextbookPipelineState,
-    command: PipelineCommand,
-) -> TextbookPipelineState:
-    seed = command.seed_document
-    if seed is None or not command.target_section_ids:
-        return initial
-
-    target_ids = set(command.target_section_ids)
-    generated_sections = dict(initial.generated_sections)
-    assembled_sections = dict(initial.assembled_sections)
-    qc_reports = dict(initial.qc_reports)
-
-    for section in seed.sections:
-        if section.section_id in target_ids:
-            continue
-        generated_sections[section.section_id] = section
-        assembled_sections[section.section_id] = section
-
-    for report in seed.qc_reports:
-        section_id = report.get("section_id")
-        if not section_id or section_id in target_ids:
-            continue
-        qc_reports[section_id] = QCReport.model_validate(report)
-
-    return initial.model_copy(
-        update={
-            "generated_sections": generated_sections,
-            "assembled_sections": assembled_sections,
-            "qc_reports": qc_reports,
-        }
-    )
-
 
 def _build_result(
     command: PipelineCommand,
@@ -246,7 +208,6 @@ async def run_pipeline_streaming(
         max_rerenders=command.max_rerenders(),
         status=PipelineStatus.RUNNING,
     )
-    initial = _seed_initial_state(initial=initial, command=command)
     config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 
     await _emit(
@@ -255,7 +216,6 @@ async def run_pipeline_streaming(
             section_count=command.section_count,
             template_id=command.template_id,
             preset_id=command.preset_id,
-            mode=command.mode.value,
         ),
         on_event,
     )
