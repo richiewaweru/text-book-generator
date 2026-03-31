@@ -15,7 +15,6 @@ from langgraph.graph import END
 from langgraph.types import Send
 
 from pipeline.state import TextbookPipelineState
-from pipeline.types.requests import GenerationMode
 
 # Diagram component blocks that retry_diagram handles.
 _DIAGRAM_FIELDS = {"diagram", "diagram_series", "diagram_compare"}
@@ -124,8 +123,6 @@ def route_after_qc(state: TextbookPipelineState | dict) -> list[Send] | str:
             sends.append(Send("retry_interaction", base))
         elif scope == "field":
             sends.append(Send("retry_field", base))
-        elif state.request.mode == GenerationMode.DRAFT:
-            continue
         else:
             sends.append(Send("process_section", base))
 

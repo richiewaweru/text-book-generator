@@ -4,8 +4,8 @@ content_generator node.
 Produces a SectionContent object per section.
 Slot assignment is resolved centrally as STANDARD.
 
-Fresh generations use a 3-phase approach (core → practice → enrichment) with
-smaller schemas per call to reduce validation failures.  Rerenders fall back to
+Fresh generations use a 3-phase approach (core -> practice -> enrichment) with
+smaller schemas per call to reduce validation failures. Rerenders fall back to
 the monolithic single-call path because they target specific fields.
 """
 
@@ -23,6 +23,7 @@ from pipeline.events import (
     ValidationRepairAttemptedEvent,
     ValidationRepairSucceededEvent,
 )
+from pipeline.llm_runner import run_llm
 from pipeline.prompts.content import (
     ENRICHMENT_FIELDS,
     _EXTERNAL_FIELDS,
@@ -50,17 +51,8 @@ from pipeline.types.section_content import (
     PracticePhaseContent,
     SectionContent,
 )
-from pipeline.llm_runner import run_llm
 
 logger = logging.getLogger(__name__)
-
-_NON_TEXT_COMPONENT_TARGETS = {
-    "diagram",
-    "diagram_compare",
-    "diagram_series",
-    "simulation",
-    "simulation_block",
-}
 
 
 def _now_iso() -> str:
@@ -161,17 +153,6 @@ def _failed_section_record(
     )
 
 
-def _seed_section(state: TextbookPipelineState, section_id: str | None) -> SectionContent | None:
-    """Return the matching seeded section so rerenders can preserve intent."""
-
-    if section_id is None or state.request.seed_document is None:
-        return None
-    for section in state.request.seed_document.sections:
-        if section.section_id == section_id:
-            return section
-    return None
-
-
 def _publish_section_failed(
     state: TextbookPipelineState,
     sid: str,
@@ -219,7 +200,7 @@ def _record_failure(
     )
     node_failures.append(detail)
     failed_record = _failed_section_record(
-        state=state, section_id=sid, detail=detail, can_retry=True,
+        state=state, section_id=sid, detail=detail, can_retry=True
     )
     failed_sections[sid] = failed_record
     _publish_section_failed(state, sid, failed_record)
@@ -248,20 +229,6 @@ def _active_enrichment_fields(template_id: str) -> list[str]:
     return [f for f in optional if f in ENRICHMENT_FIELDS and f not in _EXTERNAL_FIELDS]
 
 
-def _should_passthrough_seed_section(
-    *,
-    state: TextbookPipelineState,
-    seed_section: SectionContent | None,
-) -> bool:
-    return (
-        seed_section is not None
-        and state.request.target_component in _NON_TEXT_COMPONENT_TARGETS
-    )
-
-
-# ── Monolithic path (rerenders + seed documents) ────────────────────────────
-
-
 async def _generate_monolithic(
     *,
     state: TextbookPipelineState,
@@ -270,14 +237,13 @@ async def _generate_monolithic(
     model_overrides: dict | None,
     plan,
     rerender_reason: str | None,
-    seed_section: SectionContent | None,
-    seed_note: str | None,
     generated: dict,
     failed_sections: dict,
     errors: list,
     node_failures: list[NodeFailureDetail],
 ) -> None:
-    """Original single-call path — used for rerenders and seed-based generation."""
+    """Original single-call path used for rerenders."""
+    _ = model_overrides
     agent = Agent(
         model=model,
         output_type=SectionContent,
@@ -295,8 +261,6 @@ async def _generate_monolithic(
         learner_fit=state.request.learner_fit,
         template_id=state.contract.id,
         rerender_reason=rerender_reason,
-        seed_section=seed_section,
-        seed_note=seed_note,
     )
 
     try:
@@ -307,7 +271,6 @@ async def _generate_monolithic(
             model=model,
             user_prompt=base_prompt,
             section_id=sid,
-            generation_mode=state.request.mode,
         )
         generated[sid] = result.output
     except Exception as exc:
@@ -320,8 +283,6 @@ async def _generate_monolithic(
                 model=model,
                 plan=plan,
                 rerender_reason=rerender_reason,
-                seed_section=seed_section,
-                seed_note=seed_note,
                 generated=generated,
                 failed_sections=failed_sections,
                 errors=errors,
@@ -329,7 +290,9 @@ async def _generate_monolithic(
             )
         else:
             _record_failure(
-                state=state, sid=sid, exc=exc,
+                state=state,
+                sid=sid,
+                exc=exc,
                 node_failures=node_failures,
                 failed_sections=failed_sections,
                 errors=errors,
@@ -345,44 +308,30 @@ def _handle_validation_repair(
     model,
     plan,
     rerender_reason,
-    seed_section,
-    seed_note,
     generated: dict,
     failed_sections: dict,
     errors: list,
     node_failures: list[NodeFailureDetail],
 ) -> None:
-    """Shared validation-repair handler for the monolithic path.
-
-    This is called from an async context but schedules the repair
-    synchronously within the caller's await.  Factored out to avoid
-    deep nesting.
-    """
-    # NOTE: This is a synchronous helper that *prepares* the repair.
-    # The actual async repair call must be awaited by the caller.
-    # We raise a _RepairNeeded sentinel so the caller can await it.
+    """Prepare a repair request for the caller to await."""
     raise _RepairNeeded(
         exc=exc,
         agent=agent,
         model=model,
         plan=plan,
         rerender_reason=rerender_reason,
-        seed_section=seed_section,
-        seed_note=seed_note,
     )
 
 
 class _RepairNeeded(Exception):
-    """Internal sentinel — never escapes content_generator."""
+    """Internal sentinel - never escapes content_generator."""
 
-    def __init__(self, *, exc, agent, model, plan, rerender_reason, seed_section, seed_note):
+    def __init__(self, *, exc, agent, model, plan, rerender_reason):
         self.original_exc = exc
         self.agent = agent
         self.model = model
         self.plan = plan
         self.rerender_reason = rerender_reason
-        self.seed_section = seed_section
-        self.seed_note = seed_note
 
 
 async def _attempt_repair(
@@ -397,7 +346,7 @@ async def _attempt_repair(
 ) -> None:
     exc = repair.original_exc
     initial_detail = _failure_detail(
-        section_id=sid, error=exc, retry_attempt=0, will_retry=True,
+        section_id=sid, error=exc, retry_attempt=0, will_retry=True
     )
     node_failures.append(initial_detail)
     detailed_errors = (
@@ -434,11 +383,8 @@ async def _attempt_repair(
                 validation_summary=initial_detail.error_message,
                 validation_errors=detailed_errors,
                 rerender_reason=repair.rerender_reason,
-                seed_section=repair.seed_section,
-                seed_note=repair.seed_note,
             ),
             section_id=sid,
-            generation_mode=state.request.mode,
         )
         generated[sid] = repair_result.output
         publish_runtime_event(
@@ -450,11 +396,11 @@ async def _attempt_repair(
         )
     except Exception as repair_exc:
         final_detail = _failure_detail(
-            section_id=sid, error=repair_exc, retry_attempt=1, will_retry=False,
+            section_id=sid, error=repair_exc, retry_attempt=1, will_retry=False
         )
         node_failures.append(final_detail)
         failed_record = _failed_section_record(
-            state=state, section_id=sid, detail=final_detail, can_retry=True,
+            state=state, section_id=sid, detail=final_detail, can_retry=True
         )
         failed_sections[sid] = failed_record
         _publish_section_failed(state, sid, failed_record)
@@ -468,9 +414,6 @@ async def _attempt_repair(
         )
 
 
-# ── Phased path (fresh generation) ──────────────────────────────────────────
-
-
 async def _generate_phased(
     *,
     state: TextbookPipelineState,
@@ -479,19 +422,16 @@ async def _generate_phased(
     model_overrides: dict | None,
     plan,
     rerender_reason: str | None,
-    seed_section: SectionContent | None,
-    seed_note: str | None,
     generated: dict,
     failed_sections: dict,
     errors: list,
     node_failures: list[NodeFailureDetail],
 ) -> None:
-    """Three-phase generation: core → practice → enrichment."""
+    """Three-phase generation: core -> practice -> enrichment."""
+    _ = model_overrides
     gen_id = state.request.generation_id or ""
-    mode = state.request.mode
     template_id = state.contract.id
 
-    # ── Phase 1: Core (header + hook + explanation) ──
     core_agent = Agent(
         model=model,
         output_type=CoreContent,
@@ -515,17 +455,15 @@ async def _generate_phased(
                 learner_fit=state.request.learner_fit,
                 template_id=template_id,
                 rerender_reason=rerender_reason,
-                seed_section=seed_section,
-                seed_note=seed_note,
             ),
             section_id=sid,
-            generation_mode=mode,
         )
         core = core_result.output
     except Exception as exc:
-        # Phase 1 failure is fatal — no usable section without core content.
         _record_failure(
-            state=state, sid=sid, exc=exc,
+            state=state,
+            sid=sid,
+            exc=exc,
             node_failures=node_failures,
             failed_sections=failed_sections,
             errors=errors,
@@ -534,7 +472,6 @@ async def _generate_phased(
 
     summary = _core_summary(core)
 
-    # ── Phase 2: Practice (practice + what_next + optional pitfall/prerequisites) ──
     practice_agent = Agent(
         model=model,
         output_type=PracticePhaseContent,
@@ -562,20 +499,19 @@ async def _generate_phased(
                 rerender_reason=rerender_reason,
             ),
             section_id=sid,
-            generation_mode=mode,
         )
         practice = practice_result.output
     except Exception as exc:
-        # Phase 2 failure is fatal — practice + what_next are required fields.
         _record_failure(
-            state=state, sid=sid, exc=exc,
+            state=state,
+            sid=sid,
+            exc=exc,
             node_failures=node_failures,
             failed_sections=failed_sections,
             errors=errors,
         )
         return
 
-    # ── Phase 3: Enrichment (optional — graceful degradation on failure) ──
     enrichment_fields = _active_enrichment_fields(template_id)
     enrichment = None
 
@@ -607,11 +543,9 @@ async def _generate_phased(
                     rerender_reason=rerender_reason,
                 ),
                 section_id=sid,
-                generation_mode=mode,
             )
             enrichment = enrichment_result.output
         except Exception as exc:
-            # Phase 3 failure is non-fatal — section ships with core + practice.
             logger.warning(
                 "content_generator enrichment phase failed section=%s error=%s",
                 sid,
@@ -626,18 +560,24 @@ async def _generate_phased(
                 )
             )
 
-    # ── Assemble final SectionContent ──
-    # Exclude keys already handled by core/practice phases to prevent conflicts.
-    _EXPLICIT_KEYS = {
-        "section_id", "template_id", "header", "hook", "explanation",
-        "practice", "what_next", "pitfall", "pitfalls", "prerequisites",
+    explicit_keys = {
+        "section_id",
+        "template_id",
+        "header",
+        "hook",
+        "explanation",
+        "practice",
+        "what_next",
+        "pitfall",
+        "pitfalls",
+        "prerequisites",
     }
     enrichment_kwargs = {}
     if enrichment:
         enrichment_kwargs = {
-            k: v
-            for k, v in enrichment.model_dump(exclude_none=True).items()
-            if k not in _EXPLICIT_KEYS
+            key: value
+            for key, value in enrichment.model_dump(exclude_none=True).items()
+            if key not in explicit_keys
         }
     section = SectionContent(
         section_id=core.section_id,
@@ -655,9 +595,6 @@ async def _generate_phased(
     generated[sid] = section
 
 
-# ── Main entry point ────────────────────────────────────────────────────────
-
-
 async def content_generator(
     state: TextbookPipelineState | dict,
     *,
@@ -671,15 +608,11 @@ async def content_generator(
 
     rerender_request = state.pending_rerender_for(sid)
     rerender_reason = rerender_request.reason if rerender_request else None
-
     is_rerender = rerender_reason is not None
-    seed_section = _seed_section(state, sid)
-    seed_note = state.request.seed_document.note if state.request.seed_document else None
 
     model = get_node_text_model(
         "content_generator",
         model_overrides=model_overrides,
-        generation_mode=state.request.mode,
     )
 
     generated = dict(state.generated_sections)
@@ -687,16 +620,7 @@ async def content_generator(
     errors: list[PipelineError] = []
     node_failures: list[NodeFailureDetail] = []
 
-    if sid is not None and _should_passthrough_seed_section(state=state, seed_section=seed_section):
-        generated[sid] = seed_section
-        return {
-            "generated_sections": generated,
-            "completed_nodes": ["content_generator"],
-        }
-
-    # Rerenders and seed-based generations use the monolithic path.
-    # Fresh generations use the phased path for higher success rates.
-    use_phased = not is_rerender and seed_section is None
+    use_phased = not is_rerender
 
     if use_phased:
         await _generate_phased(
@@ -706,8 +630,6 @@ async def content_generator(
             model_overrides=model_overrides,
             plan=plan,
             rerender_reason=rerender_reason,
-            seed_section=seed_section,
-            seed_note=seed_note,
             generated=generated,
             failed_sections=failed_sections,
             errors=errors,
@@ -722,8 +644,6 @@ async def content_generator(
                 model_overrides=model_overrides,
                 plan=plan,
                 rerender_reason=rerender_reason,
-                seed_section=seed_section,
-                seed_note=seed_note,
                 generated=generated,
                 failed_sections=failed_sections,
                 errors=errors,

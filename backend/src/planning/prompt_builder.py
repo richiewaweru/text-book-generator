@@ -6,6 +6,10 @@ from typing import Any
 
 from pydantic_ai import Agent
 
+from planning.llm_config import (
+    PLANNING_BRIEF_INTERPRETER_CALLER,
+    get_planning_slot,
+)
 from planning.models import (
     NormalizedBrief,
     PlanningRefinementOutput,
@@ -60,7 +64,6 @@ async def refine_plan_text(
     model: Any,
     run_llm_fn: Callable[..., Awaitable[Any]],
     generation_id: str = "",
-    generation_mode: Any = "draft",
 ) -> PlanningRefinementOutput | None:
     agent = Agent(
         model=model,
@@ -72,12 +75,12 @@ async def refine_plan_text(
     for attempt in range(2):
         try:
             result = await run_llm_fn(
-                generation_id=generation_id,
-                node="brief_planner",
+                trace_id=generation_id,
+                caller=PLANNING_BRIEF_INTERPRETER_CALLER,
                 agent=agent,
                 model=model,
                 user_prompt=user_prompt,
-                generation_mode=generation_mode,
+                slot=get_planning_slot(PLANNING_BRIEF_INTERPRETER_CALLER),
             )
             output = result.output
             if output is None or len(output.sections) != len(sections):

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from pipeline.events import event_bus
+import core.events as core_events
 from pipeline.state import TextbookPipelineState
 
 _NODE_ATTEMPTS: dict[tuple[str, str], int] = defaultdict(int)
@@ -16,7 +16,7 @@ def generation_id_from_state(state: TextbookPipelineState | dict) -> str:
 
 def publish_runtime_event(generation_id: str, event: Any) -> None:
     if generation_id and generation_id.strip():
-        event_bus.publish(generation_id, event)
+        core_events.event_bus.publish(generation_id, event)
 
 
 def current_section_attempt(

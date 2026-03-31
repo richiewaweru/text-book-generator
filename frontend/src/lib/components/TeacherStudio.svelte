@@ -2,16 +2,9 @@
 	import { templateRegistryMap } from 'lectio';
 
 	import { planBrief } from '$lib/api/client';
-	import type {
-		BriefRequest,
-		GenerationMode,
-		GenerationRequest,
-		GenerationSpec,
-		SectionPlan
-	} from '$lib/types';
+	import type { BriefRequest, GenerationRequest, GenerationSpec, SectionPlan } from '$lib/types';
 
 	const LIVE_PRESET_ID = 'blue-classroom';
-	const DEFAULT_MODE: GenerationMode = 'balanced';
 
 	interface Props {
 		onsubmit: (request: GenerationRequest) => Promise<void> | void;
@@ -68,7 +61,6 @@
 		return {
 			subject: spec.source_brief.intent,
 			context: buildGenerationContext(spec),
-			mode: DEFAULT_MODE,
 			template_id: spec.template_id,
 			preset_id: LIVE_PRESET_ID,
 			section_count: spec.section_count,
@@ -153,7 +145,6 @@
 			</p>
 		</div>
 		<div class="chip-stack">
-			<span class="chip">Balanced mode</span>
 			<span class="chip">Blue Classroom preset</span>
 		</div>
 	</div>

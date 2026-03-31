@@ -1,6 +1,6 @@
 # Project Docs
 
-Live project-specific documentation for the shell + pipeline + native Lectio runtime.
+Live project-specific documentation for the core + generation + planning + pipeline + native Lectio runtime.
 
 ## Contents
 

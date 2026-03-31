@@ -5,7 +5,7 @@
 		type TemplateDefinition
 	} from 'lectio';
 	import TemplatePreviewOverlay from '$lib/components/TemplatePreviewOverlay.svelte';
-	import type { GenerationMode, GenerationRequest } from '$lib/types';
+	import type { GenerationRequest } from '$lib/types';
 
 	const LIVE_PRESET_ID = 'blue-classroom';
 	const livePresets = basePresets.filter((preset) => preset.id === LIVE_PRESET_ID);
@@ -15,7 +15,6 @@
 
 	let subject = $state('');
 	let context = $state('');
-	let mode: GenerationMode = $state('draft');
 	let sectionCount = $state(4);
 	let selectedTemplateId = $state(liveTemplateRegistry[0]?.contract.id ?? '');
 	let selectedPresetId = $state(livePresets[0]?.id ?? '');
@@ -56,7 +55,6 @@
 		onsubmit({
 			subject,
 			context,
-			mode,
 			template_id: selectedTemplateId,
 			preset_id: selectedPresetId,
 			section_count: sectionCount
@@ -89,15 +87,15 @@
 	class="generation-form"
 >
 	<section class="briefing">
-		<div>
-			<p class="eyebrow">Generation Brief</p>
-			<h3>Describe the lesson you want</h3>
-			<p class="copy">
-				The shell keeps profile data outside the pipeline. Here you are choosing the lesson
-				brief, engine mode, and a fully wired Lectio template plus live preset.
-			</p>
-		</div>
-	</section>
+			<div>
+				<p class="eyebrow">Generation Brief</p>
+				<h3>Describe the lesson you want</h3>
+				<p class="copy">
+					The shell keeps profile data outside the pipeline. Here you are choosing the lesson
+					brief, and a fully wired Lectio template plus live preset.
+				</p>
+			</div>
+		</section>
 
 	<div class="field-grid">
 		<label>
@@ -118,18 +116,6 @@
 				placeholder="What should this generation teach, reinforce, or clarify?"
 				required
 			></textarea>
-		</label>
-
-		<label>
-			Mode
-			<select bind:value={mode}>
-				<option value="draft">Draft</option>
-				<option value="balanced">Balanced</option>
-				<option value="strict">Strict</option>
-			</select>
-			<span class="hint">
-				Draft is fast and seedable. Balanced is the default. Strict gives QC more room to repair.
-			</span>
 		</label>
 
 		<label>
@@ -285,8 +271,7 @@
 	}
 
 	input,
-	textarea,
-	select {
+	textarea {
 		padding: 0.78rem 0.9rem;
 		border-radius: 14px;
 		border: 1px solid rgba(36, 52, 63, 0.14);

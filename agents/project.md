@@ -5,23 +5,30 @@ Monorepo: `backend/` (FastAPI + Python) and `frontend/` (SvelteKit + TypeScript)
 
 ## Architecture Rules
 
-The backend uses a `Shell + Pipeline` architecture:
+The backend uses a `Core + Generation + Planning + Telemetry + Pipeline` architecture:
 
-- `backend/src/textbook_agent/` is the product shell.
+- `backend/src/core/` holds shared infrastructure: config, auth primitives, database, error handling, event bus, and generic LLM utilities.
+- `backend/src/generation/` owns generation HTTP, persistence, and orchestration.
+- `backend/src/telemetry/` owns report persistence, telemetry routes, and usage queries; it may depend on `core/` and `pipeline.reporting`, but must not import `generation/` or `planning/`.
+- `backend/src/planning/` holds planning-specific models and services that may depend on `core/`, and may hand committed specs to generation, but not on `pipeline/` LLM internals.
 - `backend/src/pipeline/` is the standalone generation engine.
+- `backend/src/app.py` assembles the FastAPI application.
 
-The shell keeps the DDD 4-layer structure:
+The shell is flattened into top-level packages:
 
-| Layer | May import from | Must NOT import from |
-| --- | --- | --- |
-| `domain/` | nothing | application, infrastructure, interface |
-| `application/` | domain | infrastructure, interface |
-| `infrastructure/` | domain | application, interface |
-| `interface/` | domain, application, infrastructure | -- |
+| Package group | Typical contents |
+| --- | --- |
+| `entities/`, `value_objects/`, `ports/` | Shell domain model and repository contracts |
+| `dtos/`, `services/`, `routes/`, `repositories/` | Shell application and HTTP wiring |
+| `middleware/`, `dependencies.py`, `app.py` | Shell composition layer |
 
 Critical invariants:
-- Domain has zero framework imports -- pure entities, value objects, and ports
-- The shell may import `pipeline`; `pipeline` must never import `textbook_agent`
+- `core/` must not import from `generation`, `planning`, `telemetry`, or `pipeline`
+- `generation/` may import `core/`, `planning/`, `telemetry/`, and `pipeline/`
+- `telemetry/` may import `core/` and `pipeline.reporting`, but must not import `generation/` or `planning/`
+- `planning/` may import `core/` and selected `generation/` bridge types, but must not import `pipeline` LLM internals
+- `pipeline/` may import `core/`, but must never import `generation`, `planning`, or `telemetry`
+- Entities, value objects, and ports stay framework-light and reusable
 - All live generation goes through the pipeline engine
 - The canonical artifact is a structured JSON document, not HTML
 
@@ -44,6 +51,6 @@ python tools/agent/check_architecture.py --format text # Shell + pipeline bounda
 ## Key Entities
 
 - `StudentProfile` -- persistent learner data (age, education, interests, goals). Stored in DB.
-- `Generation` -- stored generation metadata plus document, lineage, and failure state.
-- `GenerationRequest` -- per-request DTO (subject, context, mode, template_id, preset_id, optional section_count).
-- `PipelineDocument` -- canonical saved output used by the frontend viewer and enhancement flow.
+- `Generation` -- stored generation metadata plus document and failure state.
+- `GenerationRequest` -- per-request DTO (`subject`, `context`, `template_id`, `preset_id`, optional `section_count`).
+- `PipelineDocument` -- canonical saved output used by the frontend viewer.

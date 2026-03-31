@@ -4,20 +4,23 @@ This file is the human-readable source of truth for the current project state.
 
 ## Current Runtime Shape
 
-- `backend/src/textbook_agent/` is the product shell.
-- `backend/src/planning/` is the shell-owned planning layer used by Teacher Studio.
+- `backend/src/core/` holds shared infrastructure and the shared auth/profile/user layer.
+- `backend/src/generation/` is the generation app.
+- `backend/src/planning/` is the planning layer used by Teacher Studio.
 - `backend/src/pipeline/` is the only live generation engine.
+- `backend/src/app.py` is the FastAPI composition entrypoint.
 - The canonical saved artifact is a JSON `PipelineDocument`.
 - The frontend hydrates from `/document` and appends new sections from `/events`.
-- Draft generations can be enhanced into balanced or strict runs through a seeded child generation.
+- Generation uses a single mode-free path with slot-based model routing.
 - `/studio` is the canonical teacher creation flow.
 
 ## Current Schema Highlights
 
-- `Generation` stores document metadata, template/preset ids, lineage, timing, and failure metadata.
+- `Generation` stores document metadata, template/preset ids, timing, and failure metadata.
 - `PlanningGenerationSpec` stores the reviewed lesson plan that bridges Teacher Studio into generation.
+- `GenerationRequest` and `GenerationAcceptedResponse` live under `backend/src/generation/dtos/`.
 - `SectionContent` is Lectio-aligned and rendered natively in the frontend.
-- `grade_band` is derived in the shell from `StudentProfile.education_level`.
+- `grade_band` is derived in the generation path from `StudentProfile.education_level`.
 - `learner_fit` currently defaults to `general`.
 
 ## Current Prompt Source of Truth

@@ -53,9 +53,14 @@ export async function ensureOk(response: Response, fallbackMessage: string): Pro
 	}
 
 	const payload = await readErrorPayload(response);
+	const detail =
+		response.status === 429
+			? payload?.detail ??
+				'You already have the maximum number of active generations. Please wait for one to finish before starting another.'
+			: payload?.detail ?? (response.statusText || fallbackMessage);
 	throw new ApiError(
 		response.status,
-		payload?.detail ?? (response.statusText || fallbackMessage),
+		detail,
 		payload?.error_type ?? null
 	);
 }

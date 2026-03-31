@@ -22,16 +22,11 @@ from pipeline.prompts.diagram import (
 from pipeline.providers.registry import get_node_text_model
 from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.state import PipelineError, TextbookPipelineState
-from pipeline.types.requests import GenerationMode
 from pipeline.types.section_content import DiagramContent, DiagramSpec
 from pipeline.llm_runner import run_llm
 
 _DIAGRAM_COMPONENTS = {"diagram-block", "diagram-series", "diagram-compare"}
-_DIAGRAM_TIMEOUTS = {
-    GenerationMode.DRAFT: 30.0,
-    GenerationMode.BALANCED: 35.0,
-    GenerationMode.STRICT: 45.0,
-}
+_DIAGRAM_TIMEOUT_SECONDS = 35.0
 
 
 class DiagramOutput(BaseModel):
@@ -50,10 +45,6 @@ def _get_diagram_slot(contract) -> str:
         if slot in contract.required_components or slot in contract.optional_components:
             return slot
     return "diagram-block"
-
-
-def _get_diagram_timeout(mode: GenerationMode) -> float:
-    return _DIAGRAM_TIMEOUTS.get(mode, 25.0)
 
 
 def _publish_outcome(generation_id: str, section_id: str | None, outcome: str) -> None:
@@ -120,7 +111,6 @@ async def diagram_generator(
     model = get_node_text_model(
         "diagram_generator",
         model_overrides=model_overrides,
-        generation_mode=state.request.mode,
     )
     agent = Agent(
         model=model,
@@ -144,9 +134,8 @@ async def diagram_generator(
                     key_concepts=plan.diagram.key_concepts if plan is not None else None,
                     visual_guidance=plan.diagram.visual_guidance if plan is not None else None,
                 ),
-                generation_mode=state.request.mode,
             ),
-            timeout=_get_diagram_timeout(state.request.mode),
+            timeout=_DIAGRAM_TIMEOUT_SECONDS,
         )
 
         diagram = DiagramContent(
@@ -173,7 +162,7 @@ async def diagram_generator(
                     node="diagram_generator",
                     section_id=sid,
                     message=(
-                        f"Diagram generation timed out ({int(_get_diagram_timeout(state.request.mode))}s) "
+                        f"Diagram generation timed out ({int(_DIAGRAM_TIMEOUT_SECONDS)}s) "
                         "and the section will ship without a diagram."
                     ),
                     recoverable=True,

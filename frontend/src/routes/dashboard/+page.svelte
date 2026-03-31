@@ -5,7 +5,7 @@
 	import { basePresetMap, templateRegistryMap } from 'lectio';
 	import { isApiError } from '$lib/api/errors';
 	import { getOnboardingRoute, resolveDashboardProfileFailure } from '$lib/auth/routing';
-	import { enhanceGeneration, getGenerations } from '$lib/api/client';
+	import { getGenerations } from '$lib/api/client';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import { getProfile } from '$lib/api/profile';
 	import { authUser, logout } from '$lib/stores/auth';
@@ -17,8 +17,6 @@
 	let profile = $state<StudentProfile | null>(null);
 	let pastGenerations = $state<GenerationHistoryItem[]>([]);
 	let loadingProfile = $state(true);
-	let generating = $state(false);
-	let errorMessage = $state<string | null>(null);
 	let profileErrorMessage = $state<string | null>(null);
 	const savedGenerations = $derived(
 		pastGenerations.filter((generation) => generation.status === 'completed')
@@ -54,20 +52,6 @@
 			}
 		}
 	});
-
-	async function handleEnhance(id: string) {
-		generating = true;
-		errorMessage = null;
-
-		try {
-			const accepted = await enhanceGeneration(id, { mode: 'balanced' });
-			goto(getTextbookRoute(accepted.generation_id));
-		} catch (err) {
-			errorMessage = err instanceof Error ? err.message : 'Draft enhancement failed.';
-		} finally {
-			generating = false;
-		}
-	}
 
 	function templateName(templateId: string | null): string {
 		return (templateId && templateRegistryMap[templateId]?.contract.name) ?? templateId ?? 'Unknown template';
@@ -161,12 +145,6 @@
 			</div>
 		</section>
 
-		{#if errorMessage}
-			<div class="error">
-				<p><strong>Error:</strong> {errorMessage}</p>
-			</div>
-		{/if}
-
 		{#if savedGenerations.length > 0}
 			<section class="history-section">
 				<h2>Saved Books</h2>
@@ -177,7 +155,6 @@
 								<p class="history-subject">{gen.subject}</p>
 								<div class="history-meta">
 									<span class="status status-{gen.status}">{gen.status}</span>
-									<span class="mode">{gen.mode.toUpperCase()}</span>
 									<span>{templateName(gen.resolved_template_id ?? gen.requested_template_id)}</span>
 									<span>{presetName(gen.resolved_preset_id ?? gen.requested_preset_id)}</span>
 								</div>
@@ -189,11 +166,6 @@
 							</div>
 							<div class="history-actions">
 								<a href={getTextbookRoute(gen.id)} class="view-link">Open</a>
-								{#if gen.mode === 'draft'}
-									<button class="enhance-link" onclick={() => handleEnhance(gen.id)} disabled={generating}>
-										Enhance
-									</button>
-								{/if}
 							</div>
 						</li>
 					{/each}
@@ -211,7 +183,6 @@
 								<p class="history-subject">{gen.subject}</p>
 								<div class="history-meta">
 									<span class="status status-{gen.status}">{gen.status}</span>
-									<span class="mode">{gen.mode.toUpperCase()}</span>
 									<span>{templateName(gen.resolved_template_id ?? gen.requested_template_id)}</span>
 									<span>{presetName(gen.resolved_preset_id ?? gen.requested_preset_id)}</span>
 								</div>
@@ -300,7 +271,6 @@
 	}
 
 	.edit-profile-btn,
-	.enhance-link,
 	.studio-link,
 	.ghost-link {
 		border-radius: 999px;
@@ -413,8 +383,7 @@
 		font-size: 0.9rem;
 	}
 
-	.status,
-	.mode {
+	.status {
 		padding: 0.2rem 0.55rem;
 		border-radius: 999px;
 		font-size: 0.76rem;
@@ -438,11 +407,6 @@
 		color: #8d3a26;
 	}
 
-	.mode {
-		background: rgba(36, 52, 63, 0.08);
-		color: #24343f;
-	}
-
 	.view-link {
 		color: #24436a;
 		font-weight: 600;
@@ -459,14 +423,6 @@
 		margin: 0.5rem 0 0 0;
 		color: #864635;
 		font-size: 0.9rem;
-	}
-
-	.error {
-		padding: 1rem;
-		border-radius: 18px;
-		border: 1px solid rgba(148, 66, 46, 0.18);
-		background: rgba(255, 242, 238, 0.9);
-		color: #7d3524;
 	}
 
 	@media (max-width: 720px) {

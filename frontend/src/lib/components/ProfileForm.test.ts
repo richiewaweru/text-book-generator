@@ -121,9 +121,6 @@ describe('ProfileForm template runtime selection', () => {
 		await fireEvent.input(screen.getByLabelText(/^context$/i), {
 			target: { value: 'show a scaffolded first pass through rate of change' }
 		});
-		await fireEvent.change(screen.getByRole('combobox'), {
-			target: { value: 'balanced' }
-		});
 
 		await fireEvent.click(screen.getByRole('button', { name: /preview guided concept path/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /use template/i }));
@@ -132,7 +129,6 @@ describe('ProfileForm template runtime selection', () => {
 		expect(onsubmit).toHaveBeenCalledWith({
 			subject: 'derivatives',
 			context: 'show a scaffolded first pass through rate of change',
-			mode: 'balanced',
 			template_id: 'guided-concept-path',
 			preset_id: 'blue-classroom',
 			section_count: 4

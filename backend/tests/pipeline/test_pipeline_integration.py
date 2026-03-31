@@ -535,9 +535,8 @@ class TestQCRouting:
         assert payload["current_section_plan"]["section_id"] == "s-01"
         assert payload["current_section_plan"]["focus"] == "Test focus"
 
-    def test_draft_routes_single_blocking_issue_to_targeted_retry(self):
+    def test_single_blocking_issue_routes_to_targeted_retry(self):
         state = _base_state(
-            request=_request(mode="draft"),
             assembled_sections={"s-01": _section("s-01")},
             qc_reports={
                 "s-01": QCReport(
@@ -561,9 +560,8 @@ class TestQCRouting:
         assert len(result) == 1
         assert result[0].node == "retry_field"
 
-    def test_draft_does_not_escalate_multi_blocking_issue_to_full_rerender(self):
+    def test_multi_blocking_issue_escalates_to_full_rerender(self):
         state = _base_state(
-            request=_request(mode="draft"),
             assembled_sections={"s-01": _section("s-01")},
             qc_reports={
                 "s-01": QCReport(
@@ -588,7 +586,9 @@ class TestQCRouting:
         from pipeline.routers.qc_router import route_after_qc
 
         result = route_after_qc(state)
-        assert result == END
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].node == "process_section"
 
 
 # ── Section assembler (deterministic, uses contracts on disk) ────────────────
@@ -629,7 +629,6 @@ class TestDocumentQuality:
             preset_id="blue-classroom",
             learner_fit="general",
             section_count=4,
-            mode="draft",
         )
         state = _base_state(
             request=command,
@@ -908,7 +907,7 @@ class TestEventBus:
 
 class TestRunPipelineStreamingEvents:
 
-    async def test_first_event_is_pipeline_start_with_template_preset_and_mode(
+    async def test_first_event_is_pipeline_start_with_template_and_preset(
         self, monkeypatch
     ):
         from pipeline import run as run_mod
@@ -936,7 +935,6 @@ class TestRunPipelineStreamingEvents:
             preset_id="blue-classroom",
             learner_fit="general",
             section_count=3,
-            mode="balanced",
         )
 
         await run_mod.run_pipeline_streaming(command, on_event=on_event)
@@ -948,7 +946,6 @@ class TestRunPipelineStreamingEvents:
         assert first_event.section_count == 3
         assert first_event.template_id == "guided-concept-path"
         assert first_event.preset_id == "blue-classroom"
-        assert first_event.mode == "balanced"
 
     async def test_completed_document_includes_section_manifest(self, monkeypatch):
         from pipeline import run as run_mod
@@ -981,7 +978,6 @@ class TestRunPipelineStreamingEvents:
             preset_id="blue-classroom",
             learner_fit="general",
             section_count=2,
-            mode="balanced",
         )
 
         result = await run_mod.run_pipeline_streaming(command)

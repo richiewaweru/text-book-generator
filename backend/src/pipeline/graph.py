@@ -43,7 +43,6 @@ def fan_out_sections(state: TextbookPipelineState | dict) -> list[Send]:
         return []
 
     base = state.model_dump()
-    target_ids = set(state.request.target_section_ids or [])
     return [
         Send("process_section", {
             **base,
@@ -51,7 +50,6 @@ def fan_out_sections(state: TextbookPipelineState | dict) -> list[Send]:
             "current_section_plan": plan.model_dump(),
         })
         for plan in state.curriculum_outline
-        if not target_ids or plan.section_id in target_ids
     ]
 
 

@@ -1,7 +1,6 @@
 import type {
 	BriefRequest,
 	BriefResponse,
-	EnhanceGenerationRequest,
 	GenerationAccepted,
 	GenerationDetail,
 	GenerationDocument,
@@ -44,19 +43,6 @@ export async function planBrief(request: BriefRequest): Promise<BriefResponse> {
 		body: JSON.stringify(request)
 	});
 	await ensureOk(response, 'Brief planning failed.');
-	return response.json();
-}
-
-export async function enhanceGeneration(
-	id: string,
-	request: EnhanceGenerationRequest
-): Promise<GenerationAccepted> {
-	const response = await apiFetch(`/api/v1/generations/${id}/enhance`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(request)
-	});
-	await ensureOk(response, 'Draft enhancement failed.');
 	return response.json();
 }
 

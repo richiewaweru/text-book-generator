@@ -1,18 +1,17 @@
 """
 pipeline.events
 
-Typed event models plus a simple in-process pub/sub bus for SSE streaming.
+Typed pipeline event models plus a compatibility bridge to the shared core bus.
 """
 
 from __future__ import annotations
 
-import asyncio
-from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
+import core.events as core_events
 from pipeline.api import PipelineSectionReport
 from pipeline.state import NodeFailureDetail
 from pipeline.types.section_content import SectionContent
@@ -24,7 +23,6 @@ class PipelineStartEvent(BaseModel):
     section_count: int
     template_id: str
     preset_id: str
-    mode: str
     started_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -72,52 +70,6 @@ class ErrorEvent(BaseModel):
     completed_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-
-
-# ── LLM diagnostics (best-effort; emitted for every LLM agent call) ─────────
-
-
-class LLMCallStartedEvent(BaseModel):
-    type: Literal["llm_call_started"] = "llm_call_started"
-    generation_id: str
-    node: str
-    slot: str
-    family: str | None = None
-    model_name: str | None = None
-    endpoint_host: str | None = None
-    attempt: int
-    section_id: str | None = None
-
-
-class LLMCallSucceededEvent(BaseModel):
-    type: Literal["llm_call_succeeded"] = "llm_call_succeeded"
-    generation_id: str
-    node: str
-    slot: str
-    family: str | None = None
-    model_name: str | None = None
-    endpoint_host: str | None = None
-    attempt: int
-    section_id: str | None = None
-    latency_ms: float | None = None
-    tokens_in: int | None = None
-    tokens_out: int | None = None
-    cost_usd: float | None = None
-
-
-class LLMCallFailedEvent(BaseModel):
-    type: Literal["llm_call_failed"] = "llm_call_failed"
-    generation_id: str
-    node: str
-    slot: str
-    family: str | None = None
-    model_name: str | None = None
-    endpoint_host: str | None = None
-    attempt: int
-    section_id: str | None = None
-    latency_ms: float | None = None
-    retryable: bool = True
-    error: str
 
 
 class SectionAttemptStartedEvent(BaseModel):
@@ -236,6 +188,10 @@ class DiagramOutcomeEvent(BaseModel):
     )
 
 
+LLMCallStartedEvent = core_events.LLMCallStartedEvent
+LLMCallSucceededEvent = core_events.LLMCallSucceededEvent
+LLMCallFailedEvent = core_events.LLMCallFailedEvent
+
 PipelineEvent = (
     PipelineStartEvent
     | SectionStartedEvent
@@ -258,33 +214,8 @@ PipelineEvent = (
 )
 
 
-class PipelineEventBus:
-    def __init__(self) -> None:
-        self._subscribers: dict[str, list[asyncio.Queue]] = defaultdict(list)
-
-    def subscribe(self, generation_id: str) -> asyncio.Queue:
-        queue: asyncio.Queue = asyncio.Queue()
-        self._subscribers[generation_id].append(queue)
-        return queue
-
-    def publish(self, generation_id: str, event: PipelineEvent | dict) -> None:
-        payload = (
-            event.model_dump(mode="json", exclude_none=True)
-            if hasattr(event, "model_dump")
-            else event
-        )
-        for queue in self._subscribers.get(generation_id, []):
-            queue.put_nowait(payload)
-
-    def unsubscribe(self, generation_id: str, queue: asyncio.Queue) -> None:
-        queues = self._subscribers.get(generation_id, [])
-        if queue in queues:
-            queues.remove(queue)
-        if not queues and generation_id in self._subscribers:
-            del self._subscribers[generation_id]
-
-
-event_bus = PipelineEventBus()
+PipelineEventBus = core_events.EventBus
+event_bus = core_events.event_bus
 
 
 __all__ = [
@@ -305,6 +236,7 @@ __all__ = [
     "ValidationRepairAttemptedEvent",
     "ValidationRepairSucceededEvent",
     "DiagramOutcomeEvent",
+    "PipelineEventBus",
     "event_bus",
     "LLMCallStartedEvent",
     "LLMCallSucceededEvent",

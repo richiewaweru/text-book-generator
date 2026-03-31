@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from pipeline.api import PipelineIssue
 from pipeline.state import NodeFailureDetail
-from pipeline.types.requests import GenerationMode as PipelineMode
 
 
 class GenerationReportLLMAttempt(BaseModel):
@@ -114,7 +113,7 @@ class GenerationReport(BaseModel):
     generation_id: str
     subject: str
     context: str
-    mode: PipelineMode
+    mode: str | None = None
     template_id: str
     preset_id: str
     source_generation_id: str | None = None

@@ -62,11 +62,11 @@ A 2-page generation hung for 30+ minutes. The UI showed "Sections ready: 1/2, St
 
 | File | What changed |
 |------|-------------|
-| `backend/src/textbook_agent/application/services/generation_report_recorder.py` | Crash-resilient consumer, timeout + drain for `wait_for_idle()` |
-| `backend/src/textbook_agent/interface/api/routes/generation.py` | Job timeout, event reordering, `finally` safety net, SSE race fix |
+| `backend/src/generation/report_recorder.py` | Crash-resilient consumer, timeout + drain for `wait_for_idle()` |
+| `backend/src/generation/routes.py` | Job timeout, event reordering, `finally` safety net, SSE race fix |
 | `backend/src/pipeline/nodes/section_runner.py` | Short-circuit when content_generator produces nothing |
-| `backend/src/textbook_agent/infrastructure/repositories/file_generation_report_repo.py` | `cleanup_tmp()` implementation |
-| `backend/src/textbook_agent/domain/ports/generation_report_repository.py` | `cleanup_tmp()` abstract method (default no-op) |
+| `backend/src/generation/repositories/file_generation_report_repo.py` | `cleanup_tmp()` implementation |
+| `backend/src/generation/ports/generation_report_repository.py` | `cleanup_tmp()` abstract method (default no-op) |
 | `backend/tests/application/test_generation_report_recorder.py` | Added `cleanup_tmp` to in-memory repo |
 | `backend/tests/interface/test_api.py` | Added `cleanup_tmp` to in-memory repo |
 | `backend/tests/interface/test_generation_provider_failures.py` | Added `cleanup_tmp` to in-memory repo |

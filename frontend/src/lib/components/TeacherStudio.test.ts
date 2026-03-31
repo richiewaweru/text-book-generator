@@ -27,7 +27,6 @@ function buildBrief() {
 	return {
 		template_id: 'guided-concept-path',
 		preset_id: 'blue-classroom',
-		mode: 'balanced',
 		section_count: 3,
 		sections: [
 			{
@@ -160,7 +159,6 @@ describe('TeacherStudio', () => {
 
 		const request = onsubmit.mock.calls[0][0];
 		expect(request.subject).toBe('Teach derivatives to Year 10 students');
-		expect(request.mode).toBe('balanced');
 		expect(request.template_id).toBe('guided-concept-path');
 		expect(request.preset_id).toBe('blue-classroom');
 		expect(request.section_count).toBe(3);

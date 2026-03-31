@@ -76,10 +76,10 @@ class TeacherConstraints(BaseModel):
 
 
 class StudioBriefRequest(BaseModel):
-    intent: str = Field(min_length=1)
-    audience: str = Field(min_length=1)
-    prior_knowledge: str | None = ""
-    extra_context: str | None = ""
+    intent: str = Field(min_length=1, max_length=200)
+    audience: str = Field(min_length=1, max_length=200)
+    prior_knowledge: str | None = Field(default="", max_length=1000)
+    extra_context: str | None = Field(default="", max_length=1000)
     signals: TeacherSignals = Field(default_factory=TeacherSignals)
     preferences: DeliveryPreferences = Field(default_factory=DeliveryPreferences)
     constraints: TeacherConstraints = Field(default_factory=TeacherConstraints)

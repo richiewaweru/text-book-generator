@@ -54,29 +54,47 @@ validation:
 architecture:
   strategy:
     type: composite
-    name: shell-pipeline-boundary
-    report_name: textbook-shell-pipeline-architecture-guard
+    name: split-app-boundary
+    report_name: textbook-split-app-architecture-guard
     checks:
-      - type: import-layer
-        name: shell-ddd
-        package_root: backend/src/textbook_agent
-        module_prefix: textbook_agent
-        layers:
-          domain:
-            forbidden: [application, infrastructure, interface]
-          application:
-            forbidden: [infrastructure, interface]
-          infrastructure:
-            forbidden: [application, interface]
-          interface:
-            forbidden: []
+      - type: forbidden-import-prefix
+        name: core-no-app
+        package_root: backend/src/core
+        module_prefix: core
+        source_label: core
+        forbidden_prefixes:
+          - generation
+          - planning
+          - telemetry
+          - pipeline
+      - type: forbidden-import-prefix
+        name: telemetry-no-generation-planning
+        package_root: backend/src/telemetry
+        module_prefix: telemetry
+        source_label: telemetry
+        forbidden_prefixes:
+          - generation
+          - planning
+      - type: forbidden-import-prefix
+        name: planning-no-pipeline-internals
+        package_root: backend/src/planning
+        module_prefix: planning
+        source_label: planning
+        forbidden_prefixes:
+          - pipeline.llm_runner
+          - pipeline.providers
+          - pipeline.events
+          - pipeline.api
+          - pipeline.runtime_diagnostics
       - type: forbidden-import-prefix
         name: pipeline-no-shell
         package_root: backend/src/pipeline
         module_prefix: pipeline
         source_label: pipeline
         forbidden_prefixes:
-          - textbook_agent
+          - generation
+          - planning
+          - telemetry
 
 github:
   required_checks:

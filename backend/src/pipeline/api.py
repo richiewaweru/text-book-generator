@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from pipeline.state import NodeFailureDetail
-from pipeline.types.requests import GenerationMode as PipelineMode
 from pipeline.types.requests import PipelineRequest as PipelineCommand
 from pipeline.types.section_content import SectionContent
 
@@ -81,10 +80,8 @@ class PipelineDocument(BaseModel):
     generation_id: str
     subject: str
     context: str
-    mode: PipelineMode
     template_id: str
     preset_id: str
-    source_generation_id: str | None = None
     status: Literal["pending", "running", "completed", "failed"] = "pending"
     section_manifest: list[PipelineSectionManifestItem] = Field(default_factory=list)
     sections: list[SectionContent] = Field(default_factory=list)
@@ -122,7 +119,6 @@ __all__ = [
     "PipelineDocument",
     "PipelineErrorInfo",
     "PipelineIssue",
-    "PipelineMode",
     "PipelineResult",
     "PipelineSectionManifestItem",
     "PipelineSectionReport",

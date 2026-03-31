@@ -13,7 +13,6 @@ from pipeline.providers.registry import (
     get_node_text_slot,
     load_profiles,
 )
-from pipeline.types.requests import GenerationMode
 
 
 @contextmanager
@@ -34,15 +33,13 @@ def _env(**kwargs: str | None):
                 os.environ[key] = value
 
 
-def test_load_profiles_uses_default_mode_profile():
-    draft = load_profiles(GenerationMode.DRAFT)
-    balanced = load_profiles(GenerationMode.BALANCED)
-    strict = load_profiles(GenerationMode.STRICT)
+def test_load_profiles_uses_default_profiles():
+    profiles = load_profiles()
 
-    assert draft[ModelSlot.FAST].family == ModelFamily.ANTHROPIC
-    assert draft[ModelSlot.FAST].model_name == "claude-haiku-4-5-20251001"
-    assert balanced[ModelSlot.STANDARD].model_name == "claude-sonnet-4-6"
-    assert strict[ModelSlot.CREATIVE].model_name == "claude-sonnet-4-6"
+    assert set(profiles) == {ModelSlot.FAST, ModelSlot.STANDARD}
+    assert profiles[ModelSlot.FAST].family == ModelFamily.ANTHROPIC
+    assert profiles[ModelSlot.FAST].model_name == "claude-haiku-4-5-20251001"
+    assert profiles[ModelSlot.STANDARD].model_name == "claude-sonnet-4-6"
 
 
 def test_slot_env_override_wins_over_code_defaults():
@@ -53,7 +50,7 @@ def test_slot_env_override_wins_over_code_defaults():
         PIPELINE_FAST_API_KEY_ENV="GROQ_API_KEY",
         GROQ_API_KEY="sk-test",
     ):
-        spec = load_profiles(GenerationMode.BALANCED)[ModelSlot.FAST]
+        spec = load_profiles()[ModelSlot.FAST]
 
     assert spec.family == ModelFamily.OPENAI_COMPATIBLE
     assert spec.model_name == "llama3-8b-8192"
@@ -66,7 +63,7 @@ def test_legacy_model_text_env_vars_no_longer_affect_profiles():
         MODEL_TEXT_FAST_PROVIDER="openai_compatible",
         MODEL_TEXT_FAST_NAME="llama3-8b-8192",
     ):
-        spec = load_profiles(GenerationMode.BALANCED)[ModelSlot.FAST]
+        spec = load_profiles()[ModelSlot.FAST]
 
     assert spec.family == ModelFamily.ANTHROPIC
     assert spec.model_name == "claude-haiku-4-5-20251001"
@@ -76,7 +73,7 @@ def test_pipeline_name_alias_no_longer_affects_profiles():
     with _env(
         PIPELINE_FAST_NAME="llama3-8b-8192",
     ):
-        spec = load_profiles(GenerationMode.BALANCED)[ModelSlot.FAST]
+        spec = load_profiles()[ModelSlot.FAST]
 
     assert spec.family == ModelFamily.ANTHROPIC
     assert spec.model_name == "claude-haiku-4-5-20251001"
@@ -105,10 +102,7 @@ def test_openai_compatible_resolves_without_new_family_code():
         PIPELINE_FAST_API_KEY_ENV="GROQ_API_KEY",
         GROQ_API_KEY="sk-test",
     ):
-        model = get_node_text_model(
-            "curriculum_planner",
-            generation_mode=GenerationMode.BALANCED,
-        )
+        model = get_node_text_model("curriculum_planner")
 
     spec = describe_text_model(model)
     assert model.__class__.__name__ == "OpenAIChatModel"
@@ -125,10 +119,7 @@ def test_google_family_uses_google_model():
         PIPELINE_STANDARD_MODEL_NAME="gemini-2.5-flash",
         GOOGLE_API_KEY="sk-test",
     ):
-        model = get_node_text_model(
-            "content_generator",
-            generation_mode=GenerationMode.BALANCED,
-        )
+        model = get_node_text_model("content_generator")
 
     spec = describe_text_model(model)
     assert model.__class__.__name__ == "GoogleModel"

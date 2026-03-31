@@ -27,8 +27,6 @@ def build_interaction_spec(
     plan = state.current_section_plan
     if plan is not None and plan.interaction_policy == "disabled":
         return None
-    if not state.request.interactions_enabled():
-        return None
     if state.contract.interaction_level not in {"medium", "high"}:
         return None
     if not _has_simulation_slot(state.contract):
@@ -48,7 +46,7 @@ def build_interaction_spec(
             "anchor_block": anchor_block or "explanation",
         },
         dimensions={
-            "difficulty": state.request.mode.value,
+            "difficulty": "standard",
             "interaction_level": state.contract.interaction_level,
         },
         print_translation="static_diagram",
@@ -70,8 +68,6 @@ async def interaction_decider(
     if plan is not None and plan.interaction_policy == "disabled":
         return {"completed_nodes": ["interaction_decider"]}
 
-    if not state.request.interactions_enabled():
-        return {"completed_nodes": ["interaction_decider"]}
     if state.contract.interaction_level not in {"medium", "high"}:
         return {"completed_nodes": ["interaction_decider"]}
     if not _has_simulation_slot(state.contract):

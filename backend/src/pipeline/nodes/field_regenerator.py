@@ -63,7 +63,6 @@ async def field_regenerator(
     model = get_node_text_model(
         "field_regenerator",
         model_overrides=model_overrides,
-        generation_mode=state.request.mode,
     )
 
     agent = Agent(
@@ -84,7 +83,6 @@ async def field_regenerator(
                 reason=request.reason,
             ),
             section_id=sid,
-            generation_mode=state.request.mode,
         )
 
         raw_field = json.loads(result.output)

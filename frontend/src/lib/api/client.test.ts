@@ -44,7 +44,6 @@ describe('client API helpers', () => {
 				JSON.stringify({
 					generation_id: 'gen-123',
 					status: 'pending',
-					mode: 'balanced',
 					events_url: '/api/v1/generations/gen-123/events',
 					document_url: '/api/v1/generations/gen-123/document'
 				}),
@@ -59,14 +58,12 @@ describe('client API helpers', () => {
 		await startGeneration({
 			subject: 'calculus',
 			context: 'integration practice',
-			mode: 'balanced',
 			template_id: 'guided-concept-path',
 			preset_id: 'blue-classroom',
 			section_count: 4,
 			generation_spec: {
 				template_id: 'guided-concept-path',
 				preset_id: 'blue-classroom',
-				mode: 'balanced',
 				section_count: 4,
 				sections: [],
 				warning: null,
@@ -91,7 +88,6 @@ describe('client API helpers', () => {
 				JSON.stringify({
 					template_id: 'guided-concept-path',
 					preset_id: 'blue-classroom',
-					mode: 'balanced',
 					section_count: 3,
 					sections: [
 						{
@@ -140,15 +136,13 @@ describe('client API helpers', () => {
 	it('loads the structured document endpoint', async () => {
 		const fetchMock = vi.fn().mockResolvedValue(
 			new Response(
-				JSON.stringify({
-					generation_id: 'gen-123',
-					subject: 'Calculus',
-					context: 'Limits',
-					mode: 'balanced',
-					template_id: 'guided-concept-path',
-					preset_id: 'blue-classroom',
-					source_generation_id: null,
-					status: 'running',
+					JSON.stringify({
+						generation_id: 'gen-123',
+						subject: 'Calculus',
+						context: 'Limits',
+						template_id: 'guided-concept-path',
+						preset_id: 'blue-classroom',
+						status: 'running',
 					section_manifest: [],
 					sections: [],
 					failed_sections: [],
