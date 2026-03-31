@@ -42,8 +42,10 @@ frontend/dist/
 .coverage
 htmlcov/
 
-# Pipeline — Lectio contract exports (generated, not committed)
-backend/contracts/
+# Pipeline contracts exported from Lectio
+backend/contracts/*
+!backend/contracts/.gitkeep
+!backend/contracts/*.json
 
 # Root scratch/output directories (not part of the project)
 outputs/

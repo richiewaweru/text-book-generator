@@ -1,0 +1,29 @@
+{
+	"name": "lectio",
+	"version": "0.1.0",
+	"type": "module",
+	"svelte": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"svelte": "./dist/index.js",
+			"default": "./dist/index.js"
+		},
+		"./theme.css": {
+			"default": "./dist/theme.css"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"dependencies": {
+		"esm-env": "^1.2.2",
+		"katex": "^0.16.38",
+		"lucide-svelte": "^0.577.0",
+		"qrcode": "^1.5.4"
+	},
+	"peerDependencies": {
+		"svelte": "^5.0.0"
+	}
+}

@@ -1,0 +1,548 @@
+{
+  "section-header": {
+    "id": "section-header",
+    "name": "SectionHeader",
+    "purpose": "Opens a section with title, subject, objective, and level indicators",
+    "cognitive_job": "Orient the learner",
+    "section_field": "header",
+    "group": 1,
+    "status": "stable",
+    "capacity": {
+      "titleMaxWords": 12,
+      "subtitleMaxWords": 20,
+      "objectiveMaxWords": 30
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Full static header"
+  },
+  "hook-hero": {
+    "id": "hook-hero",
+    "name": "HookHero",
+    "purpose": "Creates felt need before explanation arrives",
+    "cognitive_job": "Create felt need",
+    "section_field": "hook",
+    "group": 1,
+    "status": "stable",
+    "capacity": {
+      "headlineMaxWords": 12,
+      "bodyMaxWords": 80
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Pull quote block with left border"
+  },
+  "explanation-block": {
+    "id": "explanation-block",
+    "name": "ExplanationBlock",
+    "purpose": "Sustained prose that builds a mental model",
+    "cognitive_job": "Build understanding",
+    "section_field": "explanation",
+    "group": 1,
+    "status": "stable",
+    "capacity": {
+      "bodyMaxWords": 350,
+      "emphasisMax": 3
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Static prose"
+  },
+  "prerequisite-strip": {
+    "id": "prerequisite-strip",
+    "name": "PrerequisiteStrip",
+    "purpose": "Lists assumed knowledge with optional refresher pop-ups",
+    "cognitive_job": "Activate prior knowledge",
+    "section_field": "prerequisites",
+    "group": 1,
+    "status": "stable",
+    "capacity": {
+      "itemsMax": 4
+    },
+    "behaviour_modes": [
+      "static",
+      "hint-toggle"
+    ],
+    "print_fallback": "Inline list of prerequisites"
+  },
+  "what-next-bridge": {
+    "id": "what-next-bridge",
+    "name": "WhatNextBridge",
+    "purpose": "Connects the section forward to what the concept enables",
+    "cognitive_job": "Connect forward",
+    "section_field": "what_next",
+    "group": 1,
+    "status": "stable",
+    "capacity": {
+      "bodyMaxWords": 50,
+      "nextMaxWords": 15,
+      "previewMaxWords": 30
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Static, amber left rule"
+  },
+  "interview-anchor": {
+    "id": "interview-anchor",
+    "name": "InterviewAnchor",
+    "purpose": "Makes knowledge speakable - rehearse explaining the concept",
+    "cognitive_job": "Make knowledge speakable",
+    "section_field": "interview",
+    "group": 1,
+    "status": "stable",
+    "capacity": {
+      "promptMaxWords": 35,
+      "audienceMaxWords": 10,
+      "followUpMaxWords": 25
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Static with write-in lines"
+  },
+  "callout-block": {
+    "id": "callout-block",
+    "name": "CalloutBlock",
+    "purpose": "Standalone highlighted callout — tip, warning, info, or exam note",
+    "cognitive_job": "Flag what matters",
+    "section_field": "callout",
+    "group": 1,
+    "status": "stable",
+    "capacity": {
+      "bodyMaxWords": 60,
+      "headingMaxWords": 6
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Bordered callout box"
+  },
+  "summary-block": {
+    "id": "summary-block",
+    "name": "SummaryBlock",
+    "purpose": "Lists what this section covered — key takeaways as bullets",
+    "cognitive_job": "Consolidate and close",
+    "section_field": "summary",
+    "group": 1,
+    "status": "stable",
+    "capacity": {
+      "itemsMin": 2,
+      "itemsMax": 5,
+      "itemMaxWords": 25,
+      "closingMaxWords": 30
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Bulleted list with border"
+  },
+  "section-divider": {
+    "id": "section-divider",
+    "name": "SectionDivider",
+    "purpose": "Named visual break between parts within a section",
+    "cognitive_job": "Signal a phase change",
+    "section_field": "divider",
+    "group": 1,
+    "status": "stable",
+    "capacity": {
+      "labelMaxWords": 4
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Horizontal rule with label"
+  },
+  "definition-card": {
+    "id": "definition-card",
+    "name": "DefinitionCard",
+    "purpose": "Anchors a formal term with formal and plain versions",
+    "cognitive_job": "Anchor formal knowledge",
+    "section_field": "definition",
+    "group": 2,
+    "status": "stable",
+    "capacity": {
+      "formalMaxWords": 80,
+      "plainMaxWords": 60,
+      "relatedTermsMax": 3
+    },
+    "behaviour_modes": [
+      "static",
+      "plain-formal-toggle"
+    ],
+    "print_fallback": "Both versions shown"
+  },
+  "definition-family": {
+    "id": "definition-family",
+    "name": "DefinitionFamily",
+    "purpose": "Groups related terms that belong together conceptually",
+    "cognitive_job": "Distinguish related concepts",
+    "section_field": "definition_family",
+    "group": 2,
+    "status": "stable",
+    "capacity": {
+      "definitionsMax": 4,
+      "introMaxWords": 40
+    },
+    "behaviour_modes": [
+      "static",
+      "accordion"
+    ],
+    "print_fallback": "All definitions expanded"
+  },
+  "glossary-rail": {
+    "id": "glossary-rail",
+    "name": "GlossaryRail",
+    "purpose": "Vocabulary visible in peripheral field, updates by section",
+    "cognitive_job": "Retrieve meaning without losing place",
+    "section_field": "glossary",
+    "group": 2,
+    "status": "stable",
+    "capacity": {
+      "termsMax": 8,
+      "termsWarning": 6,
+      "definitionMaxWords": 30
+    },
+    "behaviour_modes": [
+      "sticky",
+      "drawer",
+      "inline-strip"
+    ],
+    "print_fallback": "Inline vocabulary strip at section end"
+  },
+  "glossary-inline": {
+    "id": "glossary-inline",
+    "name": "GlossaryInline",
+    "purpose": "In-text definition pop-up on a defined term",
+    "cognitive_job": "Retrieve meaning in context",
+    "section_field": null,
+    "group": 2,
+    "status": "stable",
+    "capacity": {
+      "definitionMaxWords": 30
+    },
+    "behaviour_modes": [
+      "hint-toggle"
+    ],
+    "print_fallback": "Term underlined, definition in footnote"
+  },
+  "insight-strip": {
+    "id": "insight-strip",
+    "name": "InsightStrip",
+    "purpose": "Side-by-side comparison of 2-3 related values or concepts",
+    "cognitive_job": "Compare values simultaneously",
+    "section_field": "insight_strip",
+    "group": 2,
+    "status": "stable",
+    "capacity": {
+      "cellsMax": 3,
+      "cellsMin": 2,
+      "cellLinesMax": 2
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Static table"
+  },
+  "key-fact": {
+    "id": "key-fact",
+    "name": "KeyFact",
+    "purpose": "Visually prominent stat, formula, or date that anchors the section",
+    "cognitive_job": "Anchor a critical fact",
+    "section_field": "key_fact",
+    "group": 2,
+    "status": "stable",
+    "capacity": {
+      "factMaxWords": 20,
+      "contextMaxWords": 30
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Bold bordered fact box"
+  },
+  "comparison-grid": {
+    "id": "comparison-grid",
+    "name": "ComparisonGrid",
+    "purpose": "Holds multiple concepts in view so distinctions become structural",
+    "cognitive_job": "Compare and classify in parallel",
+    "section_field": "comparison_grid",
+    "group": 2,
+    "status": "stable",
+    "capacity": {
+      "columnsMin": 2,
+      "columnsMax": 4,
+      "rowsMax": 6,
+      "criterionMaxWords": 8,
+      "valueMaxWords": 20
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Static comparison table"
+  },
+  "worked-example-card": {
+    "id": "worked-example-card",
+    "name": "WorkedExampleCard",
+    "purpose": "Shows reasoning in action step by step, each step justified",
+    "cognitive_job": "Watch reasoning in action",
+    "section_field": "worked_example",
+    "group": 3,
+    "status": "stable",
+    "capacity": {
+      "stepsMax": 6,
+      "stepsWarning": 4,
+      "stepLabelMaxWords": 12,
+      "stepContentMaxWords": 80
+    },
+    "behaviour_modes": [
+      "static",
+      "step-reveal",
+      "accordion",
+      "compare"
+    ],
+    "print_fallback": "All steps expanded"
+  },
+  "process-steps": {
+    "id": "process-steps",
+    "name": "ProcessSteps",
+    "purpose": "A repeatable procedure where order is non-negotiable",
+    "cognitive_job": "Follow a procedure",
+    "section_field": "process",
+    "group": 3,
+    "status": "stable",
+    "capacity": {
+      "stepsMax": 8,
+      "actionMaxWords": 15,
+      "detailMaxWords": 60
+    },
+    "behaviour_modes": [
+      "static",
+      "step-reveal"
+    ],
+    "print_fallback": "All steps visible, checkbox squares for print"
+  },
+  "practice-stack": {
+    "id": "practice-stack",
+    "name": "PracticeStack",
+    "purpose": "Problems at calibrated difficulty with progressive hints and optional solutions",
+    "cognitive_job": "Apply understanding under calibrated difficulty",
+    "section_field": "practice",
+    "group": 4,
+    "status": "stable",
+    "capacity": {
+      "problemsMin": 2,
+      "problemsMax": 5,
+      "hintsPerProblemMax": 3,
+      "questionMaxWords": 100,
+      "hintMaxWords": 60
+    },
+    "behaviour_modes": [
+      "hint-toggle",
+      "accordion",
+      "progressive-hints",
+      "flat-list"
+    ],
+    "print_fallback": "All visible, write-in lines rendered"
+  },
+  "quiz-check": {
+    "id": "quiz-check",
+    "name": "QuizCheck",
+    "purpose": "Quick concept check with immediate feedback mid-section",
+    "cognitive_job": "Verify understanding immediately",
+    "section_field": "quiz",
+    "group": 4,
+    "status": "stable",
+    "capacity": {
+      "optionsMin": 3,
+      "optionsMax": 4,
+      "questionMaxWords": 60,
+      "optionMaxWords": 20
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Question and options shown, correct answer marked"
+  },
+  "reflection-prompt": {
+    "id": "reflection-prompt",
+    "name": "ReflectionPrompt",
+    "purpose": "Pauses forward motion and turns attention inward",
+    "cognitive_job": "Pause and consolidate",
+    "section_field": "reflection",
+    "group": 4,
+    "status": "stable",
+    "capacity": {
+      "promptMaxWords": 40,
+      "spaceMax": 6
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Prompt with write-in lines"
+  },
+  "student-textbox": {
+    "id": "student-textbox",
+    "name": "StudentTextbox",
+    "purpose": "Simple write-in box for student responses — no framing beyond a prompt",
+    "cognitive_job": "Record thinking",
+    "section_field": "student_textbox",
+    "group": 4,
+    "status": "stable",
+    "capacity": {
+      "promptMaxWords": 40,
+      "linesMax": 10
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Lined write-in area"
+  },
+  "short-answer": {
+    "id": "short-answer",
+    "name": "ShortAnswerQuestion",
+    "purpose": "Open question with write-in space and optional mark scheme",
+    "cognitive_job": "Recall and explain in own words",
+    "section_field": "short_answer",
+    "group": 4,
+    "status": "stable",
+    "capacity": {
+      "questionMaxWords": 60,
+      "linesMax": 10,
+      "marksMax": 10
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Question with lined answer space, mark allocation shown"
+  },
+  "fill-in-blank": {
+    "id": "fill-in-blank",
+    "name": "FillInTheBlank",
+    "purpose": "Cloze passage with student-completed blanks — tests recall not recognition",
+    "cognitive_job": "Retrieve and complete",
+    "section_field": "fill_in_blank",
+    "group": 4,
+    "status": "stable",
+    "capacity": {
+      "segmentsMax": 60,
+      "blanksMax": 10,
+      "wordBankMax": 15
+    },
+    "behaviour_modes": [
+      "static",
+      "hint-toggle"
+    ],
+    "print_fallback": "Passage with underlined blanks, word bank box below"
+  },
+  "pitfall-alert": {
+    "id": "pitfall-alert",
+    "name": "PitfallAlert",
+    "purpose": "Names a specific misconception before the learner makes it",
+    "cognitive_job": "Inoculate against error",
+    "section_field": "pitfall",
+    "group": 5,
+    "status": "stable",
+    "capacity": {
+      "misconceptionMaxWords": 20,
+      "correctionMaxWords": 80,
+      "exampleMaxWords": 40
+    },
+    "behaviour_modes": [
+      "static",
+      "hint-toggle"
+    ],
+    "print_fallback": "Full static, amber left border"
+  },
+  "diagram-block": {
+    "id": "diagram-block",
+    "name": "DiagramBlock",
+    "purpose": "Makes spatial or relational structure visible",
+    "cognitive_job": "See the structure",
+    "section_field": "diagram",
+    "group": 6,
+    "status": "stable",
+    "capacity": {
+      "calloutsMax": 6,
+      "captionMaxWords": 60
+    },
+    "behaviour_modes": [
+      "static",
+      "zoom",
+      "hint-toggle"
+    ],
+    "print_fallback": "Static SVG 80% width centred"
+  },
+  "diagram-compare": {
+    "id": "diagram-compare",
+    "name": "DiagramCompare",
+    "purpose": "Before and after comparison with a drag slider",
+    "cognitive_job": "See transformation",
+    "section_field": "diagram_compare",
+    "group": 6,
+    "status": "stable",
+    "capacity": {
+      "captionMaxWords": 60
+    },
+    "behaviour_modes": [
+      "compare"
+    ],
+    "print_fallback": "Both diagrams shown side by side"
+  },
+  "diagram-series": {
+    "id": "diagram-series",
+    "name": "DiagramSeries",
+    "purpose": "A progression of diagrams that tells a sequence",
+    "cognitive_job": "Follow a visual progression",
+    "section_field": "diagram_series",
+    "group": 6,
+    "status": "stable",
+    "capacity": {
+      "diagramsMax": 4
+    },
+    "behaviour_modes": [
+      "step-reveal",
+      "static"
+    ],
+    "print_fallback": "All diagrams in sequence with step labels"
+  },
+  "timeline-block": {
+    "id": "timeline-block",
+    "name": "TimelineBlock",
+    "purpose": "Turns chronology into a readable instructional spine",
+    "cognitive_job": "Follow cause and sequence over time",
+    "section_field": "timeline",
+    "group": 6,
+    "status": "stable",
+    "capacity": {
+      "eventsMin": 3,
+      "eventsMax": 8,
+      "titleMaxWords": 10,
+      "summaryMaxWords": 50
+    },
+    "behaviour_modes": [
+      "static",
+      "timeline-scrubber"
+    ],
+    "print_fallback": "Vertical event list"
+  },
+  "simulation-block": {
+    "id": "simulation-block",
+    "name": "SimulationBlock",
+    "purpose": "Manipulate a variable and discover the concept through observation",
+    "cognitive_job": "Manipulate and discover",
+    "section_field": "simulation",
+    "group": 7,
+    "status": "beta",
+    "capacity": {
+      "onePerSection": "true"
+    },
+    "behaviour_modes": [
+      "static"
+    ],
+    "print_fallback": "Static diagram at midstate"
+  }
+}

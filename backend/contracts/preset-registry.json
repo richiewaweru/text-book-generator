@@ -1,0 +1,42 @@
+{
+  "blue-classroom": {
+    "id": "blue-classroom",
+    "name": "Blue Classroom",
+    "palette": "navy, sky, parchment",
+    "typography": "standard",
+    "density": "standard",
+    "surface_style": "crisp"
+  },
+  "warm-paper": {
+    "id": "warm-paper",
+    "name": "Warm Paper",
+    "palette": "sand, amber, ink",
+    "typography": "standard",
+    "density": "comfortable",
+    "surface_style": "soft"
+  },
+  "calm-green": {
+    "id": "calm-green",
+    "name": "Calm Green",
+    "palette": "sage, pine, cream",
+    "typography": "reading-support",
+    "density": "comfortable",
+    "surface_style": "soft"
+  },
+  "high-contrast-focus": {
+    "id": "high-contrast-focus",
+    "name": "High Contrast Focus",
+    "palette": "ink, ivory, signal amber",
+    "typography": "reading-support",
+    "density": "standard",
+    "surface_style": "minimal"
+  },
+  "minimal-light": {
+    "id": "minimal-light",
+    "name": "Minimal Light",
+    "palette": "white, slate, graphite",
+    "typography": "standard",
+    "density": "comfortable",
+    "surface_style": "minimal"
+  }
+}
