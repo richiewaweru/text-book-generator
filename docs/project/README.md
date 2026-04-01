@@ -12,6 +12,8 @@ Live project-specific documentation for the core + generation + planning + pipel
 | [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md) | How CI and validation work |
 | [SCHEMAS.md](SCHEMAS.md) | Current public and internal data contracts |
 | [MODEL_SLOTS_AND_PROVIDERS.md](MODEL_SLOTS_AND_PROVIDERS.md) | As-built model slots, `load_profiles`, env vars, transports, SSE/cost |
+| [handoff-shell-platform-restructure.md](handoff-shell-platform-restructure.md) | Detailed handoff for the shell/platform restructure merged in PR #15 |
+| [handoff-lectio-ci-temporary-vendoring.md](handoff-lectio-ci-temporary-vendoring.md) | Detailed handoff for the temporary Lectio/contracts CI self-containment fix |
 | [context-summary.yaml](context-summary.yaml) | Machine-readable project config (used by `tools/agent/` scripts) |
 | [stage-packs/](stage-packs/) | Stage-specific operating notes for agents |
 | [runs/](runs/) | Tracking checklists and runbooks |
