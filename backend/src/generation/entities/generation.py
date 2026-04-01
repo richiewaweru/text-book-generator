@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+from pipeline.types.requests import GenerationMode
 
 
 class Generation(BaseModel):
@@ -9,6 +10,7 @@ class Generation(BaseModel):
     user_id: str
     subject: str
     context: str = ""
+    mode: GenerationMode = GenerationMode.BALANCED
     status: Literal["pending", "running", "completed", "failed"] = "pending"
     document_path: str | None = None
     error: str | None = None

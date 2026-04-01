@@ -4,6 +4,7 @@ from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from pipeline.types.requests import GenerationMode
 
 PlanningTopicType = Literal["concept", "process", "facts", "mixed"]
 PlanningLearningOutcome = Literal[
@@ -80,6 +81,7 @@ class StudioBriefRequest(BaseModel):
     audience: str = Field(min_length=1, max_length=200)
     prior_knowledge: str | None = Field(default="", max_length=1000)
     extra_context: str | None = Field(default="", max_length=1000)
+    mode: GenerationMode = Field(default=GenerationMode.BALANCED)
     signals: TeacherSignals = Field(default_factory=TeacherSignals)
     preferences: DeliveryPreferences = Field(default_factory=DeliveryPreferences)
     constraints: TeacherConstraints = Field(default_factory=TeacherConstraints)
@@ -230,6 +232,7 @@ class PlanningGenerationSpec(BaseModel):
     id: str
     template_id: str
     preset_id: str = "blue-classroom"
+    mode: GenerationMode = GenerationMode.BALANCED
     template_decision: TemplateDecision
     lesson_rationale: str
     directives: GenerationDirectives

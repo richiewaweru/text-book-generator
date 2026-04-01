@@ -1,6 +1,7 @@
 import type { GenerationAccepted, GenerationDocument } from './index';
 
 export type StudioState = 'idle' | 'planning' | 'reviewing' | 'generating';
+export type GenerationMode = 'draft' | 'balanced' | 'strict';
 export type TopicType = 'concept' | 'process' | 'facts' | 'mixed';
 export type LearningOutcome =
 	| 'understand-why'
@@ -65,6 +66,7 @@ export interface StudioBriefRequest {
 	audience: string;
 	prior_knowledge: string;
 	extra_context: string;
+	mode: GenerationMode;
 	signals: TeacherSignals;
 	preferences: DeliveryPreferences;
 	constraints: TeacherConstraints;
@@ -127,6 +129,7 @@ export interface PlanningGenerationSpec {
 	id: string;
 	template_id: string;
 	preset_id: string;
+	mode: GenerationMode;
 	template_decision: TemplateDecision;
 	lesson_rationale: string;
 	directives: GenerationDirectives;

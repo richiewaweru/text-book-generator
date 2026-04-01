@@ -60,6 +60,7 @@ function buildDetail(overrides: Record<string, unknown> = {}) {
 		id: 'gen-123',
 		subject: 'Fractions',
 		context: 'Explain fractions',
+		mode: 'balanced',
 		status: 'running',
 		error: null,
 		error_type: null,
@@ -128,6 +129,7 @@ function buildDetail(overrides: Record<string, unknown> = {}) {
 				audience: 'Year 5',
 				prior_knowledge: '',
 				extra_context: '',
+				mode: 'balanced',
 				signals: {
 					topic_type: 'concept',
 					learning_outcome: 'understand-why',
@@ -159,6 +161,7 @@ function buildDocument(overrides: Record<string, unknown> = {}) {
 		generation_id: 'gen-123',
 		subject: 'Fractions',
 		context: 'Explain fractions',
+		mode: 'balanced',
 		template_id: 'guided-concept-path',
 		preset_id: 'blue-classroom',
 		status: 'running',

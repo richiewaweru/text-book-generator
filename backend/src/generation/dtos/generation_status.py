@@ -7,6 +7,7 @@ from telemetry.dtos.generation_report import GenerationReport
 class GenerationHistoryItem(BaseModel):
     id: str
     subject: str
+    mode: str
     status: str
     error_type: str | None = None
     error_code: str | None = None
@@ -25,6 +26,7 @@ class GenerationDetail(BaseModel):
     id: str
     subject: str
     context: str
+    mode: str
     status: str
     error: str | None = None
     error_type: str | None = None

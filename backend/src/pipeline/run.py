@@ -149,6 +149,7 @@ def _build_document(
         generation_id=command.generation_id or "",
         subject=command.subject,
         context=command.context,
+        mode=command.mode,
         template_id=command.template_id,
         preset_id=command.preset_id,
         status=status,

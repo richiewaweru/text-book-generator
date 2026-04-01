@@ -32,6 +32,7 @@ def build_fallback_spec(
     return PlanningGenerationSpec(
         id=spec_id,
         template_id=contract.id,
+        mode=brief.mode,
         template_decision=TemplateDecision(
             chosen_id=contract.id,
             chosen_name=contract.name,

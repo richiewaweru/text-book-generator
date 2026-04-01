@@ -470,6 +470,7 @@ class TestGenerationApi:
                     json={
                         "subject": "Calculus",
                         "context": "Explain limits",
+                        "mode": "strict",
                         "template_id": "guided-concept-path",
                         "preset_id": "blue-classroom",
                         "section_count": 4,
@@ -482,6 +483,9 @@ class TestGenerationApi:
         payload = response.json()
         assert "mode" not in payload
         assert payload["events_url"].endswith("/events")
+        stored = await GEN_REPO.find_by_id(payload["generation_id"])
+        assert stored is not None
+        assert stored.mode == "strict"
 
     async def test_create_generation_uses_generation_spec_as_source_of_truth(self):
         captured: dict[str, object] = {}
@@ -517,6 +521,7 @@ class TestGenerationApi:
         assert response.status_code == 202
         command = captured["command"]
         assert command.template_id == spec.template_id
+        assert command.mode == spec.mode
         assert command.section_count == spec.section_count
         assert command.section_plans is not None
         assert len(command.section_plans) == 3
@@ -526,6 +531,7 @@ class TestGenerationApi:
         stored = await GEN_REPO.find_by_id(accepted["generation_id"])
         assert stored is not None
         assert stored.planning_spec_json is not None
+        assert stored.mode == spec.mode
         assert stored.requested_template_id == "guided-concept-path"
         assert stored.requested_preset_id == "blue-classroom"
         assert stored.section_count == 3
@@ -637,6 +643,7 @@ class TestGenerationApi:
             )
         assert response.status_code == 200
         payload = response.json()
+        assert payload["mode"] == "balanced"
         assert payload["template_id"] == "guided-concept-path"
         assert payload["section_manifest"][0]["section_id"] == "s-01"
         assert payload["sections"][0]["section_id"] == "s-01"
@@ -673,8 +680,12 @@ class TestGenerationApi:
 
         assert detail_response.status_code == 200
         assert detail_response.json()["section_count"] == 5
+        assert detail_response.json()["mode"] == "balanced"
         assert detail_response.json()["report_url"].endswith("/report")
-        assert any(item["section_count"] == 5 for item in history_response.json())
+        assert any(
+            item["section_count"] == 5 and item["mode"] == "balanced"
+            for item in history_response.json()
+        )
 
     async def test_generation_report_endpoint_returns_saved_report(self, db_session: AsyncSession):
         generation_id = "gen-report"

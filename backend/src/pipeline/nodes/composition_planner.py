@@ -31,6 +31,8 @@ def _interaction_allowed(state: TextbookPipelineState) -> bool:
         return False
     if plan.interaction_policy == "disabled":
         return False
+    if not state.request.interactions_enabled():
+        return False
     if state.contract.interaction_level not in {"medium", "high"}:
         return False
     if not _has_simulation_slot(state.contract):

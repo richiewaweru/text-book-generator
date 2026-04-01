@@ -98,6 +98,7 @@ class PlanningService:
         return PlanningGenerationSpec(
             id=generation_id or uuid4().hex,
             template_id=selected_contract.id,
+            mode=brief.mode,
             template_decision=decision,
             lesson_rationale=lesson_rationale,
             directives=normalized.directives,
@@ -253,6 +254,7 @@ def _fallback_spec(brief: BriefRequest) -> GenerationSpec:
     return GenerationSpec(
         template_id=_DEFAULT_TEMPLATE_ID,
         preset_id=_LIVE_PRESET_ID,
+        mode=brief.mode,
         section_count=3,
         sections=_fallback_sections(),
         warning="Topic is broad. Narrow it to one lesson-sized arc if you want a tighter plan.",

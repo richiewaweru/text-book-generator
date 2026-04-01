@@ -65,6 +65,7 @@ class GenerationModel(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     subject = Column(String, nullable=False)
     context = Column(Text, default="")
+    mode = Column(String, default="balanced", nullable=False, server_default="balanced")
     status = Column(String, default="pending")
     document_path = Column(String, nullable=True)
     document_json = Column(JSON_DOCUMENT_TYPE, nullable=True)

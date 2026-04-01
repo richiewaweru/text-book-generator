@@ -1,11 +1,13 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from planning.dtos import GenerationSpec
+from pipeline.types.requests import GenerationMode
 
 
 class GenerationRequest(BaseModel):
     subject: str
     context: str
+    mode: GenerationMode = GenerationMode.BALANCED
     template_id: str
     preset_id: str
     section_count: int = Field(default=4, ge=1, le=8)

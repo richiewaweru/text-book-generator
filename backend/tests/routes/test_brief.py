@@ -294,8 +294,10 @@ class TestBriefApi:
         payload = response.json()
         assert payload["template_id"] == "guided-concept-path"
         assert payload["preset_id"] == "blue-classroom"
+        assert payload["mode"] == "balanced"
         assert payload["section_count"] == 3
         assert payload["source_brief"]["intent"] == brief.intent
+        assert payload["source_brief"]["mode"] == "balanced"
         assert response.headers["Deprecation"] == "true"
         assert "/api/v1/brief/stream" in response.headers["Warning"]
         assert "/api/v1/brief/commit" in response.headers["Warning"]
@@ -517,6 +519,7 @@ class TestBriefApi:
         assert "event: template_selected" in response.text
         assert "event: section_planned" in response.text
         assert "event: plan_complete" in response.text
+        assert '"mode": "balanced"' in response.text
         assert "Why ecosystems matter" in response.text
 
     async def test_commit_brief_starts_generation_with_committed_planning_spec(self):
@@ -566,8 +569,10 @@ class TestBriefApi:
         assert response.json()["generation_id"] == "gen-123"
         assert captured["subject"] == "Teach ecosystems to Year 9 students"
         assert captured["context"] == "Reviewed lesson plan"
+        assert captured["mode"] == spec.mode
         assert captured["template_id"] == "guided-concept-path"
         assert len(captured["section_plans"]) == 1
+        assert '"mode":"balanced"' in captured["planning_spec_json"]
         assert '"status":"committed"' in captured["planning_spec_json"]
 
     async def test_commit_brief_rejects_invalid_template_preset_combination(self):

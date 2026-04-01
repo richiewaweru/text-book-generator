@@ -39,6 +39,7 @@
 		return {
 			intent: intent.trim(),
 			audience: audience.trim(),
+			mode: 'balanced',
 			extra_context: extraContext.trim()
 		};
 	}
@@ -61,6 +62,7 @@
 		return {
 			subject: spec.source_brief.intent,
 			context: buildGenerationContext(spec),
+			mode: spec.mode,
 			template_id: spec.template_id,
 			preset_id: LIVE_PRESET_ID,
 			section_count: spec.section_count,

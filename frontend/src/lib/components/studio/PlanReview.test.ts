@@ -139,6 +139,7 @@ function buildSpec(): PlanningGenerationSpec {
 		id: 'plan-1',
 		template_id: 'guided-concept-path',
 		preset_id: 'blue-classroom',
+		mode: 'balanced',
 		template_decision: {
 			chosen_id: 'guided-concept-path',
 			chosen_name: 'Guided Concept Path',
@@ -190,6 +191,7 @@ function buildSpec(): PlanningGenerationSpec {
 			audience: 'Year 6',
 			prior_knowledge: '',
 			extra_context: '',
+			mode: 'balanced',
 			signals: {
 				topic_type: 'process',
 				learning_outcome: 'be-able-to-do',

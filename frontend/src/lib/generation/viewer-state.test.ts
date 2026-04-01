@@ -60,6 +60,7 @@ function createDocument(overrides: Partial<GenerationDocument> = {}): Generation
 		generation_id: 'gen-123',
 		subject: 'Calculus',
 		context: 'Explain limits',
+		mode: 'balanced',
 		template_id: 'guided-concept-path',
 		preset_id: 'blue-classroom',
 		status: 'running',

@@ -271,6 +271,7 @@ async def _generate_monolithic(
             model=model,
             user_prompt=base_prompt,
             section_id=sid,
+            generation_mode=state.request.mode,
         )
         generated[sid] = result.output
     except Exception as exc:
@@ -385,6 +386,7 @@ async def _attempt_repair(
                 rerender_reason=repair.rerender_reason,
             ),
             section_id=sid,
+            generation_mode=state.request.mode,
         )
         generated[sid] = repair_result.output
         publish_runtime_event(
@@ -457,6 +459,7 @@ async def _generate_phased(
                 rerender_reason=rerender_reason,
             ),
             section_id=sid,
+            generation_mode=state.request.mode,
         )
         core = core_result.output
     except Exception as exc:
@@ -499,6 +502,7 @@ async def _generate_phased(
                 rerender_reason=rerender_reason,
             ),
             section_id=sid,
+            generation_mode=state.request.mode,
         )
         practice = practice_result.output
     except Exception as exc:
@@ -543,6 +547,7 @@ async def _generate_phased(
                     rerender_reason=rerender_reason,
                 ),
                 section_id=sid,
+                generation_mode=state.request.mode,
             )
             enrichment = enrichment_result.output
         except Exception as exc:
@@ -613,6 +618,7 @@ async def content_generator(
     model = get_node_text_model(
         "content_generator",
         model_overrides=model_overrides,
+        generation_mode=state.request.mode,
     )
 
     generated = dict(state.generated_sections)

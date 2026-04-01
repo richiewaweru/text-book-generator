@@ -108,6 +108,7 @@ async def create_generation(
     (
         effective_subject,
         effective_context,
+        effective_mode,
         effective_template_id,
         effective_preset_id,
         effective_section_count,
@@ -125,6 +126,7 @@ async def create_generation(
         report_repo=report_repo,
         subject=effective_subject,
         context=effective_context,
+        mode=effective_mode,
         template_id=effective_template_id,
         preset_id=effective_preset_id,
         section_count=effective_section_count,
