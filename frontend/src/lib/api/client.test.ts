@@ -58,12 +58,14 @@ describe('client API helpers', () => {
 		await startGeneration({
 			subject: 'calculus',
 			context: 'integration practice',
+			mode: 'strict',
 			template_id: 'guided-concept-path',
 			preset_id: 'blue-classroom',
 			section_count: 4,
 			generation_spec: {
 				template_id: 'guided-concept-path',
 				preset_id: 'blue-classroom',
+				mode: 'strict',
 				section_count: 4,
 				sections: [],
 				warning: null,
@@ -71,6 +73,7 @@ describe('client API helpers', () => {
 				source_brief: {
 					intent: 'Teach derivatives',
 					audience: 'Year 10 mixed ability',
+					mode: 'strict',
 					extra_context: 'Use concrete examples.'
 				}
 			}
@@ -79,6 +82,7 @@ describe('client API helpers', () => {
 		const init = fetchMock.mock.calls[0][1] as RequestInit;
 		expect(init.body).toContain('"template_id":"guided-concept-path"');
 		expect(init.body).toContain('"preset_id":"blue-classroom"');
+		expect(init.body).toContain('"mode":"strict"');
 		expect(init.body).toContain('"generation_spec"');
 	});
 
@@ -88,6 +92,7 @@ describe('client API helpers', () => {
 				JSON.stringify({
 					template_id: 'guided-concept-path',
 					preset_id: 'blue-classroom',
+					mode: 'balanced',
 					section_count: 3,
 					sections: [
 						{
@@ -109,6 +114,7 @@ describe('client API helpers', () => {
 					source_brief: {
 						intent: 'Teach derivatives',
 						audience: 'Year 10 mixed ability',
+						mode: 'balanced',
 						extra_context: 'Use concrete examples.'
 					}
 				}),
@@ -123,6 +129,7 @@ describe('client API helpers', () => {
 		await planBrief({
 			intent: 'Teach derivatives',
 			audience: 'Year 10 mixed ability',
+			mode: 'balanced',
 			extra_context: 'Use concrete examples.'
 		});
 
@@ -130,6 +137,7 @@ describe('client API helpers', () => {
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/brief');
 		expect(init.body).toContain('"intent":"Teach derivatives"');
 		expect(init.body).toContain('"audience":"Year 10 mixed ability"');
+		expect(init.body).toContain('"mode":"balanced"');
 		expect(init.body).toContain('"extra_context":"Use concrete examples."');
 	});
 
@@ -140,6 +148,7 @@ describe('client API helpers', () => {
 						generation_id: 'gen-123',
 						subject: 'Calculus',
 						context: 'Limits',
+						mode: 'balanced',
 						template_id: 'guided-concept-path',
 						preset_id: 'blue-classroom',
 						status: 'running',

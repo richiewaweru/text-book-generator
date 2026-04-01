@@ -10,9 +10,11 @@ from pipeline.providers.registry import (
     ModelSlot,
     describe_text_model,
     get_node_text_model,
+    get_node_text_spec,
     get_node_text_slot,
     load_profiles,
 )
+from pipeline.types.requests import GenerationMode
 
 
 @contextmanager
@@ -40,6 +42,16 @@ def test_load_profiles_uses_default_profiles():
     assert profiles[ModelSlot.FAST].family == ModelFamily.ANTHROPIC
     assert profiles[ModelSlot.FAST].model_name == "claude-haiku-4-5-20251001"
     assert profiles[ModelSlot.STANDARD].model_name == "claude-sonnet-4-6"
+
+
+def test_load_profiles_varies_defaults_by_generation_mode():
+    draft_profiles = load_profiles(GenerationMode.DRAFT)
+    strict_profiles = load_profiles(GenerationMode.STRICT)
+
+    assert draft_profiles[ModelSlot.FAST].model_name == "claude-haiku-4-5-20251001"
+    assert draft_profiles[ModelSlot.STANDARD].model_name == "claude-haiku-4-5-20251001"
+    assert strict_profiles[ModelSlot.FAST].model_name == "claude-sonnet-4-6"
+    assert strict_profiles[ModelSlot.STANDARD].model_name == "claude-sonnet-4-6"
 
 
 def test_slot_env_override_wins_over_code_defaults():
@@ -92,6 +104,20 @@ def test_get_node_text_model_returns_slot_override_for_tests():
         model_overrides={ModelSlot.FAST: TestModel()},
     )
     assert isinstance(model, TestModel)
+
+
+def test_get_node_text_model_respects_generation_mode_defaults():
+    draft_spec = get_node_text_spec(
+        "content_generator",
+        generation_mode=GenerationMode.DRAFT,
+    )
+    strict_spec = get_node_text_spec(
+        "content_generator",
+        generation_mode=GenerationMode.STRICT,
+    )
+
+    assert draft_spec.model_name == "claude-haiku-4-5-20251001"
+    assert strict_spec.model_name == "claude-sonnet-4-6"
 
 
 def test_openai_compatible_resolves_without_new_family_code():

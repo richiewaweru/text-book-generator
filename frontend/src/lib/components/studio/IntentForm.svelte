@@ -7,6 +7,7 @@
 		ClassStyle,
 		ExampleStyle,
 		ExplanationStyle,
+		GenerationMode,
 		LearningOutcome,
 		LessonFormat,
 		ReadingLevel,
@@ -90,6 +91,28 @@
 		{ label: 'Concise', value: 'tight' },
 		{ label: 'Balanced', value: 'balanced' },
 		{ label: 'Expanded', value: 'expanded' }
+	];
+
+	const generationModes: Array<{
+		label: string;
+		value: GenerationMode;
+		hint: string;
+	}> = [
+		{
+			label: 'Draft - Fast preview for planning',
+			value: 'draft',
+			hint: 'Static printable lessons, fastest generation, best for quick iteration.'
+		},
+		{
+			label: 'Balanced - Recommended default',
+			value: 'balanced',
+			hint: 'Interactive-capable output with the standard speed and quality balance.'
+		},
+		{
+			label: 'Strict - Maximum quality for critical content',
+			value: 'strict',
+			hint: 'Highest-quality generation path with the largest retry budget.'
+		}
 	];
 
 	function hasAnySignals(draft: UserBriefDraft): boolean {
@@ -249,6 +272,23 @@
 						updateBrief({ audience: (event.currentTarget as HTMLInputElement).value })}
 					disabled={disabled}
 				/>
+			</label>
+
+			<label class="field">
+				<span>Generation mode</span>
+				<select
+					value={$briefDraft.mode}
+					onchange={(event) =>
+						updateBrief({
+							mode: (event.currentTarget as HTMLSelectElement).value as GenerationMode
+						})}
+					disabled={disabled}
+				>
+					{#each generationModes as option}
+						<option value={option.value}>{option.label}</option>
+					{/each}
+				</select>
+				<span class="hint">{generationModes.find((option) => option.value === $briefDraft.mode)?.hint}</span>
 			</label>
 		</div>
 
@@ -589,6 +629,12 @@
 	.field span,
 	.signal-title {
 		color: #24343f;
+	}
+
+	.hint {
+		font-size: 0.82rem;
+		color: #6e665c;
+		line-height: 1.5;
 	}
 
 	input,

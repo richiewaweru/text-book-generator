@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 import core.events as core_events
 from core.llm import build_model, run_llm
 from pipeline.contracts import get_contract, list_template_ids, validate_preset_for_template
-from pipeline.types.requests import SectionPlan
+from pipeline.types.requests import GenerationMode, SectionPlan
 from generation.dtos import GenerationAcceptedResponse
 from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_report_repository import (
@@ -88,6 +88,7 @@ def _pipeline_section_from_planning(
     section: PlanningSectionPlan,
     *,
     always_present: list[str],
+    generation_mode: GenerationMode,
 ) -> SectionPlan:
     selected = list(dict.fromkeys([*always_present, *section.selected_components]))
     visual_required = bool(section.visual_policy and section.visual_policy.required)
@@ -113,7 +114,11 @@ def _pipeline_section_from_planning(
         needs_worked_example=needs_worked_example,
         required_components=selected,
         optional_components=[],
-        interaction_policy="required" if interaction_required else "allowed",
+        interaction_policy=(
+            "disabled"
+            if generation_mode == GenerationMode.DRAFT
+            else "required" if interaction_required else "allowed"
+        ),
         diagram_policy="required" if visual_required else "allowed",
         continuity_notes=section.rationale,
     )
@@ -123,7 +128,11 @@ def _pipeline_sections_from_planning_spec(spec: PlanningGenerationSpec) -> list[
     contract = get_contract(spec.template_id)
     always_present = contract.always_present or contract.required_components
     sections = [
-        _pipeline_section_from_planning(section, always_present=always_present)
+        _pipeline_section_from_planning(
+            section,
+            always_present=always_present,
+            generation_mode=spec.mode,
+        )
         for section in spec.sections
     ]
     for index, section in enumerate(sections):
@@ -361,6 +370,7 @@ async def commit_brief(
             committed,
             subject=committed.source_brief.intent,
         ),
+        mode=committed.mode,
         template_id=committed.template_id,
         preset_id=committed.preset_id,
         section_count=len(committed.sections),

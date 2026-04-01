@@ -19,6 +19,7 @@ function buildSpec(): PlanningGenerationSpec {
 		id: 'plan-1',
 		template_id: 'guided-concept-path',
 		preset_id: 'blue-classroom',
+		mode: 'balanced',
 		template_decision: {
 			chosen_id: 'guided-concept-path',
 			chosen_name: 'Guided Concept Path',
@@ -68,12 +69,14 @@ describe('studio store', () => {
 	it('moves from planning into review with the completed spec', () => {
 		beginPlanning();
 		expect(get(studioState)).toBe('planning');
+		expect(get(briefDraft).mode).toBe('balanced');
 
 		const spec = buildSpec();
 		completePlanning(spec, 650);
 
 		expect(get(studioState)).toBe('reviewing');
 		expect(get(editedSpec)?.template_id).toBe('guided-concept-path');
+		expect(get(editedSpec)?.mode).toBe('balanced');
 	});
 
 	it('keeps the brief draft while resetting the stage back to idle', () => {

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from pipeline.types.requests import SectionPlan
+from pipeline.types.requests import GenerationMode, SectionPlan
 
 
 class BriefRequest(BaseModel):
     intent: str = Field(min_length=1, max_length=200)
     audience: str = Field(min_length=1, max_length=200)
     extra_context: str = Field(default="", max_length=1000)
+    mode: GenerationMode = Field(default=GenerationMode.BALANCED)
 
     @field_validator("intent", "audience", "extra_context")
     @classmethod
@@ -27,6 +28,7 @@ class BriefRequest(BaseModel):
 class GenerationSpec(BaseModel):
     template_id: str = Field(min_length=1)
     preset_id: str = Field(default="blue-classroom", min_length=1)
+    mode: GenerationMode = Field(default=GenerationMode.BALANCED)
     section_count: int = Field(ge=2, le=4)
     sections: list[SectionPlan] = Field(min_length=2, max_length=4)
     warning: str | None = None

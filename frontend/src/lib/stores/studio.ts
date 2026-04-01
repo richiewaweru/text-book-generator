@@ -16,6 +16,7 @@ export function emptyDraft(): UserBriefDraft {
 		audience: '',
 		prior_knowledge: '',
 		extra_context: '',
+		mode: 'balanced',
 		signals: {
 			topic_type: null,
 			learning_outcome: null,

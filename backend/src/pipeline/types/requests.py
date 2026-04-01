@@ -6,9 +6,16 @@ Input types for the generation pipeline.
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, Field
+
+class GenerationMode(str, Enum):
+    DRAFT = "draft"
+    BALANCED = "balanced"
+    STRICT = "strict"
+
 
 class PipelineRequest(BaseModel):
     subject: str
@@ -18,6 +25,7 @@ class PipelineRequest(BaseModel):
     preset_id: str
     learner_fit: str = "general"
     section_count: int = 4
+    mode: GenerationMode = GenerationMode.BALANCED
     generation_id: str | None = None
     section_plans: list["SectionPlan"] | None = None
 
@@ -26,7 +34,14 @@ class PipelineRequest(BaseModel):
         return self.context
 
     def max_rerenders(self) -> int:
+        if self.mode == GenerationMode.DRAFT:
+            return 1
+        if self.mode == GenerationMode.STRICT:
+            return 3
         return 2
+
+    def interactions_enabled(self) -> bool:
+        return self.mode != GenerationMode.DRAFT
 
 
 class SectionPlan(BaseModel):

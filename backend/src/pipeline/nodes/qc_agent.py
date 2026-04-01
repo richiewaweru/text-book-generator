@@ -51,6 +51,7 @@ async def qc_agent(
     model = get_node_text_model(
         "qc_agent",
         model_overrides=model_overrides,
+        generation_mode=state.request.mode,
     )
     agent = Agent(
         model=model,
@@ -84,6 +85,7 @@ async def qc_agent(
             model=model,
             user_prompt=build_qc_user_prompt(section_json),
             section_id=section_id,
+            generation_mode=state.request.mode,
         )
 
         qc_output = result.output

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pipeline.graph import fan_out_sections
 from pipeline.state import StyleContext, TextbookPipelineState
-from pipeline.types.requests import PipelineRequest, SectionPlan
+from pipeline.types.requests import GenerationMode, PipelineRequest, SectionPlan
 from pipeline.types.template_contract import GenerationGuidance, TemplateContractSummary
 
 
@@ -109,5 +109,12 @@ def test_initial_pipeline_state_does_not_preseed_any_sections() -> None:
     assert state.failed_sections == {}
 
 
-def test_pipeline_request_uses_fixed_rerender_budget() -> None:
-    assert _request().max_rerenders() == 2
+def test_pipeline_request_uses_mode_specific_rerender_budget() -> None:
+    assert _request(mode=GenerationMode.DRAFT).max_rerenders() == 1
+    assert _request(mode=GenerationMode.BALANCED).max_rerenders() == 2
+    assert _request(mode=GenerationMode.STRICT).max_rerenders() == 3
+
+
+def test_pipeline_request_disables_interactions_in_draft_mode() -> None:
+    assert _request(mode=GenerationMode.DRAFT).interactions_enabled() is False
+    assert _request(mode=GenerationMode.BALANCED).interactions_enabled() is True

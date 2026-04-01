@@ -27,6 +27,7 @@ function buildBrief() {
 	return {
 		template_id: 'guided-concept-path',
 		preset_id: 'blue-classroom',
+		mode: 'balanced',
 		section_count: 3,
 		sections: [
 			{
@@ -74,6 +75,7 @@ function buildBrief() {
 		source_brief: {
 			intent: 'Teach derivatives to Year 10 students',
 			audience: 'Year 10, mixed ability',
+			mode: 'balanced',
 			extra_context: 'Use concrete examples.'
 		}
 	};
@@ -161,6 +163,7 @@ describe('TeacherStudio', () => {
 		expect(request.subject).toBe('Teach derivatives to Year 10 students');
 		expect(request.template_id).toBe('guided-concept-path');
 		expect(request.preset_id).toBe('blue-classroom');
+		expect(request.mode).toBe('balanced');
 		expect(request.section_count).toBe(3);
 		expect(request.generation_spec?.template_id).toBe('guided-concept-path');
 		expect(request.generation_spec?.sections[0].title).toBe('Start with a real example');

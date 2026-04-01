@@ -46,4 +46,16 @@ describe('IntentForm', () => {
 
 		expect(get(briefDraft).preferences.example_style).toBe('academic');
 	});
+
+	it('defaults to balanced mode and persists generation mode changes', async () => {
+		render(IntentForm, { props: { onSubmit: vi.fn() } });
+
+		const modeSelect = screen.getByLabelText(/generation mode/i) as HTMLSelectElement;
+		expect(modeSelect.value).toBe('balanced');
+
+		await fireEvent.change(modeSelect, { target: { value: 'draft' } });
+
+		expect(get(briefDraft).mode).toBe('draft');
+		expect(screen.getByText(/fastest generation/i)).toBeTruthy();
+	});
 });

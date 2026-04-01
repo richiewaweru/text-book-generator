@@ -27,7 +27,7 @@ from pipeline.api import PipelineCommand, PipelineDocument, PipelineSectionManif
 from pipeline.contracts import get_contract, validate_preset_for_template
 from pipeline.events import CompleteEvent, ErrorEvent, SectionReadyEvent, SectionStartedEvent
 from pipeline.runtime_diagnostics import clear_node_attempts
-from pipeline.types.requests import SectionPlan
+from pipeline.types.requests import GenerationMode, SectionPlan
 from planning.dtos import GenerationSpec
 from planning.models import PlanningGenerationSpec, PlanningSectionPlan
 from generation.dtos import (
@@ -77,6 +77,7 @@ def _history_item(generation: Generation) -> dict:
     return {
         "id": generation.id,
         "subject": generation.subject,
+        "mode": generation.mode.value,
         "status": generation.status,
         "error_type": generation.error_type,
         "error_code": generation.error_code,
@@ -96,7 +97,13 @@ def _planning_spec_payload(generation: Generation) -> dict | None:
     if not generation.planning_spec_json:
         return None
     try:
-        return json.loads(generation.planning_spec_json)
+        payload = json.loads(generation.planning_spec_json)
+        if "mode" not in payload:
+            payload["mode"] = generation.mode.value
+        source_brief = payload.get("source_brief")
+        if isinstance(source_brief, dict) and "mode" not in source_brief:
+            source_brief["mode"] = generation.mode.value
+        return payload
     except json.JSONDecodeError:
         logger.warning(
             "Generation has invalid planning_spec_json payload",
@@ -111,6 +118,7 @@ def _detail_item(generation: Generation) -> dict:
         "id": generation.id,
         "subject": generation.subject,
         "context": generation.context,
+        "mode": generation.mode.value,
         "status": generation.status,
         "error": generation.error,
         "error_type": generation.error_type,
@@ -154,6 +162,7 @@ def _pipeline_section_from_planning(
     section: PlanningSectionPlan,
     *,
     always_present: list[str],
+    generation_mode: GenerationMode,
 ) -> SectionPlan:
     selected = list(dict.fromkeys([*always_present, *section.selected_components]))
     bridges_from = None
@@ -177,7 +186,11 @@ def _pipeline_section_from_planning(
         needs_worked_example=needs_worked_example,
         required_components=selected,
         optional_components=[],
-        interaction_policy="required" if interaction_required else "allowed",
+        interaction_policy=(
+            "disabled"
+            if generation_mode == GenerationMode.DRAFT
+            else "required" if interaction_required else "allowed"
+        ),
         diagram_policy="required" if visual_required else "allowed",
         continuity_notes=section.rationale,
     )
@@ -187,7 +200,11 @@ def _pipeline_sections_from_planning_spec(spec: PlanningGenerationSpec) -> list[
     contract = get_contract(spec.template_id)
     always_present = contract.always_present or contract.required_components
     sections = [
-        _pipeline_section_from_planning(section, always_present=always_present)
+        _pipeline_section_from_planning(
+            section,
+            always_present=always_present,
+            generation_mode=spec.mode,
+        )
         for section in spec.sections
     ]
     for index, section in enumerate(sections):
@@ -255,12 +272,13 @@ def _effective_generation_spec(req: GenerationRequest) -> GenerationSpec | None:
 
 def _effective_generation_payload(
     req: GenerationRequest,
-) -> tuple[str, str, str, str, int, list | None, str | None]:
+) -> tuple[str, str, GenerationMode, str, str, int, list | None, str | None]:
     spec = _effective_generation_spec(req)
     if spec is None:
         return (
             req.subject,
             req.context,
+            req.mode,
             req.template_id,
             req.preset_id,
             req.section_count,
@@ -274,6 +292,7 @@ def _effective_generation_payload(
             spec,
             subject=req.subject or spec.source_brief.intent,
         ),
+        spec.mode,
         spec.template_id,
         spec.preset_id,
         spec.section_count,
@@ -363,6 +382,7 @@ def _initial_document(
         generation_id=generation.id,
         subject=generation.subject,
         context=generation.context,
+        mode=generation.mode,
         template_id=generation.requested_template_id,
         preset_id=generation.requested_preset_id,
         status=status_value,
@@ -887,6 +907,7 @@ async def enqueue_generation(
     report_repo: GenerationReportRepository,
     subject: str,
     context: str,
+    mode: GenerationMode,
     template_id: str,
     preset_id: str,
     section_count: int,
@@ -912,6 +933,7 @@ async def enqueue_generation(
         user_id=current_user.id,
         subject=subject,
         context=context,
+        mode=mode,
         requested_template_id=template_id,
         requested_preset_id=preset_id,
         section_count=section_count,
@@ -932,6 +954,7 @@ async def enqueue_generation(
         extra=_generation_log_extra(
             generation.id,
             user_id=current_user.id,
+            mode=mode.value,
             template_id=template_id,
             preset_id=preset_id,
             section_count=section_count,
@@ -943,6 +966,7 @@ async def enqueue_generation(
         subject=subject,
         context=context,
         grade_band=_grade_band(profile),
+        mode=mode,
         template_id=template_id,
         preset_id=preset_id,
         learner_fit="general",
@@ -1010,6 +1034,7 @@ async def create_generation(
     (
         effective_subject,
         effective_context,
+        effective_mode,
         effective_template_id,
         effective_preset_id,
         effective_section_count,
@@ -1026,6 +1051,7 @@ async def create_generation(
         report_repo=report_repo,
         subject=effective_subject,
         context=effective_context,
+        mode=effective_mode,
         template_id=effective_template_id,
         preset_id=effective_preset_id,
         section_count=effective_section_count,

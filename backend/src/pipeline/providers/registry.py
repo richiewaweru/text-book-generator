@@ -12,6 +12,7 @@ import os
 
 from core.llm import ModelFamily, ModelSlot, ModelSpec, build_model
 from core.llm.transport import describe_text_model, effective_text_spec, endpoint_host
+from pipeline.types.requests import GenerationMode
 
 NODE_MODEL_SLOTS: dict[str, ModelSlot] = {
     "curriculum_planner": ModelSlot.FAST,
@@ -27,15 +28,37 @@ NODE_MODEL_SLOTS: dict[str, ModelSlot] = {
     "field_regenerator": ModelSlot.FAST,
 }
 
-DEFAULT_PROFILES: dict[ModelSlot, ModelSpec] = {
-    ModelSlot.FAST: ModelSpec(
-        family=ModelFamily.ANTHROPIC,
-        model_name="claude-haiku-4-5-20251001",
-    ),
-    ModelSlot.STANDARD: ModelSpec(
-        family=ModelFamily.ANTHROPIC,
-        model_name="claude-sonnet-4-6",
-    ),
+DEFAULT_PROFILES_BY_MODE: dict[GenerationMode, dict[ModelSlot, ModelSpec]] = {
+    GenerationMode.DRAFT: {
+        ModelSlot.FAST: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
+        ModelSlot.STANDARD: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
+    },
+    GenerationMode.BALANCED: {
+        ModelSlot.FAST: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
+        ModelSlot.STANDARD: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+    },
+    GenerationMode.STRICT: {
+        ModelSlot.FAST: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+        ModelSlot.STANDARD: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+    },
 }
 
 
@@ -85,9 +108,12 @@ def _env_override(slot: ModelSlot, *, base: ModelSpec) -> ModelSpec | None:
     )
 
 
-def load_profiles() -> dict[ModelSlot, ModelSpec]:
-    profiles = dict(DEFAULT_PROFILES)
-    for slot, spec in DEFAULT_PROFILES.items():
+def load_profiles(
+    generation_mode: GenerationMode = GenerationMode.BALANCED,
+) -> dict[ModelSlot, ModelSpec]:
+    base_profiles = DEFAULT_PROFILES_BY_MODE[generation_mode]
+    profiles = dict(base_profiles)
+    for slot, spec in base_profiles.items():
         override = _env_override(slot, base=spec)
         if override is not None:
             profiles[slot] = override
@@ -120,9 +146,10 @@ def resolve_text_model(
 def get_node_text_model(
     node_name: str,
     model_overrides: dict | None = None,
+    generation_mode: GenerationMode = GenerationMode.BALANCED,
 ):
     slot = get_node_text_slot(node_name)
-    spec = load_profiles()[slot]
+    spec = load_profiles(generation_mode)[slot]
     return resolve_text_model(
         slot=slot,
         spec=spec,
@@ -130,9 +157,12 @@ def get_node_text_model(
     )
 
 
-def get_node_text_spec(node_name: str) -> ModelSpec:
+def get_node_text_spec(
+    node_name: str,
+    generation_mode: GenerationMode = GenerationMode.BALANCED,
+) -> ModelSpec:
     slot = get_node_text_slot(node_name)
-    return load_profiles()[slot]
+    return load_profiles(generation_mode)[slot]
 
 
 __all__ = [
@@ -140,7 +170,7 @@ __all__ = [
     "ModelFamily",
     "ModelSlot",
     "NODE_MODEL_SLOTS",
-    "DEFAULT_PROFILES",
+    "DEFAULT_PROFILES_BY_MODE",
     "load_profiles",
     "get_node_text_slot",
     "get_node_text_model",

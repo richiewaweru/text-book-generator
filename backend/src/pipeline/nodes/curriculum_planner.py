@@ -107,6 +107,7 @@ async def curriculum_planner(
     model = get_node_text_model(
         "curriculum_planner",
         model_overrides=model_overrides,
+        generation_mode=state.request.mode,
     )
     agent = Agent(
         model=model,
@@ -131,6 +132,7 @@ async def curriculum_planner(
                 learner_fit=state.request.learner_fit,
                 section_count=state.request.section_count,
             ),
+            generation_mode=state.request.mode,
         )
         _publish_section_titles(
             state.request.generation_id or "", result.output.sections

@@ -1,5 +1,5 @@
 import type { SectionContent } from 'lectio';
-import type { PlanningGenerationSpec } from './studio';
+import type { GenerationMode, PlanningGenerationSpec } from './studio';
 
 export type Depth = 'survey' | 'standard' | 'deep';
 export type NotationLanguage = 'plain' | 'math_notation' | 'python' | 'pseudocode';
@@ -60,6 +60,7 @@ export interface BriefRequest {
 	intent: string;
 	audience: string;
 	extra_context: string;
+	mode?: GenerationMode;
 }
 
 export interface OutlineSection {
@@ -82,6 +83,7 @@ export interface SectionPlan extends OutlineSection {
 export interface GenerationSpec {
 	template_id: string;
 	preset_id: string;
+	mode: GenerationMode;
 	section_count: number;
 	sections: SectionPlan[];
 	warning: string | null;
@@ -94,6 +96,7 @@ export type BriefResponse = GenerationSpec;
 export interface GenerationRequest {
 	subject: string;
 	context: string;
+	mode?: GenerationMode;
 	template_id: string;
 	preset_id: string;
 	section_count?: number;
@@ -111,6 +114,7 @@ export interface GenerationAccepted {
 export interface GenerationHistoryItem {
 	id: string;
 	subject: string;
+	mode: GenerationMode;
 	status: 'pending' | 'running' | 'completed' | 'failed';
 	error_type: string | null;
 	error_code: string | null;
@@ -129,6 +133,7 @@ export interface GenerationDetail {
 	id: string;
 	subject: string;
 	context: string;
+	mode: GenerationMode;
 	status: 'pending' | 'running' | 'completed' | 'failed';
 	error: string | null;
 	error_type: string | null;
@@ -197,6 +202,7 @@ export interface GenerationDocument {
 	generation_id: string;
 	subject: string;
 	context: string;
+	mode: GenerationMode;
 	template_id: string;
 	preset_id: string;
 	status: 'pending' | 'running' | 'completed' | 'failed';
@@ -315,6 +321,7 @@ export type {
 	DeliveryPreferences,
 	ExampleStyle,
 	ExplanationStyle,
+	GenerationMode,
 	GenerationDirectives,
 	LearningOutcome,
 	LessonFormat,

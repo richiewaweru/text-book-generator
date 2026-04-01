@@ -110,6 +110,7 @@ function buildSpec() {
 		id: 'plan-1',
 		template_id: 'guided-concept-path',
 		preset_id: 'blue-classroom',
+		mode: 'strict',
 		template_decision: {
 			chosen_id: 'guided-concept-path',
 			chosen_name: 'Guided Concept Path',
@@ -155,6 +156,7 @@ function buildSpec() {
 			audience: 'Year 5',
 			prior_knowledge: '',
 			extra_context: '',
+			mode: 'strict',
 			signals: {
 				topic_type: 'concept',
 				learning_outcome: 'understand-why',
@@ -232,9 +234,13 @@ describe('TeacherStudioFlow', () => {
 		await fireEvent.input(screen.getByLabelText(/who is this for\?/i), {
 			target: { value: 'Year 5' }
 		});
+		await fireEvent.change(screen.getByLabelText(/generation mode/i), {
+			target: { value: 'strict' }
+		});
 		await fireEvent.click(screen.getByRole('button', { name: /build lesson plan/i }));
 
 		expect(screen.getByText(/building the lesson structure in view/i)).toBeTruthy();
+		expect(streamPlan).toHaveBeenCalledWith(expect.objectContaining({ mode: 'strict' }));
 
 		releasePlan();
 
