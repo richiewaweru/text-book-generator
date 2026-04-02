@@ -16,6 +16,7 @@ from pipeline.types.requests import GenerationMode
 
 NODE_MODEL_SLOTS: dict[str, ModelSlot] = {
     "curriculum_planner": ModelSlot.FAST,
+    "composition_planner": ModelSlot.FAST,
     "brief_planner": ModelSlot.FAST,
     "block_generator": ModelSlot.FAST,
     "content_generator": ModelSlot.STANDARD,
@@ -163,6 +164,23 @@ def get_node_text_spec(
 ) -> ModelSpec:
     slot = get_node_text_slot(node_name)
     return load_profiles(generation_mode)[slot]
+
+
+def get_image_client():
+    """Resolve image generation client, or None if not configured.
+
+    Returns a GeminiImageClient if GOOGLE_API_KEY is set, else None.
+    Lazy-imports to avoid errors when the Gemini SDK is not installed.
+    """
+    api_key = _first_env("GOOGLE_API_KEY", "GEMINI_API_KEY")
+    if not api_key:
+        return None
+    try:
+        from pipeline.providers.gemini_image_client import GeminiImageClient
+
+        return GeminiImageClient(api_key=api_key)
+    except ImportError:
+        return None
 
 
 __all__ = [

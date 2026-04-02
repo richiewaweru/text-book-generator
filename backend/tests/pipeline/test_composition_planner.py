@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
-from pipeline.nodes.composition_planner import composition_planner, pick_interaction_type
+from pipeline.nodes.composition_planner import (
+    CompositionDecision,
+    DiagramDecision,
+    InteractionDecision,
+    _to_composition_plan,
+    composition_planner,
+    pick_interaction_type,
+)
 from pipeline.state import StyleContext, TextbookPipelineState
 from pipeline.types.requests import GenerationMode, PipelineRequest, SectionPlan
 from pipeline.types.section_content import (
@@ -224,3 +233,190 @@ def test_pick_interaction_type_probability_gives_probability_tree() -> None:
     state = _state(request=_request(subject="Probability and Statistics"))
     section = _section("s-01")
     assert pick_interaction_type(state, section) == "probability_tree"
+
+
+# ---------------------------------------------------------------------------
+# LLM-powered composition tests
+# ---------------------------------------------------------------------------
+
+
+def _mock_llm_decision(
+    *,
+    diagram_enabled: bool = False,
+    interactions: list[InteractionDecision] | None = None,
+) -> CompositionDecision:
+    """Helper to build a CompositionDecision for mocking."""
+    return CompositionDecision(
+        diagram=DiagramDecision(
+            enabled=diagram_enabled,
+            reasoning="LLM decided this",
+            diagram_type="concept_map" if diagram_enabled else None,
+            key_concepts=["derivative", "slope"],
+        ),
+        interactions=interactions or [],
+        reasoning="LLM overall reasoning",
+        confidence="high",
+    )
+
+
+def test_to_composition_plan_enforces_guard_rails() -> None:
+    """Guard-rail overrides force-disable even if LLM says enabled."""
+    decision = _mock_llm_decision(
+        diagram_enabled=True,
+        interactions=[
+            InteractionDecision(
+                enabled=True,
+                reasoning="LLM wants this",
+                interaction_type="graph_slider",
+                manipulable_element="slope",
+                response_element="line",
+                pedagogical_payoff="see slope effect",
+            )
+        ],
+    )
+
+    plan = _to_composition_plan(
+        decision,
+        diagram_allowed=False,
+        interaction_allowed=False,
+    )
+    assert plan.diagram.enabled is False
+    assert plan.interaction.enabled is False
+    assert all(not i.enabled for i in plan.interactions)
+
+
+def test_to_composition_plan_populates_interactions_list() -> None:
+    """LLM decision with multiple interactions is correctly converted."""
+    decision = _mock_llm_decision(
+        interactions=[
+            InteractionDecision(
+                enabled=True,
+                reasoning="Parameter exploration",
+                interaction_type="graph_slider",
+                manipulable_element="slope m",
+                response_element="line steepness",
+                pedagogical_payoff="see m controls steepness",
+            ),
+            InteractionDecision(
+                enabled=True,
+                reasoning="Step reveal",
+                interaction_type="equation_reveal",
+                manipulable_element="steps",
+                response_element="equation",
+                pedagogical_payoff="see derivation process",
+            ),
+        ],
+    )
+
+    plan = _to_composition_plan(
+        decision,
+        diagram_allowed=True,
+        interaction_allowed=True,
+    )
+    assert len(plan.interactions) == 2
+    assert plan.interactions[0].interaction_type == "graph_slider"
+    assert plan.interactions[1].interaction_type == "equation_reveal"
+    # Singular field mirrors first enabled interaction
+    assert plan.interaction.enabled is True
+    assert plan.interaction.interaction_type == "graph_slider"
+
+
+from pydantic_ai.models.test import TestModel
+
+_TEST_MODEL_OVERRIDES = {"fast": TestModel()}
+
+
+async def _run_with_mock_llm(state, mock_result):
+    """Run composition_planner with mocked LLM, returning the mock decision."""
+    with patch("pipeline.nodes.composition_planner.run_llm", new_callable=AsyncMock, return_value=mock_result):
+        return await composition_planner(state, model_overrides=_TEST_MODEL_OVERRIDES)
+
+
+@pytest.mark.asyncio
+async def test_llm_success_uses_llm_decision() -> None:
+    """When LLM succeeds, the plan uses LLM output (not heuristic)."""
+    mock_result = MagicMock()
+    mock_result.output = _mock_llm_decision(
+        diagram_enabled=True,
+        interactions=[
+            InteractionDecision(
+                enabled=True,
+                reasoning="LLM chose this",
+                interaction_type="equation_reveal",
+                manipulable_element="steps",
+                response_element="equation",
+                pedagogical_payoff="see process",
+            )
+        ],
+    )
+
+    state = _state(generated_sections={"s-01": _section("s-01")})
+    result = await _run_with_mock_llm(state, mock_result)
+
+    plan = result["composition_plans"]["s-01"]
+    assert plan.interaction.interaction_type == "equation_reveal"
+    assert plan.reasoning == "LLM overall reasoning"
+    assert plan.confidence == "high"
+
+
+@pytest.mark.asyncio
+async def test_llm_failure_falls_back_to_heuristic() -> None:
+    """When LLM fails, heuristic fallback produces a valid plan."""
+    state = _state(generated_sections={"s-01": _section("s-01")})
+
+    with patch("pipeline.nodes.composition_planner.run_llm", new_callable=AsyncMock, side_effect=RuntimeError("API error")):
+        result = await composition_planner(state, model_overrides=_TEST_MODEL_OVERRIDES)
+
+    plan = result["composition_plans"]["s-01"]
+    # Heuristic still produces a valid plan
+    assert plan.diagram.enabled is True
+    assert plan.interaction.enabled is True
+    assert plan.interaction.interaction_type == "graph_slider"  # math default
+
+
+@pytest.mark.asyncio
+async def test_interaction_usage_incremented() -> None:
+    """interaction_usage tracking is updated from the composition plan."""
+    mock_result = MagicMock()
+    mock_result.output = _mock_llm_decision(
+        interactions=[
+            InteractionDecision(
+                enabled=True,
+                reasoning="test",
+                interaction_type="timeline_scrubber",
+                manipulable_element="time",
+                response_element="events",
+                pedagogical_payoff="see sequence",
+            )
+        ],
+    )
+
+    state = _state(
+        request=_request(subject="History"),
+        generated_sections={"s-01": _section("s-01")},
+        interaction_usage={"graph_slider": 3},
+    )
+
+    result = await _run_with_mock_llm(state, mock_result)
+
+    usage = result["interaction_usage"]
+    assert usage["timeline_scrubber"] == 1
+    assert usage["graph_slider"] == 3
+
+
+@pytest.mark.asyncio
+async def test_both_disabled_skips_llm_call() -> None:
+    """When both diagram and interaction are disabled, no LLM call is made."""
+    state = _state(
+        request=_request(mode=GenerationMode.DRAFT),
+        current_section_plan=_plan("s-01", needs_diagram=False),
+        generated_sections={"s-01": _section("s-01")},
+    )
+
+    with patch("pipeline.nodes.composition_planner.run_llm", new_callable=AsyncMock) as mock_run:
+        result = await composition_planner(state)
+        mock_run.assert_not_called()
+
+    plan = result["composition_plans"]["s-01"]
+    assert plan.diagram.enabled is False
+    assert plan.interaction.enabled is False

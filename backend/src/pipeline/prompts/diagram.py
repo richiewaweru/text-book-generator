@@ -14,6 +14,8 @@ Output is a structured DiagramSpec (JSON) rendered client-side, not raw SVG.
 from __future__ import annotations
 
 from pipeline.state import StyleContext
+from pipeline.types.composition import DiagramPlan
+from pipeline.types.section_content import SectionContent
 
 
 # -- Style translation maps ---------------------------------------------------
@@ -121,3 +123,64 @@ Diagram slot: {diagram_slot}
 
 Generate a structured diagram spec that makes the core concept visually clear.
 Keep to 3-6 elements for clarity. Use meaningful connections."""
+
+
+# ── Image generation prompts ────────────────────────────────────────────────
+
+_SURFACE_TO_IMAGE_STYLE: dict[str, str] = {
+    "crisp": "clean vector illustration, sharp lines",
+    "soft": "gentle watercolour style, soft edges",
+    "minimal": "minimalist line art, essential elements",
+}
+
+_PALETTE_TO_IMAGE_COLOURS: dict[str, str] = {
+    "navy, sky, parchment": "navy blue and sky blue professional scheme",
+    "sand, amber, ink": "warm sand and amber with dark ink",
+    "sage, pine, cream": "sage green and pine natural palette",
+    "ink, ivory, signal amber": "high-contrast dark ink with amber accents",
+    "white, slate, graphite": "neutral slate and graphite tones",
+}
+
+
+def _translate_style_to_image_keywords(ctx: StyleContext) -> str:
+    """Map style context to image generation keywords."""
+    style = _SURFACE_TO_IMAGE_STYLE.get(ctx.surface_style, "clean illustration")
+    colours = _PALETTE_TO_IMAGE_COLOURS.get(ctx.palette, "neutral educational colours")
+    return f"{style}, {colours}, textbook quality"
+
+
+def build_image_generation_prompt(
+    section: SectionContent,
+    diagram_plan: DiagramPlan,
+    style_context: StyleContext,
+) -> str:
+    """Build a natural-language prompt for image generation models."""
+
+    visual_style = _translate_style_to_image_keywords(style_context)
+
+    prompt = f"""Educational diagram: {section.header.title}
+
+Concept: {section.hook.body}
+Context: {section.explanation.body[:300]}
+
+Visual style: {visual_style}
+
+Requirements:
+- Clear, simple composition for textbook
+- Educational illustration style
+- High contrast, readable
+- No text overlays (labels added separately)"""
+
+    if diagram_plan.fallback_from_interaction:
+        prompt += f"""
+
+This diagram replaces an interaction that would have shown: {diagram_plan.interaction_intent}
+Emphasise these elements: {', '.join(diagram_plan.interaction_elements)}"""
+
+    if diagram_plan.visual_guidance:
+        prompt += f"\nVisual approach: {diagram_plan.visual_guidance}"
+
+    if diagram_plan.key_concepts:
+        prompt += f"\nFocus on: {', '.join(diagram_plan.key_concepts)}"
+
+    return prompt
