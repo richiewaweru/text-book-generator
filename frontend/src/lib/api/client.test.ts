@@ -1,13 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const { authState } = vi.hoisted(() => ({
+	authState: {
+		token: 'test-token' as string | null
+	}
+}));
+
 vi.mock('$lib/stores/auth', () => ({
-	getToken: () => 'test-token'
+	getToken: () => authState.token
 }));
 
 import {
 	apiFetch,
 	buildApiUrl,
 	buildGenerationEventsUrl,
+	downloadGenerationPdf,
 	getGenerationDocument,
 	planBrief,
 	startGeneration
@@ -16,6 +23,8 @@ import {
 describe('client API helpers', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
+		authState.token = 'test-token';
 	});
 
 	it('builds a relative URL when no public API base is configured', () => {
@@ -179,5 +188,65 @@ describe('client API helpers', () => {
 		expect(buildGenerationEventsUrl('gen-123')).toBe(
 			'/api/v1/generations/gen-123/events?token=test-token'
 		);
+	});
+
+	it('falls back to the query token when the auth store is empty', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response('{}', {
+				status: 200,
+				headers: { 'Content-Type': 'application/json' }
+			})
+		);
+		vi.stubGlobal('fetch', fetchMock);
+		authState.token = null;
+		vi.stubGlobal('window', {
+			location: {
+				href: 'http://localhost/textbook/gen-123?print=true&token=query-token'
+			}
+		} as Window & typeof globalThis);
+		await apiFetch('/api/v1/profile');
+
+		const init = fetchMock.mock.calls.at(-1)?.[1] as RequestInit;
+		const headers = new Headers(init.headers);
+		expect(headers.get('Authorization')).toBe('Bearer query-token');
+	});
+
+	it('downloads the exported PDF and returns response metadata', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(new Blob(['pdf-bytes'], { type: 'application/pdf' }), {
+				status: 200,
+				headers: {
+					'Content-Type': 'application/pdf',
+					'Content-Disposition': 'attachment; filename="lesson.pdf"',
+					'X-Page-Count': '12'
+				}
+			})
+		);
+		const clickMock = vi.fn();
+		const createObjectUrl = vi.fn(() => 'blob:download');
+		const revokeObjectUrl = vi.fn();
+		const createElement = vi.fn(() => ({ click: clickMock, href: '', download: '' }));
+
+		vi.stubGlobal('fetch', fetchMock);
+		vi.stubGlobal('URL', {
+			createObjectURL: createObjectUrl,
+			revokeObjectURL: revokeObjectUrl
+		});
+		vi.stubGlobal('document', {
+			createElement
+		} as unknown as Document);
+
+		const result = await downloadGenerationPdf('gen-123', {
+			school_name: 'Springfield High',
+			teacher_name: 'Ms. Johnson',
+			include_toc: true,
+			include_answers: false
+		});
+
+		expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/generations/gen-123/export/pdf');
+		expect(clickMock).toHaveBeenCalledTimes(1);
+		expect(result).toEqual({ filename: 'lesson.pdf', pageCount: '12' });
+		expect(createObjectUrl).toHaveBeenCalledTimes(1);
+		expect(revokeObjectUrl).toHaveBeenCalledWith('blob:download');
 	});
 });

@@ -11,6 +11,9 @@
 	const initialized = fromStore(authInitialized);
 	const user = fromStore(authUser);
 	const authed = fromStore(authIsAuthenticated);
+	const isPrintTextbookRoute = $derived(
+		page.url.pathname.startsWith('/textbook/') && page.url.searchParams.get('print') === 'true'
+	);
 
 	onMount(() => {
 		void bootstrapAuth(fetchCurrentUser);
@@ -21,6 +24,9 @@
 		const path = page.url.pathname;
 		const isLogin = path.startsWith('/login');
 		const isOnboarding = path.startsWith('/onboarding');
+		if (isPrintTextbookRoute) {
+			return;
+		}
 
 		if (!user.current) {
 			if (!isLogin) {
@@ -44,31 +50,33 @@
 	<title>Textbook Agent</title>
 </svelte:head>
 
-<header>
-	<nav>
-		<div class="nav-left">
-			<a href={authed.current ? '/dashboard' : '/'} class="brand">Textbook Agent</a>
+{#if !isPrintTextbookRoute}
+	<header>
+		<nav>
+			<div class="nav-left">
+				<a href={authed.current ? '/dashboard' : '/'} class="brand">Textbook Agent</a>
+				{#if authed.current && user.current}
+					<div class="nav-links">
+						<a href="/dashboard" class="nav-link">Dashboard</a>
+						<a href="/studio" class="nav-link">Studio</a>
+					</div>
+				{/if}
+			</div>
 			{#if authed.current && user.current}
-				<div class="nav-links">
-					<a href="/dashboard" class="nav-link">Dashboard</a>
-					<a href="/studio" class="nav-link">Studio</a>
+				<div class="nav-right">
+					{#if user.current.picture_url}
+						<img src={user.current.picture_url} alt={user.current.name ?? ''} class="avatar" />
+					{/if}
+					<span class="user-name">{user.current.name ?? user.current.email}</span>
+					<button onclick={handleLogout} class="logout-btn">Sign out</button>
 				</div>
 			{/if}
-		</div>
-		{#if authed.current && user.current}
-			<div class="nav-right">
-				{#if user.current.picture_url}
-					<img src={user.current.picture_url} alt={user.current.name ?? ''} class="avatar" />
-				{/if}
-				<span class="user-name">{user.current.name ?? user.current.email}</span>
-				<button onclick={handleLogout} class="logout-btn">Sign out</button>
-			</div>
-		{/if}
-	</nav>
-</header>
+		</nav>
+	</header>
+{/if}
 
 <main>
-	{#if initialized.current}
+	{#if initialized.current || isPrintTextbookRoute}
 		{@render children()}
 	{:else}
 		<p>Loading session...</p>

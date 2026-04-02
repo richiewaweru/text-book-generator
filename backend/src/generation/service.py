@@ -59,6 +59,7 @@ from generation.ports.generation_repository import GenerationRepository
 from core.ports.student_profile_repository import StudentProfileRepository
 from core.ports.user_repository import UserRepository
 from generation.failure import classify_generation_failure
+from generation.logging import GenerationLogger
 from core.value_objects import EducationLevel
 from generation.dependencies import (
     get_document_repository,
@@ -708,6 +709,10 @@ async def _run_generation_job(
     initial_document: PipelineDocument,
 ) -> None:
     _ = report_repo
+    job_logger = GenerationLogger(
+        generation_id=generation.id,
+        user_id=generation.user_id,
+    )
     document = initial_document.model_copy(
         update={"status": "running", "updated_at": datetime.now(timezone.utc)}
     )
@@ -757,6 +762,12 @@ async def _run_generation_job(
     timeout_seconds = _generation_job_timeout(command.section_count)
 
     try:
+        job_logger.info(
+            "Generation job started template=%s preset=%s sections=%s",
+            command.template_id,
+            command.preset_id,
+            command.section_count,
+        )
         document_path = await document_repo.save_document(document)
         await gen_repo.update_status(
             generation.id,
@@ -792,14 +803,16 @@ async def _run_generation_job(
             quality_passed=document.quality_passed,
             generation_time_seconds=result.generation_time_seconds,
         )
+        job_logger.info(
+            "Generation completed in %.1fs quality_passed=%s",
+            result.generation_time_seconds,
+            document.quality_passed,
+        )
         core_events.event_bus.publish(generation.id, _complete_event(generation.id))
     except asyncio.TimeoutError:
-        logger.error(
+        job_logger.error(
             "Generation timed out",
-            extra=_generation_log_extra(
-                generation.id,
-                timeout_seconds=timeout_seconds,
-            ),
+            extra={"timeout_seconds": timeout_seconds},
         )
         try:
             await finalize_failure(
@@ -811,15 +824,9 @@ async def _run_generation_job(
                 generation_time_seconds=perf_counter() - started,
             )
         except Exception:
-            logger.exception(
-                "Generation failed while finalizing timeout state",
-                extra=_generation_log_extra(generation.id),
-            )
+            job_logger.exception("Generation failed while finalizing timeout state")
     except asyncio.CancelledError:
-        logger.warning(
-            "Generation was interrupted before completion",
-            extra=_generation_log_extra(generation.id),
-        )
+        job_logger.warning("Generation was interrupted before completion")
         try:
             await finalize_failure(
                 error_message=INTERRUPTED_GENERATION_ERROR,
@@ -828,15 +835,9 @@ async def _run_generation_job(
                 generation_time_seconds=perf_counter() - started,
             )
         except Exception:
-            logger.exception(
-                "Generation failed while finalizing interrupted state",
-                extra=_generation_log_extra(generation.id),
-            )
+            job_logger.exception("Generation failed while finalizing interrupted state")
     except Exception as exc:
-        logger.exception(
-            "Generation failed",
-            extra=_generation_log_extra(generation.id, error=str(exc)),
-        )
+        job_logger.exception("Generation failed", extra={"error": str(exc)})
         classification = classify_generation_failure(exc)
         try:
             await finalize_failure(
@@ -846,10 +847,7 @@ async def _run_generation_job(
                 generation_time_seconds=perf_counter() - started,
             )
         except Exception:
-            logger.exception(
-                "Generation failed while finalizing exception state",
-                extra=_generation_log_extra(generation.id),
-            )
+            job_logger.exception("Generation failed while finalizing exception state")
     finally:
         if heartbeat_task is not None:
             heartbeat_task.cancel()
@@ -861,10 +859,7 @@ async def _run_generation_job(
         try:
             current = await gen_repo.find_by_id(generation.id)
             if current is not None and current.status in {"pending", "running"}:
-                logger.error(
-                    "Generation ended without completion; forcing orphan failure",
-                    extra=_generation_log_extra(generation.id),
-                )
+                job_logger.error("Generation ended without completion; forcing orphan failure")
                 document = await _persist_failed_generation_state(
                     generation=generation,
                     gen_repo=gen_repo,
@@ -880,10 +875,7 @@ async def _run_generation_job(
                     _error_event(generation.id, _ORPHANED_GENERATION_ERROR_MESSAGE),
                 )
         except Exception:
-            logger.exception(
-                "Generation failed during orphan cleanup",
-                extra=_generation_log_extra(generation.id),
-            )
+            job_logger.exception("Generation failed during orphan cleanup")
         finally:
             core_events.event_bus.publish(
                 generation.id,
@@ -1100,9 +1092,11 @@ async def get_generation_document(
     generation = await gen_repo.find_by_id(generation_id)
     if generation is None or generation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
-    if not generation.document_path:
-        raise HTTPException(status_code=404, detail="Document not found")
-    document = await document_repo.load_document(generation.document_path)
+    document_ref = generation.document_path or generation.id
+    try:
+        document = await document_repo.load_document(document_ref)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document not found") from exc
     return document.model_dump(mode="json", exclude_none=True)
 
 

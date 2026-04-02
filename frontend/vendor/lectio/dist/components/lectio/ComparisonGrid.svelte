@@ -10,6 +10,7 @@
 	);
 </script>
 
+<div class="comparison-grid-root">
 <Card class="border-cyan-200 bg-cyan-50/45 p-6">
 	<div class="space-y-5">
 		<div class="space-y-2">
@@ -47,8 +48,8 @@
 			{/each}
 		</div>
 
-		<div class="overflow-x-auto rounded-[1.25rem] border border-cyan-100 bg-white/88">
-			<div class="min-w-[48rem]">
+		<div class="comparison-grid-table-wrapper overflow-x-auto rounded-[1.25rem] border border-cyan-100 bg-white/88">
+			<div class="comparison-grid-table min-w-[48rem]">
 				<div class="grid items-stretch border-b border-cyan-100 bg-cyan-50/80" style={gridTemplate}>
 					<div class="px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
 						Criterion
@@ -88,3 +89,22 @@
 		{/if}
 	</div>
 </Card>
+</div>
+
+<style>
+	@media print {
+		.comparison-grid-root {
+			page-break-inside: avoid;
+		}
+
+		/* Remove horizontal scroll so table renders fully */
+		.comparison-grid-table-wrapper {
+			overflow: visible !important;
+		}
+
+		.comparison-grid-table {
+			min-width: 0 !important;
+			width: 100%;
+		}
+	}
+</style>

@@ -52,7 +52,7 @@
     "section-divider"
   ],
   "component_budget": {
-    "simulation-block": 1
+    "simulation-block": 2
   },
   "max_per_section": {
     "diagram-block": 1,

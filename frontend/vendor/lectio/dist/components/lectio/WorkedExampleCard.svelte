@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { WorkedExampleContent, WorkedStep } from '../../types';
 	import { Card } from '../ui/card';
+	import { usePrintMode } from '../../utils/printContext';
+	import ExpandedSteps from '../../print/ExpandedSteps.svelte';
 	import { Badge } from '../ui/badge';
 	import { Button } from '../ui/button';
 	import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../ui/collapsible';
@@ -19,6 +21,9 @@
 		content: WorkedExampleContent;
 		mode?: 'static' | 'step-reveal' | 'accordion';
 	} = $props();
+
+	const getPrintMode = usePrintMode();
+	const printMode = $derived(getPrintMode());
 
 	let revealed = $state(0);
 
@@ -84,6 +89,16 @@
 	</div>
 {/snippet}
 
+{#if printMode}
+	<div class="worked-example-print">
+		<p class="worked-example-print-setup">{content.setup}</p>
+		<ExpandedSteps steps={content.steps} title={content.title} />
+		<p class="worked-example-print-conclusion">{content.conclusion}</p>
+		{#if content.answer}
+			<p class="worked-example-print-answer"><strong>Answer:</strong> {content.answer}</p>
+		{/if}
+	</div>
+{:else}
 <Card class="border-l-4 border-l-violet-500 bg-violet-50/45">
 	<div class="space-y-5 p-6">
 		<div class="space-y-3">
@@ -175,3 +190,31 @@
 		{/if}
 	</div>
 </Card>
+{/if}
+
+<style>
+	.worked-example-print {
+		page-break-inside: avoid;
+		margin: 1rem 0;
+	}
+
+	.worked-example-print-setup {
+		font-size: 0.875rem;
+		color: #6b7280;
+		margin-bottom: 1rem;
+		line-height: 1.6;
+	}
+
+	.worked-example-print-conclusion {
+		padding: 0.75rem 1rem;
+		border: 1px solid #e5e7eb;
+		margin-top: 0.5rem;
+		font-weight: 600;
+		font-size: 0.875rem;
+	}
+
+	.worked-example-print-answer {
+		margin-top: 0.75rem;
+		font-size: 0.875rem;
+	}
+</style>

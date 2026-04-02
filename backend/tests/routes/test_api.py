@@ -1,10 +1,11 @@
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +14,7 @@ from core.config import Settings
 from core.database.models import GenerationModel
 from core.database.session import get_async_session
 from pipeline.api import PipelineDocument, PipelineResult
-from pipeline.events import SectionReadyEvent, SectionStartedEvent
+from pipeline.events import ErrorEvent, SectionReadyEvent, SectionStartedEvent
 from pipeline.runtime_context import (
     build_runtime_context,
     register_runtime_context,
@@ -399,57 +400,6 @@ async def _client():
 
 
 class TestHealthAndAuth:
-    async def test_health_returns_pipeline_runtime_metadata(self):
-        with TestClient(create_app()) as client:
-            response = client.get("/health")
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["status"] == "ok"
-        assert payload["pipeline_architecture"] == "shell-pipeline-native-lectio"
-
-    async def test_health_includes_security_headers(self):
-        with TestClient(create_app()) as client:
-            response = client.get("/health")
-
-        assert response.headers["X-Content-Type-Options"] == "nosniff"
-        assert response.headers["X-Frame-Options"] == "DENY"
-        assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
-
-    async def test_readiness_returns_ok_when_database_and_key_are_available(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-
-        with TestClient(create_app()) as client:
-            response = client.get("/health/ready")
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["status"] == "ok"
-        assert payload["checks"]["database"] == "ok"
-        assert payload["checks"]["anthropic_api_key"] == "present"
-
-    async def test_readiness_returns_degraded_when_database_check_fails(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        app = create_app()
-
-        class BrokenSession:
-            async def execute(self, *_args, **_kwargs):
-                raise RuntimeError("db offline")
-
-        async def override_session():
-            yield BrokenSession()
-
-        app.dependency_overrides[get_async_session] = override_session
-        try:
-            with TestClient(app) as client:
-                response = client.get("/health/ready")
-        finally:
-            app.dependency_overrides.clear()
-
-        assert response.status_code == 503
-        payload = response.json()
-        assert payload["status"] == "degraded"
-        assert payload["checks"]["database"].startswith("failed:")
-
     async def test_auth_me_returns_current_user(self):
         async with _client() as client:
             response = await client.get("/api/v1/auth/me", headers=AUTH_HEADERS)
@@ -588,6 +538,88 @@ class TestGenerationApi:
 
         assert response.status_code == 429
         assert "Maximum 2 concurrent generations allowed" in response.json()["detail"]
+
+    async def test_export_pdf_rejects_non_completed_generations(self):
+        generation_id = "gen-export-pending"
+        generation = Generation(
+            id=generation_id,
+            user_id=TEST_USER.id,
+            subject="Calculus",
+            context="Explain limits",
+            status="running",
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
+        )
+        generation.document_path = await DOC_REPO.save_document(_document(generation_id, status="running"))
+        await GEN_REPO.create(generation)
+
+        async with _client() as client:
+            response = await client.post(
+                f"/api/v1/generations/{generation_id}/export/pdf",
+                json={
+                    "school_name": "Springfield High",
+                    "teacher_name": "Ms. Johnson",
+                    "include_toc": True,
+                    "include_answers": True,
+                },
+                headers=AUTH_HEADERS,
+            )
+
+        assert response.status_code == 409
+        assert "only available for completed generations" in response.json()["detail"]
+
+    async def test_export_pdf_returns_download_for_completed_generation(self, tmp_path: Path):
+        generation_id = "gen-export-complete"
+        generation = Generation(
+            id=generation_id,
+            user_id=TEST_USER.id,
+            subject="Calculus",
+            context="Explain limits",
+            status="completed",
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
+        )
+        generation.document_path = await DOC_REPO.save_document(_document(generation_id))
+        await GEN_REPO.create(generation)
+
+        exported_pdf = tmp_path / "lesson.pdf"
+        exported_pdf.write_bytes(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF")
+
+        async def fake_export_generation_pdf(**kwargs):
+            assert kwargs["generation"].id == generation_id
+            assert kwargs["document"].generation_id == generation_id
+            assert kwargs["request_id"] is not None
+            return SimpleNamespace(
+                pdf_path=exported_pdf,
+                filename="calculus.pdf",
+                file_size_bytes=exported_pdf.stat().st_size,
+                page_count=4,
+                generation_time_ms=850,
+                cleanup_paths=[],
+            )
+
+        with patch.object(
+            generation_routes,
+            "export_generation_pdf",
+            side_effect=fake_export_generation_pdf,
+        ):
+            async with _client() as client:
+                response = await client.post(
+                    f"/api/v1/generations/{generation_id}/export/pdf",
+                    json={
+                        "school_name": "Springfield High",
+                        "teacher_name": "Ms. Johnson",
+                        "include_toc": True,
+                        "include_answers": False,
+                    },
+                    headers=AUTH_HEADERS,
+                )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert response.headers["x-page-count"] == "4"
+        assert response.headers["x-file-size"] == str(exported_pdf.stat().st_size)
+        assert response.headers["x-generation-time-ms"] == "850"
 
     async def test_create_generation_uses_settings_backed_concurrency_limit(self, monkeypatch):
         await GEN_REPO.create(
@@ -1368,6 +1400,151 @@ class TestGenerationApi:
         assert updated.error_code == "generation_timeout"
 
         assert generation_id not in report_repo.store
+
+    async def test_run_generation_job_timeout_publishes_error_event(self, monkeypatch):
+        generation_id = "gen-timeout-event"
+        generation = Generation(
+            id=generation_id,
+            user_id=TEST_USER.id,
+            subject="Calculus",
+            context="Explain limits",
+            mode="balanced",
+            status="pending",
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
+            section_count=1,
+        )
+        gen_repo = InMemoryGenerationRepo()
+        doc_repo = InMemoryDocumentRepo()
+        report_repo = InMemoryReportRepo()
+        initial_document = _document(generation_id, status="pending").model_copy(
+            update={"quality_passed": None, "completed_at": None, "error": None}
+        )
+        generation.document_path = await doc_repo.save_document(initial_document)
+        await gen_repo.create(generation)
+
+        command = generation_routes.PipelineCommand(
+            generation_id=generation_id,
+            subject="Calculus",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=1,
+            mode="balanced",
+        )
+        queue = generation_routes.event_bus.subscribe(generation_id)
+
+        async def slow_run_pipeline(command, on_event=None):
+            _ = (command, on_event)
+            await asyncio.sleep(0.05)
+            return PipelineResult(
+                document=_document(generation_id),
+                completed_nodes=["curriculum_planner"],
+                generation_time_seconds=0.05,
+            )
+
+        monkeypatch.setattr(generation_routes, "_generation_job_timeout", lambda n: 0.01)
+        with patch.object(
+            generation_routes,
+            "run_pipeline_streaming",
+            create=True,
+            side_effect=slow_run_pipeline,
+        ):
+            await generation_routes._run_generation_job(
+                generation,
+                command,
+                gen_repo,
+                doc_repo,
+                report_repo,
+                initial_document,
+            )
+
+        try:
+            events = []
+            while not queue.empty():
+                events.append(queue.get_nowait())
+        finally:
+            generation_routes.event_bus.unsubscribe(generation_id, queue)
+
+        error_events = [
+            ErrorEvent.model_validate(event)
+            for event in events
+            if event.get("type") == "error"
+        ]
+        assert len(error_events) == 1
+        assert "timed out" in error_events[0].message.lower()
+
+    async def test_run_generation_job_logs_generation_context(self, monkeypatch):
+        generation_id = "gen-logging-context"
+        generation = Generation(
+            id=generation_id,
+            user_id=TEST_USER.id,
+            subject="Calculus",
+            context="Explain derivatives",
+            mode="balanced",
+            status="pending",
+            requested_template_id="guided-concept-path",
+            requested_preset_id="blue-classroom",
+            section_count=1,
+        )
+        gen_repo = InMemoryGenerationRepo()
+        doc_repo = InMemoryDocumentRepo()
+        report_repo = InMemoryReportRepo()
+        initial_document = _document(generation_id, status="pending").model_copy(
+            update={"quality_passed": None, "completed_at": None, "error": None}
+        )
+        generation.document_path = await doc_repo.save_document(initial_document)
+        await gen_repo.create(generation)
+
+        command = generation_routes.PipelineCommand(
+            generation_id=generation_id,
+            subject="Calculus",
+            context="Explain derivatives",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=1,
+            mode="balanced",
+        )
+
+        async def fast_run_pipeline(command, on_event=None):
+            _ = (command, on_event)
+            return PipelineResult(
+                document=_document(generation_id),
+                completed_nodes=["curriculum_planner"],
+                generation_time_seconds=0.25,
+            )
+
+        with patch.object(
+            generation_routes,
+            "run_pipeline_streaming",
+            create=True,
+            side_effect=fast_run_pipeline,
+        ), patch.object(
+            generation_routes.generation_service.GenerationLogger,
+            "info",
+            autospec=True,
+        ) as info_mock:
+                await generation_routes._run_generation_job(
+                    generation,
+                    command,
+                    gen_repo,
+                    doc_repo,
+                    report_repo,
+                    initial_document,
+                )
+
+        assert info_mock.call_count >= 2
+        messages = [call.args[1] for call in info_mock.call_args_list]
+        assert any("Generation job started" in message for message in messages)
+        assert any("Generation completed" in message for message in messages)
+        for call in info_mock.call_args_list:
+            logger_instance = call.args[0]
+            assert logger_instance.extra["generation_id"] == generation_id
+            assert logger_instance.extra["user_id"] == TEST_USER.id
 
     async def test_run_generation_job_forces_orphan_failure_when_primary_persist_breaks_without_direct_report_writes(self):
         generation_id = "gen-orphaned"

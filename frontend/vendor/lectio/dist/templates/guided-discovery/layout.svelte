@@ -12,11 +12,13 @@
 		WhatNextBridge,
 		WorkedExampleCard
 	} from '../../components/lectio';
+	import { getSectionSimulations } from '../../section-content';
 	import type { SectionContent } from '../../types';
 
 	import TemplateShell from '../TemplateShell.svelte';
 
 	let { section }: { section: SectionContent } = $props();
+	const simulations = $derived(getSectionSimulations(section));
 </script>
 
 <TemplateShell {section}>
@@ -34,9 +36,9 @@
 	{#if section.diagram}
 		<DiagramBlock content={section.diagram} />
 	{/if}
-	{#if section.simulation}
-		<SimulationBlock content={section.simulation} />
-	{/if}
+	{#each simulations as simulation}
+		<SimulationBlock content={simulation} />
+	{/each}
 	{#if section.worked_example}
 		<WorkedExampleCard content={section.worked_example} mode="step-reveal" />
 	{/if}

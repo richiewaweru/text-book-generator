@@ -7,22 +7,36 @@ const {
 	pageState,
 	getGenerationDetail,
 	getGenerationDocument,
-	buildGenerationEventsUrl
+	buildGenerationEventsUrl,
+	downloadGenerationPdf
 } = vi.hoisted(() => ({
-	pageState: { params: { id: 'gen-123' } },
+	pageState: {
+		params: { id: 'gen-123' },
+		url: new URL('http://localhost/textbook/gen-123')
+	},
 	getGenerationDetail: vi.fn(),
 	getGenerationDocument: vi.fn(),
-	buildGenerationEventsUrl: vi.fn((id: string) => `/api/v1/generations/${id}/events`)
+	buildGenerationEventsUrl: vi.fn((id: string) => `/api/v1/generations/${id}/events`),
+	downloadGenerationPdf: vi.fn()
 }));
 
 vi.mock('$app/state', () => ({
 	page: pageState
 }));
 
+vi.mock('lectio', () => ({
+	providePrintMode: vi.fn()
+}));
+
+vi.mock('$lib/components/PrintSectionLink.svelte', async () => ({
+	default: (await import('./__fixtures__/MockPrintSectionLink.svelte')).default
+}));
+
 vi.mock('$lib/api/client', () => ({
 	getGenerationDetail,
 	getGenerationDocument,
-	buildGenerationEventsUrl
+	buildGenerationEventsUrl,
+	downloadGenerationPdf
 }));
 
 vi.mock('$lib/components/LectioDocumentView.svelte', async () => ({
@@ -124,6 +138,8 @@ describe('textbook page stream lifecycle', () => {
 		getGenerationDetail.mockReset();
 		getGenerationDocument.mockReset();
 		buildGenerationEventsUrl.mockClear();
+		downloadGenerationPdf.mockReset();
+		pageState.url = new URL('http://localhost/textbook/gen-123');
 		vi.stubGlobal('EventSource', MockEventSource);
 	});
 
@@ -429,5 +445,101 @@ describe('textbook page stream lifecycle', () => {
 		expect(screen.getByText(/Needs a diagram/i)).toBeTruthy();
 		expect(screen.queryByRole('button', { name: /improve section/i })).toBeNull();
 		expect(screen.queryByRole('button', { name: /retry diagram/i })).toBeNull();
+	});
+
+	it('shows the export pdf action for completed generations', async () => {
+		getGenerationDetail.mockResolvedValueOnce(
+			buildDetail({
+				status: 'completed',
+				quality_passed: true,
+				completed_at: '2026-03-23T00:01:00Z'
+			})
+		);
+		getGenerationDocument.mockResolvedValueOnce(
+			buildDocument({
+				status: 'completed',
+				sections: [
+					{
+						section_id: 's-01',
+						header: { title: 'Section 1' }
+					}
+				],
+				quality_passed: true,
+				completed_at: '2026-03-23T00:01:00Z'
+			})
+		);
+
+		render(TextbookPage);
+
+		await waitFor(() => expect(screen.getByRole('button', { name: /export pdf/i })).toBeTruthy());
+		expect(MockEventSource.instances).toHaveLength(0);
+	});
+
+	it('marks the print route complete when a completed document is fully ready', async () => {
+		pageState.url = new URL('http://localhost/textbook/gen-123?print=true&token=abc');
+		getGenerationDetail.mockResolvedValueOnce(
+			buildDetail({
+				status: 'completed',
+				quality_passed: true,
+				completed_at: '2026-03-23T00:01:00Z'
+			})
+		);
+		getGenerationDocument.mockResolvedValueOnce(
+			buildDocument({
+				status: 'completed',
+				sections: [
+					{
+						section_id: 's-01',
+						header: { title: 'Section 1' }
+					},
+					{
+						section_id: 's-02',
+						header: { title: 'Section 2' }
+					},
+					{
+						section_id: 's-03',
+						header: { title: 'Section 3' }
+					},
+					{
+						section_id: 's-04',
+						header: { title: 'Section 4' }
+					}
+				],
+				quality_passed: true,
+				completed_at: '2026-03-23T00:01:00Z'
+			})
+		);
+
+		const { container } = render(TextbookPage);
+		await waitFor(() =>
+			expect(container.querySelector('[data-generation-complete="true"]')).toBeTruthy()
+		);
+		expect(screen.queryByRole('button', { name: /export pdf/i })).toBeNull();
+		expect(MockEventSource.instances).toHaveLength(0);
+	});
+
+	it('shows teacher and student export presets for completed generations', async () => {
+		getGenerationDetail.mockResolvedValueOnce(
+			buildDetail({
+				status: 'completed',
+				quality_passed: true,
+				completed_at: '2026-03-23T00:01:00Z'
+			})
+		);
+		getGenerationDocument.mockResolvedValueOnce(
+			buildDocument({
+				status: 'completed',
+				sections: [{ section_id: 's-01', header: { title: 'Section 1' } }],
+				quality_passed: true,
+				completed_at: '2026-03-23T00:01:00Z'
+			})
+		);
+
+		render(TextbookPage);
+		await waitFor(() => expect(screen.getByRole('button', { name: /export pdf/i })).toBeTruthy());
+		screen.getByRole('button', { name: /export pdf/i }).click();
+
+		await waitFor(() => expect(screen.getByRole('button', { name: /teacher copy/i })).toBeTruthy());
+		expect(screen.getByRole('button', { name: /student copy/i })).toBeTruthy();
 	});
 });

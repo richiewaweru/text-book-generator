@@ -264,12 +264,9 @@ class TelemetryMonitor:
 
     async def _load_document(self, generation_id: str) -> PipelineDocument:
         generation = await self._load_generation(generation_id)
-        if (
-            generation is not None
-            and self._document_loader is not None
-            and getattr(generation, "document_path", None)
-        ):
-            return await self._document_loader(generation.document_path)
+        if generation is not None and self._document_loader is not None:
+            document_ref = getattr(generation, "document_path", None) or generation_id
+            return await self._document_loader(document_ref)
         async with async_session_factory() as session:
             result = await session.execute(
                 select(GenerationModel.document_json).where(GenerationModel.id == generation_id)

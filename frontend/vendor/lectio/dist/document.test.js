@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculusSection } from './dummy-content';
+import { calculusSection, physicsSection } from './dummy-content';
 import { fromSectionContents, toSectionContents, validateDocument } from './document';
 describe('LessonDocument conversion', () => {
     it('round-trips a rich section through fromSectionContents and toSectionContents', () => {
@@ -38,5 +38,45 @@ describe('LessonDocument conversion', () => {
         const result = validateDocument(doc);
         expect(result.valid).toBe(false);
         expect(result.errors.some((e) => e.includes('missing-block'))).toBe(true);
+    });
+    it('preserves repeated simulation blocks through document round-trips', () => {
+        const secondSimulation = {
+            ...physicsSection.simulations[0],
+            explanation: 'A second interaction that extends the same concept.',
+            spec: {
+                ...physicsSection.simulations[0].spec,
+                goal: 'Compare how a second interaction reinforces Newtons Second Law.'
+            }
+        };
+        const section = {
+            ...physicsSection,
+            section_id: 'phys-02-multi',
+            simulations: [physicsSection.simulations[0], secondSimulation]
+        };
+        const doc = fromSectionContents([section], {
+            title: section.header.title,
+            subject: section.header.subject,
+            preset_id: 'blue-classroom'
+        });
+        const simulationBlocks = Object.values(doc.blocks).filter((block) => block.component_id === 'simulation-block');
+        expect(simulationBlocks).toHaveLength(2);
+        const back = toSectionContents(doc)[0];
+        expect(back.simulations).toEqual(section.simulations);
+    });
+    it('reads legacy singular simulation content and rebuilds the plural shape', () => {
+        const legacySection = {
+            ...physicsSection,
+            section_id: 'phys-02-legacy',
+            simulations: undefined,
+            simulation: physicsSection.simulations[0]
+        };
+        const doc = fromSectionContents([legacySection], {
+            title: legacySection.header.title,
+            subject: legacySection.header.subject,
+            preset_id: 'blue-classroom'
+        });
+        const back = toSectionContents(doc)[0];
+        expect(back.simulations).toEqual([physicsSection.simulations[0]]);
+        expect(back.simulation).toBeUndefined();
     });
 });

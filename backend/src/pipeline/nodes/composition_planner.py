@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from core.llm.logging import NodeLogger
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
@@ -252,6 +253,11 @@ async def composition_planner(
     section = state.generated_sections.get(sid)
     if sid is None or section is None:
         return {"completed_nodes": ["composition_planner"]}
+    node_logger = NodeLogger(
+        generation_id=state.request.generation_id or "",
+        section_id=sid,
+        node_name="composition_planner",
+    )
 
     diagram_ok = _diagram_allowed(state)
     interaction_ok = _interaction_allowed(state)
@@ -310,7 +316,7 @@ async def composition_planner(
         )
 
     except Exception:
-        logger.warning(
+        node_logger.warning(
             "composition_planner LLM call failed for section %s, using heuristic fallback",
             sid,
             exc_info=True,

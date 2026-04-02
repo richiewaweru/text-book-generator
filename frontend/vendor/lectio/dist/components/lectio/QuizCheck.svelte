@@ -3,11 +3,16 @@
 	import { Card } from '../ui/card';
 	import { Button } from '../ui/button';
 	import { CircleCheck, CircleX, RotateCcw } from 'lucide-svelte';
+	import { usePrintMode } from '../../utils/printContext';
+	import AnswerMarker from '../../print/AnswerMarker.svelte';
 
-	let { content }: { content: QuizContent } = $props();
+	let { content, showAnswersInPrint = true }: { content: QuizContent; showAnswersInPrint?: boolean } = $props();
 
 	let selected = $state<number | null>(null);
 	let submitted = $state(false);
+
+	const getPrintMode = usePrintMode();
+	const printMode = $derived(getPrintMode());
 
 	function select(index: number) {
 		if (submitted) return;
@@ -23,6 +28,29 @@
 	const isCorrect = $derived(selected !== null && Boolean(content.options[selected]?.correct));
 </script>
 
+{#if printMode}
+	<div class="quiz-print">
+		<div class="quiz-print-question">{content.question}</div>
+		<div class="quiz-print-options">
+			{#each content.options as option, idx}
+				<div class="quiz-print-option">
+					<span class="quiz-print-letter">{String.fromCharCode(65 + idx)}.</span>
+					<span class="quiz-print-text">{option.text}</span>
+					<AnswerMarker isCorrect={option.correct} showAnswers={showAnswersInPrint} />
+				</div>
+			{/each}
+		</div>
+		{#if showAnswersInPrint}
+			{@const correctOption = content.options.find((o) => o.correct)}
+			{#if correctOption?.explanation}
+				<div class="quiz-print-explanation">
+					<strong>Explanation:</strong>
+					<span>{correctOption.explanation}</span>
+				</div>
+			{/if}
+		{/if}
+	</div>
+{:else}
 <Card class="border-primary/10 bg-white/85 p-6">
 	<div class="space-y-4">
 		<div class="space-y-2">
@@ -101,3 +129,45 @@
 		{/if}
 	</div>
 </Card>
+{/if}
+
+<style>
+	.quiz-print {
+		page-break-inside: avoid;
+		margin: 1rem 0;
+		padding: 1rem;
+		border: 2px solid #e5e7eb;
+	}
+
+	.quiz-print-question {
+		font-weight: 600;
+		margin-bottom: 1rem;
+	}
+
+	.quiz-print-options {
+		margin-bottom: 1rem;
+	}
+
+	.quiz-print-option {
+		display: flex;
+		align-items: baseline;
+		margin-bottom: 0.5rem;
+	}
+
+	.quiz-print-letter {
+		font-weight: 600;
+		margin-right: 0.5rem;
+		min-width: 1.5rem;
+	}
+
+	.quiz-print-text {
+		flex: 1;
+	}
+
+	.quiz-print-explanation {
+		border-top: 1px solid #d1d5db;
+		padding-top: 0.75rem;
+		margin-top: 0.75rem;
+		font-size: 0.875rem;
+	}
+</style>

@@ -26,6 +26,8 @@
   "diagram-block": "diagram",
   "diagram-compare": "diagram_compare",
   "diagram-series": "diagram_series",
+  "video-embed": "video_embed",
+  "image-block": "image_block",
   "timeline-block": "timeline",
-  "simulation-block": "simulation"
+  "simulation-block": "simulations"
 }

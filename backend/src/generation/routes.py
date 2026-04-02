@@ -5,7 +5,8 @@ from collections.abc import AsyncIterator
 
 import core.events as core_events
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
 from core.auth.jwt_handler import JWTHandler
 from core.auth.middleware import get_current_user
@@ -24,6 +25,8 @@ from generation.dependencies import (
     get_generation_engine,
     get_generation_repository,
 )
+from generation.pdf_export.cleanup import cleanup_files
+from generation.pdf_export.service import PDFExportRequest, export_generation_pdf
 from generation.dtos import GenerationAcceptedResponse, GenerationRequest
 from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_repository import GenerationRepository
@@ -168,10 +171,59 @@ async def get_generation_document(
     generation = await gen_repo.find_by_id(generation_id)
     if generation is None or generation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
-    if not generation.document_path:
-        raise HTTPException(status_code=404, detail="Document not found")
-    document = await document_repo.load_document(generation.document_path)
+    document_ref = generation.document_path or generation.id
+    try:
+        document = await document_repo.load_document(document_ref)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document not found") from exc
     return document.model_dump(mode="json", exclude_none=True)
+
+
+@router.post("/generations/{generation_id}/export/pdf")
+async def export_generation_pdf_route(
+    generation_id: str,
+    body: PDFExportRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    jwt_handler: JWTHandler = Depends(get_jwt_handler),
+    gen_repo: GenerationRepository = Depends(get_generation_repository),
+    document_repo: DocumentRepository = Depends(get_document_repository),
+):
+    generation = await gen_repo.find_by_id(generation_id)
+    if generation is None or generation.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    if generation.status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="PDF export is only available for completed generations",
+        )
+
+    document_ref = generation.document_path or generation.id
+    try:
+        document = await document_repo.load_document(document_ref)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document not found") from exc
+
+    auth_token = jwt_handler.create_access_token(current_user.id, current_user.email)
+    result = await export_generation_pdf(
+        generation=generation,
+        document=document,
+        auth_token=auth_token,
+        request=body,
+        settings=get_settings(),
+        request_id=getattr(request.state, "request_id", None),
+    )
+    return FileResponse(
+        path=result.pdf_path,
+        media_type="application/pdf",
+        filename=result.filename,
+        headers={
+            "X-Page-Count": str(result.page_count),
+            "X-File-Size": str(result.file_size_bytes),
+            "X-Generation-Time-Ms": str(result.generation_time_ms),
+        },
+        background=BackgroundTask(cleanup_files, result.cleanup_paths),
+    )
 
 
 @router.get("/generations/{generation_id}/events")

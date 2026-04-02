@@ -2,8 +2,13 @@
 	import type { ReflectionContent } from '../../types';
 	import { Card } from '../ui/card';
 	import { Brain } from 'lucide-svelte';
+	import { usePrintMode } from '../../utils/printContext';
+	import RuledLines from '../../print/RuledLines.svelte';
 
 	let { content }: { content: ReflectionContent } = $props();
+
+	const getPrintMode = usePrintMode();
+	const printMode = $derived(getPrintMode());
 
 	const typeLabels: Record<string, string> = {
 		open: 'Reflect',
@@ -16,6 +21,15 @@
 	};
 </script>
 
+{#if printMode}
+	<div class="reflection-print">
+		<p class="reflection-print-prompt">{content.prompt}</p>
+		{#if content.type === 'sentence-stem' && content.sentence_stem}
+			<p class="reflection-print-stem">{content.sentence_stem} ________________</p>
+		{/if}
+		<RuledLines lines={content.space && content.space > 0 ? content.space : 4} />
+	</div>
+{:else}
 <Card class="border-l-4 border-l-indigo-400 bg-indigo-50/50 p-6">
 	<div class="flex gap-3">
 		<Brain class="mt-0.5 h-5 w-5 shrink-0 text-indigo-500" />
@@ -52,3 +66,4 @@
 		</div>
 	</div>
 </Card>
+{/if}

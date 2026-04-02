@@ -78,9 +78,10 @@ const discoveryMathSection = {
         ],
         related_terms: ['Independent Events', 'Conditional Probability', 'Sample Space'],
     },
-    simulation: {
-        explanation: 'Build your own probability tree by choosing events. Watch the compound probabilities calculate as branches grow.',
-        html_content: `<!DOCTYPE html>
+    simulations: [
+        {
+            explanation: 'Build your own probability tree by choosing events. Watch the compound probabilities calculate as branches grow.',
+            html_content: `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -190,30 +191,31 @@ function draw(){
 }
 draw();
 </script></body></html>`,
-        spec: {
-            type: 'probability_tree',
-            goal: 'Explore how branching paths create compound probabilities through the multiplication rule.',
-            anchor_content: {
-                events: ['coin_flip', 'coin_flip'],
-                starting_probabilities: [0.5, 0.5],
+            spec: {
+                type: 'probability_tree',
+                goal: 'Explore how branching paths create compound probabilities through the multiplication rule.',
+                anchor_content: {
+                    events: ['coin_flip', 'coin_flip'],
+                    starting_probabilities: [0.5, 0.5],
+                },
+                context: {
+                    learner_level: 'secondary',
+                    template_id: 'guided-discovery',
+                    color_mode: 'light',
+                    accent_color: '#2563eb',
+                    surface_color: '#eff6ff',
+                    font_mono: 'ui-monospace',
+                },
+                dimensions: { width: '100%', height: 340, resizable: false },
+                print_translation: 'static_diagram',
             },
-            context: {
-                learner_level: 'secondary',
-                template_id: 'guided-discovery',
-                color_mode: 'light',
-                accent_color: '#2563eb',
-                surface_color: '#eff6ff',
-                font_mono: 'ui-monospace',
+            fallback_diagram: {
+                svg_content: probabilityTreeSvg,
+                caption: 'Probability tree for two fair coin flips showing four equally likely outcomes, each with probability ¼.',
+                alt_text: 'Tree diagram branching from Start into Heads and Tails, each further branching into Heads and Tails, with final probabilities of one quarter each.',
             },
-            dimensions: { width: '100%', height: 340, resizable: false },
-            print_translation: 'static_diagram',
-        },
-        fallback_diagram: {
-            svg_content: probabilityTreeSvg,
-            caption: 'Probability tree for two fair coin flips showing four equally likely outcomes, each with probability ¼.',
-            alt_text: 'Tree diagram branching from Start into Heads and Tails, each further branching into Heads and Tails, with final probabilities of one quarter each.',
-        },
-    },
+        }
+    ],
     worked_example: {
         title: 'Two dice: probability of doubles',
         setup: 'You roll two fair six-sided dice. What is the probability of rolling doubles (both dice show the same number)?',

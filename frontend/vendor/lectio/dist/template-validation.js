@@ -7,6 +7,7 @@
 //   validateTemplateDefinition — both combined (the one you call)
 import { basePresetMap } from './presets/base-presets';
 import { getComponentById, getComponentFieldMap } from './registry';
+import { getSectionSimulations } from './section-content';
 // Derived from the registry — never hardcoded here.
 // When you add a new component with sectionField declared,
 // it is automatically included. This file never needs to change.
@@ -15,6 +16,9 @@ function hasPreviewField(section, componentId) {
     const field = componentFieldMap[componentId];
     if (!field)
         return false;
+    if (field === 'simulations') {
+        return getSectionSimulations(section).length > 0;
+    }
     return Boolean(section[field]);
 }
 export function validateTemplateContract(contract) {

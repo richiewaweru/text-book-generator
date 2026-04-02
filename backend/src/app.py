@@ -1,8 +1,6 @@
 import asyncio
 import inspect
-import json
 import logging
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit, urlunsplit
@@ -10,7 +8,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from core.config import settings
@@ -18,8 +16,11 @@ from core.database.migrations import upgrade_database
 from core.database.models import GenerationModel
 from core.database.session import async_session_factory, engine
 from core.errors import register_error_handlers
+from core.health.routes import router as health_router
+from core.logging import configure_logging
+from core.middleware.request_id import RequestIdMiddleware
+from core.pdf_export_runtime import cleanup_stale_pdf_exports
 from core.routes.auth import router as auth_router
-from core.routes.health import router as health_router
 from core.routes.profile import router as profile_router
 from core.routes.shares import router as shares_router
 from generation.dependencies import get_document_repository, get_generation_repository
@@ -27,7 +28,6 @@ from generation.recovery import mark_stale_generations_failed
 from generation.repositories.sql_document_repo import SqlDocumentRepository
 from generation.repositories.sql_generation_repo import SqlGenerationRepository
 from generation.routes import router as generation_router
-from pdf_export.routes import router as pdf_export_router
 from planning.routes import router as brief_router
 from telemetry import telemetry_router
 from telemetry.dependencies import get_llm_call_repository, get_report_repository
@@ -35,43 +35,8 @@ from telemetry.service import telemetry_monitor
 
 logger = logging.getLogger("uvicorn.error")
 __version__ = "0.1.0"
-_STALE_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
-
-
-class JSONFormatter(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        log_entry: dict[str, object] = {
-            "timestamp": self.formatTime(record),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-        }
-        for key in (
-            "generation_id",
-            "user_id",
-            "node",
-            "latency_ms",
-            "caller",
-            "trace_id",
-            "slot",
-            "status_code",
-            "timeout_seconds",
-            "template_id",
-            "preset_id",
-            "section_count",
-            "endpoint_host",
-            "error",
-            "instance_id",
-            "started_at",
-            "pipeline_architecture",
-            "stale_generations",
-            "telemetry_backfill",
-        ):
-            if hasattr(record, key):
-                log_entry[key] = getattr(record, key)
-        if record.exc_info:
-            log_entry["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_entry, default=str)
+_PRODUCTION_LIKE_ENVS = {"production", "staging"}
+_STALE_GENERATION_GRACE_SECONDS = 60.0
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -83,55 +48,57 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def configure_logging() -> None:
-    handler = logging.StreamHandler(sys.stdout)
-    if settings.json_logging:
-        handler.setFormatter(JSONFormatter())
-    else:
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
-        )
-    root = logging.getLogger()
-    root.handlers = [handler]
-    root.setLevel(logging.INFO)
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-
-
-def _allowed_frontend_origins(frontend_origin: str) -> list[str]:
-    parsed = urlsplit(frontend_origin)
-    hostname = parsed.hostname
-    if hostname not in {"localhost", "127.0.0.1"}:
-        return [frontend_origin]
-
-    port_suffix = f":{parsed.port}" if parsed.port is not None else ""
-    netloc_template = "{host}" + port_suffix
-    variants = []
-    for host in ("localhost", "127.0.0.1"):
-        candidate = urlunsplit(
-            (
-                parsed.scheme,
-                netloc_template.format(host=host),
-                parsed.path,
-                parsed.query,
-                parsed.fragment,
+def _allowed_frontend_origins(frontend_origin: str, env: str = "development") -> list[str]:
+    if not frontend_origin or frontend_origin.strip() == "*":
+        if env in _PRODUCTION_LIKE_ENVS:
+            raise RuntimeError(
+                "FRONTEND_ORIGIN must be set to a specific domain in production. "
+                "A wildcard origin ('*') is not permitted."
             )
+        logger.warning(
+            "CORS is open to all origins. This is only acceptable in local development."
         )
-        if candidate not in variants:
-            variants.append(candidate)
+        return ["*"]
+
+    origins = [origin.strip() for origin in frontend_origin.split(",") if origin.strip()]
+    variants: list[str] = []
+    for origin in origins:
+        parsed = urlsplit(origin)
+        hostname = parsed.hostname
+        if hostname in {"localhost", "127.0.0.1"}:
+            port_suffix = f":{parsed.port}" if parsed.port is not None else ""
+            netloc_template = "{host}" + port_suffix
+            for host in ("localhost", "127.0.0.1"):
+                candidate = urlunsplit(
+                    (
+                        parsed.scheme,
+                        netloc_template.format(host=host),
+                        parsed.path,
+                        parsed.query,
+                        parsed.fragment,
+                    )
+                )
+                if candidate not in variants:
+                    variants.append(candidate)
+            continue
+
+        if origin not in variants:
+            variants.append(origin)
     return variants
 
 
+def _stale_generation_cutoff() -> datetime:
+    stale_after_seconds = settings.pipeline_timeout_generation_cap_seconds + _STALE_GENERATION_GRACE_SECONDS
+    return datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=stale_after_seconds)
+
+
 async def _mark_stale_generations_failed() -> int:
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - _STALE_HEARTBEAT_TIMEOUT
+    cutoff = _stale_generation_cutoff()
     async with async_session_factory() as session:
         result = await session.execute(
             select(GenerationModel).where(
                 GenerationModel.status.in_(("pending", "running")),
-                or_(
-                    GenerationModel.last_heartbeat.is_(None),
-                    GenerationModel.last_heartbeat < cutoff,
-                ),
+                GenerationModel.created_at < cutoff,
             )
         )
         models = result.scalars().all()
@@ -165,6 +132,11 @@ async def _resolve_override(app: FastAPI, dependency):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging(
+        json_logs=settings.json_logs,
+        level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    )
+
     async def load_generation(generation_id: str):
         repository = await _resolve_override(app, get_generation_repository)
         if repository is None:
@@ -193,6 +165,10 @@ async def lifespan(app: FastAPI):
         await asyncio.to_thread(upgrade_database)
     await telemetry_monitor.start()
     stale_generations = await _mark_stale_generations_failed()
+    pdf_temp_cleaned = cleanup_stale_pdf_exports(
+        path_value=settings.pdf_temp_dir,
+        retention_seconds=settings.pdf_temp_retention_seconds,
+    )
     telemetry_backfill = await telemetry_monitor.backfill_failed_reports()
     app.state.instance_id = str(uuid4())
     app.state.started_at = datetime.now(timezone.utc)
@@ -204,6 +180,7 @@ async def lifespan(app: FastAPI):
             "started_at": app.state.started_at.isoformat(),
             "pipeline_architecture": app.state.pipeline_architecture,
             "stale_generations": stale_generations,
+            "pdf_temp_cleaned": pdf_temp_cleaned,
             "telemetry_backfill": telemetry_backfill,
         },
     )
@@ -214,7 +191,6 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    configure_logging()
     app = FastAPI(
         title="Textbook Generation Agent",
         version=__version__,
@@ -222,8 +198,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    allowed_origins = _allowed_frontend_origins(settings.frontend_origin)
+    allowed_origins = _allowed_frontend_origins(
+        settings.frontend_origin,
+        env=settings.app_env,
+    )
 
+    app.add_middleware(RequestIdMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
@@ -241,7 +221,6 @@ def create_app() -> FastAPI:
     app.include_router(profile_router)
     app.include_router(brief_router)
     app.include_router(generation_router)
-    app.include_router(pdf_export_router)
     app.include_router(telemetry_router)
 
     return app

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from core.llm.logging import NodeLogger
 from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel
 from pydantic_ai import Agent
@@ -109,6 +110,11 @@ async def _generate_image_diagram(
     model_overrides: dict | None = None,
 ) -> dict | None:
     """Generate diagram as an image. Returns None when the image path is unavailable."""
+    node_logger = NodeLogger(
+        generation_id=state.request.generation_id or "",
+        section_id=section_id,
+        node_name="diagram_generator",
+    )
 
     try:
         image_client = get_image_client()
@@ -153,7 +159,7 @@ async def _generate_image_diagram(
             "generated_sections": {section_id: updated},
         }
     except Exception as exc:
-        logger.warning(
+        node_logger.warning(
             "Image generation failed for section %s, falling back to spec: %s",
             section_id,
             exc,
@@ -278,6 +284,11 @@ async def diagram_generator(
 
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
+    node_logger = NodeLogger(
+        generation_id=state.request.generation_id or "",
+        section_id=sid,
+        node_name="diagram_generator",
+    )
     outcomes = dict(state.diagram_outcomes)
     plan = state.composition_plans.get(sid)
 
@@ -334,7 +345,7 @@ async def diagram_generator(
                 "diagram_outcomes": outcomes,
                 "completed_nodes": ["diagram_generator"],
             }
-        logger.info("Image generation unavailable for %s, using spec path", sid)
+        node_logger.info("Image generation unavailable for %s, using spec path", sid)
 
     try:
         spec_result = await _generate_spec_diagram(

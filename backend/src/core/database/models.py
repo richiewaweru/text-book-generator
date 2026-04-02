@@ -81,8 +81,6 @@ class GenerationModel(Base):
     generation_time_seconds = Column(Float, nullable=True)
     planning_spec_json = Column(Text, nullable=True)
     report_json = Column(JSON_DOCUMENT_TYPE, nullable=True)
-    question_records = Column(JSON_DOCUMENT_TYPE, nullable=True)
-    sections_metadata = Column(JSON_DOCUMENT_TYPE, nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     last_heartbeat = Column(DateTime, nullable=True, index=True)

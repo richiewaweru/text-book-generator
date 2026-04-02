@@ -10,6 +10,7 @@
 	const isMinor = $derived(content.severity === 'minor');
 </script>
 
+<div class="pitfall-alert-root">
 <Alert class={isMinor ? 'border-amber-200 bg-amber-50/60' : 'border-orange-200 bg-orange-50/80'}>
 	<TriangleAlert class="h-4 w-4 {isMinor ? 'text-amber-500' : 'text-orange-600'}" />
 	<AlertTitle class="{isMinor ? 'text-amber-700' : 'text-orange-700'} text-sm font-semibold">
@@ -45,3 +46,16 @@
 		</Collapsible>
 	{/if}
 </Alert>
+</div>
+
+<style>
+	@media print {
+		.pitfall-alert-root {
+			page-break-inside: avoid;
+			border-left: 3px solid #d97706;
+			padding-left: 0.75rem;
+			margin: 1rem 0;
+		}
+	}
+</style>
+

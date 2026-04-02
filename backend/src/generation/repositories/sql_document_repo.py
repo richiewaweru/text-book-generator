@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,8 +31,8 @@ class SqlDocumentRepository(DocumentRepository):
         if model is None:
             raise FileNotFoundError(document.generation_id)
 
-        locator = self._locator_for(document.generation_id)
-        model.document_path = locator
+        locator = document.generation_id
+        model.document_path = None
         model.document_json = document.model_dump(mode="json", exclude_none=True)
         await self._session.commit()
         return locator
@@ -58,10 +56,4 @@ class SqlDocumentRepository(DocumentRepository):
                     exclude_none=True,
                 )
             return payload
-
-        file_path = Path(locator)
-        if file_path.exists():
-            return PipelineDocument.model_validate_json(
-                file_path.read_text(encoding="utf-8")
-            ).model_dump(mode="json", exclude_none=True)
         return None
