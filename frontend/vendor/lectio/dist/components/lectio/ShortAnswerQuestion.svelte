@@ -3,12 +3,27 @@
 	import { Card } from '../ui/card';
 	import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../ui/collapsible';
 	import { Badge } from '../ui/badge';
+	import { usePrintMode } from '../../utils/printContext';
+	import RuledLines from '../../print/RuledLines.svelte';
 
 	let { content }: { content: ShortAnswerContent } = $props();
 
+	const getPrintMode = usePrintMode();
+	const printMode = $derived(getPrintMode());
 	const lines = $derived(content.lines ?? 6);
 </script>
 
+{#if printMode}
+	<div class="short-answer-print">
+		<div class="short-answer-header">
+			<span class="short-answer-question">{content.question}</span>
+			{#if content.marks}
+				<span class="short-answer-marks">[{content.marks} {content.marks === 1 ? 'mark' : 'marks'}]</span>
+			{/if}
+		</div>
+		<RuledLines {lines} label="Answer:" />
+	</div>
+{:else}
 <Card class="border-border/60 p-5 sm:p-6">
 	<div class="flex items-start justify-between gap-3">
 		<p class="text-sm font-medium leading-relaxed">{content.question}</p>
@@ -39,3 +54,31 @@
 		</Collapsible>
 	{/if}
 </Card>
+{/if}
+
+<style>
+	.short-answer-print {
+		page-break-inside: avoid;
+		margin: 1rem 0;
+		padding: 1rem;
+		border: 1px solid #e5e7eb;
+	}
+
+	.short-answer-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		margin-bottom: 1rem;
+	}
+
+	.short-answer-question {
+		font-weight: 600;
+		flex: 1;
+	}
+
+	.short-answer-marks {
+		font-size: 0.875rem;
+		color: #6b7280;
+		margin-left: 1rem;
+	}
+</style>

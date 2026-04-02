@@ -34,7 +34,7 @@ export const interactiveLabContract = {
         'short-answer',
         'section-divider'
     ],
-    component_budget: { 'simulation-block': 1 },
+    component_budget: { 'simulation-block': 2 },
     max_per_section: { 'diagram-block': 1, 'worked-example-card': 1, 'practice-stack': 1 },
     signal_affinity: {
         topic_type: { concept: 0.5, process: 0.6, facts: 0.3, mixed: 0.6 },

@@ -56,7 +56,7 @@ export const openCanvasContract = {
         'simulation-block'
     ],
     component_budget: {
-        'simulation-block': 1,
+        'simulation-block': 2,
         'diagram-compare': 2,
         'diagram-series': 2,
         'comparison-grid': 2,

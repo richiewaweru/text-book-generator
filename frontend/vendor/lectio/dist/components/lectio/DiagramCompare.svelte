@@ -2,8 +2,13 @@
 	import type { DiagramCompareContent } from '../../types';
 	import { Card } from '../ui/card';
 	import { Badge } from '../ui/badge';
+	import { usePrintMode } from '../../utils/printContext';
+	import SideBySide from '../../print/SideBySide.svelte';
 
 	let { content }: { content: DiagramCompareContent } = $props();
+
+	const getPrintMode = usePrintMode();
+	const printMode = $derived(getPrintMode());
 
 	let position = $state(0);
 	const stagePosition = $derived(Math.min(100, Math.max(0, position)));
@@ -23,6 +28,25 @@
 	const seamVisible = $derived(stagePosition > 0 && stagePosition < 100);
 </script>
 
+{#if printMode}
+	<div class="diagram-compare-print">
+		<SideBySide leftLabel={content.before_label} rightLabel={content.after_label}>
+			{#snippet left()}
+				<div role="img" aria-label="{content.before_label} diagram" class="diagram-compare-print-svg">
+					{@html content.before_svg}
+				</div>
+			{/snippet}
+			{#snippet right()}
+				<div role="img" aria-label="{content.after_label} diagram" class="diagram-compare-print-svg">
+					{@html content.after_svg}
+				</div>
+			{/snippet}
+		</SideBySide>
+		{#if content.caption}
+			<p class="diagram-compare-print-caption">{content.caption}</p>
+		{/if}
+	</div>
+{:else}
 <Card class="border-primary/10 bg-white/88 p-6">
 	<div class="space-y-5">
 		<div class="space-y-2">
@@ -161,8 +185,27 @@
 		<p class="text-sm leading-6 text-muted-foreground">{content.caption}</p>
 	</div>
 </Card>
+{/if}
 
 <style>
+	.diagram-compare-print {
+		page-break-inside: avoid;
+		margin: 1rem 0;
+	}
+
+	.diagram-compare-print-svg :global(svg) {
+		display: block;
+		width: 100%;
+		height: auto;
+	}
+
+	.diagram-compare-print-caption {
+		text-align: center;
+		font-size: 0.875rem;
+		font-style: italic;
+		margin-top: 1rem;
+	}
+
 	.compare-slider {
 		-webkit-appearance: none;
 		appearance: none;

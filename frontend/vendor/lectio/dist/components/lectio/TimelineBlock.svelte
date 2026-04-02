@@ -3,17 +3,32 @@
 	import { Badge } from '../ui/badge';
 	import { Button } from '../ui/button';
 	import { Card } from '../ui/card';
+	import { usePrintMode } from '../../utils/printContext';
+	import VerticalList from '../../print/VerticalList.svelte';
 
 	let {
 		content,
 		mode = 'timeline-scrubber'
 	}: { content: TimelineContent; mode?: 'static' | 'timeline-scrubber' } = $props();
 
+	const getPrintMode = usePrintMode();
+	const printMode = $derived(getPrintMode());
+
 	let activeIndex = $state(0);
 
 	const activeEvent = $derived(content.events[activeIndex] ?? content.events[0]);
 </script>
 
+{#if printMode}
+	<div class="timeline-print">
+		<VerticalList events={content.events} title={content.title} />
+		{#if content.closing_takeaway}
+			<div class="timeline-print-takeaway">
+				<strong>Key Takeaway:</strong> {content.closing_takeaway}
+			</div>
+		{/if}
+	</div>
+{:else}
 <Card class="border-rose-200 bg-rose-50/45 p-6">
 	<div class="space-y-5">
 		<div class="space-y-2">
@@ -130,3 +145,17 @@
 		{/if}
 	</div>
 </Card>
+{/if}
+
+<style>
+	.timeline-print {
+		margin: 1rem 0;
+	}
+
+	.timeline-print-takeaway {
+		margin-top: 1.5rem;
+		padding: 1rem;
+		border-left: 3px solid #374151;
+		font-size: 0.875rem;
+	}
+</style>

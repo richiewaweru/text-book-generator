@@ -1,5 +1,6 @@
 // Capacity warnings — not hard errors, just console warnings
 // Prevents content from quietly overflowing components
+import { getSectionSimulations } from './section-content';
 function words(text) {
     return text.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -59,12 +60,18 @@ function validateTimeline(content, warnings) {
         warnings.push(warn('TimelineBlock', 'closing_takeaway exceeds 40 words'));
 }
 function validateDiagram(content, location, warnings) {
+    const hasSvg = Boolean(content.svg_content?.trim());
+    const hasImage = Boolean(content.image_url?.trim());
+    if (!hasSvg && !hasImage)
+        warnings.push(warn(location, 'requires svg_content or image_url'));
     if (words(content.caption) > 60)
         warnings.push(warn(location, 'caption exceeds 60 words'));
     if (words(content.alt_text) > 80)
         warnings.push(warn(location, 'alt_text exceeds 80 words'));
     if (content.callouts && content.callouts.length > 6)
         warnings.push(warn(location, 'callouts max 6'));
+    if (content.callouts?.length && !hasSvg)
+        warnings.push(warn(location, 'callouts require svg_content'));
 }
 function validateDiagramCompare(content, warnings) {
     if (words(content.before_label) > 6)
@@ -295,9 +302,9 @@ export function validateSection(section) {
     if (section.image_block) {
         validateImageBlock(section.image_block, w);
     }
-    if (section.simulation) {
-        validateSimulation(section.simulation, w);
-    }
+    getSectionSimulations(section).forEach((simulation) => {
+        validateSimulation(simulation, w);
+    });
     return w;
 }
 // Call this in dev — shows warnings in console

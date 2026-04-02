@@ -31,7 +31,32 @@ cd "C:\Projects\lectio"
 npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\lectio"
 ```
 
-Open `http://localhost:5173`, sign in, create a profile, and generate a lesson.
+For Docker runs, open `http://localhost:3000`.
+For native frontend runs, open `http://localhost:5173`.
+For Railway production, deploy the backend from the repo root with [railway.toml](/C:/Projects/Textbook%20agent/railway.toml) and then point the frontend to the Railway backend URL using `PUBLIC_API_URL` and `VITE_API_TARGET`.
+
+## PDF Export
+
+Slice 1 PDF export is generation-based and uses the existing `document_json` artifact. The backend renders the authenticated print view at `/textbook/[id]?print=true` with Playwright and returns a direct PDF download from `POST /api/v1/generations/{id}/export/pdf`.
+
+The key runtime settings are:
+
+- `PDF_EXPORT_ENABLED`
+- `PDF_RENDER_BASE_URL`
+- `PDF_EXPORT_TIMEOUT_MS`
+- `PLAYWRIGHT_TIMEOUT_MS`
+- `PDF_TEMP_DIR`
+- `PDF_MAX_FILE_SIZE_MB`
+- `PDF_MAX_PAGE_COUNT`
+
+Use `PDF_RENDER_BASE_URL=http://localhost:5173` for native development and `PDF_RENDER_BASE_URL=http://frontend` for the Docker stack.
+
+Slice 2 adds:
+
+- teacher and student export presets in the textbook UI
+- print-only QR wrappers for interactive or diagram-heavy sections
+- in-process PDF export telemetry surfaced in deep health checks
+- Playwright and PDF temp-dir dependency checks in `/health/deep` and `/health/ready`
 
 ## Runtime Policy Configuration
 
@@ -44,7 +69,8 @@ The generation runtime is now configured through env-backed settings instead of 
 - `PIPELINE_RERENDER_<MODE>_SECTION_MAX`
 - `PIPELINE_RETRY_<NAME>_MAX_ATTEMPTS`
 
-`backend/.env.example` is the authoritative local reference. For Docker, copy the same variables into the repo-root `.env` so `docker-compose.yml` can pass them through to the backend container.
+`backend/.env.example` is the authoritative native-backend reference.
+For Docker, use the repo-root `.env.example` and copy the needed runtime values into the repo-root `.env`.
 
 ## Local Run Requirements
 
@@ -55,6 +81,7 @@ The generation runtime is now configured through env-backed settings instead of 
   - `backend/.env` needs `GOOGLE_CLIENT_ID`
   - the Google Cloud OAuth client must allow `http://localhost:5173` and `http://127.0.0.1:5173` as authorized JavaScript origins
   - if the OAuth consent screen is still in Testing mode, your sign-in email must be added as a test user
+- For Docker-local runs, the Google Cloud OAuth client must also allow `http://localhost:3000`
 - The sibling `C:\Projects\lectio` repo must exist locally because the frontend consumes it as a file dependency.
 - If Lectio template contracts change, refresh the backend copies with:
 
@@ -73,6 +100,7 @@ npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\
 - SvelteKit frontend in `frontend/` with native Lectio rendering
 - JSON document persistence plus authenticated SSE streaming
 - Slot-based model routing and a single generation path
+- Alembic startup upgrade is the only supported schema bootstrap path for runtime containers
 
 ## Live Docs
 
@@ -82,6 +110,7 @@ npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\
 - [`docs/project/DEVELOPMENT_WORKFLOW.md`](docs/project/DEVELOPMENT_WORKFLOW.md)
 - [`docs/project/SCHEMAS.md`](docs/project/SCHEMAS.md)
 - [`docs/project/runs/`](docs/project/runs/)
+- [`docs/project/runs/2026-04-02-phase-p6-railway-backend-deployment.md`](docs/project/runs/2026-04-02-phase-p6-railway-backend-deployment.md)
 
 ## Validation
 

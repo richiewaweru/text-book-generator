@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import tempfile
 from pathlib import Path
 
@@ -14,8 +15,16 @@ _TEST_DB_PATH = _TEST_DB_DIR / "app-runtime.db"
 
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB_PATH.as_posix()}"
 os.environ.setdefault("RUN_MIGRATIONS_ON_STARTUP", "true")
+os.environ.setdefault("JWT_SECRET_KEY", secrets.token_hex(32))
 
 from core.database.models import Base  # noqa: E402
+
+
+def pytest_configure(config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "postgres: tests requiring a real PostgreSQL instance",
+    )
 
 
 @pytest.fixture

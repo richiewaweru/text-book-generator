@@ -131,13 +131,36 @@ class TestSqlDocumentRepository:
         found_generation = await generation_repo.find_by_id(generation_id)
         loaded = await document_repo.load_document(locator)
 
-        assert locator == f"generation:{generation_id}:document"
+        assert locator == generation_id
         assert found_generation is not None
-        assert found_generation.document_path == locator
+        assert found_generation.document_path is None
         assert loaded.generation_id == document.generation_id
         assert loaded.sections[0].section_id == "s-01"
         assert loaded.template_id == "guided-concept-path"
         assert loaded.section_manifest[0].title == "Limits in Motion"
+
+    async def test_load_document_accepts_legacy_locator(
+        self,
+        generation_repo: SqlGenerationRepository,
+        document_repo: SqlDocumentRepository,
+    ) -> None:
+        generation_id = "gen-doc-legacy"
+        await generation_repo.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER_ID,
+                subject="Calculus",
+                context="Explain limits",
+                requested_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+            )
+        )
+
+        document = _document(generation_id)
+        await document_repo.save_document(document)
+        loaded = await document_repo.load_document(f"generation:{generation_id}:document")
+
+        assert loaded.generation_id == generation_id
 
     async def test_load_document_raises_for_missing_locator(
         self,

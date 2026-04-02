@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { LectioThemeSurface, basePresetMap, templateRegistryMap } from 'lectio';
+	import { LectioThemeSurface, basePresetMap, templateRegistryMap, usePrintMode } from 'lectio';
 	import { buildSectionSlots, type ViewerSectionSlot } from '$lib/generation/viewer-state';
+	import PrintSectionLink from '$lib/components/PrintSectionLink.svelte';
 	import type { GenerationDocument } from '$lib/types';
 
 	interface Props {
@@ -21,46 +22,53 @@
 	const resolvedSectionSlots = $derived(
 		sectionSlots ?? buildSectionSlots(document, document.section_manifest.length || document.sections.length)
 	);
+	const getPrintMode = usePrintMode();
+	const printMode = $derived(getPrintMode());
 </script>
 
 {#if template}
 	<LectioThemeSurface {preset}>
-		<div class="page-frame space-y-6">
-			<header class="lesson-shell p-6 sm:p-8">
-				<div class="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-					<div class="space-y-3">
-						<p class="eyebrow">{preset?.name ?? document.preset_id}</p>
-						<h2 class="text-3xl font-serif text-primary sm:text-4xl">{document.subject}</h2>
-						<p class="max-w-3xl text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
-							{document.context}
-						</p>
-					</div>
+		<div class="page-frame space-y-6 textbook-document-shell" data-print-mode={printMode ? 'true' : 'false'}>
+			{#if !printMode}
+				<header class="lesson-shell p-6 sm:p-8">
+					<div class="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+						<div class="space-y-3">
+							<p class="eyebrow">{preset?.name ?? document.preset_id}</p>
+							<h2 class="text-3xl font-serif text-primary sm:text-4xl">{document.subject}</h2>
+							<p class="max-w-3xl text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
+								{document.context}
+							</p>
+						</div>
 
-					<div class="lesson-header-actions">
-						{#if showExportForBuilder}
-							<button
-								type="button"
-								class="export-builder-btn"
-								onclick={() => onExportForBuilder?.()}
-							>
-								Export for Builder
-							</button>
-						{/if}
-						<div class="document-meta">
-							<span>{template.contract.name}</span>
-							<span>{resolvedSectionSlots.length} sections</span>
+						<div class="lesson-header-actions">
+							{#if showExportForBuilder}
+								<button
+									type="button"
+									class="export-builder-btn"
+									onclick={() => onExportForBuilder?.()}
+								>
+									Export for Builder
+								</button>
+							{/if}
+							<div class="document-meta">
+								<span>{template.contract.name}</span>
+								<span>{resolvedSectionSlots.length} sections</span>
+							</div>
 						</div>
 					</div>
-				</div>
-			</header>
+				</header>
+			{/if}
 
-			<div class="section-stack">
+			<div class="section-stack" data-print-mode={printMode ? 'true' : 'false'}>
 				{#each resolvedSectionSlots as slot (slot.section_id)}
 					{#if slot.status === 'ready' && slot.section}
 						{@const TemplateRender = template.render}
-						<article class="animate-step-reveal">
+						<article class="animate-step-reveal" id={`section-${slot.section_id}`}>
 							<TemplateRender section={slot.section} />
 						</article>
+						{#if printMode}
+							<PrintSectionLink generationId={document.generation_id} section={slot.section} />
+						{/if}
 					{:else}
 						<article class="glass-panel section-skeleton" aria-busy="true">
 							<p class="skeleton-kicker">Generating section {slot.position}</p>
@@ -169,6 +177,16 @@
 	@media (min-width: 1024px) {
 		.document-meta {
 			justify-items: end;
+		}
+	}
+
+	@media print {
+		.textbook-document-shell[data-print-mode='true'] {
+			padding: 0;
+		}
+
+		.section-stack[data-print-mode='true'] {
+			gap: 1rem;
 		}
 	}
 </style>

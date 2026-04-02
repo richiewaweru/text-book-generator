@@ -30,6 +30,7 @@ Thumbs.db
 backend/outputs/*
 !backend/outputs/.gitkeep
 backend/*.db
+backend/*.db.pre-migration-backup-*
 
 # Frontend
 frontend/node_modules/
@@ -72,3 +73,4 @@ release_notes.md
 /frontend.zip
 /structure.txt
 /textbook_agent.db
+/textbook_agent.db.pre-migration-backup-*

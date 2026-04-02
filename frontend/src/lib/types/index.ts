@@ -111,6 +111,14 @@ export interface GenerationAccepted {
 	report_url?: string;
 }
 
+export interface PDFExportRequest {
+	school_name: string;
+	teacher_name: string;
+	date?: string;
+	include_toc?: boolean;
+	include_answers?: boolean;
+}
+
 export interface GenerationHistoryItem {
 	id: string;
 	subject: string;

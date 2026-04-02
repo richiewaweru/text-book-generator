@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import tomllib
 
 import pytest
 from pydantic import ValidationError
 
 from core.config import Settings, bootstrap_environment
+from core.database.session import build_engine_kwargs
 from pipeline.runtime_policy import resolve_generation_timeout_seconds, resolve_runtime_policy_bundle
 from pipeline.types.requests import GenerationMode
 
@@ -167,3 +170,142 @@ def test_runtime_policy_settings_reject_invalid_values(monkeypatch) -> None:
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_engine_kwargs_use_db_echo_for_sqlite() -> None:
+    kwargs = build_engine_kwargs("sqlite+aiosqlite:///./test.db", db_echo=True)
+
+    assert kwargs == {"echo": True}
+
+
+def test_engine_kwargs_add_postgres_pool_settings() -> None:
+    kwargs = build_engine_kwargs(
+        "postgresql+asyncpg://textbook:textbook@localhost:5432/textbook_agent",
+        db_echo=False,
+    )
+
+    assert kwargs == {
+        "echo": False,
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_pre_ping": True,
+        "pool_recycle": 300,
+    }
+
+
+def test_settings_allow_local_defaults_in_development(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-development-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "http://localhost:5173")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "http://127.0.0.1:5173")
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./textbook_agent.db")
+    monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.app_env == "development"
+    assert settings.db_echo is False
+
+
+def test_settings_reject_placeholder_secret_in_development(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./textbook_agent.db")
+    monkeypatch.setenv("JWT_SECRET_KEY", "change-me-to-a-random-secret")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "http://localhost:5173")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "http://127.0.0.1:5173")
+
+    with pytest.raises(ValidationError, match="JWT_SECRET_KEY"):
+        Settings(_env_file=None)
+
+
+def test_settings_reject_placeholder_secret_in_production(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://textbook:textbook@db:5432/textbook_agent")
+    monkeypatch.setenv("JWT_SECRET_KEY", "change-me-to-a-random-secret")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://app.example.com")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "https://app.example.com")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "example-google-client-id")
+
+    with pytest.raises(ValidationError, match="JWT_SECRET_KEY"):
+        Settings(_env_file=None)
+
+
+def test_settings_reject_local_origins_in_production(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://textbook:textbook@db:5432/textbook_agent")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-production-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "http://localhost:3000")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "https://app.example.com")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "example-google-client-id")
+
+    with pytest.raises(ValidationError, match="FRONTEND_ORIGIN"):
+        Settings(_env_file=None)
+
+
+def test_settings_require_google_client_id_in_production(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://textbook:textbook@db:5432/textbook_agent")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-production-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://app.example.com")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "https://app.example.com")
+    monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+
+    with pytest.raises(ValidationError, match="GOOGLE_CLIENT_ID"):
+        Settings(_env_file=None)
+
+
+def test_settings_accept_safe_production_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://textbook:textbook@db:5432/textbook_agent")
+    monkeypatch.setenv("DB_ECHO", "true")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-production-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://app.example.com")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "https://app.example.com")
+    monkeypatch.setenv("PDF_RENDER_BASE_URL", "https://app.example.com")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "example-google-client-id")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.app_env == "production"
+    assert settings.db_echo is True
+
+
+def test_settings_accept_json_logs_env_aliases(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./textbook_agent.db")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-development-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "http://localhost:5173")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "http://127.0.0.1:5173")
+    monkeypatch.setenv("JSON_LOGGING", "true")
+    monkeypatch.delenv("JSON_LOGS", raising=False)
+
+    legacy_settings = Settings(_env_file=None)
+
+    monkeypatch.setenv("JSON_LOGS", "true")
+    monkeypatch.delenv("JSON_LOGGING", raising=False)
+    canonical_settings = Settings(_env_file=None)
+
+    assert legacy_settings.json_logs is True
+    assert canonical_settings.json_logs is True
+
+
+def test_settings_normalize_log_level(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./textbook_agent.db")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-development-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "http://localhost:5173")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "http://127.0.0.1:5173")
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.log_level == "DEBUG"
+
+
+def test_pytest_config_deselects_postgres_by_default() -> None:
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    pytest_options = config["tool"]["pytest"]["ini_options"]
+
+    assert "postgres: tests requiring a real PostgreSQL instance (deselected by default)" in pytest_options["markers"]
+    assert "not postgres" in pytest_options["addopts"]

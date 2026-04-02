@@ -5,7 +5,8 @@ import type {
 	GenerationDetail,
 	GenerationDocument,
 	GenerationHistoryItem,
-	GenerationRequest
+	GenerationRequest,
+	PDFExportRequest
 } from '$lib/types';
 import { ensureOk } from '$lib/api/errors';
 import { getToken } from '$lib/stores/auth';
@@ -18,7 +19,7 @@ export function buildApiUrl(path: string): string {
 }
 
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-	const token = getToken();
+	const token = getAuthToken();
 	const headers = new Headers(init?.headers);
 	if (token) {
 		headers.set('Authorization', `Bearer ${token}`);
@@ -65,7 +66,7 @@ export async function getGenerationDocument(id: string): Promise<GenerationDocum
 }
 
 export function buildGenerationEventsUrl(id: string): string {
-	const token = getToken();
+	const token = getAuthToken();
 	const base = buildApiUrl(`/api/v1/generations/${encodeURIComponent(id)}/events`);
 	if (!token) {
 		return base;
@@ -77,4 +78,49 @@ export function buildGenerationEventsUrl(id: string): string {
 export async function healthCheck(): Promise<{ status: string; version: string }> {
 	const response = await fetch(buildApiUrl('/health'));
 	return response.json();
+}
+
+export async function downloadGenerationPdf(
+	id: string,
+	request: PDFExportRequest
+): Promise<{ filename: string | null; pageCount: string | null }> {
+	const response = await apiFetch(`/api/v1/generations/${encodeURIComponent(id)}/export/pdf`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(request)
+	});
+	await ensureOk(response, 'Failed to export PDF.');
+
+	const blob = await response.blob();
+	const downloadUrl = URL.createObjectURL(blob);
+	const anchor = document.createElement('a');
+	const filename = parseFilename(response.headers.get('content-disposition'));
+	anchor.href = downloadUrl;
+	anchor.download = filename ?? 'textbook.pdf';
+	anchor.click();
+	URL.revokeObjectURL(downloadUrl);
+
+	return {
+		filename,
+		pageCount: response.headers.get('x-page-count')
+	};
+}
+
+function getAuthToken(): string | null {
+	return getToken() ?? getQueryToken();
+}
+
+function getQueryToken(): string | null {
+	if (typeof window === 'undefined') {
+		return null;
+	}
+	return new URL(window.location.href).searchParams.get('token');
+}
+
+function parseFilename(header: string | null): string | null {
+	if (!header) {
+		return null;
+	}
+	const match = /filename="?([^";]+)"?/i.exec(header);
+	return match?.[1] ?? null;
 }

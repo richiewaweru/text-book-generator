@@ -2,11 +2,16 @@
 	import type { ProcessContent } from '../../types';
 	import { Button } from '../ui/button';
 	import { Card } from '../ui/card';
+	import { usePrintMode } from '../../utils/printContext';
+	import Checkboxes from '../../print/Checkboxes.svelte';
 
 	let {
 		content,
 		mode = 'static'
 	}: { content: ProcessContent; mode?: 'static' | 'step-reveal' } = $props();
+
+	const getPrintMode = usePrintMode();
+	const printMode = $derived(getPrintMode());
 
 	let visibleSteps = $state(0);
 
@@ -33,6 +38,33 @@
 	}
 </script>
 
+{#if printMode}
+	<div class="process-print">
+		<h4 class="process-print-title">{content.title}</h4>
+		{#if content.intro}
+			<p class="process-print-intro">{content.intro}</p>
+		{/if}
+		<div class="process-print-steps-layout">
+			<div class="process-print-checkboxes">
+				<Checkboxes count={content.steps.length} />
+			</div>
+			<div class="process-print-steps">
+				{#each content.steps as step}
+					<div class="process-print-step">
+						<div class="process-print-step-number">{step.number}</div>
+						<div class="process-print-step-content">
+							<div class="process-print-action">{step.action}</div>
+							<div class="process-print-detail">{step.detail}</div>
+							{#if step.warning}
+								<div class="process-print-warning">⚠ {step.warning}</div>
+							{/if}
+						</div>
+					</div>
+				{/each}
+			</div>
+		</div>
+	</div>
+{:else}
 <Card class="border-emerald-200 bg-emerald-50/45 p-6">
 	<div class="space-y-4">
 		<div class="space-y-2">
@@ -77,3 +109,75 @@
 		{/if}
 	</div>
 </Card>
+{/if}
+
+<style>
+	.process-print {
+		margin: 1rem 0;
+	}
+
+	.process-print-title {
+		font-size: 1.125rem;
+		font-weight: 600;
+		margin-bottom: 0.5rem;
+	}
+
+	.process-print-intro {
+		font-size: 0.875rem;
+		color: #6b7280;
+		margin-bottom: 1rem;
+	}
+
+	.process-print-steps-layout {
+		display: flex;
+		gap: 1rem;
+	}
+
+	.process-print-checkboxes {
+		flex-shrink: 0;
+	}
+
+	.process-print-steps {
+		flex: 1;
+	}
+
+	.process-print-step {
+		display: flex;
+		gap: 1rem;
+		margin-bottom: 1.5rem;
+		page-break-inside: avoid;
+	}
+
+	.process-print-step-number {
+		flex-shrink: 0;
+		width: 1.5rem;
+		height: 1.5rem;
+		border-radius: 50%;
+		background: #e5e7eb;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-weight: 600;
+		font-size: 0.875rem;
+	}
+
+	.process-print-step-content {
+		flex: 1;
+	}
+
+	.process-print-action {
+		font-weight: 600;
+		margin-bottom: 0.25rem;
+	}
+
+	.process-print-detail {
+		line-height: 1.6;
+		font-size: 0.875rem;
+	}
+
+	.process-print-warning {
+		margin-top: 0.5rem;
+		font-size: 0.875rem;
+		color: #d97706;
+	}
+</style>

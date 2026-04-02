@@ -1,0 +1,49 @@
+@media print {
+	@page {
+		size: A4;
+		margin: 16mm 14mm 18mm;
+	}
+
+	html,
+	body {
+		background: white !important;
+	}
+
+	header,
+	nav,
+	.logout-btn,
+	.export-controls,
+	.status-panel,
+	.failed-sections,
+	.weak-sections,
+	.warning,
+	.error {
+		display: none !important;
+	}
+
+	main {
+		max-width: none !important;
+		margin: 0 !important;
+		padding: 0 !important;
+	}
+
+	.page-shell[data-print-mode='true'] {
+		gap: 0;
+	}
+
+	.page-shell[data-print-mode='true'] .textbook-document-shell,
+	.page-shell[data-print-mode='true'] .page-frame {
+		padding: 0 !important;
+		margin: 0 !important;
+	}
+
+	.page-shell[data-print-mode='true'] .section-stack > article {
+		break-inside: avoid-page;
+		page-break-inside: avoid;
+	}
+
+	* {
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+	}
+}

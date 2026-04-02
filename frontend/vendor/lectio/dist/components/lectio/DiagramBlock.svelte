@@ -15,6 +15,9 @@
 	let { content }: { content: DiagramContent } = $props();
 
 	type DiagramCallout = NonNullable<DiagramContent['callouts']>[number];
+	const hasImage = $derived(Boolean(content.image_url?.trim()));
+	const hasSvg = $derived(Boolean(content.svg_content?.trim()));
+	const showCallouts = $derived(Boolean(!hasImage && hasSvg && content.callouts?.length));
 
 	function getMarkerPosition(callout: DiagramCallout) {
 		const horizontalOffset = callout.x >= 72 ? -20 : callout.x <= 28 ? 20 : 0;
@@ -27,6 +30,7 @@
 	}
 </script>
 
+<div class="diagram-block-root">
 <Card class="border-primary/10 bg-white/88 p-6">
 	<div class="space-y-4">
 		<div class="flex flex-wrap items-center gap-3">
@@ -42,14 +46,22 @@
 			<DialogTrigger>
 				<div class="group relative cursor-pointer" role="img" aria-label={content.alt_text}>
 					<div class="overflow-hidden rounded-[1.25rem] border border-border/70 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] [&_svg]:h-auto [&_svg]:w-full">
-						{@html content.svg_content}
+						{#if hasImage}
+							<img src={content.image_url} alt="" class="h-auto w-full" />
+						{:else if hasSvg}
+							{@html content.svg_content}
+						{:else}
+							<div class="flex min-h-48 items-center justify-center p-6 text-sm text-muted-foreground">
+								Diagram source unavailable.
+							</div>
+						{/if}
 					</div>
 
-					{#if content.callouts?.length}
+					{#if showCallouts}
 						{#each content.callouts as callout, index}
 							{@const markerPosition = getMarkerPosition(callout)}
 							<div
-								class="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/90 bg-primary shadow-[0_3px_10px_rgba(15,23,42,0.18)]"
+								class="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/90 bg-primary shadow-[0_3px_10px_rgba(15,23,42,0.18)] diagram-block-dot"
 								style="left: {callout.x}%; top: {callout.y}%;"
 							></div>
 							<Popover>
@@ -58,7 +70,7 @@
 										<button
 											{...props}
 											type="button"
-											class="absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/85 bg-primary text-[11px] font-semibold text-primary-foreground shadow-[0_10px_24px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-[55%] hover:scale-[1.04]"
+											class="absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/85 bg-primary text-[11px] font-semibold text-primary-foreground shadow-[0_10px_24px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-[55%] hover:scale-[1.04] diagram-block-callout-btn"
 											style="left: {markerPosition.left}; top: {markerPosition.top};"
 											aria-label={callout.label}
 											onpointerdown={(event) => event.stopPropagation()}
@@ -92,7 +104,7 @@
 						{/each}
 					{/if}
 
-					<div class="absolute right-3 top-3 rounded-full bg-white/82 p-1.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-hover:opacity-100">
+					<div class="absolute right-3 top-3 rounded-full bg-white/82 p-1.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-hover:opacity-100 diagram-block-zoom">
 						<ZoomIn class="h-4 w-4 text-muted-foreground" />
 					</div>
 				</div>
@@ -112,7 +124,15 @@
 							role="img"
 							aria-label={content.alt_text}
 						>
-							{@html content.svg_content}
+							{#if hasImage}
+								<img src={content.image_url} alt="" class="h-auto w-full" />
+							{:else if hasSvg}
+								{@html content.svg_content}
+							{:else}
+								<div class="flex min-h-64 items-center justify-center p-6 text-sm text-muted-foreground">
+									Diagram source unavailable.
+								</div>
+							{/if}
 						</div>
 						<p class="text-sm leading-6 text-muted-foreground">{content.caption}</p>
 					</div>
@@ -120,7 +140,7 @@
 			</DialogPortal>
 		</Dialog>
 
-		{#if content.callouts?.length}
+		{#if showCallouts}
 			<p class="text-xs leading-5 text-muted-foreground">
 				Tap a numbered point to see the labeled detail for that part of the diagram.
 			</p>
@@ -129,3 +149,19 @@
 		<p class="text-sm leading-6 text-muted-foreground">{content.caption}</p>
 	</div>
 </Card>
+</div>
+
+<style>
+	@media print {
+		.diagram-block-root {
+			page-break-inside: avoid;
+		}
+
+		/* Hide the zoom button overlay and callout interactive buttons */
+		.diagram-block-zoom,
+		.diagram-block-callout-btn,
+		.diagram-block-dot {
+			display: none !important;
+		}
+	}
+</style>

@@ -258,7 +258,8 @@ export interface DiagramCallout {
     explanation: string;
 }
 export interface DiagramContent {
-    svg_content: string;
+    svg_content?: string;
+    image_url?: string;
     caption: string;
     zoom_label?: string;
     alt_text: string;
@@ -365,6 +366,7 @@ export interface SectionContent {
     quiz?: QuizContent;
     reflection?: ReflectionContent;
     glossary?: GlossaryContent;
+    simulations?: SimulationContent[];
     simulation?: SimulationContent;
     interview?: InterviewContent;
     callout?: CalloutBlockContent;

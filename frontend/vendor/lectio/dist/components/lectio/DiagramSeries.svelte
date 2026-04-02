@@ -3,8 +3,12 @@
 	import { Card } from '../ui/card';
 	import { Button } from '../ui/button';
 	import { ChevronLeft, ChevronRight } from 'lucide-svelte';
+	import { usePrintMode } from '../../utils/printContext';
 
 let { content }: { content: DiagramSeriesContent } = $props();
+
+const getPrintMode = usePrintMode();
+const printMode = $derived(getPrintMode());
 
 let current = $state(0);
 
@@ -21,6 +25,24 @@ const progressPercent = $derived(
 );
 </script>
 
+{#if printMode}
+	<!-- Print: All diagrams shown sequentially -->
+	<div class="diagram-series-print-root">
+		<p class="diagram-series-print-title">{content.title}</p>
+		{#each content.diagrams as diagram, index}
+			<div class="diagram-series-print-item">
+				<p class="diagram-series-print-label">
+					<span class="diagram-series-print-step">Step {index + 1}</span>
+					{diagram.step_label}
+				</p>
+				<div class="overflow-hidden rounded-[1.25rem] border border-border/70 bg-white [&_svg]:h-auto [&_svg]:w-full">
+					{@html diagram.svg_content}
+				</div>
+				<p class="text-sm leading-6 text-muted-foreground">{diagram.caption}</p>
+			</div>
+		{/each}
+	</div>
+{:else}
 <Card class="border-primary/10 bg-white/88 p-6">
 	<div class="space-y-5">
 		<div class="space-y-2">
@@ -107,3 +129,35 @@ const progressPercent = $derived(
 		{/if}
 	</div>
 </Card>
+{/if}
+
+<style>
+	.diagram-series-print-root {
+		margin: 1rem 0;
+	}
+
+	.diagram-series-print-title {
+		font-size: 1.125rem;
+		font-weight: 600;
+		margin-bottom: 1rem;
+	}
+
+	.diagram-series-print-item {
+		page-break-inside: avoid;
+		margin-bottom: 2rem;
+	}
+
+	.diagram-series-print-label {
+		font-size: 0.875rem;
+		font-weight: 600;
+		margin-bottom: 0.5rem;
+	}
+
+	.diagram-series-print-step {
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.14em;
+		color: #6b7280;
+		margin-right: 0.5rem;
+	}
+</style>

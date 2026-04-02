@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from core.llm.logging import NodeLogger
 from langchain_core.runnables.config import RunnableConfig
 from pydantic import ValidationError
 from pydantic_ai import Agent
@@ -57,6 +58,14 @@ from pipeline.types.section_content import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _node_logger(state: TextbookPipelineState, section_id: str | None) -> NodeLogger:
+    return NodeLogger(
+        generation_id=state.request.generation_id or "",
+        section_id=section_id,
+        node_name="content_generator",
+    )
 
 
 def _now_iso() -> str:
@@ -369,6 +378,7 @@ async def _attempt_repair(
     node_failures: list[NodeFailureDetail],
 ) -> None:
     exc = repair.original_exc
+    node_logger = _node_logger(state, sid)
     initial_detail = _failure_detail(
         section_id=sid, error=exc, retry_attempt=0, will_retry=True
     )
@@ -386,7 +396,7 @@ async def _attempt_repair(
             error_summary=initial_detail.error_message,
         ),
     )
-    logger.warning(
+    node_logger.warning(
         "content_generator validation failed; attempting repair section=%s error=%s",
         sid,
         initial_detail.error_message,
@@ -462,6 +472,7 @@ async def _generate_phased(
     _ = model_overrides
     gen_id = state.request.generation_id or ""
     template_id = state.contract.id
+    node_logger = _node_logger(state, sid)
 
     core_agent = Agent(
         model=model,
@@ -595,7 +606,7 @@ async def _generate_phased(
             )
             enrichment = enrichment_result.output
         except Exception as exc:
-            logger.warning(
+            node_logger.warning(
                 "content_generator enrichment phase failed section=%s error=%s",
                 sid,
                 str(exc)[:200],

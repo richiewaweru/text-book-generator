@@ -1,12 +1,21 @@
 <script lang="ts">
 	import type { StudentTextboxContent } from '../../types';
 	import { Card } from '../ui/card';
+	import { usePrintMode } from '../../utils/printContext';
+	import RuledLines from '../../print/RuledLines.svelte';
 
 	let { content }: { content: StudentTextboxContent } = $props();
 
+	const getPrintMode = usePrintMode();
+	const printMode = $derived(getPrintMode());
 	const lines = $derived(content.lines ?? 4);
 </script>
 
+{#if printMode}
+	<div class="textbox-print">
+		<RuledLines {lines} label={content.prompt} />
+	</div>
+{:else}
 <Card class="border-border/60 p-5 sm:p-6">
 	{#if content.label}
 		<p class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
@@ -21,3 +30,11 @@
 		<p class="text-xs text-muted-foreground/50 italic">Write your answer here...</p>
 	</div>
 </Card>
+{/if}
+
+<style>
+	.textbox-print {
+		page-break-inside: avoid;
+		margin: 1rem 0;
+	}
+</style>

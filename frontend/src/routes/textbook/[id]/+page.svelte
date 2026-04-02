@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { providePrintMode } from 'lectio';
+	import '$lib/styles/print.css';
 	import LectioDocumentView from '$lib/components/LectioDocumentView.svelte';
 	import {
 		applySectionFailed,
@@ -8,9 +10,15 @@
 		buildSectionSlots,
 		normalizeDocument
 	} from '$lib/generation/viewer-state';
-	import { buildGenerationEventsUrl, getGenerationDetail, getGenerationDocument } from '$lib/api/client';
+	import {
+		buildGenerationEventsUrl,
+		downloadGenerationPdf,
+		getGenerationDetail,
+		getGenerationDocument
+	} from '$lib/api/client';
 	import { downloadLessonDocument, exportToLessonDocument } from '$lib/generation/export-document';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
+	import type { PDFExportRequest } from '$lib/types';
 	import type {
 		ErrorEvent,
 		GenerationDetail,
@@ -25,6 +33,8 @@
 	} from '$lib/types';
 
 	const generationId = $derived(page.params.id);
+	const isPrintMode = $derived(page.url.searchParams.get('print') === 'true');
+	providePrintMode(() => isPrintMode);
 
 	let detail = $state<GenerationDetail | null>(null);
 	let document = $state<GenerationDocument | null>(null);
@@ -37,6 +47,15 @@
 	let runtimePolicy = $state<RuntimePolicyEvent | null>(null);
 	let runtimeProgress = $state<RuntimeProgressEvent['snapshot'] | null>(null);
 	let viewerWarning = $state<string | null>(null);
+	let exportPdfOpen = $state(false);
+	let exportPdfLoading = $state(false);
+	let exportPdfError = $state<string | null>(null);
+	let schoolName = $state('');
+	let teacherName = $state('');
+	let exportDate = $state('');
+	let includeToc = $state(true);
+	let includeAnswers = $state(true);
+	let exportPreset = $state<'teacher' | 'student'>('teacher');
 	let eventSource: EventSource | null = null;
 	let streamClosedTerminally = false;
 	let streamErrorRecoveryAttempted = false;
@@ -61,6 +80,13 @@
 	);
 	const sectionTitleMap = $derived(buildSectionTitleMap(document));
 	const weakSections = $derived(buildWeakSectionSummaries(document, sectionTitleMap));
+	const canExportPdf = $derived(detail?.status === 'completed' && !!document && !isPrintMode);
+	const printReady = $derived(
+		!!document &&
+			!loading &&
+			detail?.status === 'completed' &&
+			(sectionSlots.length === 0 || sectionSlots.every((slot) => slot.status === 'ready'))
+	);
 
 	function formatSeconds(seconds: number | null | undefined): string {
 		if (seconds === null || seconds === undefined) return 'Pending';
@@ -80,6 +106,38 @@
 		if (source === eventSource) {
 			eventSource = null;
 		}
+	}
+
+	async function handlePdfExport() {
+		if (!generationId) return;
+		exportPdfLoading = true;
+		exportPdfError = null;
+		try {
+			const request: PDFExportRequest = {
+				school_name: schoolName.trim(),
+				teacher_name: teacherName.trim(),
+				include_toc: includeToc,
+				include_answers: includeAnswers
+			};
+			if (exportDate.trim()) {
+				request.date = exportDate.trim();
+			}
+			if (!request.school_name || !request.teacher_name) {
+				throw new Error('School name and teacher name are required.');
+			}
+			await downloadGenerationPdf(generationId, request);
+			exportPdfOpen = false;
+		} catch (err) {
+			exportPdfError = err instanceof Error ? err.message : 'Failed to export PDF.';
+		} finally {
+			exportPdfLoading = false;
+		}
+	}
+
+	function applyExportPreset(preset: 'teacher' | 'student') {
+		exportPreset = preset;
+		includeToc = true;
+		includeAnswers = preset === 'teacher';
 	}
 
 	function buildSectionTitleMap(nextDocument: GenerationDocument | null): Map<string, string> {
@@ -353,104 +411,170 @@
 	});
 </script>
 
-<div class="page-shell">
-	<div class="header">
-		<div>
-			<p class="eyebrow">Generation</p>
-			<h1>{detail?.subject ?? generationId}</h1>
-			{#if detail}
-				<div class="meta">
-					<span class="status status-{detail.status}">{detail.status}</span>
-					<span>{detail.resolved_template_id ?? detail.requested_template_id}</span>
-					<span>{detail.resolved_preset_id ?? detail.requested_preset_id}</span>
+<div
+	class="page-shell"
+	data-generation-complete={printReady ? 'true' : 'false'}
+	data-print-mode={isPrintMode ? 'true' : 'false'}
+>
+	{#if !isPrintMode}
+		<div class="header">
+			<div>
+				<p class="eyebrow">Generation</p>
+				<h1>{detail?.subject ?? generationId}</h1>
+				{#if detail}
+					<div class="meta">
+						<span class="status status-{detail.status}">{detail.status}</span>
+						<span>{detail.resolved_template_id ?? detail.requested_template_id}</span>
+						<span>{detail.resolved_preset_id ?? detail.requested_preset_id}</span>
+					</div>
+				{/if}
+			</div>
+			{#if canExportPdf}
+				<div class="export-controls">
+					<button type="button" class="pdf-btn" onclick={() => (exportPdfOpen = !exportPdfOpen)}>
+						{exportPdfOpen ? 'Close PDF Export' : 'Export PDF'}
+					</button>
 				</div>
 			{/if}
 		</div>
-	</div>
 
-	{#if plannedSections !== null}
-		<div class="status-panel">
-			<p>
-				Sections ready: {readySectionCount} / {plannedSections}
-			</p>
-			{#if failedSectionCount > 0}
-				<p>Failed sections: {failedSectionCount}</p>
-			{/if}
-			<p>Stream: {streamLabel}</p>
-			{#if progressUpdate && detail?.status !== 'completed' && detail?.status !== 'failed'}
-				<p>Progress: {progressUpdate.label}</p>
-				<p>Stage: {progressStageLabel}</p>
-			{/if}
-			{#if runtimeProgress}
-				<p>
-					Runtime sections: {runtimeProgress.sections_completed} complete / {runtimeProgress.sections_running}
-					running / {runtimeProgress.sections_queued} queued
-				</p>
-				<p>
-					Diagram workers: {runningQueuedLabel(
-						runtimeProgress.diagram_running,
-						runtimeProgress.diagram_queued
-					)}
-				</p>
-				<p>
-					QC workers: {runningQueuedLabel(runtimeProgress.qc_running, runtimeProgress.qc_queued)}
-				</p>
-				<p>
-					Retries: {runningQueuedLabel(runtimeProgress.retry_running, runtimeProgress.retry_queued)}
-				</p>
-			{/if}
-			{#if runtimePolicy}
-				<p>
-					Policy: {runtimePolicy.concurrency.max_section_concurrency} section / {runtimePolicy.concurrency.max_diagram_concurrency}
-					diagram / {runtimePolicy.concurrency.max_qc_concurrency} QC workers
-				</p>
-				<p>
-					Budget: {formatSeconds(runtimePolicy.generation_timeout_seconds)} total, rerenders {runtimePolicy.max_section_rerenders} max
-				</p>
-				<p>
-					Admission: {runtimePolicy.generation_max_concurrent_per_user} concurrent generations per user
-				</p>
-			{/if}
-			{#if qcSummary}
-				<p>QC: {qcSummary.passed} / {qcSummary.total} passing</p>
-			{/if}
-		</div>
-	{/if}
+		{#if exportPdfOpen}
+			<section class="status-panel export-controls">
+				<h2>Export PDF</h2>
+				<div class="export-grid">
+					<label>
+						<span>School name</span>
+						<input bind:value={schoolName} placeholder="Springfield High" />
+					</label>
+					<label>
+						<span>Teacher name</span>
+						<input bind:value={teacherName} placeholder="Ms. Johnson" />
+					</label>
+					<label>
+						<span>Date</span>
+						<input bind:value={exportDate} type="date" />
+					</label>
+				</div>
+				<div class="preset-row">
+					<p class="preset-label">Export preset</p>
+					<div class="preset-buttons">
+						<button
+							type="button"
+							class:active-preset={exportPreset === 'teacher'}
+							class="preset-btn"
+							onclick={() => applyExportPreset('teacher')}
+						>
+							Teacher copy
+						</button>
+						<button
+							type="button"
+							class:active-preset={exportPreset === 'student'}
+							class="preset-btn"
+							onclick={() => applyExportPreset('student')}
+						>
+							Student copy
+						</button>
+					</div>
+				</div>
+				<div class="export-toggles">
+					<label><input bind:checked={includeToc} type="checkbox" /> Include table of contents</label>
+					<label><input bind:checked={includeAnswers} type="checkbox" /> Include answers</label>
+				</div>
+				<div class="export-actions">
+					<button type="button" class="pdf-btn" disabled={exportPdfLoading} onclick={handlePdfExport}>
+						{exportPdfLoading ? 'Generating PDF...' : 'Download PDF'}
+					</button>
+					{#if exportPdfError}
+						<p class="export-error">{exportPdfError}</p>
+					{/if}
+				</div>
+			</section>
+		{/if}
 
-	{#if viewerWarning}
-		<div class="warning"><strong>Viewer warning:</strong> {viewerWarning}</div>
-	{/if}
+		{#if plannedSections !== null}
+			<div class="status-panel">
+				<p>
+					Sections ready: {readySectionCount} / {plannedSections}
+				</p>
+				{#if failedSectionCount > 0}
+					<p>Failed sections: {failedSectionCount}</p>
+				{/if}
+				<p>Stream: {streamLabel}</p>
+				{#if progressUpdate && detail?.status !== 'completed' && detail?.status !== 'failed'}
+					<p>Progress: {progressUpdate.label}</p>
+					<p>Stage: {progressStageLabel}</p>
+				{/if}
+				{#if runtimeProgress}
+					<p>
+						Runtime sections: {runtimeProgress.sections_completed} complete / {runtimeProgress.sections_running}
+						running / {runtimeProgress.sections_queued} queued
+					</p>
+					<p>
+						Diagram workers: {runningQueuedLabel(
+							runtimeProgress.diagram_running,
+							runtimeProgress.diagram_queued
+						)}
+					</p>
+					<p>
+						QC workers: {runningQueuedLabel(runtimeProgress.qc_running, runtimeProgress.qc_queued)}
+					</p>
+					<p>
+						Retries: {runningQueuedLabel(runtimeProgress.retry_running, runtimeProgress.retry_queued)}
+					</p>
+				{/if}
+				{#if runtimePolicy}
+					<p>
+						Policy: {runtimePolicy.concurrency.max_section_concurrency} section / {runtimePolicy.concurrency.max_diagram_concurrency}
+						diagram / {runtimePolicy.concurrency.max_qc_concurrency} QC workers
+					</p>
+					<p>
+						Budget: {formatSeconds(runtimePolicy.generation_timeout_seconds)} total, rerenders {runtimePolicy.max_section_rerenders} max
+					</p>
+					<p>
+						Admission: {runtimePolicy.generation_max_concurrent_per_user} concurrent generations per user
+					</p>
+				{/if}
+				{#if qcSummary}
+					<p>QC: {qcSummary.passed} / {qcSummary.total} passing</p>
+				{/if}
+			</div>
+		{/if}
 
-	{#if document?.failed_sections?.length}
-		<section class="failed-sections">
-			<h2>Sections Not Completed</h2>
-			<ul>
-				{#each document.failed_sections as failed}
-					<li>
-						<div class="section-summary">
-							<strong>{failed.title}</strong>
-							<span>Failed at {failed.failed_at_node}: {failed.error_summary}</span>
-						</div>
-					</li>
-				{/each}
-			</ul>
-		</section>
-	{/if}
+		{#if viewerWarning}
+			<div class="warning"><strong>Viewer warning:</strong> {viewerWarning}</div>
+		{/if}
 
-	{#if weakSections.length}
-		<section class="weak-sections">
-			<h2>Sections Needing Another Pass</h2>
-			<ul>
-				{#each weakSections as weak}
-					<li>
-						<div class="section-summary">
-							<strong>{weak.title}</strong>
-							<span>{weak.warning}</span>
-						</div>
-					</li>
-				{/each}
-			</ul>
-		</section>
+		{#if document?.failed_sections?.length}
+			<section class="failed-sections">
+				<h2>Sections Not Completed</h2>
+				<ul>
+					{#each document.failed_sections as failed}
+						<li>
+							<div class="section-summary">
+								<strong>{failed.title}</strong>
+								<span>Failed at {failed.failed_at_node}: {failed.error_summary}</span>
+							</div>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
+		{#if weakSections.length}
+			<section class="weak-sections">
+				<h2>Sections Needing Another Pass</h2>
+				<ul>
+					{#each weakSections as weak}
+						<li>
+							<div class="section-summary">
+								<strong>{weak.title}</strong>
+								<span>{weak.warning}</span>
+							</div>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
 	{/if}
 
 	{#if error}
@@ -535,11 +659,101 @@
 	.failed-sections,
 	.weak-sections,
 	.warning,
-	.error {
+	.error,
+	.export-controls {
 		padding: 1rem;
 		border-radius: 18px;
 		background: rgba(255, 251, 244, 0.84);
 		border: 1px solid rgba(36, 52, 63, 0.1);
+	}
+
+	.export-grid {
+		display: grid;
+		gap: 0.75rem;
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		margin-top: 0.75rem;
+	}
+
+	.export-grid label,
+	.export-toggles label {
+		display: grid;
+		gap: 0.35rem;
+	}
+
+	.export-grid input {
+		border: 1px solid rgba(36, 52, 63, 0.18);
+		border-radius: 10px;
+		padding: 0.6rem 0.75rem;
+		font: inherit;
+		background: rgba(255, 255, 255, 0.82);
+	}
+
+	.export-toggles {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1rem;
+		margin-top: 0.9rem;
+	}
+
+	.preset-row {
+		display: grid;
+		gap: 0.55rem;
+		margin-top: 1rem;
+	}
+
+	.preset-label {
+		margin: 0;
+		font-size: 0.82rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #5f574d;
+	}
+
+	.preset-buttons {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+	}
+
+	.preset-btn {
+		border: 1px solid rgba(31, 43, 52, 0.18);
+		background: rgba(255, 255, 255, 0.8);
+		color: #24343f;
+		border-radius: 999px;
+		padding: 0.55rem 0.95rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.active-preset {
+		background: #24343f;
+		color: #fffaf2;
+	}
+
+	.export-actions {
+		display: grid;
+		gap: 0.6rem;
+		margin-top: 1rem;
+	}
+
+	.pdf-btn {
+		border: 1px solid rgba(31, 43, 52, 0.18);
+		background: #24343f;
+		color: #fffaf2;
+		border-radius: 999px;
+		padding: 0.65rem 1rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.pdf-btn:disabled {
+		opacity: 0.65;
+		cursor: progress;
+	}
+
+	.export-error {
+		margin: 0;
+		color: #8d3a26;
 	}
 
 	.error {

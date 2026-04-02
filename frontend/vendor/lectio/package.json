@@ -1,5 +1,6 @@
 {
 	"name": "lectio",
+	"private": true,
 	"version": "0.1.0",
 	"type": "module",
 	"svelte": "./dist/index.js",
@@ -12,11 +13,52 @@
 		},
 		"./theme.css": {
 			"default": "./dist/theme.css"
+		},
+		"./print": {
+			"types": "./dist/print/index.d.ts",
+			"svelte": "./dist/print/index.js",
+			"default": "./dist/print/index.js"
 		}
 	},
 	"files": [
-		"dist"
+		"dist",
+		"!dist/**/*.test.*"
 	],
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"test": "vitest run",
+		"package": "svelte-kit sync && svelte-package",
+		"export-contracts": "npx tsx scripts/export-contracts.ts"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-auto": "^7.0.0",
+		"@sveltejs/kit": "^2.50.2",
+		"@sveltejs/package": "^2.5.7",
+		"@sveltejs/vite-plugin-svelte": "^6.2.4",
+		"@tailwindcss/vite": "^4.2.1",
+		"@testing-library/jest-dom": "^6.9.1",
+		"@testing-library/svelte": "^5.2.8",
+		"@types/katex": "^0.16.8",
+		"@types/node": "^24.5.2",
+		"@types/qrcode": "^1.5.6",
+		"bits-ui": "^2.16.3",
+		"clsx": "^2.1.1",
+		"jsdom": "^26.1.0",
+		"svelte": "^5.51.0",
+		"svelte-check": "^4.4.2",
+		"tailwind-merge": "^3.5.0",
+		"tailwind-variants": "^3.2.2",
+		"tailwindcss": "^4.2.1",
+		"tsx": "^4.19.3",
+		"typescript": "^5.9.3",
+		"vite": "^7.3.1",
+		"vitest": "^3.2.4"
+	},
 	"dependencies": {
 		"esm-env": "^1.2.2",
 		"katex": "^0.16.38",

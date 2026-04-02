@@ -17,10 +17,11 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from core.config import Settings  # noqa: E402
-from generation.repositories.file_document_repo import FileDocumentRepository  # noqa: E402
 from generation.repositories.file_generation_report_repo import FileGenerationReportRepository  # noqa: E402
+from pipeline.api import PipelineDocument  # noqa: E402
 
 logger = logging.getLogger("migrate_sqlite_to_postgres")
+LEGACY_DOCUMENT_OUTPUT_DIR = "outputs/documents"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -40,7 +41,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--source-document-dir",
-        default=settings.document_output_dir,
+        default=LEGACY_DOCUMENT_OUTPUT_DIR,
         help="Legacy document directory for importing PipelineDocument JSON files.",
     )
     parser.add_argument(
@@ -111,17 +112,18 @@ def _parse_bool(value: object) -> bool | None:
 async def _load_document_payload(
     generation_id: str,
     document_path: str | None,
-    repo: FileDocumentRepository,
     *,
     fallback_dir: Path,
 ) -> dict | None:
     if document_path:
-        try:
-            document = await repo.load_document(document_path)
-        except FileNotFoundError:
-            logger.warning("Document file missing for generation=%s path=%s", generation_id, document_path)
-        else:
-            return document.model_dump(mode="json", exclude_none=True)
+        document_file = Path(document_path)
+        if not document_file.is_absolute():
+            document_file = (PROJECT_ROOT / document_file).resolve()
+        if document_file.exists():
+            return PipelineDocument.model_validate_json(
+                document_file.read_text(encoding="utf-8")
+            ).model_dump(mode="json", exclude_none=True)
+        logger.warning("Document file missing for generation=%s path=%s", generation_id, document_path)
 
     fallback_path = fallback_dir / f"{generation_id}.json"
     if fallback_path.exists():
@@ -234,7 +236,6 @@ async def _upsert_generations(
     conn: asyncpg.Connection,
     rows: list[dict[str, object]],
     *,
-    document_repo: FileDocumentRepository,
     report_repo: FileGenerationReportRepository,
     document_dir: Path,
     report_dir: Path,
@@ -248,7 +249,6 @@ async def _upsert_generations(
         document_payload = await _load_document_payload(
             generation_id,
             row.get("document_path") if isinstance(row.get("document_path"), str) else None,
-            document_repo,
             fallback_dir=document_dir,
         )
         report_payload = await _load_report_payload(
@@ -354,7 +354,6 @@ async def migrate(
     document_dir = Path(source_document_dir).expanduser().resolve()
     report_dir = Path(source_report_dir).expanduser().resolve()
 
-    document_repo = FileDocumentRepository(output_dir=str(document_dir))
     report_repo = FileGenerationReportRepository(output_dir=str(report_dir))
 
     async with aiosqlite.connect(source_db_path) as sqlite_conn:
@@ -372,7 +371,6 @@ async def migrate(
         generations_count, missing_documents, missing_reports = await _upsert_generations(
             pg_conn,
             generations,
-            document_repo=document_repo,
             report_repo=report_repo,
             document_dir=document_dir,
             report_dir=report_dir,

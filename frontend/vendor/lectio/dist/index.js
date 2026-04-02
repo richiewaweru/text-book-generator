@@ -18,3 +18,11 @@ export { validateTemplateDefinition, validateTemplateContract, validateTemplateP
 export { basePresets, basePresetMap } from './presets/base-presets';
 // ── Utility ─────────────────────────────────────────
 export { cn } from './utils';
+// ── Print utilities ──────────────────────────────────
+export { default as RuledLines } from './print/RuledLines.svelte';
+export { default as Checkboxes } from './print/Checkboxes.svelte';
+export { default as ExpandedSteps } from './print/ExpandedSteps.svelte';
+export { default as SideBySide } from './print/SideBySide.svelte';
+export { default as VerticalList } from './print/VerticalList.svelte';
+export { default as AnswerMarker } from './print/AnswerMarker.svelte';
+export { providePrintMode, usePrintMode } from './utils/printContext';

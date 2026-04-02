@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { PracticeContent } from '../../types';
 	import { Card } from '../ui/card';
+	import { usePrintMode } from '../../utils/printContext';
+	import RuledLines from '../../print/RuledLines.svelte';
 	import {
 		Accordion,
 		AccordionItem,
@@ -26,6 +28,9 @@
 		extension: { label: 'Extension', className: 'bg-purple-50 text-purple-700 border-purple-200' }
 	};
 
+	const getPrintMode = usePrintMode();
+	const printMode = $derived(getPrintMode());
+
 	let hintsRevealed = $state<Record<number, number>>({});
 	let selfAssessments = $state<Record<number, SelfAssessment>>({});
 
@@ -41,6 +46,40 @@
 	}
 </script>
 
+{#if printMode}
+	<div class="practice-print">
+		<h4 class="practice-print-title">{content.label ?? 'Practice problems'}</h4>
+		{#each content.problems as problem, idx}
+			<div class="practice-print-problem">
+				<div class="practice-print-header">
+					<span class="practice-print-number">Problem {idx + 1}</span>
+					<span class="practice-print-difficulty">{problem.difficulty}</span>
+				</div>
+				{#if problem.context}
+					<p class="practice-print-context">{problem.context}</p>
+				{/if}
+				<p class="practice-print-question">{problem.question}</p>
+				{#if problem.hints?.length}
+					<div class="practice-print-hints">
+						<p class="practice-print-hints-label"><strong>Hints:</strong></p>
+						{#each problem.hints as hint}
+							<p class="practice-print-hint">• {hint.text}</p>
+						{/each}
+					</div>
+				{/if}
+				{#if problem.writein_lines && problem.writein_lines > 0}
+					<RuledLines lines={problem.writein_lines} label="Your answer:" />
+				{/if}
+				{#if problem.solution && content.solutions_available}
+					<div class="practice-print-solution">
+						<p><strong>Solution:</strong> {problem.solution.approach}</p>
+						<p class="practice-print-answer"><strong>Answer:</strong> {problem.solution.answer}</p>
+					</div>
+				{/if}
+			</div>
+		{/each}
+	</div>
+{:else}
 <Card class="border-primary/10 bg-white/88 p-6">
 	<div class="space-y-4">
 		<div class="space-y-2">
@@ -199,3 +238,77 @@
 		{/if}
 	</div>
 </Card>
+{/if}
+
+<style>
+	.practice-print {
+		margin: 1rem 0;
+	}
+
+	.practice-print-title {
+		font-size: 1.125rem;
+		font-weight: 600;
+		margin-bottom: 1rem;
+	}
+
+	.practice-print-problem {
+		page-break-inside: avoid;
+		margin-bottom: 2rem;
+		padding: 1rem;
+		border: 1px solid #e5e7eb;
+	}
+
+	.practice-print-header {
+		display: flex;
+		justify-content: space-between;
+		margin-bottom: 0.75rem;
+	}
+
+	.practice-print-number {
+		font-weight: 600;
+	}
+
+	.practice-print-difficulty {
+		font-size: 0.875rem;
+		color: #6b7280;
+		text-transform: capitalize;
+	}
+
+	.practice-print-context {
+		font-size: 0.875rem;
+		font-style: italic;
+		color: #6b7280;
+		margin-bottom: 0.5rem;
+	}
+
+	.practice-print-question {
+		margin-bottom: 1rem;
+		line-height: 1.6;
+	}
+
+	.practice-print-hints {
+		background: #f9fafb;
+		padding: 0.75rem;
+		margin: 1rem 0;
+		border-left: 3px solid #d1d5db;
+	}
+
+	.practice-print-hints-label {
+		margin-bottom: 0.5rem;
+	}
+
+	.practice-print-hint {
+		margin: 0.25rem 0;
+		font-size: 0.875rem;
+	}
+
+	.practice-print-solution {
+		border-top: 1px solid #d1d5db;
+		padding-top: 0.75rem;
+		margin-top: 1rem;
+	}
+
+	.practice-print-answer {
+		margin-top: 0.5rem;
+	}
+</style>

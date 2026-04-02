@@ -3,6 +3,7 @@
 	import { Badge } from '../ui/badge';
 	import { Card } from '../ui/card';
 	import { X, ZoomIn, ZoomOut } from 'lucide-svelte';
+	import { usePrintMode } from '../../utils/printContext';
 
 	let { content }: { content: SimulationContent } = $props();
 
@@ -10,6 +11,8 @@
 
 	const hasLiveContent = $derived(!!content.html_content);
 	const typeLabel = $derived(content.spec.type.replace(/_/g, ' '));
+	const getPrintMode = usePrintMode();
+	const printMode = $derived(getPrintMode());
 
 	function toggleExpanded() {
 		expanded = !expanded;
@@ -34,6 +37,36 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
+{#if printMode}
+	<!-- Print fallback -->
+	{#if content.spec.print_translation === 'hide'}
+		<div class="simulation-print-note">
+			<p><strong>Interactive simulation:</strong> {content.spec.goal}</p>
+			<p class="simulation-print-note-sub">Available in digital version</p>
+		</div>
+	{:else if (content.spec.print_translation === 'static_diagram' || content.spec.print_translation === 'static_midstate') && content.fallback_diagram}
+		<div class="simulation-print-fallback">
+			{#if content.spec.print_translation === 'static_midstate'}
+				<p class="simulation-type-label">{typeLabel}</p>
+			{/if}
+			<div
+				role="img"
+				aria-label={content.fallback_diagram.alt_text}
+				class="simulation-print-diagram"
+			>
+				{@html content.fallback_diagram.svg_content}
+			</div>
+			{#if content.fallback_diagram.caption}
+				<p class="simulation-print-caption">{content.fallback_diagram.caption}</p>
+			{/if}
+		</div>
+	{:else}
+		<div class="simulation-print-note">
+			<p><strong>{typeLabel}:</strong> {content.spec.goal}</p>
+			<p class="simulation-print-note-sub">See digital version for interactive experience</p>
+		</div>
+	{/if}
+{:else}
 <Card class="border-primary/10 bg-white/88 p-6">
 	<div class="space-y-4">
 		<div class="space-y-3">
@@ -121,9 +154,10 @@
 		</div>
 	</div>
 </Card>
+{/if}
 
 <!-- Expanded overlay -->
-{#if expanded && hasLiveContent}
+{#if expanded && hasLiveContent && !printMode}
 	<div
 		class="fixed inset-0 z-50 grid place-items-center p-6 bg-black/40 backdrop-blur-sm"
 		role="presentation"
@@ -165,3 +199,50 @@
 		</div>
 	</div>
 {/if}
+
+<style>
+	.simulation-print-fallback {
+		page-break-inside: avoid;
+		margin: 1rem 0;
+	}
+
+	.simulation-print-diagram {
+		max-width: 80%;
+		margin: 0 auto;
+	}
+
+	.simulation-print-diagram :global(svg) {
+		display: block;
+		width: 100%;
+		height: auto;
+	}
+
+	.simulation-print-caption {
+		text-align: center;
+		font-size: 0.875rem;
+		font-style: italic;
+		margin-top: 0.5rem;
+	}
+
+	.simulation-type-label {
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.16em;
+		color: #6b7280;
+		margin-bottom: 0.75rem;
+	}
+
+	.simulation-print-note {
+		padding: 1rem;
+		border: 1px solid #d1d5db;
+		margin: 1rem 0;
+		page-break-inside: avoid;
+	}
+
+	.simulation-print-note-sub {
+		font-size: 0.875rem;
+		color: #6b7280;
+		margin-top: 0.5rem;
+	}
+</style>

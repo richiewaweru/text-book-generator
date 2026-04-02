@@ -492,7 +492,7 @@ export const componentRegistry = {
     SimulationBlock: {
         id: 'simulation-block',
         ...teacherFor('simulation-block'),
-        sectionField: 'simulation',
+        sectionField: 'simulations',
         name: 'SimulationBlock',
         group: 7,
         purpose: 'Manipulate a variable and discover the concept through observation',
@@ -500,7 +500,7 @@ export const componentRegistry = {
         subjects: ['mathematics', 'physics', 'chemistry', 'statistics'],
         behaviourModes: ['static'],
         shadcnPrimitive: 'iframe sandbox',
-        capacity: { onePerSection: 'true' },
+        capacity: { countGuidance: 'template-defined' },
         printFallback: 'Static diagram at midstate',
         status: 'beta'
     }

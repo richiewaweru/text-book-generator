@@ -9,6 +9,7 @@ from time import perf_counter
 from typing import Any
 
 from langchain_core.runnables.config import RunnableConfig
+from core.llm.logging import NodeLogger
 from pipeline.api import PipelineSectionReport
 from pipeline.events import (
     NodeFinishedEvent,
@@ -60,6 +61,14 @@ def _utc_now_iso() -> str:
 
 def _report_source_for(node_name: str) -> str | None:
     return _SECTION_REPORT_SOURCES.get(node_name)
+
+
+def _node_logger(generation_id: str, section_id: str | None, node_name: str) -> NodeLogger:
+    return NodeLogger(
+        generation_id=generation_id,
+        section_id=section_id,
+        node_name=node_name,
+    )
 
 
 def _coerce_report(report: Any) -> PipelineSectionReport:
@@ -608,6 +617,7 @@ async def run_section_steps(
             and section_id
             and section_id not in step_state.generated_sections
         ):
+            node_logger = _node_logger(generation_id, section_id, node_name)
             emitted_by_node = section_id in result.get("failed_sections", {})
             record = step_state.failed_sections.get(section_id)
             if record is None:
@@ -620,7 +630,7 @@ async def run_section_steps(
                 )
                 step_state.failed_sections[section_id] = record
                 raw["failed_sections"] = dict(step_state.failed_sections)
-            logger.warning(
+            node_logger.warning(
                 "Short-circuiting section %s after content_generator produced no content",
                 section_id,
             )
@@ -636,6 +646,7 @@ async def run_section_steps(
             and section_id
             and section_id not in step_state.assembled_sections
         ):
+            node_logger = _node_logger(generation_id, section_id, node_name)
             record = step_state.failed_sections.get(section_id)
             if record is None:
                 record = _synthetic_failed_section(
@@ -647,7 +658,7 @@ async def run_section_steps(
                 )
                 step_state.failed_sections[section_id] = record
                 raw["failed_sections"] = dict(step_state.failed_sections)
-            logger.warning(
+            node_logger.warning(
                 "Short-circuiting section %s after section_assembler produced no assembled section",
                 section_id,
             )
