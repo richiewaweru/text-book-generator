@@ -1034,7 +1034,6 @@ class TestProcessSectionComposite:
 
         monkeypatch.setattr(ps_mod, "content_generator", fake_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
-        monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
@@ -1097,7 +1096,6 @@ class TestProcessSectionComposite:
 
         monkeypatch.setattr(ps_mod, "content_generator", failing_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", noop)
-        monkeypatch.setattr(ps_mod, "interaction_decider", noop)
         monkeypatch.setattr(ps_mod, "interaction_generator", noop)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", noop)
@@ -1179,7 +1177,6 @@ class TestProcessSectionComposite:
 
         monkeypatch.setattr(ps_mod, "content_generator", fake_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
-        monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
@@ -1253,7 +1250,6 @@ class TestProcessSectionComposite:
 
         monkeypatch.setattr(ps_mod, "content_generator", fake_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
-        monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
@@ -1316,7 +1312,6 @@ class TestProcessSectionComposite:
 
         monkeypatch.setattr(ps_mod, "content_generator", fake_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
-        monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
@@ -1332,7 +1327,6 @@ class TestProcessSectionComposite:
             "content_generator",
             "composition_planner",
             "diagram_generator",
-            "interaction_decider",
             "interaction_generator",
             "section_assembler",
         ]

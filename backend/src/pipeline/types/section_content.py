@@ -296,6 +296,7 @@ class DiagramCallout(BaseModel):
 class DiagramContent(BaseModel):
     svg_content: str = ""
     spec: Optional[DiagramSpec] = None
+    image_url: Optional[str] = None
     caption: str
     alt_text: str
     zoom_label: Optional[str] = None
@@ -432,6 +433,7 @@ class SectionContent(BaseModel):
     reflection: Optional[ReflectionContent] = None
     glossary: Optional[GlossaryContent] = None
     simulation: Optional[SimulationContent] = None
+    simulations: list[SimulationContent] = Field(default_factory=list)
     interview: Optional[InterviewContent] = None
 
     def to_json(self) -> str:

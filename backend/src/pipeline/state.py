@@ -6,9 +6,10 @@ The single state object that flows through the LangGraph pipeline.
 Field ownership rules (enforced by convention):
     curriculum_planner    -> curriculum_outline, style_context
     content_generator     -> generated_sections, failed_sections, node_failures
-    composition_planner   -> composition_plans
+    composition_planner   -> composition_plans, interaction_usage
     diagram_generator     -> generated_sections[id].diagram, diagram_outcomes
-    interaction_generator -> generated_sections[id].simulation, interaction_specs
+    interaction_generator -> generated_sections[id].simulation,
+                             generated_sections[id].simulations, interaction_specs
     section_assembler     -> assembled_sections, qc_reports (capacity warnings)
     qc_agent              -> qc_reports (semantic issues), rerender_requests
 
@@ -164,6 +165,9 @@ class TextbookPipelineState(BaseModel):
         default_factory=dict
     )
     interaction_specs: Annotated[dict[str, InteractionSpec], _merge_dicts] = Field(
+        default_factory=dict
+    )
+    interaction_usage: Annotated[dict[str, int], _merge_dicts] = Field(
         default_factory=dict
     )
     assembled_sections: Annotated[dict[str, SectionContent], _merge_dicts] = Field(
