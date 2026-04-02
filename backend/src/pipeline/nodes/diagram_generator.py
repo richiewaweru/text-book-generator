@@ -15,9 +15,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
+from core.config import settings as app_settings
 from pipeline.events import DiagramOutcomeEvent
 from pipeline.prompts.diagram import (
     build_diagram_system_prompt,
@@ -25,11 +27,12 @@ from pipeline.prompts.diagram import (
     build_image_generation_prompt,
 )
 from pipeline.providers.registry import get_image_client, get_node_text_model
+from pipeline.runtime_context import retry_policy_for_node, timeout_policy_from_config
 from pipeline.runtime_diagnostics import publish_runtime_event
+from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, TextbookPipelineState
 from pipeline.storage.image_store import get_image_store
 from pipeline.types.composition import DiagramPlan
-from pipeline.types.requests import GenerationMode
 from pipeline.types.section_content import (
     DiagramContent,
     DiagramSpec,
@@ -41,20 +44,12 @@ from pipeline.llm_runner import run_llm
 logger = logging.getLogger(__name__)
 
 _DIAGRAM_COMPONENTS = {"diagram-block", "diagram-series", "diagram-compare"}
-_DIAGRAM_TIMEOUTS = {
-    GenerationMode.DRAFT: 30.0,
-    GenerationMode.BALANCED: 35.0,
-    GenerationMode.STRICT: 45.0,
-}
 
 
 class DiagramOutput(BaseModel):
     spec: DiagramSpec
     caption: str
     alt_text: str
-
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
 
 
 def _has_diagram_slot(contract) -> bool:
@@ -82,27 +77,16 @@ def _publish_outcome(generation_id: str, section_id: str | None, outcome: str) -
     )
 
 
-def _get_diagram_timeout(mode: GenerationMode) -> float:
-    return _DIAGRAM_TIMEOUTS.get(mode, 35.0)
-
-
-# ── Image generation routing ────────────────────────────────────────────────
-
-
 def should_use_image_generation(
     section: SectionContent,
     contract: TemplateContractSummary,
 ) -> bool:
-    """Decide whether to use image generation vs structured spec.
-
-    Prefers images for visual-first templates and science subjects.
-    Falls back to spec for process flows and math geometry.
-    """
+    """Decide whether to use image generation vs structured spec."""
     if contract.family == "visual-exploration":
         return True
 
     science = {"biology", "chemistry", "earth-science", "geography"}
-    if any(s in science for s in contract.subjects):
+    if any(subject in science for subject in contract.subjects):
         return True
 
     if section.process is not None:
@@ -110,13 +94,10 @@ def should_use_image_generation(
 
     if "mathematics" in contract.subjects:
         title_lower = section.header.title.lower()
-        if any(kw in title_lower for kw in ["geometry", "triangle", "circle", "angle"]):
+        if any(keyword in title_lower for keyword in ["geometry", "triangle", "circle", "angle"]):
             return False
 
     return True
-
-
-# ── Image generation path ───────────────────────────────────────────────────
 
 
 async def _generate_image_diagram(
@@ -127,7 +108,7 @@ async def _generate_image_diagram(
     *,
     model_overrides: dict | None = None,
 ) -> dict | None:
-    """Generate diagram as image. Returns state update or None on failure."""
+    """Generate diagram as an image. Returns None when the image path is unavailable."""
 
     try:
         image_client = get_image_client()
@@ -155,9 +136,10 @@ async def _generate_image_diagram(
             format="png",
         )
 
-        # Generate caption/alt text via a quick LLM call
         caption, alt_text = await _generate_image_metadata(
-            state, section, model_overrides=model_overrides,
+            state,
+            section,
+            model_overrides=model_overrides,
         )
 
         diagram = DiagramContent(
@@ -170,12 +152,11 @@ async def _generate_image_diagram(
         return {
             "generated_sections": {section_id: updated},
         }
-
-    except Exception as e:
+    except Exception as exc:
         logger.warning(
             "Image generation failed for section %s, falling back to spec: %s",
             section_id,
-            e,
+            exc,
         )
         return None
 
@@ -192,6 +173,7 @@ async def _generate_image_metadata(
     model_overrides: dict | None = None,
 ) -> tuple[str, str]:
     """Generate caption and alt text for an image diagram."""
+
     try:
         model = get_node_text_model(
             "diagram_generator",
@@ -206,7 +188,6 @@ async def _generate_image_metadata(
                 "for an educational diagram image. Output JSON with 'caption' and 'alt_text' fields."
             ),
         )
-
         result = await asyncio.wait_for(
             run_llm(
                 generation_id=state.request.generation_id or "",
@@ -226,9 +207,6 @@ async def _generate_image_metadata(
         )
 
 
-# ── Spec generation path (existing logic) ───────────────────────────────────
-
-
 async def _generate_spec_diagram(
     state: TextbookPipelineState,
     section: SectionContent,
@@ -236,6 +214,7 @@ async def _generate_spec_diagram(
     plan: object | None,
     *,
     model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict:
     """Generate diagram as structured DiagramSpec (JSON) via LLM."""
 
@@ -249,6 +228,12 @@ async def _generate_spec_diagram(
         output_type=DiagramOutput,
         system_prompt=build_diagram_system_prompt(state.style_context),
     )
+    timeout_policy = timeout_policy_from_config(config)
+    retry_policy = retry_policy_for_node(config, "diagram_generator")
+    if timeout_policy is None or retry_policy is None:
+        policy = resolve_runtime_policy_bundle(app_settings, state.request.mode)
+        timeout_policy = timeout_policy or policy.timeouts
+        retry_policy = retry_policy or policy.retries.for_node("diagram_generator")
 
     result = await asyncio.wait_for(
         run_llm(
@@ -266,8 +251,9 @@ async def _generate_spec_diagram(
                 visual_guidance=plan.diagram.visual_guidance if plan is not None else None,
             ),
             generation_mode=state.request.mode,
+            retry_policy=retry_policy,
         ),
-        timeout=_get_diagram_timeout(state.request.mode),
+        timeout=timeout_policy.diagram_node_budget_seconds,
     )
 
     diagram = DiagramContent(
@@ -282,13 +268,11 @@ async def _generate_spec_diagram(
     }
 
 
-# ── Main node ────────────────────────────────────────────────────────────────
-
-
 async def diagram_generator(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict:
     """Generate an optional visual explanation for the current section."""
 
@@ -333,11 +317,14 @@ async def diagram_generator(
             "completed_nodes": ["diagram_generator"],
         }
 
-    # Try image generation if configured and appropriate
     use_image = should_use_image_generation(section, state.contract)
     if use_image and plan is not None:
         image_result = await _generate_image_diagram(
-            state, section, plan.diagram, sid, model_overrides=model_overrides,
+            state,
+            section,
+            plan.diagram,
+            sid,
+            model_overrides=model_overrides,
         )
         if image_result is not None:
             outcomes[sid] = "image_success"
@@ -347,13 +334,16 @@ async def diagram_generator(
                 "diagram_outcomes": outcomes,
                 "completed_nodes": ["diagram_generator"],
             }
-        # Image failed, fall through to spec path
         logger.info("Image generation unavailable for %s, using spec path", sid)
 
-    # Spec generation path (existing logic)
     try:
         spec_result = await _generate_spec_diagram(
-            state, section, sid, plan, model_overrides=model_overrides,
+            state,
+            section,
+            sid,
+            plan,
+            model_overrides=model_overrides,
+            config=config,
         )
         outcome = "image_fallback_to_spec" if use_image else "spec_success"
         outcomes[sid] = outcome
@@ -364,6 +354,12 @@ async def diagram_generator(
             "completed_nodes": ["diagram_generator"],
         }
     except asyncio.TimeoutError:
+        timeout_policy = timeout_policy_from_config(config)
+        if timeout_policy is None:
+            timeout_policy = resolve_runtime_policy_bundle(
+                app_settings,
+                state.request.mode,
+            ).timeouts
         outcomes[sid] = "timeout"
         _publish_outcome(state.request.generation_id or "", sid, "timeout")
         return {
@@ -372,7 +368,7 @@ async def diagram_generator(
                     node="diagram_generator",
                     section_id=sid,
                     message=(
-                        f"Diagram generation timed out ({int(_get_diagram_timeout(state.request.mode))}s) "
+                        f"Diagram generation timed out ({int(timeout_policy.diagram_node_budget_seconds)}s) "
                         "and the section will ship without a diagram."
                     ),
                     recoverable=True,

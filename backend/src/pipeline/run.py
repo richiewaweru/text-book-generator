@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 
+import core.events as core_events
+from core.dependencies import get_settings
 from pipeline.api import (
     PipelineCommand,
     PipelineDocument,
@@ -25,10 +27,18 @@ from pipeline.events import (
     PipelineEvent,
     PipelineStartEvent,
     QCCompleteEvent,
+    RuntimeProgressEvent,
     SectionReadyEvent,
     SectionStartedEvent,
 )
 from pipeline.graph import build_graph
+from pipeline.runtime_context import (
+    build_runtime_context,
+    build_runtime_policy_event,
+    register_runtime_context,
+    runtime_config_for_context,
+    unregister_runtime_context,
+)
 from pipeline.state import PipelineStatus, TextbookPipelineState, merge_state_updates
 from pipeline.types.section_content import SectionContent
 from pipeline.types.template_contract import TemplateContractSummary
@@ -201,84 +211,106 @@ async def run_pipeline_streaming(
     command: PipelineCommand,
     on_event: Callable[[PipelineEvent], Awaitable[None] | None] | None = None,
 ) -> PipelineResult:
+    runtime_context = build_runtime_context(request=command, settings=get_settings())
+    register_runtime_context(runtime_context)
     contract = get_contract(command.template_id)
     graph = build_graph()
     initial = TextbookPipelineState(
         request=command,
         contract=contract,
-        max_rerenders=command.max_rerenders(),
+        max_rerenders=runtime_context.policy.max_section_rerenders,
         status=PipelineStatus.RUNNING,
     )
-    config = {"configurable": {"thread_id": str(uuid.uuid4())}}
+    config = {
+        "configurable": {
+            "thread_id": str(uuid.uuid4()),
+            **runtime_config_for_context(runtime_context),
+        }
+    }
 
-    await _emit(
-        PipelineStartEvent(
-            generation_id=command.generation_id or "",
-            section_count=command.section_count,
-            template_id=command.template_id,
-            preset_id=command.preset_id,
-        ),
-        on_event,
-    )
+    try:
+        await _emit(
+            PipelineStartEvent(
+                generation_id=command.generation_id or "",
+                section_count=command.section_count,
+                template_id=command.template_id,
+                preset_id=command.preset_id,
+            ),
+            on_event,
+        )
+        core_events.event_bus.publish(
+            command.generation_id or "",
+            build_runtime_policy_event(runtime_context),
+        )
+        core_events.event_bus.publish(
+            command.generation_id or "",
+            RuntimeProgressEvent(
+                generation_id=command.generation_id or "",
+                snapshot=await runtime_context.progress.snapshot(),
+            ),
+        )
 
-    final_state: dict[str, Any] = initial.model_dump()
-    started = perf_counter()
-    emitted_started_sections = False
+        final_state: dict[str, Any] = initial.model_dump()
+        started = perf_counter()
+        emitted_started_sections = False
 
-    async for chunk in graph.astream(initial.model_dump(), config=config):
-        for node_name, output in chunk.items():
-            if node_name == "__end__":
-                continue
+        async for chunk in graph.astream(initial.model_dump(), config=config):
+            for node_name, output in chunk.items():
+                if node_name == "__end__":
+                    continue
 
-            if isinstance(output, dict):
-                _merge_state(final_state, output)
+                if isinstance(output, dict):
+                    _merge_state(final_state, output)
 
-            typed_state = TextbookPipelineState.parse(final_state)
+                typed_state = TextbookPipelineState.parse(final_state)
 
-            if node_name == "curriculum_planner" and not emitted_started_sections:
-                for plan in typed_state.curriculum_outline or []:
-                    await _emit(
-                        SectionStartedEvent(
-                            generation_id=command.generation_id or "",
-                            section_id=plan.section_id,
-                            title=plan.title,
-                            position=plan.position,
-                        ),
-                        on_event,
-                    )
-                emitted_started_sections = True
-
-            if node_name in {"process_section", "retry_diagram", "retry_field"}:
-                assembled = output.get("assembled_sections", {}) if isinstance(output, dict) else {}
-                total_sections = len(typed_state.curriculum_outline or []) or command.section_count
-                completed_sections = len(typed_state.assembled_sections)
-                for section_id, section in assembled.items():
-                    await _emit(
-                        SectionReadyEvent(
-                            generation_id=command.generation_id or "",
-                            section_id=section_id,
-                            section=(
-                                section
-                                if isinstance(section, SectionContent)
-                                else SectionContent.model_validate(section)
+                if node_name == "curriculum_planner" and not emitted_started_sections:
+                    for plan in typed_state.curriculum_outline or []:
+                        await _emit(
+                            SectionStartedEvent(
+                                generation_id=command.generation_id or "",
+                                section_id=plan.section_id,
+                                title=plan.title,
+                                position=plan.position,
                             ),
-                            completed_sections=completed_sections,
-                            total_sections=total_sections,
-                        ),
-                        on_event,
-                    )
+                            on_event,
+                        )
+                    emitted_started_sections = True
 
-                # QC is now inline in process_section.
-                # Emit QCCompleteEvent when all sections have QC reports.
-                reports = typed_state.qc_reports
-                if reports and len(reports) >= total_sections:
-                    await _emit(
-                        QCCompleteEvent(
-                            generation_id=command.generation_id or "",
-                            passed=sum(1 for report in reports.values() if report.passed),
-                            total=len(reports),
-                        ),
-                        on_event,
-                    )
+                if node_name in {"process_section", "retry_diagram", "retry_field", "retry_interaction"}:
+                    assembled = output.get("assembled_sections", {}) if isinstance(output, dict) else {}
+                    total_sections = len(typed_state.curriculum_outline or []) or command.section_count
+                    completed_sections = len(typed_state.assembled_sections)
+                    for section_id, section in assembled.items():
+                        await runtime_context.progress.mark_section_ready(section_id)
+                        await _emit(
+                            SectionReadyEvent(
+                                generation_id=command.generation_id or "",
+                                section_id=section_id,
+                                section=(
+                                    section
+                                    if isinstance(section, SectionContent)
+                                    else SectionContent.model_validate(section)
+                                ),
+                                completed_sections=completed_sections,
+                                total_sections=total_sections,
+                            ),
+                            on_event,
+                        )
 
-    return _build_result(command, final_state, perf_counter() - started)
+                    # QC is now inline in process_section.
+                    # Emit QCCompleteEvent when all sections have QC reports.
+                    reports = typed_state.qc_reports
+                    if reports and len(reports) >= total_sections:
+                        await _emit(
+                            QCCompleteEvent(
+                                generation_id=command.generation_id or "",
+                                passed=sum(1 for report in reports.values() if report.passed),
+                                total=len(reports),
+                            ),
+                            on_event,
+                        )
+
+        return _build_result(command, final_state, perf_counter() - started)
+    finally:
+        unregister_runtime_context(runtime_context.id)

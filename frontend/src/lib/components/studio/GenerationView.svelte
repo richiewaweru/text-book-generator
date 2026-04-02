@@ -25,6 +25,8 @@
 		PlanningGenerationSpec,
 		ProgressUpdateEvent,
 		QCCompleteEvent,
+		RuntimePolicyEvent,
+		RuntimeProgressEvent,
 		SectionFailedEvent,
 		SectionReadyEvent,
 		SectionStartedEvent
@@ -47,6 +49,8 @@
 	let plannedSections = $state<number | null>(null);
 	let qcSummary = $state<{ passed: number; total: number } | null>(null);
 	let progressUpdate = $state<ProgressUpdateEvent | null>(null);
+	let runtimePolicy = $state<RuntimePolicyEvent | null>(null);
+	let runtimeProgress = $state<RuntimeProgressEvent['snapshot'] | null>(null);
 	let viewerWarning = $state<string | null>(null);
 	let activeSectionId = $state<string | null>(null);
 	let reconnectAttempts = $state(0);
@@ -69,6 +73,9 @@
 	const templateName = $derived(formatTemplateName(detail));
 	const viewerTitle = $derived(document?.subject || detail?.subject || 'Live lesson');
 	const showFullLesson = $derived(detail?.status === 'completed');
+	const runtimeSectionsTotal = $derived(
+		runtimeProgress?.sections_total ?? plannedSections ?? sectionSlots.length
+	);
 
 	function isStudioPlanningSpec(value: unknown): value is PlanningGenerationSpec {
 		return Boolean(
@@ -128,6 +135,37 @@
 		if (status === 'active') return progressUpdate?.label ?? 'Generating...';
 		if (status === 'failed') return 'Failed';
 		return 'Waiting';
+	}
+
+	function formatSeconds(seconds: number | null | undefined): string {
+		if (seconds === null || seconds === undefined) return 'Pending';
+		const rounded = Number.isInteger(seconds) ? seconds : Math.round(seconds);
+		return `${rounded}s`;
+	}
+
+	function runtimeCounterLabel(
+		running: number | null | undefined,
+		queued: number | null | undefined
+	): string {
+		if (running === null || running === undefined || queued === null || queued === undefined) {
+			return 'Pending';
+		}
+		return `${running} running / ${queued} queued`;
+	}
+
+	function sectionRuntimeLabel(): string {
+		if (!runtimeProgress) {
+			const total = plannedSections ?? sectionSlots.length;
+			return total ? `${readySectionCount} complete / ${total} planned` : 'Pending';
+		}
+		return `${runtimeProgress.sections_completed} complete / ${runtimeProgress.sections_running} running / ${runtimeProgress.sections_queued} queued`;
+	}
+
+	function workerLabel(): string {
+		if (!runtimePolicy) {
+			return 'Pending';
+		}
+		return `${runtimePolicy.concurrency.max_section_concurrency} sections / ${runtimePolicy.concurrency.max_diagram_concurrency} diagrams / ${runtimePolicy.concurrency.max_qc_concurrency} QC`;
 	}
 
 	function clearReconnectTimer() {
@@ -305,6 +343,18 @@
 			}
 		});
 
+		source.addEventListener('runtime_policy', (event) => {
+			if (source !== eventSource) return;
+			runtimePolicy = JSON.parse((event as MessageEvent).data) as RuntimePolicyEvent;
+		});
+
+		source.addEventListener('runtime_progress', (event) => {
+			if (source !== eventSource) return;
+			const payload = JSON.parse((event as MessageEvent).data) as RuntimeProgressEvent;
+			runtimeProgress = payload.snapshot;
+			plannedSections ??= payload.snapshot.sections_total;
+		});
+
 		source.addEventListener('section_started', (event) => {
 			if (source !== eventSource || !document) return;
 			const payload = JSON.parse((event as MessageEvent).data) as SectionStartedEvent;
@@ -377,6 +427,8 @@
 		qcSummary = null;
 		plannedSections = null;
 		progressUpdate = null;
+		runtimePolicy = null;
+		runtimeProgress = null;
 		viewerWarning = null;
 		activeSectionId = null;
 		reconnectAttempts = 0;
@@ -494,6 +546,38 @@
 				</section>
 
 				<section class="rail-card">
+					<p class="rail-label">Runtime</p>
+					<div class="meta-list">
+						<div>
+							<span>Sections</span>
+							<strong>{sectionRuntimeLabel()}</strong>
+						</div>
+						<div>
+							<span>Diagrams</span>
+							<strong
+								>{runtimeCounterLabel(
+									runtimeProgress?.diagram_running,
+									runtimeProgress?.diagram_queued
+								)}</strong
+							>
+						</div>
+						<div>
+							<span>QC workers</span>
+							<strong>{runtimeCounterLabel(runtimeProgress?.qc_running, runtimeProgress?.qc_queued)}</strong>
+						</div>
+						<div>
+							<span>Retries</span>
+							<strong
+								>{runtimeCounterLabel(
+									runtimeProgress?.retry_running,
+									runtimeProgress?.retry_queued
+								)}</strong
+							>
+						</div>
+					</div>
+				</section>
+
+				<section class="rail-card">
 					<p class="rail-label">Lesson</p>
 					<div class="meta-list">
 						<div>
@@ -502,11 +586,31 @@
 						</div>
 						<div>
 							<span>Sections</span>
-							<strong>{plannedSections ?? sectionSlots.length ?? 0}</strong>
+							<strong>{runtimeSectionsTotal}</strong>
 						</div>
 						<div>
 							<span>Format</span>
 							<strong>{lessonFormat}</strong>
+						</div>
+						<div>
+							<span>Workers</span>
+							<strong>{workerLabel()}</strong>
+						</div>
+						<div>
+							<span>Rerenders</span>
+							<strong>{runtimePolicy ? `${runtimePolicy.max_section_rerenders} max` : 'Pending'}</strong>
+						</div>
+						<div>
+							<span>Budget</span>
+							<strong>{formatSeconds(runtimePolicy?.generation_timeout_seconds)}</strong>
+						</div>
+						<div>
+							<span>Admission</span>
+							<strong
+								>{runtimePolicy
+									? `${runtimePolicy.generation_max_concurrent_per_user} per user`
+									: 'Pending'}</strong
+							>
 						</div>
 						<div>
 							<span>QC</span>

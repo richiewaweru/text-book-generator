@@ -13,8 +13,10 @@ from pydantic import BaseModel, Field
 
 import core.events as core_events
 from pipeline.api import PipelineSectionReport
+from pipeline.runtime_progress import RuntimeProgressSnapshot
 from pipeline.state import NodeFailureDetail
 from pipeline.types.section_content import SectionContent
+from pipeline.types.requests import GenerationMode
 
 
 class PipelineStartEvent(BaseModel):
@@ -50,6 +52,30 @@ class QCCompleteEvent(BaseModel):
     generation_id: str
     passed: int
     total: int
+
+
+class RuntimePolicyEvent(BaseModel):
+    type: Literal["runtime_policy"] = "runtime_policy"
+    generation_id: str
+    mode: GenerationMode
+    generation_timeout_seconds: float
+    generation_max_concurrent_per_user: int
+    max_section_rerenders: int
+    concurrency: dict[str, int]
+    timeouts: dict[str, float]
+    retries: dict[str, dict[str, float | int]]
+    emitted_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class RuntimeProgressEvent(BaseModel):
+    type: Literal["runtime_progress"] = "runtime_progress"
+    generation_id: str
+    snapshot: RuntimeProgressSnapshot
+    emitted_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
 
 class CompleteEvent(BaseModel):
@@ -197,6 +223,8 @@ PipelineEvent = (
     | SectionStartedEvent
     | SectionReadyEvent
     | QCCompleteEvent
+    | RuntimePolicyEvent
+    | RuntimeProgressEvent
     | CompleteEvent
     | ErrorEvent
     | LLMCallStartedEvent
@@ -225,6 +253,8 @@ __all__ = [
     "PipelineEventBus",
     "PipelineStartEvent",
     "QCCompleteEvent",
+    "RuntimePolicyEvent",
+    "RuntimeProgressEvent",
     "SectionReadyEvent",
     "SectionStartedEvent",
     "SectionAttemptStartedEvent",

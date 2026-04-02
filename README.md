@@ -33,9 +33,23 @@ npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\
 
 Open `http://localhost:5173`, sign in, create a profile, and generate a lesson.
 
+## Runtime Policy Configuration
+
+The generation runtime is now configured through env-backed settings instead of hard-coded policy constants. The main knobs are:
+
+- `GENERATION_MAX_CONCURRENT_PER_USER`
+- `PIPELINE_CONCURRENCY_<MODE>_<RESOURCE>_MAX`
+- `PIPELINE_TIMEOUT_<NAME>_SECONDS`
+- `PIPELINE_TIMEOUT_GENERATION_{BASE,PER_SECTION,CAP}_SECONDS`
+- `PIPELINE_RERENDER_<MODE>_SECTION_MAX`
+- `PIPELINE_RETRY_<NAME>_MAX_ATTEMPTS`
+
+`backend/.env.example` is the authoritative local reference. For Docker, copy the same variables into the repo-root `.env` so `docker-compose.yml` can pass them through to the backend container.
+
 ## Local Run Requirements
 
 - Provider API keys must be present in `backend/.env`.
+- Runtime policy knobs live in `backend/.env`; for Docker runs, mirror the same names in the repo-root `.env`.
 - Google OAuth must be configured for local development:
   - `frontend/.env` needs `VITE_GOOGLE_CLIENT_ID`
   - `backend/.env` needs `GOOGLE_CLIENT_ID`

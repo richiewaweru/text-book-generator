@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 
 from dotenv import load_dotenv
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -78,6 +79,53 @@ class Settings(BaseSettings):
 
     # API
     default_pagination_limit: int = 20
+
+    # Generation admission
+    generation_max_concurrent_per_user: int = Field(default=2, ge=1)
+
+    # Runtime concurrency
+    pipeline_concurrency_draft_section_max: int = Field(default=6, ge=1)
+    pipeline_concurrency_draft_diagram_max: int = Field(default=2, ge=1)
+    pipeline_concurrency_draft_qc_max: int = Field(default=6, ge=1)
+
+    pipeline_concurrency_balanced_section_max: int = Field(default=4, ge=1)
+    pipeline_concurrency_balanced_diagram_max: int = Field(default=2, ge=1)
+    pipeline_concurrency_balanced_qc_max: int = Field(default=4, ge=1)
+
+    pipeline_concurrency_strict_section_max: int = Field(default=3, ge=1)
+    pipeline_concurrency_strict_diagram_max: int = Field(default=1, ge=1)
+    pipeline_concurrency_strict_qc_max: int = Field(default=3, ge=1)
+
+    # Whole-generation timeout
+    pipeline_timeout_generation_base_seconds: float = Field(default=120.0, gt=0)
+    pipeline_timeout_generation_per_section_seconds: float = Field(default=90.0, gt=0)
+    pipeline_timeout_generation_cap_seconds: float = Field(default=900.0, gt=0)
+
+    # Node execution budgets
+    pipeline_timeout_curriculum_seconds: float = Field(default=60.0, gt=0)
+    pipeline_timeout_content_core_seconds: float = Field(default=180.0, gt=0)
+    pipeline_timeout_content_practice_seconds: float = Field(default=120.0, gt=0)
+    pipeline_timeout_content_enrichment_seconds: float = Field(default=90.0, gt=0)
+    pipeline_timeout_content_repair_seconds: float = Field(default=120.0, gt=0)
+    pipeline_timeout_field_regen_seconds: float = Field(default=60.0, gt=0)
+    pipeline_timeout_qc_seconds: float = Field(default=60.0, gt=0)
+    pipeline_timeout_diagram_inner_seconds: float = Field(default=45.0, gt=0)
+    pipeline_timeout_diagram_node_budget_seconds: float = Field(default=60.0, gt=0)
+
+    # Rerender budgets
+    pipeline_rerender_draft_section_max: int = Field(default=1, ge=0)
+    pipeline_rerender_balanced_section_max: int = Field(default=2, ge=0)
+    pipeline_rerender_strict_section_max: int = Field(default=3, ge=0)
+
+    # LLM retry attempts per node family
+    pipeline_retry_curriculum_max_attempts: int = Field(default=2, ge=1)
+    pipeline_retry_content_core_max_attempts: int = Field(default=2, ge=1)
+    pipeline_retry_content_practice_max_attempts: int = Field(default=2, ge=1)
+    pipeline_retry_content_enrichment_max_attempts: int = Field(default=2, ge=1)
+    pipeline_retry_content_repair_max_attempts: int = Field(default=2, ge=1)
+    pipeline_retry_field_regen_max_attempts: int = Field(default=2, ge=1)
+    pipeline_retry_qc_max_attempts: int = Field(default=2, ge=1)
+    pipeline_retry_diagram_max_attempts: int = Field(default=1, ge=1)
 
     # Output
     document_output_dir: str = "outputs/documents"

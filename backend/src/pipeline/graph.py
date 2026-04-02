@@ -8,8 +8,10 @@ then route_after_qc decides whether to rerender or finish.
 
 from __future__ import annotations
 
+import inspect
 from time import perf_counter
 
+from langchain_core.runnables.config import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph
 from langgraph.types import Send
@@ -27,6 +29,7 @@ from pipeline.nodes.qc_agent import qc_agent
 from pipeline.nodes.section_assembler import section_assembler
 from pipeline.nodes.section_runner import run_section_steps
 from pipeline.routers.qc_router import route_after_qc
+from pipeline.runtime_context import get_runtime_context
 from pipeline.runtime_diagnostics import (
     generation_id_from_state,
     next_node_attempt,
@@ -34,6 +37,19 @@ from pipeline.runtime_diagnostics import (
     publish_runtime_event,
 )
 from pipeline.state import TextbookPipelineState
+
+
+async def _invoke_node(
+    fn,
+    state,
+    *,
+    model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
+):
+    kwargs = {"model_overrides": model_overrides}
+    if config is not None and "config" in inspect.signature(fn).parameters:
+        kwargs["config"] = config
+    return await fn(state, **kwargs)
 
 
 def fan_out_sections(state: TextbookPipelineState | dict) -> list[Send]:
@@ -53,7 +69,14 @@ def fan_out_sections(state: TextbookPipelineState | dict) -> list[Send]:
     ]
 
 
-async def _run_generation_node(name: str, fn, state, *, model_overrides: dict | None = None):
+async def _run_generation_node(
+    name: str,
+    fn,
+    state,
+    *,
+    model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
+):
     typed = TextbookPipelineState.parse(state)
     generation_id = generation_id_from_state(typed)
     attempt = next_node_attempt(generation_id, name) if generation_id else 1
@@ -69,7 +92,12 @@ async def _run_generation_node(name: str, fn, state, *, model_overrides: dict | 
     )
 
     try:
-        result = await fn(state, model_overrides=model_overrides)
+        result = await _invoke_node(
+            fn,
+            state,
+            model_overrides=model_overrides,
+            config=config,
+        )
     except Exception as exc:
         publish_runtime_event(
             generation_id,
@@ -104,12 +132,14 @@ async def _instrumented_curriculum_planner(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
 ):
     return await _run_generation_node(
         "curriculum_planner",
         curriculum_planner,
         state,
         model_overrides=model_overrides,
+        config=config,
     )
 
 
@@ -117,6 +147,7 @@ async def retry_diagram(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict:
     """
     Re-run diagram_generator -> section_assembler -> qc_agent only.
@@ -128,60 +159,81 @@ async def retry_diagram(
     sid = typed.current_section_id
     prior_outcome = typed.diagram_outcomes.get(sid) if sid else None
     prior_retry_count = typed.diagram_retry_count.get(sid, 0) if sid else 0
+    runtime_context = get_runtime_context(config)
 
-    if prior_outcome == "timeout" or prior_retry_count >= 1:
+    if runtime_context is not None and sid is not None:
+        await runtime_context.progress.start_retry(sid)
+
+    try:
+        if prior_outcome == "timeout" or prior_retry_count >= 1:
+            return await run_section_steps(
+                typed,
+                steps=[
+                    ("section_assembler", section_assembler),
+                    ("qc_agent", qc_agent),
+                ],
+                model_overrides=model_overrides,
+                increment_rerender_count=True,
+                config=config,
+            )
+
+        raw_state = typed.model_dump()
+        if sid:
+            raw_state["diagram_retry_count"] = {
+                **typed.diagram_retry_count,
+                sid: prior_retry_count + 1,
+            }
+
         return await run_section_steps(
-            typed,
+            raw_state,
             steps=[
+                ("diagram_generator", diagram_generator),
                 ("section_assembler", section_assembler),
                 ("qc_agent", qc_agent),
             ],
             model_overrides=model_overrides,
             increment_rerender_count=True,
+            config=config,
         )
-
-    raw_state = typed.model_dump()
-    if sid:
-        raw_state["diagram_retry_count"] = {
-            **typed.diagram_retry_count,
-            sid: prior_retry_count + 1,
-        }
-
-    return await run_section_steps(
-        raw_state,
-        steps=[
-            ("diagram_generator", diagram_generator),
-            ("section_assembler", section_assembler),
-            ("qc_agent", qc_agent),
-        ],
-        model_overrides=model_overrides,
-        increment_rerender_count=True,
-    )
+    finally:
+        if runtime_context is not None and sid is not None:
+            await runtime_context.progress.finish_retry(sid)
 
 
 async def retry_field(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict:
     """Re-run field_regenerator -> section_assembler -> qc_agent only."""
-
-    return await run_section_steps(
-        state,
-        steps=[
-            ("field_regenerator", field_regenerator),
-            ("section_assembler", section_assembler),
-            ("qc_agent", qc_agent),
-        ],
-        model_overrides=model_overrides,
-        increment_rerender_count=True,
-    )
+    typed = TextbookPipelineState.parse(state)
+    runtime_context = get_runtime_context(config)
+    sid = typed.current_section_id
+    if runtime_context is not None and sid is not None:
+        await runtime_context.progress.start_retry(sid)
+    try:
+        return await run_section_steps(
+            state,
+            steps=[
+                ("field_regenerator", field_regenerator),
+                ("section_assembler", section_assembler),
+                ("qc_agent", qc_agent),
+            ],
+            model_overrides=model_overrides,
+            increment_rerender_count=True,
+            config=config,
+        )
+    finally:
+        if runtime_context is not None and sid is not None:
+            await runtime_context.progress.finish_retry(sid)
 
 
 async def retry_interaction(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict:
     """
     Re-run interaction_generator -> section_assembler -> qc_agent only.
@@ -193,24 +245,33 @@ async def retry_interaction(
     typed = TextbookPipelineState.parse(state)
     sid = typed.current_section_id
     prior_retry_count = typed.interaction_retry_count.get(sid, 0) if sid else 0
+    runtime_context = get_runtime_context(config)
 
-    raw_state = typed.model_dump()
-    if sid:
-        raw_state["interaction_retry_count"] = {
-            **typed.interaction_retry_count,
-            sid: prior_retry_count + 1,
-        }
+    if runtime_context is not None and sid is not None:
+        await runtime_context.progress.start_retry(sid)
 
-    return await run_section_steps(
-        raw_state,
-        steps=[
-            ("interaction_generator", interaction_generator),
-            ("section_assembler", section_assembler),
-            ("qc_agent", qc_agent),
-        ],
-        model_overrides=model_overrides,
-        increment_rerender_count=False,  # does NOT consume max_rerenders
-    )
+    try:
+        raw_state = typed.model_dump()
+        if sid:
+            raw_state["interaction_retry_count"] = {
+                **typed.interaction_retry_count,
+                sid: prior_retry_count + 1,
+            }
+
+        return await run_section_steps(
+            raw_state,
+            steps=[
+                ("interaction_generator", interaction_generator),
+                ("section_assembler", section_assembler),
+                ("qc_agent", qc_agent),
+            ],
+            model_overrides=model_overrides,
+            increment_rerender_count=False,  # does NOT consume max_rerenders
+            config=config,
+        )
+    finally:
+        if runtime_context is not None and sid is not None:
+            await runtime_context.progress.finish_retry(sid)
 
 
 def build_graph(checkpointer=None) -> StateGraph:

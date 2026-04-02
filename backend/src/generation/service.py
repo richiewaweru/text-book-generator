@@ -25,8 +25,22 @@ from core.dependencies import get_jwt_handler, get_settings
 from core.ports.generation_engine import GenerationEngine
 from pipeline.api import PipelineCommand, PipelineDocument, PipelineSectionManifestItem
 from pipeline.contracts import get_contract, validate_preset_for_template
-from pipeline.events import CompleteEvent, ErrorEvent, SectionReadyEvent, SectionStartedEvent
+from pipeline.events import (
+    CompleteEvent,
+    ErrorEvent,
+    RuntimeProgressEvent,
+    SectionReadyEvent,
+    SectionStartedEvent,
+)
+from pipeline.runtime_context import (
+    build_runtime_policy_event,
+    get_runtime_context_by_generation,
+)
 from pipeline.runtime_diagnostics import clear_node_attempts
+from pipeline.runtime_policy import (
+    resolve_generation_max_concurrent_per_user,
+    resolve_generation_timeout_seconds,
+)
 from pipeline.types.requests import GenerationMode, SectionPlan
 from planning.dtos import GenerationSpec
 from planning.models import PlanningGenerationSpec, PlanningSectionPlan
@@ -69,7 +83,6 @@ logger = logging.getLogger(__name__)
 event_bus = core_events.event_bus
 
 router = APIRouter(prefix="/api/v1", tags=["generation"])
-MAX_CONCURRENT_GENERATIONS_PER_USER = 2
 _HEARTBEAT_INTERVAL_SECONDS = 30.0
 
 
@@ -584,9 +597,6 @@ def _log_trace_event(generation_id: str, event) -> None:
         )
 
 
-_GENERATION_JOB_TIMEOUT_MIN = 120.0
-_GENERATION_JOB_TIMEOUT_PER_SECTION = 90.0
-_GENERATION_JOB_TIMEOUT_MAX = 720.0
 
 
 def _generation_job_timeout(section_count: int) -> float:
@@ -595,11 +605,7 @@ def _generation_job_timeout(section_count: int) -> float:
     Formula: 120 + 90 * N, capped at 720s.
     1 section â†’ 210s, 2 â†’ 300s, 4 â†’ 480s, 7+ â†’ 720s.
     """
-    return min(
-        _GENERATION_JOB_TIMEOUT_MIN
-        + _GENERATION_JOB_TIMEOUT_PER_SECTION * max(section_count, 1),
-        _GENERATION_JOB_TIMEOUT_MAX,
-    )
+    return resolve_generation_timeout_seconds(get_settings(), section_count)
 _SSE_KEEPALIVE_TIMEOUT_SECONDS = 15.0
 _GENERATION_TIMEOUT_ERROR_CODE = "generation_timeout"
 _ORPHANED_GENERATION_ERROR_CODE = "orphaned_generation"
@@ -918,11 +924,12 @@ async def enqueue_generation(
     if profile is None:
         raise HTTPException(status_code=409, detail="Complete your profile first")
     active_generations = await gen_repo.count_active_by_user(current_user.id)
-    if active_generations >= MAX_CONCURRENT_GENERATIONS_PER_USER:
+    generation_limit = resolve_generation_max_concurrent_per_user(get_settings())
+    if active_generations >= generation_limit:
         raise HTTPException(
             status_code=429,
             detail=(
-                f"Maximum {MAX_CONCURRENT_GENERATIONS_PER_USER} concurrent generations allowed. "
+                f"Maximum {generation_limit} concurrent generations allowed. "
                 "Please wait for a running generation to complete."
             ),
         )
@@ -1138,6 +1145,20 @@ async def get_generation_events(
         queue = core_events.event_bus.subscribe(generation_id)
         try:
             current = await gen_repo.find_by_id(generation_id)
+            runtime_context = get_runtime_context_by_generation(generation_id)
+            if runtime_context is not None:
+                policy_payload = build_runtime_policy_event(runtime_context).model_dump(
+                    mode="json",
+                    exclude_none=True,
+                )
+                async for payload in emit_event_payloads(policy_payload):
+                    yield payload
+                progress_payload = RuntimeProgressEvent(
+                    generation_id=generation_id,
+                    snapshot=await runtime_context.progress.snapshot(),
+                ).model_dump(mode="json", exclude_none=True)
+                async for payload in emit_event_payloads(progress_payload):
+                    yield payload
             while not queue.empty():
                 event = queue.get_nowait()
                 async for payload in emit_event_payloads(event):

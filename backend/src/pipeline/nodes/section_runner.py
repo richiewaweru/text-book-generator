@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 
+from langchain_core.runnables.config import RunnableConfig
 from pipeline.api import PipelineSectionReport
 from pipeline.events import (
     NodeFinishedEvent,
@@ -16,6 +18,7 @@ from pipeline.events import (
     SectionReportUpdatedEvent,
     SectionRetryQueuedEvent,
 )
+from pipeline.runtime_context import get_runtime_context
 from pipeline.runtime_diagnostics import (
     current_section_attempt,
     generation_id_from_state,
@@ -37,6 +40,13 @@ logger = logging.getLogger(__name__)
 
 SectionStep = Callable[..., Awaitable[dict]]
 NamedSectionStep = tuple[str, SectionStep]
+
+_RESOURCE_LIMITERS = {
+    "diagram_generator": "diagram",
+    "qc_agent": "qc",
+}
+_DIAGRAM_RETRY_FIELDS = {"diagram", "diagram_series", "diagram_compare"}
+_INTERACTION_RETRY_FIELDS = {"simulation", "simulation_block"}
 
 _SECTION_REPORT_SOURCES = {
     "section_assembler": "assembler",
@@ -63,6 +73,23 @@ def _coerce_rerender_request(request: Any) -> RerenderRequest:
 
 def _coerce_failed_section(record: Any) -> FailedSectionRecord:
     return record if isinstance(record, FailedSectionRecord) else FailedSectionRecord.model_validate(record)
+
+
+def _step_accepts_config(step: SectionStep) -> bool:
+    return "config" in inspect.signature(step).parameters
+
+
+async def _invoke_step(
+    step: SectionStep,
+    state: Any,
+    *,
+    model_overrides: dict | None,
+    config: RunnableConfig | None,
+) -> dict:
+    kwargs: dict[str, Any] = {"model_overrides": model_overrides}
+    if config is not None and _step_accepts_config(step):
+        kwargs["config"] = config
+    return await step(state, **kwargs)
 
 
 def _rerender_request_changed(before: RerenderRequest | None, after: RerenderRequest | None) -> bool:
@@ -253,57 +280,97 @@ async def _run_parallel_phase(
     steps: Sequence[NamedSectionStep],
     model_overrides: dict | None = None,
     pre_instrumented: frozenset[str] = frozenset(),
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     generation_id = generation_id_from_state(state)
     attempt, _ = current_section_attempt(state, state.current_section_id)
     base_state = state.model_dump()
+    runtime_context = get_runtime_context(config)
+    section_id = state.current_section_id
 
     async def _call(name: str, fn: SectionStep) -> dict:
         if name in pre_instrumented:
-            return await fn(dict(base_state), model_overrides=model_overrides)
+            return await _invoke_step(
+                fn,
+                dict(base_state),
+                model_overrides=model_overrides,
+                config=config,
+            )
+        limiter_name = _RESOURCE_LIMITERS.get(name)
+        limiter = None
+        if (
+            runtime_context is not None
+            and limiter_name is not None
+            and section_id is not None
+        ):
+            await runtime_context.progress.queue_node(limiter_name, section_id)
+            limiter = getattr(runtime_context.limiters, limiter_name)
+            await limiter.acquire()
+            await runtime_context.progress.start_node(limiter_name, section_id)
         started = perf_counter()
         publish_runtime_event(
             generation_id,
             NodeStartedEvent(
                 generation_id=generation_id,
                 node=name,
-                section_id=state.current_section_id,
+                section_id=section_id,
                 attempt=attempt,
             ),
         )
         try:
-            result = await fn(dict(base_state), model_overrides=model_overrides)
+            result = await _invoke_step(
+                fn,
+                dict(base_state),
+                model_overrides=model_overrides,
+                config=config,
+            )
         except Exception as exc:
             publish_runtime_event(
                 generation_id,
                 NodeFinishedEvent(
                     generation_id=generation_id,
                     node=name,
-                    section_id=state.current_section_id,
+                    section_id=section_id,
                     attempt=attempt,
                     status="failed",
                     latency_ms=(perf_counter() - started) * 1000.0,
                     error=str(exc),
                 ),
             )
+            if (
+                runtime_context is not None
+                and limiter_name is not None
+                and limiter is not None
+                and section_id is not None
+            ):
+                limiter.release()
+                await runtime_context.progress.finish_node(limiter_name, section_id)
             raise
         msgs = node_error_messages(
             result.get("errors"),
             node=name,
-            section_id=state.current_section_id,
+            section_id=section_id,
         )
         publish_runtime_event(
             generation_id,
             NodeFinishedEvent(
                 generation_id=generation_id,
                 node=name,
-                section_id=state.current_section_id,
+                section_id=section_id,
                 attempt=attempt,
                 status="failed" if msgs else "succeeded",
                 latency_ms=(perf_counter() - started) * 1000.0,
                 error=" | ".join(msgs) if msgs else None,
             ),
         )
+        if (
+            runtime_context is not None
+            and limiter_name is not None
+            and limiter is not None
+            and section_id is not None
+        ):
+            limiter.release()
+            await runtime_context.progress.finish_node(limiter_name, section_id)
         return result
 
     results = await asyncio.gather(
@@ -360,6 +427,7 @@ async def run_section_steps(
     steps: Sequence[NamedSectionStep | SectionStep],
     model_overrides: dict | None = None,
     increment_rerender_count: bool = False,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Run a section-scoped composite node and publish per-step diagnostics.
@@ -372,6 +440,7 @@ async def run_section_steps(
     raw = before_state.model_dump()
     section_id = before_state.current_section_id
     generation_id = generation_id_from_state(before_state)
+    runtime_context = get_runtime_context(config)
     attempt, trigger = current_section_attempt(before_state, section_id)
 
     if increment_rerender_count and trigger == "rerender" and section_id:
@@ -399,9 +468,20 @@ async def run_section_steps(
 
     completed_node_names: list[str] = []
     for node_name, step in normalized_steps:
-        step_started = perf_counter()
+        limiter_name = _RESOURCE_LIMITERS.get(node_name)
+        limiter = None
 
         if generation_id:
+            if (
+                runtime_context is not None
+                and limiter_name is not None
+                and section_id is not None
+            ):
+                await runtime_context.progress.queue_node(limiter_name, section_id)
+                limiter = getattr(runtime_context.limiters, limiter_name)
+                await limiter.acquire()
+                await runtime_context.progress.start_node(limiter_name, section_id)
+            step_started = perf_counter()
             publish_runtime_event(
                 generation_id,
                 NodeStartedEvent(
@@ -411,9 +491,16 @@ async def run_section_steps(
                     attempt=attempt,
                 ),
             )
+        else:
+            step_started = perf_counter()
 
         try:
-            result = await step(raw, model_overrides=model_overrides)
+            result = await _invoke_step(
+                step,
+                raw,
+                model_overrides=model_overrides,
+                config=config,
+            )
         except Exception as exc:
             publish_runtime_event(
                 generation_id,
@@ -427,6 +514,14 @@ async def run_section_steps(
                     error=str(exc),
                 ),
             )
+            if (
+                runtime_context is not None
+                and limiter_name is not None
+                and limiter is not None
+                and section_id is not None
+            ):
+                limiter.release()
+                await runtime_context.progress.finish_node(limiter_name, section_id)
             raise
 
         merge_state_updates(raw, result)
@@ -450,6 +545,14 @@ async def run_section_steps(
                 error=" | ".join(step_errors) if step_errors else None,
             ),
         )
+        if (
+            runtime_context is not None
+            and limiter_name is not None
+            and limiter is not None
+            and section_id is not None
+        ):
+            limiter.release()
+            await runtime_context.progress.finish_node(limiter_name, section_id)
 
         source = _report_source_for(node_name)
         if (
@@ -473,17 +576,32 @@ async def run_section_steps(
                 if rerender is None:
                     continue
                 request = _coerce_rerender_request(rerender)
-                publish_runtime_event(
-                    generation_id,
-                    SectionRetryQueuedEvent(
-                        generation_id=generation_id,
-                        section_id=request.section_id,
-                        reason=request.reason,
-                        block_type=request.block_type,
-                        next_attempt=step_state.rerender_count.get(request.section_id, 0) + 2,
-                        max_attempts=step_state.max_rerenders + 1,
-                    ),
+                diagram_budget_exhausted = (
+                    request.block_type in _DIAGRAM_RETRY_FIELDS
+                    and step_state.diagram_retry_count.get(request.section_id, 0) >= 1
                 )
+                interaction_budget_exhausted = (
+                    request.block_type in _INTERACTION_RETRY_FIELDS
+                    and step_state.interaction_retry_count.get(request.section_id, 0) >= 1
+                )
+                should_queue_retry = not diagram_budget_exhausted and not interaction_budget_exhausted
+                if (
+                    runtime_context is not None
+                    and should_queue_retry
+                ):
+                    await runtime_context.progress.queue_retry(request.section_id)
+                if should_queue_retry:
+                    publish_runtime_event(
+                        generation_id,
+                        SectionRetryQueuedEvent(
+                            generation_id=generation_id,
+                            section_id=request.section_id,
+                            reason=request.reason,
+                            block_type=request.block_type,
+                            next_attempt=step_state.rerender_count.get(request.section_id, 0) + 2,
+                            max_attempts=step_state.max_rerenders + 1,
+                        ),
+                    )
 
         if (
             node_name == "content_generator"

@@ -9,9 +9,11 @@ STATE CONTRACT
 
 from __future__ import annotations
 
+from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
+from core.config import settings as app_settings
 from pipeline.contracts import get_preset, validate_preset_for_template
 from pipeline.events import SectionStartedEvent
 from pipeline.prompts.curriculum import (
@@ -19,7 +21,9 @@ from pipeline.prompts.curriculum import (
     build_curriculum_user_prompt,
 )
 from pipeline.providers.registry import get_node_text_model
+from pipeline.runtime_context import retry_policy_for_node
 from pipeline.runtime_diagnostics import publish_runtime_event
+from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, StyleContext, TextbookPipelineState
 from pipeline.types.requests import SectionPlan
 from pipeline.llm_runner import run_llm
@@ -73,6 +77,7 @@ async def curriculum_planner(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict:
     """Generate the curriculum outline or reuse the seeded outline when present."""
 
@@ -120,6 +125,12 @@ async def curriculum_planner(
     )
 
     try:
+        retry_policy = retry_policy_for_node(config, "curriculum_planner")
+        if retry_policy is None:
+            retry_policy = resolve_runtime_policy_bundle(
+                app_settings,
+                state.request.mode,
+            ).retries.for_node("curriculum_planner")
         result = await run_llm(
             generation_id=state.request.generation_id or "",
             node="curriculum_planner",
@@ -133,6 +144,7 @@ async def curriculum_planner(
                 section_count=state.request.section_count,
             ),
             generation_mode=state.request.mode,
+            retry_policy=retry_policy,
         )
         _publish_section_titles(
             state.request.generation_id or "", result.output.sections

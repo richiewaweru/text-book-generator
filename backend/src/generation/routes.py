@@ -202,6 +202,21 @@ async def get_generation_events(
         queue = core_events.event_bus.subscribe(generation_id)
         try:
             current = await gen_repo.find_by_id(generation_id)
+            runtime_context = generation_service.get_runtime_context_by_generation(
+                generation_id
+            )
+            if runtime_context is not None:
+                policy_payload = generation_service.build_runtime_policy_event(
+                    runtime_context
+                ).model_dump(mode="json", exclude_none=True)
+                async for payload in emit_event_payloads(policy_payload):
+                    yield payload
+                progress_payload = generation_service.RuntimeProgressEvent(
+                    generation_id=generation_id,
+                    snapshot=await runtime_context.progress.snapshot(),
+                ).model_dump(mode="json", exclude_none=True)
+                async for payload in emit_event_payloads(progress_payload):
+                    yield payload
             while not queue.empty():
                 event = queue.get_nowait()
                 async for payload in emit_event_payloads(event):
