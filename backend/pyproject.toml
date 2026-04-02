@@ -38,7 +38,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/core", "src/generation", "src/pipeline", "src/planning", "src/telemetry"]
+packages = ["src/core", "src/generation", "src/pipeline", "src/planning", "src/telemetry", "src/pdf_export"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
