@@ -27,6 +27,7 @@ from generation.recovery import mark_stale_generations_failed
 from generation.repositories.sql_document_repo import SqlDocumentRepository
 from generation.repositories.sql_generation_repo import SqlGenerationRepository
 from generation.routes import router as generation_router
+from pdf_export.routes import router as pdf_export_router
 from planning.routes import router as brief_router
 from telemetry import telemetry_router
 from telemetry.dependencies import get_llm_call_repository, get_report_repository
@@ -240,6 +241,7 @@ def create_app() -> FastAPI:
     app.include_router(profile_router)
     app.include_router(brief_router)
     app.include_router(generation_router)
+    app.include_router(pdf_export_router)
     app.include_router(telemetry_router)
 
     return app
