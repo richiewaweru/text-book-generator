@@ -19,11 +19,15 @@ from __future__ import annotations
 
 import json
 
+from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
+from core.config import settings as app_settings
 from pipeline.prompts.qc import build_qc_system_prompt, build_qc_user_prompt
 from pipeline.providers.registry import get_node_text_model
+from pipeline.runtime_context import retry_policy_for_node
+from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import (
     PipelineError,
     QCReport,
@@ -43,6 +47,7 @@ async def qc_agent(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict:
     """Run semantic quality checks and request rerenders for blocking issues."""
 
@@ -69,6 +74,12 @@ async def qc_agent(
         return {"completed_nodes": ["qc_agent"]}
 
     try:
+        retry_policy = retry_policy_for_node(config, "qc_agent")
+        if retry_policy is None:
+            retry_policy = resolve_runtime_policy_bundle(
+                app_settings,
+                state.request.mode,
+            ).retries.for_node("qc_agent")
         section_json = json.dumps(
             (
                 section.model_dump(exclude_none=True)
@@ -86,6 +97,7 @@ async def qc_agent(
             user_prompt=build_qc_user_prompt(section_json),
             section_id=section_id,
             generation_mode=state.request.mode,
+            retry_policy=retry_policy,
         )
 
         qc_output = result.output

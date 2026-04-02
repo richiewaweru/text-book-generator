@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic_ai.models.test import TestModel
 
 from pipeline.nodes.composition_planner import (
     CompositionDecision,
@@ -320,8 +321,6 @@ def test_to_composition_plan_populates_interactions_list() -> None:
     assert plan.interaction.enabled is True
     assert plan.interaction.interaction_type == "graph_slider"
 
-
-from pydantic_ai.models.test import TestModel
 
 _TEST_MODEL_OVERRIDES = {"fast": TestModel()}
 

@@ -14,9 +14,11 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from langchain_core.runnables.config import RunnableConfig
 from pydantic import ValidationError
 from pydantic_ai import Agent
 
+from core.config import settings as app_settings
 from pipeline.contracts import get_optional_fields
 from pipeline.events import (
     SectionFailedEvent,
@@ -38,7 +40,9 @@ from pipeline.prompts.content import (
     build_practice_user_prompt,
 )
 from pipeline.providers.registry import get_node_text_model
+from pipeline.runtime_context import retry_policy_for_node
 from pipeline.runtime_diagnostics import publish_runtime_event
+from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import (
     FailedSectionRecord,
     NodeFailureDetail,
@@ -229,12 +233,25 @@ def _active_enrichment_fields(template_id: str) -> list[str]:
     return [f for f in optional if f in ENRICHMENT_FIELDS and f not in _EXTERNAL_FIELDS]
 
 
+def _retry_policy(
+    state: TextbookPipelineState,
+    *,
+    config: RunnableConfig | None,
+    node: str,
+):
+    return retry_policy_for_node(config, node) or resolve_runtime_policy_bundle(
+        app_settings,
+        state.request.mode,
+    ).retries.for_node(node)
+
+
 async def _generate_monolithic(
     *,
     state: TextbookPipelineState,
     sid: str,
     model,
     model_overrides: dict | None,
+    config: RunnableConfig | None,
     plan,
     rerender_reason: str | None,
     generated: dict,
@@ -272,6 +289,11 @@ async def _generate_monolithic(
             user_prompt=base_prompt,
             section_id=sid,
             generation_mode=state.request.mode,
+            retry_policy=_retry_policy(
+                state,
+                config=config,
+                node="content_generator",
+            ),
         )
         generated[sid] = result.output
     except Exception as exc:
@@ -340,6 +362,7 @@ async def _attempt_repair(
     state: TextbookPipelineState,
     sid: str,
     repair: _RepairNeeded,
+    config: RunnableConfig | None,
     generated: dict,
     failed_sections: dict,
     errors: list,
@@ -387,6 +410,11 @@ async def _attempt_repair(
             ),
             section_id=sid,
             generation_mode=state.request.mode,
+            retry_policy=_retry_policy(
+                state,
+                config=config,
+                node="content_generator_repair",
+            ),
         )
         generated[sid] = repair_result.output
         publish_runtime_event(
@@ -422,6 +450,7 @@ async def _generate_phased(
     sid: str,
     model,
     model_overrides: dict | None,
+    config: RunnableConfig | None,
     plan,
     rerender_reason: str | None,
     generated: dict,
@@ -460,6 +489,11 @@ async def _generate_phased(
             ),
             section_id=sid,
             generation_mode=state.request.mode,
+            retry_policy=_retry_policy(
+                state,
+                config=config,
+                node="content_generator_core",
+            ),
         )
         core = core_result.output
     except Exception as exc:
@@ -503,6 +537,11 @@ async def _generate_phased(
             ),
             section_id=sid,
             generation_mode=state.request.mode,
+            retry_policy=_retry_policy(
+                state,
+                config=config,
+                node="content_generator_practice",
+            ),
         )
         practice = practice_result.output
     except Exception as exc:
@@ -548,6 +587,11 @@ async def _generate_phased(
                 ),
                 section_id=sid,
                 generation_mode=state.request.mode,
+                retry_policy=_retry_policy(
+                    state,
+                    config=config,
+                    node="content_generator_enrichment",
+                ),
             )
             enrichment = enrichment_result.output
         except Exception as exc:
@@ -604,6 +648,7 @@ async def content_generator(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict:
     """Generate or rerender one section's core teaching content."""
 
@@ -634,6 +679,7 @@ async def content_generator(
             sid=sid,
             model=model,
             model_overrides=model_overrides,
+            config=config,
             plan=plan,
             rerender_reason=rerender_reason,
             generated=generated,
@@ -648,6 +694,7 @@ async def content_generator(
                 sid=sid,
                 model=model,
                 model_overrides=model_overrides,
+                config=config,
                 plan=plan,
                 rerender_reason=rerender_reason,
                 generated=generated,
@@ -660,6 +707,7 @@ async def content_generator(
                 state=state,
                 sid=sid,
                 repair=repair,
+                config=config,
                 generated=generated,
                 failed_sections=failed_sections,
                 errors=errors,

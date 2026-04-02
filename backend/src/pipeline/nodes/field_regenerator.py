@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import json
 
+from langchain_core.runnables.config import RunnableConfig
 from pydantic_ai import Agent
 
+from core.config import settings as app_settings
 from pipeline.llm_runner import run_llm
 from pipeline.prompts.field_regen import (
     RETRYABLE_FIELDS,
@@ -28,6 +30,8 @@ from pipeline.prompts.field_regen import (
     build_field_regen_user_prompt,
 )
 from pipeline.providers.registry import get_node_text_model
+from pipeline.runtime_context import retry_policy_for_node
+from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, TextbookPipelineState
 
 
@@ -35,6 +39,7 @@ async def field_regenerator(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict:
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
@@ -73,6 +78,12 @@ async def field_regenerator(
     )
 
     try:
+        retry_policy = retry_policy_for_node(config, "field_regenerator")
+        if retry_policy is None:
+            retry_policy = resolve_runtime_policy_bundle(
+                app_settings,
+                state.request.mode,
+            ).retries.for_node("field_regenerator")
         result = await run_llm(
             generation_id=state.request.generation_id or "",
             node="field_regenerator",
@@ -85,6 +96,7 @@ async def field_regenerator(
             ),
             section_id=sid,
             generation_mode=state.request.mode,
+            retry_policy=retry_policy,
         )
 
         raw_field = json.loads(result.output)

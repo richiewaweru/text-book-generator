@@ -271,6 +271,68 @@ export interface QCCompleteEvent {
 	total: number;
 }
 
+export interface RuntimeConcurrencyPolicy {
+	max_section_concurrency: number;
+	max_diagram_concurrency: number;
+	max_qc_concurrency: number;
+}
+
+export interface RuntimeTimeoutPolicy {
+	curriculum_planner_timeout_seconds: number;
+	content_core_timeout_seconds: number;
+	content_practice_timeout_seconds: number;
+	content_enrichment_timeout_seconds: number;
+	content_repair_timeout_seconds: number;
+	field_regenerator_timeout_seconds: number;
+	qc_timeout_seconds: number;
+	diagram_inner_timeout_seconds: number;
+	diagram_node_budget_seconds: number;
+	generation_timeout_base_seconds: number;
+	generation_timeout_per_section_seconds: number;
+	generation_timeout_cap_seconds: number;
+}
+
+export interface RuntimeRetryPolicy {
+	max_attempts: number;
+	base_delay_seconds: number;
+	call_timeout_seconds: number;
+	max_rate_limit_delay_seconds: number;
+}
+
+export interface RuntimePolicyEvent {
+	type: 'runtime_policy';
+	generation_id: string;
+	mode: GenerationMode;
+	generation_timeout_seconds: number;
+	generation_max_concurrent_per_user: number;
+	max_section_rerenders: number;
+	concurrency: RuntimeConcurrencyPolicy;
+	timeouts: RuntimeTimeoutPolicy;
+	retries: Record<string, RuntimeRetryPolicy>;
+	emitted_at: string;
+}
+
+export interface RuntimeProgressSnapshot {
+	mode: GenerationMode;
+	sections_total: number;
+	sections_completed: number;
+	sections_running: number;
+	sections_queued: number;
+	diagram_running: number;
+	diagram_queued: number;
+	qc_running: number;
+	qc_queued: number;
+	retry_running: number;
+	retry_queued: number;
+}
+
+export interface RuntimeProgressEvent {
+	type: 'runtime_progress';
+	generation_id: string;
+	snapshot: RuntimeProgressSnapshot;
+	emitted_at: string;
+}
+
 export type ProgressUpdateStage =
 	| 'planning'
 	| 'generating_section'
@@ -311,6 +373,8 @@ export type GenerationStreamEvent =
 	| SectionReadyEvent
 	| SectionFailedEvent
 	| QCCompleteEvent
+	| RuntimePolicyEvent
+	| RuntimeProgressEvent
 	| ProgressUpdateEvent
 	| CompleteEvent
 	| ErrorEvent;

@@ -254,6 +254,60 @@ describe('GenerationView', () => {
 		expect(screen.getByText(/printed booklet/i)).toBeTruthy();
 		expect(screen.getByText(/waiting to start/i)).toBeTruthy();
 
+		MockEventSource.instances[0].emit('runtime_policy', {
+			type: 'runtime_policy',
+			generation_id: 'gen-123',
+			mode: 'balanced',
+			generation_timeout_seconds: 390,
+			generation_max_concurrent_per_user: 2,
+			max_section_rerenders: 2,
+			concurrency: {
+				max_section_concurrency: 4,
+				max_diagram_concurrency: 2,
+				max_qc_concurrency: 4
+			},
+			timeouts: {
+				curriculum_planner_timeout_seconds: 60,
+				content_core_timeout_seconds: 180,
+				content_practice_timeout_seconds: 120,
+				content_enrichment_timeout_seconds: 90,
+				content_repair_timeout_seconds: 120,
+				field_regenerator_timeout_seconds: 60,
+				qc_timeout_seconds: 60,
+				diagram_inner_timeout_seconds: 45,
+				diagram_node_budget_seconds: 60,
+				generation_timeout_base_seconds: 120,
+				generation_timeout_per_section_seconds: 90,
+				generation_timeout_cap_seconds: 900
+			},
+			retries: {},
+			emitted_at: '2026-03-23T00:00:00Z'
+		});
+		MockEventSource.instances[0].emit('runtime_progress', {
+			type: 'runtime_progress',
+			generation_id: 'gen-123',
+			snapshot: {
+				mode: 'balanced',
+				sections_total: 2,
+				sections_completed: 1,
+				sections_running: 1,
+				sections_queued: 0,
+				diagram_running: 1,
+				diagram_queued: 0,
+				qc_running: 0,
+				qc_queued: 1,
+				retry_running: 0,
+				retry_queued: 1
+			},
+			emitted_at: '2026-03-23T00:00:00Z'
+		});
+
+		await waitFor(() =>
+			expect(screen.getByText(/1 complete \/ 1 running \/ 0 queued/i)).toBeTruthy()
+		);
+		expect(screen.getByText(/4 sections \/ 2 diagrams \/ 4 qc/i)).toBeTruthy();
+		expect(screen.getByText(/390s/i)).toBeTruthy();
+
 		MockEventSource.instances[0].emit('section_started', {
 			type: 'section_started',
 			generation_id: 'gen-123',

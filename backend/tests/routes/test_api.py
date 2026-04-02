@@ -9,10 +9,16 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import Settings
 from core.database.models import GenerationModel
 from core.database.session import get_async_session
 from pipeline.api import PipelineDocument, PipelineResult
 from pipeline.events import SectionReadyEvent, SectionStartedEvent
+from pipeline.runtime_context import (
+    build_runtime_context,
+    register_runtime_context,
+    unregister_runtime_context,
+)
 from pipeline.types.requests import SectionPlan
 from planning.dtos import BriefRequest, GenerationSpec
 from pipeline.types.section_content import (
@@ -583,6 +589,41 @@ class TestGenerationApi:
         assert response.status_code == 429
         assert "Maximum 2 concurrent generations allowed" in response.json()["detail"]
 
+    async def test_create_generation_uses_settings_backed_concurrency_limit(self, monkeypatch):
+        await GEN_REPO.create(
+            Generation(
+                id="gen-active-settings",
+                user_id=TEST_USER.id,
+                subject="Active settings-backed generation",
+                context="Still running",
+                status="running",
+                requested_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                last_heartbeat=_now(),
+            )
+        )
+        monkeypatch.setattr(
+            generation_routes.generation_service,
+            "get_settings",
+            lambda: Settings(_env_file=None, generation_max_concurrent_per_user=1),
+        )
+
+        async with _client() as client:
+            response = await client.post(
+                "/api/v1/generations",
+                json={
+                    "subject": "Calculus",
+                    "context": "Explain limits",
+                    "template_id": "guided-concept-path",
+                    "preset_id": "blue-classroom",
+                    "section_count": 4,
+                },
+                headers=AUTH_HEADERS,
+            )
+
+        assert response.status_code == 429
+        assert "Maximum 1 concurrent generations allowed" in response.json()["detail"]
+
     async def test_create_generation_rejects_blank_trimmed_fields(self):
         async with _client() as client:
             response = await client.post(
@@ -814,6 +855,61 @@ class TestGenerationApi:
         assert "event: complete" in response.text
         assert "event: progress_update" in response.text
         assert "/report" in response.text
+
+    async def test_events_endpoint_emits_runtime_policy_and_progress_snapshot(self):
+        generation_id = "gen-runtime-events"
+        document = _document(generation_id)
+        path = await DOC_REPO.save_document(document)
+        await GEN_REPO.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER.id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                status="completed",
+                document_path=path,
+                requested_template_id="guided-concept-path",
+                resolved_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                resolved_preset_id="blue-classroom",
+                quality_passed=True,
+            )
+        )
+        command = generation_routes.PipelineCommand(
+            generation_id=generation_id,
+            subject="Calculus",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=2,
+            mode="balanced",
+        )
+        runtime_context = build_runtime_context(
+            request=command,
+            settings=Settings(_env_file=None),
+        )
+        register_runtime_context(runtime_context)
+        try:
+            await runtime_context.progress.mark_section_ready("s-01")
+            await runtime_context.progress.queue_section("s-02")
+
+            token = JWT_HANDLER.create_access_token(TEST_USER.id, TEST_USER.email)
+            async with _client() as client:
+                response = await client.get(
+                    f"/api/v1/generations/{generation_id}/events?token={token}",
+                )
+        finally:
+            unregister_runtime_context(runtime_context.id)
+
+        assert response.status_code == 200
+        assert "event: runtime_policy" in response.text
+        assert "event: runtime_progress" in response.text
+        assert '"sections_completed": 1' in response.text or '"sections_completed":1' in response.text
+        assert '"sections_queued": 1' in response.text or '"sections_queued":1' in response.text
+        assert "event: complete" in response.text
 
     async def test_events_endpoint_returns_terminal_error_for_failed_generation(self):
         generation_id = "gen-failed-events"

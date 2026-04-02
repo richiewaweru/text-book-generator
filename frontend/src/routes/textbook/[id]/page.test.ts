@@ -307,6 +307,53 @@ describe('textbook page stream lifecycle', () => {
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
 		expect(MockEventSource.instances).toHaveLength(1);
 
+		MockEventSource.instances[0].emit('runtime_policy', {
+			type: 'runtime_policy',
+			generation_id: 'gen-123',
+			mode: 'balanced',
+			generation_timeout_seconds: 390,
+			generation_max_concurrent_per_user: 2,
+			max_section_rerenders: 2,
+			concurrency: {
+				max_section_concurrency: 4,
+				max_diagram_concurrency: 2,
+				max_qc_concurrency: 4
+			},
+			timeouts: {
+				curriculum_planner_timeout_seconds: 60,
+				content_core_timeout_seconds: 180,
+				content_practice_timeout_seconds: 120,
+				content_enrichment_timeout_seconds: 90,
+				content_repair_timeout_seconds: 120,
+				field_regenerator_timeout_seconds: 60,
+				qc_timeout_seconds: 60,
+				diagram_inner_timeout_seconds: 45,
+				diagram_node_budget_seconds: 60,
+				generation_timeout_base_seconds: 120,
+				generation_timeout_per_section_seconds: 90,
+				generation_timeout_cap_seconds: 900
+			},
+			retries: {},
+			emitted_at: '2026-03-23T00:00:00Z'
+		});
+		MockEventSource.instances[0].emit('runtime_progress', {
+			type: 'runtime_progress',
+			generation_id: 'gen-123',
+			snapshot: {
+				mode: 'balanced',
+				sections_total: 4,
+				sections_completed: 1,
+				sections_running: 1,
+				sections_queued: 2,
+				diagram_running: 1,
+				diagram_queued: 0,
+				qc_running: 0,
+				qc_queued: 1,
+				retry_running: 0,
+				retry_queued: 1
+			},
+			emitted_at: '2026-03-23T00:00:00Z'
+		});
 		MockEventSource.instances[0].emit('progress_update', {
 			type: 'progress_update',
 			generation_id: 'gen-123',
@@ -316,6 +363,9 @@ describe('textbook page stream lifecycle', () => {
 
 		await waitFor(() => expect(screen.getByText(/Progress: Planning lesson structure/i)).toBeTruthy());
 		expect(screen.getByText(/Stage: planning/i)).toBeTruthy();
+		expect(screen.getByText(/Runtime sections: 1 complete \/ 1 running \/ 2 queued/i)).toBeTruthy();
+		expect(screen.getByText(/Policy: 4 section \/ 2 diagram \/ 4 QC workers/i)).toBeTruthy();
+		expect(screen.getByText(/Budget: 390s total, rerenders 2 max/i)).toBeTruthy();
 	});
 
 	it('renders failed and weak sections without enhancement actions', async () => {

@@ -15,8 +15,10 @@
 		ErrorEvent,
 		GenerationDetail,
 		GenerationDocument,
-		QCCompleteEvent,
 		ProgressUpdateEvent,
+		QCCompleteEvent,
+		RuntimePolicyEvent,
+		RuntimeProgressEvent,
 		SectionFailedEvent,
 		SectionReadyEvent,
 		SectionStartedEvent
@@ -32,6 +34,8 @@
 	let plannedSections = $state<number | null>(null);
 	let qcSummary = $state<{ passed: number; total: number } | null>(null);
 	let progressUpdate = $state<ProgressUpdateEvent | null>(null);
+	let runtimePolicy = $state<RuntimePolicyEvent | null>(null);
+	let runtimeProgress = $state<RuntimeProgressEvent['snapshot'] | null>(null);
 	let viewerWarning = $state<string | null>(null);
 	let eventSource: EventSource | null = null;
 	let streamClosedTerminally = false;
@@ -57,6 +61,19 @@
 	);
 	const sectionTitleMap = $derived(buildSectionTitleMap(document));
 	const weakSections = $derived(buildWeakSectionSummaries(document, sectionTitleMap));
+
+	function formatSeconds(seconds: number | null | undefined): string {
+		if (seconds === null || seconds === undefined) return 'Pending';
+		const rounded = Number.isInteger(seconds) ? seconds : Math.round(seconds);
+		return `${rounded}s`;
+	}
+
+	function runningQueuedLabel(running: number | null | undefined, queued: number | null | undefined): string {
+		if (running === null || running === undefined || queued === null || queued === undefined) {
+			return 'Pending';
+		}
+		return `${running} running / ${queued} queued`;
+	}
 
 	function closeStream(source: EventSource | null = eventSource) {
 		source?.close();
@@ -203,6 +220,22 @@
 			progressUpdate = JSON.parse((event as MessageEvent).data) as ProgressUpdateEvent;
 		});
 
+		source.addEventListener('runtime_policy', (event) => {
+			if (source !== eventSource) {
+				return;
+			}
+			runtimePolicy = JSON.parse((event as MessageEvent).data) as RuntimePolicyEvent;
+		});
+
+		source.addEventListener('runtime_progress', (event) => {
+			if (source !== eventSource) {
+				return;
+			}
+			const payload = JSON.parse((event as MessageEvent).data) as RuntimeProgressEvent;
+			runtimeProgress = payload.snapshot;
+			plannedSections ??= payload.snapshot.sections_total;
+		});
+
 		source.addEventListener('section_started', (event) => {
 			if (source !== eventSource) {
 				return;
@@ -281,6 +314,8 @@
 		qcSummary = null;
 		plannedSections = null;
 		progressUpdate = null;
+		runtimePolicy = null;
+		runtimeProgress = null;
 		viewerWarning = null;
 		streamClosedTerminally = false;
 		streamErrorRecoveryAttempted = false;
@@ -345,6 +380,36 @@
 			{#if progressUpdate && detail?.status !== 'completed' && detail?.status !== 'failed'}
 				<p>Progress: {progressUpdate.label}</p>
 				<p>Stage: {progressStageLabel}</p>
+			{/if}
+			{#if runtimeProgress}
+				<p>
+					Runtime sections: {runtimeProgress.sections_completed} complete / {runtimeProgress.sections_running}
+					running / {runtimeProgress.sections_queued} queued
+				</p>
+				<p>
+					Diagram workers: {runningQueuedLabel(
+						runtimeProgress.diagram_running,
+						runtimeProgress.diagram_queued
+					)}
+				</p>
+				<p>
+					QC workers: {runningQueuedLabel(runtimeProgress.qc_running, runtimeProgress.qc_queued)}
+				</p>
+				<p>
+					Retries: {runningQueuedLabel(runtimeProgress.retry_running, runtimeProgress.retry_queued)}
+				</p>
+			{/if}
+			{#if runtimePolicy}
+				<p>
+					Policy: {runtimePolicy.concurrency.max_section_concurrency} section / {runtimePolicy.concurrency.max_diagram_concurrency}
+					diagram / {runtimePolicy.concurrency.max_qc_concurrency} QC workers
+				</p>
+				<p>
+					Budget: {formatSeconds(runtimePolicy.generation_timeout_seconds)} total, rerenders {runtimePolicy.max_section_rerenders} max
+				</p>
+				<p>
+					Admission: {runtimePolicy.generation_max_concurrent_per_user} concurrent generations per user
+				</p>
 			{/if}
 			{#if qcSummary}
 				<p>QC: {qcSummary.passed} / {qcSummary.total} passing</p>
