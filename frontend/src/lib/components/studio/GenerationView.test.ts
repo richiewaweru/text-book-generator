@@ -5,54 +5,37 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { generationState } from '$lib/stores/studio';
 
-const { getGenerationDetail, getGenerationDocument, buildGenerationEventsUrl } = vi.hoisted(() => ({
-	getGenerationDetail: vi.fn(),
-	getGenerationDocument: vi.fn(),
-	buildGenerationEventsUrl: vi.fn((id: string) => `/api/v1/generations/${id}/events`)
-}));
+type EventHandlers = {
+	onEvent: (type: string, data: string) => void;
+	onError: (err: unknown) => void;
+	onOpen?: () => void;
+};
+
+const { getGenerationDetail, getGenerationDocument, connectGenerationEvents, capturedHandlers } =
+	vi.hoisted(() => {
+		let handlers: EventHandlers | null = null;
+		return {
+			getGenerationDetail: vi.fn(),
+			getGenerationDocument: vi.fn(),
+			connectGenerationEvents: vi.fn((_id: string, h: EventHandlers) => {
+				handlers = h;
+				return () => { handlers = null; };
+			}),
+			capturedHandlers: { get current() { return handlers; } }
+		};
+	});
 
 vi.mock('$lib/api/client', () => ({
 	getGenerationDetail,
 	getGenerationDocument,
-	buildGenerationEventsUrl
+	connectGenerationEvents
 }));
 
 import GenerationView from './GenerationView.svelte';
 
-class MockEventSource {
-	static instances: MockEventSource[] = [];
-
-	url: string;
-	closed = false;
-	private listeners = new Map<string, Array<(event: Event | MessageEvent) => void>>();
-
-	constructor(url: string) {
-		this.url = url;
-		MockEventSource.instances.push(this);
-	}
-
-	addEventListener(type: string, listener: (event: Event | MessageEvent) => void) {
-		const handlers = this.listeners.get(type) ?? [];
-		handlers.push(listener);
-		this.listeners.set(type, handlers);
-	}
-
-	close() {
-		this.closed = true;
-	}
-
-	emit(type: string, payload?: unknown) {
-		const handlers = this.listeners.get(type) ?? [];
-		const event =
-			payload instanceof Event || payload instanceof MessageEvent
-				? payload
-				: new MessageEvent(type, {
-						data: payload === undefined ? '' : JSON.stringify(payload)
-					});
-		for (const handler of handlers) {
-			handler(event);
-		}
-	}
+function emitEvent(type: string, payload?: unknown) {
+	const data = payload === undefined ? '' : JSON.stringify(payload);
+	capturedHandlers.current?.onEvent(type, data);
 }
 
 function buildDetail(overrides: Record<string, unknown> = {}) {
@@ -215,7 +198,6 @@ function buildDocument(overrides: Record<string, unknown> = {}) {
 
 describe('GenerationView', () => {
 	beforeEach(() => {
-		MockEventSource.instances = [];
 		generationState.set({
 			accepted: null,
 			document: null,
@@ -223,13 +205,11 @@ describe('GenerationView', () => {
 		});
 		getGenerationDetail.mockReset();
 		getGenerationDocument.mockReset();
-		buildGenerationEventsUrl.mockClear();
-		vi.stubGlobal('EventSource', MockEventSource);
+		connectGenerationEvents.mockClear();
 	});
 
 	afterEach(() => {
 		cleanup();
-		vi.unstubAllGlobals();
 	});
 
 	it('renders the live workspace, marks active sections, and shows failed sections inline', async () => {
@@ -254,7 +234,7 @@ describe('GenerationView', () => {
 		expect(screen.getByText(/printed booklet/i)).toBeTruthy();
 		expect(screen.getByText(/waiting to start/i)).toBeTruthy();
 
-		MockEventSource.instances[0].emit('runtime_policy', {
+		emitEvent('runtime_policy', {
 			type: 'runtime_policy',
 			generation_id: 'gen-123',
 			mode: 'balanced',
@@ -283,7 +263,7 @@ describe('GenerationView', () => {
 			retries: {},
 			emitted_at: '2026-03-23T00:00:00Z'
 		});
-		MockEventSource.instances[0].emit('runtime_progress', {
+		emitEvent('runtime_progress', {
 			type: 'runtime_progress',
 			generation_id: 'gen-123',
 			snapshot: {
@@ -308,7 +288,7 @@ describe('GenerationView', () => {
 		expect(screen.getByText(/4 sections \/ 2 diagrams \/ 4 qc/i)).toBeTruthy();
 		expect(screen.getByText(/390s/i)).toBeTruthy();
 
-		MockEventSource.instances[0].emit('section_started', {
+		emitEvent('section_started', {
 			type: 'section_started',
 			generation_id: 'gen-123',
 			section_id: 's-02',
@@ -318,7 +298,7 @@ describe('GenerationView', () => {
 
 		await waitFor(() => expect(screen.getByText(/writing section content/i)).toBeTruthy());
 
-		MockEventSource.instances[0].emit('section_failed', {
+		emitEvent('section_failed', {
 			type: 'section_failed',
 			generation_id: 'gen-123',
 			section_id: 's-02',

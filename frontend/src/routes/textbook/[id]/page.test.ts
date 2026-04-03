@@ -3,22 +3,36 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+type EventHandlers = {
+	onEvent: (type: string, data: string) => void;
+	onError: (err: unknown) => void;
+	onOpen?: () => void;
+};
+
 const {
 	pageState,
 	getGenerationDetail,
 	getGenerationDocument,
-	buildGenerationEventsUrl,
-	downloadGenerationPdf
-} = vi.hoisted(() => ({
-	pageState: {
-		params: { id: 'gen-123' },
-		url: new URL('http://localhost/textbook/gen-123')
-	},
-	getGenerationDetail: vi.fn(),
-	getGenerationDocument: vi.fn(),
-	buildGenerationEventsUrl: vi.fn((id: string) => `/api/v1/generations/${id}/events`),
-	downloadGenerationPdf: vi.fn()
-}));
+	connectGenerationEvents,
+	downloadGenerationPdf,
+	capturedHandlers
+} = vi.hoisted(() => {
+	let handlers: EventHandlers | null = null;
+	return {
+		pageState: {
+			params: { id: 'gen-123' },
+			url: new URL('http://localhost/textbook/gen-123')
+		},
+		getGenerationDetail: vi.fn(),
+		getGenerationDocument: vi.fn(),
+		connectGenerationEvents: vi.fn((_id: string, h: EventHandlers) => {
+			handlers = h;
+			return () => { handlers = null; };
+		}),
+		downloadGenerationPdf: vi.fn(),
+		capturedHandlers: { get current() { return handlers; } }
+	};
+});
 
 vi.mock('$app/state', () => ({
 	page: pageState
@@ -35,7 +49,7 @@ vi.mock('$lib/components/PrintSectionLink.svelte', async () => ({
 vi.mock('$lib/api/client', () => ({
 	getGenerationDetail,
 	getGenerationDocument,
-	buildGenerationEventsUrl,
+	connectGenerationEvents,
 	downloadGenerationPdf
 }));
 
@@ -45,40 +59,13 @@ vi.mock('$lib/components/LectioDocumentView.svelte', async () => ({
 
 import TextbookPage from './+page.svelte';
 
-class MockEventSource {
-	static instances: MockEventSource[] = [];
+function emitEvent(type: string, payload?: unknown) {
+	const data = payload === undefined ? '' : JSON.stringify(payload);
+	capturedHandlers.current?.onEvent(type, data);
+}
 
-	url: string;
-	closed = false;
-	private listeners = new Map<string, Array<(event: Event | MessageEvent) => void>>();
-
-	constructor(url: string) {
-		this.url = url;
-		MockEventSource.instances.push(this);
-	}
-
-	addEventListener(type: string, listener: (event: Event | MessageEvent) => void) {
-		const handlers = this.listeners.get(type) ?? [];
-		handlers.push(listener);
-		this.listeners.set(type, handlers);
-	}
-
-	close() {
-		this.closed = true;
-	}
-
-	emit(type: string, payload?: unknown) {
-		const handlers = this.listeners.get(type) ?? [];
-		const event =
-			payload instanceof Event || payload instanceof MessageEvent
-				? payload
-				: new MessageEvent(type, {
-						data: payload === undefined ? '' : JSON.stringify(payload)
-					});
-		for (const handler of handlers) {
-			handler(event);
-		}
-	}
+function emitError(err?: unknown) {
+	capturedHandlers.current?.onError(err ?? new Error('stream error'));
 }
 
 function buildDetail(overrides: Record<string, unknown> = {}) {
@@ -134,18 +121,15 @@ function buildDocument(overrides: Record<string, unknown> = {}) {
 
 describe('textbook page stream lifecycle', () => {
 	beforeEach(() => {
-		MockEventSource.instances = [];
 		getGenerationDetail.mockReset();
 		getGenerationDocument.mockReset();
-		buildGenerationEventsUrl.mockClear();
+		connectGenerationEvents.mockClear();
 		downloadGenerationPdf.mockReset();
 		pageState.url = new URL('http://localhost/textbook/gen-123');
-		vi.stubGlobal('EventSource', MockEventSource);
 	});
 
 	afterEach(() => {
 		cleanup();
-		vi.unstubAllGlobals();
 	});
 
 	it('opens one stream and performs one terminal refresh on complete', async () => {
@@ -189,14 +173,12 @@ describe('textbook page stream lifecycle', () => {
 
 		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
-		expect(MockEventSource.instances).toHaveLength(1);
+		expect(connectGenerationEvents).toHaveBeenCalledTimes(1);
 
-		MockEventSource.instances[0].emit('complete', { type: 'complete', generation_id: 'gen-123' });
+		emitEvent('complete', { type: 'complete', generation_id: 'gen-123' });
 
 		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(2));
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(2));
-		expect(MockEventSource.instances).toHaveLength(1);
-		expect(MockEventSource.instances[0].closed).toBe(true);
 
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(getGenerationDetail).toHaveBeenCalledTimes(2);
@@ -228,7 +210,7 @@ describe('textbook page stream lifecycle', () => {
 		render(TextbookPage);
 
 		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
-		expect(MockEventSource.instances).toHaveLength(0);
+		expect(connectGenerationEvents).not.toHaveBeenCalled();
 		expect(screen.getByText(/Stream: completed with QC issues/i)).toBeTruthy();
 	});
 
@@ -260,14 +242,12 @@ describe('textbook page stream lifecycle', () => {
 
 		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
-		expect(MockEventSource.instances).toHaveLength(1);
+		expect(connectGenerationEvents).toHaveBeenCalledTimes(1);
 
-		MockEventSource.instances[0].emit('error', new Event('error'));
+		emitError();
 
 		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(2));
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(2));
-		expect(MockEventSource.instances).toHaveLength(1);
-		expect(MockEventSource.instances[0].closed).toBe(true);
 
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(getGenerationDetail).toHaveBeenCalledTimes(2);
@@ -283,9 +263,9 @@ describe('textbook page stream lifecycle', () => {
 
 		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
-		expect(MockEventSource.instances).toHaveLength(1);
+		expect(connectGenerationEvents).toHaveBeenCalledTimes(1);
 
-		MockEventSource.instances[0].emit('section_failed', {
+		emitEvent('section_failed', {
 			type: 'section_failed',
 			generation_id: 'gen-123',
 			section_id: 's-03',
@@ -321,9 +301,9 @@ describe('textbook page stream lifecycle', () => {
 
 		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
-		expect(MockEventSource.instances).toHaveLength(1);
+		expect(connectGenerationEvents).toHaveBeenCalledTimes(1);
 
-		MockEventSource.instances[0].emit('runtime_policy', {
+		emitEvent('runtime_policy', {
 			type: 'runtime_policy',
 			generation_id: 'gen-123',
 			mode: 'balanced',
@@ -352,7 +332,7 @@ describe('textbook page stream lifecycle', () => {
 			retries: {},
 			emitted_at: '2026-03-23T00:00:00Z'
 		});
-		MockEventSource.instances[0].emit('runtime_progress', {
+		emitEvent('runtime_progress', {
 			type: 'runtime_progress',
 			generation_id: 'gen-123',
 			snapshot: {
@@ -370,7 +350,7 @@ describe('textbook page stream lifecycle', () => {
 			},
 			emitted_at: '2026-03-23T00:00:00Z'
 		});
-		MockEventSource.instances[0].emit('progress_update', {
+		emitEvent('progress_update', {
 			type: 'progress_update',
 			generation_id: 'gen-123',
 			stage: 'planning',
@@ -472,7 +452,7 @@ describe('textbook page stream lifecycle', () => {
 		render(TextbookPage);
 
 		await waitFor(() => expect(screen.getByRole('button', { name: /export pdf/i })).toBeTruthy());
-		expect(MockEventSource.instances).toHaveLength(0);
+		expect(connectGenerationEvents).not.toHaveBeenCalled();
 	});
 
 	it('marks the print route complete when a completed document is fully ready', async () => {
@@ -515,7 +495,7 @@ describe('textbook page stream lifecycle', () => {
 			expect(container.querySelector('[data-generation-complete="true"]')).toBeTruthy()
 		);
 		expect(screen.queryByRole('button', { name: /export pdf/i })).toBeNull();
-		expect(MockEventSource.instances).toHaveLength(0);
+		expect(connectGenerationEvents).not.toHaveBeenCalled();
 	});
 
 	it('shows teacher and student export presets for completed generations', async () => {

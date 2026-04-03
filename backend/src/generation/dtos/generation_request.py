@@ -5,8 +5,8 @@ from pipeline.types.requests import GenerationMode
 
 
 class GenerationRequest(BaseModel):
-    subject: str
-    context: str
+    subject: str = Field(..., min_length=1, max_length=500)
+    context: str = Field(..., max_length=10000)
     mode: GenerationMode = GenerationMode.BALANCED
     template_id: str
     preset_id: str

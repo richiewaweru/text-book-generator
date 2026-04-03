@@ -11,7 +11,7 @@
 		normalizeDocument
 	} from '$lib/generation/viewer-state';
 	import {
-		buildGenerationEventsUrl,
+		connectGenerationEvents,
 		downloadGenerationPdf,
 		getGenerationDetail,
 		getGenerationDocument
@@ -56,7 +56,8 @@
 	let includeToc = $state(true);
 	let includeAnswers = $state(true);
 	let exportPreset = $state<'teacher' | 'student'>('teacher');
-	let eventSource: EventSource | null = null;
+	let connectionToken = 0;
+	let cancelStream: (() => void) | null = null;
 	let streamClosedTerminally = false;
 	let streamErrorRecoveryAttempted = false;
 	const sectionSlots = $derived(buildSectionSlots(document, plannedSections));
@@ -101,11 +102,10 @@
 		return `${running} running / ${queued} queued`;
 	}
 
-	function closeStream(source: EventSource | null = eventSource) {
-		source?.close();
-		if (source === eventSource) {
-			eventSource = null;
-		}
+	function closeStream(token?: number) {
+		if (token !== undefined && token !== connectionToken) return;
+		cancelStream?.();
+		cancelStream = null;
 	}
 
 	async function handlePdfExport() {
@@ -212,13 +212,11 @@
 		applyGenerationSnapshot(nextDetail, nextDocument);
 	}
 
-	async function finalizeStream(source: EventSource, id: string, nextError: string | null = null) {
-		if (source !== eventSource) {
-			return;
-		}
+	async function finalizeStream(token: number, id: string, nextError: string | null = null) {
+		if (token !== connectionToken) return;
 		streamClosedTerminally = true;
 		streamState = 'complete';
-		closeStream(source);
+		closeStream(token);
 		await refresh(id);
 		if (detail?.status === 'failed') {
 			error = friendlyGenerationErrorMessage(detail.error, detail.error_type, detail.error_code);
@@ -229,10 +227,8 @@
 		}
 	}
 
-	async function revalidateTerminalState(source: EventSource, id: string): Promise<boolean> {
-		if (source !== eventSource || streamErrorRecoveryAttempted) {
-			return false;
-		}
+	async function revalidateTerminalState(token: number, id: string): Promise<boolean> {
+		if (token !== connectionToken || streamErrorRecoveryAttempted) return false;
 		streamErrorRecoveryAttempted = true;
 		try {
 			await refresh(id);
@@ -240,13 +236,11 @@
 			console.error('[Lectio] Stream recovery refresh failed:', err);
 			return false;
 		}
-		if (source !== eventSource) {
-			return false;
-		}
+		if (token !== connectionToken) return false;
 		if (detail?.status === 'completed' || detail?.status === 'failed') {
 			streamClosedTerminally = true;
 			streamState = 'complete';
-			closeStream(source);
+			closeStream(token);
 			if (detail.status === 'failed') {
 				error = friendlyGenerationErrorMessage(detail.error, detail.error_type, detail.error_code);
 			}
@@ -257,112 +251,85 @@
 
 	function connectStream(id: string) {
 		closeStream();
-		const source = new EventSource(buildGenerationEventsUrl(id));
-		eventSource = source;
+		const myToken = ++connectionToken;
 		streamClosedTerminally = false;
 		streamErrorRecoveryAttempted = false;
 		streamState = 'connected';
 
-		source.addEventListener('pipeline_start', (event) => {
-			if (source !== eventSource) {
-				return;
+		cancelStream = connectGenerationEvents(id, {
+			onEvent(type, data) {
+				if (myToken !== connectionToken) return;
+				switch (type) {
+					case 'pipeline_start': {
+						const payload = JSON.parse(data) as { section_count: number };
+						plannedSections = payload.section_count;
+						break;
+					}
+					case 'progress_update': {
+						progressUpdate = JSON.parse(data) as ProgressUpdateEvent;
+						break;
+					}
+					case 'runtime_policy': {
+						runtimePolicy = JSON.parse(data) as RuntimePolicyEvent;
+						break;
+					}
+					case 'runtime_progress': {
+						const payload = JSON.parse(data) as RuntimeProgressEvent;
+						runtimeProgress = payload.snapshot;
+						plannedSections ??= payload.snapshot.sections_total;
+						break;
+					}
+					case 'section_started': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionStartedEvent;
+						document = applySectionStarted(document, payload);
+						break;
+					}
+					case 'section_ready': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionReadyEvent;
+						plannedSections = payload.total_sections;
+						const result = applySectionReady(document, payload);
+						document = result.document;
+						if (result.warning) {
+							console.error('[Lectio] Section validation failed:', result.warning.message);
+							viewerWarning = result.warning.message;
+						}
+						break;
+					}
+					case 'section_failed': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionFailedEvent;
+						document = applySectionFailed(document, payload);
+						break;
+					}
+					case 'qc_complete': {
+						const payload = JSON.parse(data) as QCCompleteEvent;
+						qcSummary = { passed: payload.passed, total: payload.total };
+						break;
+					}
+					case 'complete': {
+						void finalizeStream(myToken, id);
+						break;
+					}
+					case 'error': {
+						const payload = JSON.parse(data) as ErrorEvent;
+						void finalizeStream(myToken, id, payload.message);
+						break;
+					}
+				}
+			},
+			onError(err) {
+				if (myToken !== connectionToken) return;
+				if (streamClosedTerminally || detail?.status === 'completed' || detail?.status === 'failed') {
+					streamState = 'complete';
+					closeStream(myToken);
+					return;
+				}
+				void revalidateTerminalState(myToken, id).then((handled) => {
+					if (!handled) streamState = 'reconnecting';
+				});
 			}
-			const payload = JSON.parse((event as MessageEvent).data) as { section_count: number };
-			plannedSections = payload.section_count;
-		});
-
-		source.addEventListener('progress_update', (event) => {
-			if (source !== eventSource) {
-				return;
-			}
-			progressUpdate = JSON.parse((event as MessageEvent).data) as ProgressUpdateEvent;
-		});
-
-		source.addEventListener('runtime_policy', (event) => {
-			if (source !== eventSource) {
-				return;
-			}
-			runtimePolicy = JSON.parse((event as MessageEvent).data) as RuntimePolicyEvent;
-		});
-
-		source.addEventListener('runtime_progress', (event) => {
-			if (source !== eventSource) {
-				return;
-			}
-			const payload = JSON.parse((event as MessageEvent).data) as RuntimeProgressEvent;
-			runtimeProgress = payload.snapshot;
-			plannedSections ??= payload.snapshot.sections_total;
-		});
-
-		source.addEventListener('section_started', (event) => {
-			if (source !== eventSource) {
-				return;
-			}
-			const payload = JSON.parse((event as MessageEvent).data) as SectionStartedEvent;
-			if (!document) {
-				return;
-			}
-			document = applySectionStarted(document, payload);
-		});
-
-		source.addEventListener('section_ready', (event) => {
-			if (source !== eventSource) {
-				return;
-			}
-			const payload = JSON.parse((event as MessageEvent).data) as SectionReadyEvent;
-			plannedSections = payload.total_sections;
-			if (!document) {
-				return;
-			}
-			const result = applySectionReady(document, payload);
-			document = result.document;
-			if (result.warning) {
-				console.error('[Lectio] Section validation failed:', result.warning.message);
-				viewerWarning = result.warning.message;
-			}
-		});
-
-		source.addEventListener('section_failed', (event) => {
-			if (source !== eventSource) {
-				return;
-			}
-			const payload = JSON.parse((event as MessageEvent).data) as SectionFailedEvent;
-			if (!document) {
-				return;
-			}
-			document = applySectionFailed(document, payload);
-		});
-
-		source.addEventListener('qc_complete', (event) => {
-			if (source !== eventSource) {
-				return;
-			}
-			const payload = JSON.parse((event as MessageEvent).data) as QCCompleteEvent;
-			qcSummary = { passed: payload.passed, total: payload.total };
-		});
-
-		source.addEventListener('complete', async () => {
-			await finalizeStream(source, id);
-		});
-
-		source.addEventListener('error', async (event) => {
-			if (event instanceof MessageEvent) {
-				const payload = JSON.parse(event.data) as ErrorEvent;
-				await finalizeStream(source, id, payload.message);
-				return;
-			}
-			if (source !== eventSource) {
-				return;
-			}
-			if (streamClosedTerminally || detail?.status === 'completed' || detail?.status === 'failed') {
-				streamState = 'complete';
-				closeStream(source);
-				return;
-			}
-			if (await revalidateTerminalState(source, id)) {
-				return;
-			}
-			streamState = 'reconnecting';
 		});
 	}
 

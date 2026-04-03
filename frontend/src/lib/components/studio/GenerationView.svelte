@@ -2,7 +2,7 @@
 	import { onDestroy } from 'svelte';
 
 	import {
-		buildGenerationEventsUrl,
+		connectGenerationEvents,
 		getGenerationDetail,
 		getGenerationDocument
 	} from '$lib/api/client';
@@ -54,7 +54,8 @@
 	let viewerWarning = $state<string | null>(null);
 	let activeSectionId = $state<string | null>(null);
 	let reconnectAttempts = $state(0);
-	let eventSource: EventSource | null = null;
+	let connectionToken = 0;
+	let cancelStream: (() => void) | null = null;
 	let reconnectTimer: number | null = null;
 	let streamClosedTerminally = false;
 	let streamErrorRecoveryAttempted = false;
@@ -175,11 +176,10 @@
 		}
 	}
 
-	function closeStream(source: EventSource | null = eventSource) {
-		source?.close();
-		if (source === eventSource) {
-			eventSource = null;
-		}
+	function closeStream(token?: number) {
+		if (token !== undefined && token !== connectionToken) return;
+		cancelStream?.();
+		cancelStream = null;
 	}
 
 	function syncDocument(nextDocument: GenerationDocument) {
@@ -215,17 +215,15 @@
 		applyGenerationSnapshot(nextDetail, nextDocument);
 	}
 
-	async function finalizeStream(source: EventSource, id: string, nextError: string | null = null) {
-		if (source !== eventSource) {
-			return;
-		}
+	async function finalizeStream(token: number, id: string, nextError: string | null = null) {
+		if (token !== connectionToken) return;
 
 		streamClosedTerminally = true;
 		streamState = 'complete';
 		activeSectionId = null;
 		clearReconnectTimer();
 		setGenerationBanner(null);
-		closeStream(source);
+		closeStream(token);
 		await refresh(id);
 
 		if (detail?.status === 'failed') {
@@ -238,10 +236,8 @@
 		}
 	}
 
-	async function revalidateTerminalState(source: EventSource, id: string): Promise<boolean> {
-		if (source !== eventSource || streamErrorRecoveryAttempted) {
-			return false;
-		}
+	async function revalidateTerminalState(token: number, id: string): Promise<boolean> {
+		if (token !== connectionToken || streamErrorRecoveryAttempted) return false;
 
 		streamErrorRecoveryAttempted = true;
 		try {
@@ -250,16 +246,14 @@
 			return false;
 		}
 
-		if (source !== eventSource) {
-			return false;
-		}
+		if (token !== connectionToken) return false;
 
 		if (detail?.status === 'completed' || detail?.status === 'failed') {
 			streamClosedTerminally = true;
 			streamState = 'complete';
 			activeSectionId = null;
 			setGenerationBanner(null);
-			closeStream(source);
+			closeStream(token);
 			if (detail.status === 'failed') {
 				error = friendlyGenerationErrorMessage(detail.error, detail.error_type, detail.error_code);
 			}
@@ -269,12 +263,10 @@
 		return false;
 	}
 
-	function scheduleReconnect(source: EventSource, id: string) {
-		if (source !== eventSource) {
-			return;
-		}
+	function scheduleReconnect(token: number, id: string) {
+		if (token !== connectionToken) return;
 
-		closeStream(source);
+		closeStream(token);
 		clearReconnectTimer();
 
 		if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
@@ -311,113 +303,98 @@
 	function connectStream(id: string) {
 		clearReconnectTimer();
 		closeStream();
-		const source = new EventSource(buildGenerationEventsUrl(id));
-		eventSource = source;
+		const myToken = ++connectionToken;
 		streamClosedTerminally = false;
 		streamErrorRecoveryAttempted = false;
 		streamState = reconnectAttempts > 0 ? 'reconnecting' : 'connected';
 		setGenerationBanner(reconnectAttempts > 0 ? 'Reconnecting to live generation...' : 'Live generation connected.');
 
-		source.addEventListener('open', () => {
-			if (source !== eventSource) return;
-			streamState = 'connected';
-			if (reconnectAttempts > 0) {
-				setGenerationBanner('Live generation reconnected.');
-			} else {
-				setGenerationBanner('Live generation connected.');
+		cancelStream = connectGenerationEvents(id, {
+			onOpen() {
+				if (myToken !== connectionToken) return;
+				streamState = 'connected';
+				if (reconnectAttempts > 0) {
+					setGenerationBanner('Live generation reconnected.');
+				} else {
+					setGenerationBanner('Live generation connected.');
+				}
+				reconnectAttempts = 0;
+			},
+			onEvent(type, data) {
+				if (myToken !== connectionToken) return;
+				switch (type) {
+					case 'pipeline_start': {
+						const payload = JSON.parse(data) as { section_count: number };
+						plannedSections = payload.section_count;
+						break;
+					}
+					case 'progress_update': {
+						progressUpdate = JSON.parse(data) as ProgressUpdateEvent;
+						if (progressUpdate.section_id) activeSectionId = progressUpdate.section_id;
+						break;
+					}
+					case 'runtime_policy': {
+						runtimePolicy = JSON.parse(data) as RuntimePolicyEvent;
+						break;
+					}
+					case 'runtime_progress': {
+						const payload = JSON.parse(data) as RuntimeProgressEvent;
+						runtimeProgress = payload.snapshot;
+						plannedSections ??= payload.snapshot.sections_total;
+						break;
+					}
+					case 'section_started': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionStartedEvent;
+						activeSectionId = payload.section_id;
+						syncDocument(applySectionStarted(document, payload));
+						break;
+					}
+					case 'section_ready': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionReadyEvent;
+						plannedSections = payload.total_sections;
+						if (activeSectionId === payload.section_id) activeSectionId = null;
+						const result = applySectionReady(document, payload);
+						syncDocument(result.document);
+						if (result.warning) viewerWarning = result.warning.message;
+						break;
+					}
+					case 'section_failed': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionFailedEvent;
+						if (activeSectionId === payload.section_id) activeSectionId = null;
+						syncDocument(applySectionFailed(document, payload));
+						break;
+					}
+					case 'qc_complete': {
+						const payload = JSON.parse(data) as QCCompleteEvent;
+						qcSummary = { passed: payload.passed, total: payload.total };
+						break;
+					}
+					case 'complete': {
+						void finalizeStream(myToken, id);
+						break;
+					}
+					case 'error': {
+						const payload = JSON.parse(data) as ErrorEvent;
+						void finalizeStream(myToken, id, payload.message);
+						break;
+					}
+				}
+			},
+			onError(err) {
+				if (myToken !== connectionToken) return;
+				if (streamClosedTerminally || detail?.status === 'completed' || detail?.status === 'failed') {
+					streamState = 'complete';
+					setGenerationBanner(null);
+					closeStream(myToken);
+					return;
+				}
+				void revalidateTerminalState(myToken, id).then((handled) => {
+					if (!handled) scheduleReconnect(myToken, id);
+				});
 			}
-			reconnectAttempts = 0;
-		});
-
-		source.addEventListener('pipeline_start', (event) => {
-			if (source !== eventSource) return;
-			const payload = JSON.parse((event as MessageEvent).data) as { section_count: number };
-			plannedSections = payload.section_count;
-		});
-
-		source.addEventListener('progress_update', (event) => {
-			if (source !== eventSource) return;
-			progressUpdate = JSON.parse((event as MessageEvent).data) as ProgressUpdateEvent;
-			if (progressUpdate.section_id) {
-				activeSectionId = progressUpdate.section_id;
-			}
-		});
-
-		source.addEventListener('runtime_policy', (event) => {
-			if (source !== eventSource) return;
-			runtimePolicy = JSON.parse((event as MessageEvent).data) as RuntimePolicyEvent;
-		});
-
-		source.addEventListener('runtime_progress', (event) => {
-			if (source !== eventSource) return;
-			const payload = JSON.parse((event as MessageEvent).data) as RuntimeProgressEvent;
-			runtimeProgress = payload.snapshot;
-			plannedSections ??= payload.snapshot.sections_total;
-		});
-
-		source.addEventListener('section_started', (event) => {
-			if (source !== eventSource || !document) return;
-			const payload = JSON.parse((event as MessageEvent).data) as SectionStartedEvent;
-			activeSectionId = payload.section_id;
-			syncDocument(applySectionStarted(document, payload));
-		});
-
-		source.addEventListener('section_ready', (event) => {
-			if (source !== eventSource || !document) return;
-			const payload = JSON.parse((event as MessageEvent).data) as SectionReadyEvent;
-			plannedSections = payload.total_sections;
-			if (activeSectionId === payload.section_id) {
-				activeSectionId = null;
-			}
-			const result = applySectionReady(document, payload);
-			syncDocument(result.document);
-			if (result.warning) {
-				viewerWarning = result.warning.message;
-			}
-		});
-
-		source.addEventListener('section_failed', (event) => {
-			if (source !== eventSource || !document) return;
-			const payload = JSON.parse((event as MessageEvent).data) as SectionFailedEvent;
-			if (activeSectionId === payload.section_id) {
-				activeSectionId = null;
-			}
-			syncDocument(applySectionFailed(document, payload));
-		});
-
-		source.addEventListener('qc_complete', (event) => {
-			if (source !== eventSource) return;
-			const payload = JSON.parse((event as MessageEvent).data) as QCCompleteEvent;
-			qcSummary = { passed: payload.passed, total: payload.total };
-		});
-
-		source.addEventListener('complete', async () => {
-			await finalizeStream(source, id);
-		});
-
-		source.addEventListener('error', async (event) => {
-			if (event instanceof MessageEvent) {
-				const payload = JSON.parse(event.data) as ErrorEvent;
-				await finalizeStream(source, id, payload.message);
-				return;
-			}
-
-			if (source !== eventSource) {
-				return;
-			}
-
-			if (streamClosedTerminally || detail?.status === 'completed' || detail?.status === 'failed') {
-				streamState = 'complete';
-				setGenerationBanner(null);
-				closeStream(source);
-				return;
-			}
-
-			if (await revalidateTerminalState(source, id)) {
-				return;
-			}
-
-			scheduleReconnect(source, id);
 		});
 	}
 
