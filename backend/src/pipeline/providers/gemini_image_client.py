@@ -1,35 +1,27 @@
-"""Gemini Imagen client for diagram image generation."""
-
 from __future__ import annotations
 
 import asyncio
-from io import BytesIO
+import os
+from functools import lru_cache
 
-from pipeline.providers.image_client import (
-    ImageFormat,
-    ImageGenerationResult,
-    ImageSize,
-)
+from google import genai
+from google.genai import types
+
+from pipeline.providers.image_client import ImageFormat, ImageGenerationResult, ImageSize
 
 
 class GeminiImageClient:
-    """Gemini Imagen implementation of the ImageModelClient protocol."""
+    """
+    Concrete ImageModelClient using gemini-3.1-flash-image-preview.
 
-    def __init__(
-        self,
-        api_key: str,
-        model: str = "imagen-3.0-generate-001",
-    ):
-        self.api_key = api_key
-        self.model = model
-        self._client: object | None = None
+    The model returns mixed TEXT + IMAGE parts. We extract the first
+    inline_data part (raw PNG bytes) and return it.
+    """
 
-    def _get_client(self):
-        if self._client is None:
-            from google import genai
+    MODEL = "gemini-3.1-flash-image-preview"
 
-            self._client = genai.Client(api_key=self.api_key)
-        return self._client
+    def __init__(self, *, api_key: str) -> None:
+        self._client = genai.Client(vertexai=True, api_key=api_key)
 
     async def generate_image(
         self,
@@ -39,37 +31,74 @@ class GeminiImageClient:
         format: ImageFormat = "png",
         seed: int | None = None,
     ) -> ImageGenerationResult:
-        """Generate an educational diagram image."""
-        from google.genai.types import GenerateImageConfig
-
-        config = GenerateImageConfig(
-            number_of_images=1,
-            negative_prompt="blurry, low quality, distorted, text overlay",
+        config = types.GenerateContentConfig(
+            temperature=1,
+            top_p=0.95,
+            max_output_tokens=32768,
+            response_modalities=["TEXT", "IMAGE"],
+            safety_settings=[
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HATE_SPEECH",
+                    threshold="OFF",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                    threshold="OFF",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    threshold="OFF",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HARASSMENT",
+                    threshold="OFF",
+                ),
+            ],
+            image_config=types.ImageConfig(
+                aspect_ratio="auto",
+                image_size="1K",
+                output_mime_type=f"image/{format}",
+            ),
+            thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
         )
 
-        if seed is not None:
-            config.seed = seed
-
-        try:
-            client = self._get_client()
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: client.models.generate_images(
-                    model=self.model,
-                    prompt=prompt,
-                    config=config,
-                ),
+        contents = [
+            types.Content(
+                role="user",
+                parts=[types.Part(text=prompt)],
             )
+        ]
 
-            pil_image = response.images[0]._pil_image
-            buffer = BytesIO()
-            pil_image.save(buffer, format=format.upper())
+        def _call() -> bytes:
+            image_bytes: bytes | None = None
+            for chunk in self._client.models.generate_content_stream(
+                model=self.MODEL,
+                contents=contents,
+                config=config,
+            ):
+                if not chunk.candidates:
+                    continue
+                for part in chunk.candidates[0].content.parts:
+                    if part.inline_data is not None:
+                        image_bytes = part.inline_data.data
+                        break
+                if image_bytes is not None:
+                    break
 
-            return ImageGenerationResult(
-                bytes=buffer.getvalue(),
-                format=format,
-                mime_type=f"image/{format}",
-            )
-        except Exception as e:
-            raise RuntimeError(f"Gemini image generation failed: {e}") from e
+            if image_bytes is None:
+                raise RuntimeError("Gemini returned no image data in response")
+            return image_bytes
+
+        image_bytes = await asyncio.to_thread(_call)
+
+        return ImageGenerationResult(
+            bytes=image_bytes,
+            format=format,
+            mime_type=f"image/{format}",
+        )
+
+
+@lru_cache(maxsize=1)
+def get_gemini_image_client() -> GeminiImageClient:
+    api_key = os.environ["GOOGLE_CLOUD_NANO_API_KEY"]
+    return GeminiImageClient(api_key=api_key)

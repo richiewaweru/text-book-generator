@@ -42,3 +42,14 @@ This file is the human-readable source of truth for the current project state.
 
 - `backend/contracts/` is exported from `C:\Projects\lectio`.
 - The current harmonised catalog includes `classification`, `concept-compact`, `diagram-led`, `low-load`, `open-canvas`, `procedure`, `timeline`, `visual-led`, plus the other live-safe templates shipped by Lectio.
+
+## Image Generation (raster path)
+
+- Sections where `visual_policy.mode == "image"` generate a PNG via Gemini instead of an SVG spec.
+- **New node:** `backend/src/pipeline/nodes/image_generator.py` runs in Phase 3 parallel alongside `diagram_generator`. The two nodes are mutually exclusive by their own gates.
+- **GCS storage:** `backend/src/core/storage/gcs_image_store.py` — uploads to `GCS_BUCKET_NAME` (currently `lectio-bucket-1`) and returns a signed URL (1-hour TTL). When `GCS_BUCKET_NAME` is unset the node silently no-ops, so local dev works without credentials.
+- **Gemini client:** `backend/src/pipeline/providers/gemini_image_client.py` uses `gemini-3.1-flash-image-preview` via `generate_content_stream()` (multimodal text+image response). Factory: `get_gemini_image_client()` (LRU-cached, reads `GOOGLE_CLOUD_NANO_API_KEY`).
+- **Type changes:** `DiagramPlan.mode: Literal["svg", "image"] | None` (composition.py). `DiagramContent.image_url` was already present.
+- **Wiring:** `composition_planner` reads `plan.visual_policy.mode` and stamps it onto `DiagramPlan.mode`. `diagram_generator` has an early-exit gate for `mode == "image"`.
+- **Required env vars:** `GCS_BUCKET_NAME`, `GCS_SERVICE_ACCOUNT_JSON`, `GCS_IMAGE_BASE_URL` (optional), `GOOGLE_CLOUD_NANO_API_KEY`.
+- **Lectio frontend** (`image_url` branch in the diagram block component) is deferred — to be done in the Lectio repo.

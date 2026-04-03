@@ -14,6 +14,7 @@ from langchain_core.runnables.config import RunnableConfig
 from pipeline.nodes.composition_planner import composition_planner
 from pipeline.nodes.content_generator import content_generator
 from pipeline.nodes.diagram_generator import diagram_generator
+from pipeline.nodes.image_generator import image_generator
 from pipeline.nodes.interaction_decider import interaction_decider
 from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.nodes.qc_agent import qc_agent
@@ -90,6 +91,7 @@ async def process_section(
             typed,
             steps=[
                 ("diagram_generator", diagram_generator),
+                ("image_generator", image_generator),
                 ("interaction_path", _run_interaction_path),
             ],
             pre_instrumented=frozenset({"interaction_path"}),

@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from datetime import timedelta
+
+from google.cloud import storage
+from google.oauth2 import service_account
+
+
+class GCSImageStore:
+    """
+    Upload pipeline images to GCS and return a URL.
+
+    Key format : images/{generation_id}/{section_id}.png
+    URL         : signed URL (1-hour TTL) unless GCS_IMAGE_BASE_URL is set
+    No-op mode  : when GCS_BUCKET_NAME is empty, enabled=False and all
+                  operations return None — lets local dev run without credentials.
+    """
+
+    def __init__(self) -> None:
+        bucket_name = os.getenv("GCS_BUCKET_NAME", "")
+        if not bucket_name:
+            self._bucket = None
+            self._base_url = ""
+            return
+
+        creds_json = os.getenv("GCS_SERVICE_ACCOUNT_JSON", "")
+        if creds_json:
+            info = json.loads(creds_json)
+            credentials = service_account.Credentials.from_service_account_info(info)
+            client = storage.Client(
+                credentials=credentials,
+                project=info["project_id"],
+            )
+        else:
+            # Local fallback: gcloud auth application-default login
+            client = storage.Client()
+
+        self._bucket = client.bucket(bucket_name)
+        self._base_url = os.getenv("GCS_IMAGE_BASE_URL", "")
+
+    @property
+    def enabled(self) -> bool:
+        return self._bucket is not None
+
+    async def upload(
+        self,
+        *,
+        generation_id: str,
+        section_id: str,
+        image_bytes: bytes,
+        content_type: str = "image/png",
+    ) -> str | None:
+        """
+        Upload bytes and return a publicly-accessible URL.
+        Returns None if GCS is not configured.
+        """
+        if not self.enabled:
+            return None
+
+        key = f"images/{generation_id}/{section_id}.png"
+        blob = self._bucket.blob(key)
+
+        # SDK is sync — run off the event loop
+        await asyncio.to_thread(
+            blob.upload_from_string, image_bytes, content_type
+        )
+
+        if self._base_url:
+            return f"{self._base_url.rstrip('/')}/{key}"
+
+        return blob.generate_signed_url(
+            expiration=timedelta(hours=1),
+            method="GET",
+            version="v4",
+        )

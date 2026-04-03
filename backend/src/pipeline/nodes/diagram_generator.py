@@ -298,6 +298,13 @@ async def diagram_generator(
             _publish_outcome(state.request.generation_id or "", sid, "skipped")
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
 
+    # image_generator handles sections where mode == "image"
+    if plan is not None and plan.diagram.mode == "image":
+        if sid:
+            outcomes[sid] = "skipped_image_mode"
+            _publish_outcome(state.request.generation_id or "", sid, "skipped_image_mode")
+        return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
+
     section = state.generated_sections.get(sid)
     if sid is None or section is None:
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}

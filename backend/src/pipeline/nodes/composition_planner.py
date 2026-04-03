@@ -104,6 +104,7 @@ def _heuristic_fallback(
     *,
     diagram_enabled: bool,
     interaction_enabled: bool,
+    visual_mode: str | None = None,
 ) -> CompositionPlan:
     """Build a CompositionPlan using the original heuristic logic."""
     plan = state.current_section_plan
@@ -116,6 +117,7 @@ def _heuristic_fallback(
     return CompositionPlan(
         diagram=DiagramPlan(
             enabled=diagram_enabled,
+            mode=visual_mode if diagram_enabled else None,
             reasoning=(
                 "The reviewed section plan requires or strongly prefers a diagram."
                 if diagram_enabled
@@ -193,11 +195,14 @@ def _to_composition_plan(
     *,
     diagram_allowed: bool,
     interaction_allowed: bool,
+    visual_mode: str | None = None,
 ) -> CompositionPlan:
     """Convert LLM decision to CompositionPlan, enforcing guard-rail overrides."""
 
+    enabled = decision.diagram.enabled and diagram_allowed
     diagram = DiagramPlan(
-        enabled=decision.diagram.enabled and diagram_allowed,
+        enabled=enabled,
+        mode=visual_mode if enabled else None,
         reasoning=decision.diagram.reasoning,
         diagram_type=decision.diagram.diagram_type,
         key_concepts=decision.diagram.key_concepts,
@@ -262,6 +267,15 @@ async def composition_planner(
     diagram_ok = _diagram_allowed(state)
     interaction_ok = _interaction_allowed(state)
 
+    # Extract visual_policy.mode from the section plan (None if not set)
+    plan = state.current_section_plan
+    visual_policy = getattr(plan, "visual_policy", None) if plan is not None else None
+    visual_mode = (
+        visual_policy.mode
+        if visual_policy is not None and getattr(visual_policy, "required", False)
+        else None
+    )
+
     # If both are disabled by guards, skip the LLM call entirely
     if not diagram_ok and not interaction_ok:
         composition = _heuristic_fallback(
@@ -269,6 +283,7 @@ async def composition_planner(
             section,
             diagram_enabled=False,
             interaction_enabled=False,
+            visual_mode=visual_mode,
         )
         return {
             "composition_plans": {sid: composition},
@@ -313,6 +328,7 @@ async def composition_planner(
             result.output,
             diagram_allowed=diagram_ok,
             interaction_allowed=interaction_ok,
+            visual_mode=visual_mode,
         )
 
     except Exception:
@@ -326,6 +342,7 @@ async def composition_planner(
             section,
             diagram_enabled=diagram_ok,
             interaction_enabled=interaction_ok,
+            visual_mode=visual_mode,
         )
 
     # Update interaction usage tracking

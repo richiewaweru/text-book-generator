@@ -1314,8 +1314,12 @@ class TestProcessSectionComposite:
             qc_called = True
             return {"completed_nodes": ["qc_agent"]}
 
+        async def fake_image_generator(state, *, model_overrides=None):
+            return {"completed_nodes": ["image_generator"]}
+
         monkeypatch.setattr(ps_mod, "content_generator", fake_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
+        monkeypatch.setattr(ps_mod, "image_generator", fake_image_generator)
         monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
@@ -1332,6 +1336,7 @@ class TestProcessSectionComposite:
             "content_generator",
             "composition_planner",
             "diagram_generator",
+            "image_generator",
             "interaction_decider",
             "interaction_generator",
             "section_assembler",
