@@ -58,6 +58,7 @@ npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\
 For Docker runs, open `http://localhost:3000`.
 For native frontend runs, open `http://localhost:5173`.
 For Railway production, deploy the backend from the repo root with [railway.toml](/C:/Projects/Textbook%20agent/railway.toml). Keep the backend deploy strict: set a real frontend domain first, then configure `FRONTEND_ORIGIN`, `LESSON_BUILDER_PUBLIC_URL`, and `PDF_RENDER_BASE_URL` to that exact `https://` origin before the Railway rollout. After the backend is healthy, point the frontend to the Railway backend URL using `PUBLIC_API_URL` and `VITE_API_TARGET`.
+Frontend deployment remains a separate manual Vercel flow documented in the project runbooks. GitHub Actions is not the deployment source of truth right now.
 
 ## PDF Export
 
@@ -144,3 +145,10 @@ npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\
 python tools/agent/validate_repo.py --scope all
 python tools/agent/check_architecture.py --format text
 ```
+
+For pull requests, the required merge gate is intentionally lean:
+
+- `backend-quality`
+- `frontend-quality`
+
+Additional checks such as architecture validation, tooling tests, frontend `vitest`, and app smoke tests are still recommended for release prep or operator verification, but they are not required GitHub merge blockers.

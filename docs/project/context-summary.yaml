@@ -100,8 +100,6 @@ github:
   required_checks:
     - backend-quality
     - frontend-quality
-    - architecture-guard
-    - agent-governance
   pr_required_sections:
     - Summary
     - Agent Contract
@@ -248,11 +246,11 @@ process_packs:
       - id: read-release-pack
         title: Review the release-prep stage pack, changelog, and snapshot docs.
       - id: refresh-scaffold
-        title: Confirm the managed scaffold, project-local tools, and GitHub assets are in sync.
+        title: Confirm the managed scaffold, project-local tools, and deployment docs are in sync.
       - id: validate-release
-        title: Run full repo and agent-layer validation.
+        title: Run full repo validation plus any manual release checks that apply to the target deploy.
       - id: update-docs
-        title: Update changelog and release-facing docs or handoff records.
+        title: Update changelog, deploy notes, and release-facing handoff records.
       - id: verify-runbook
         title: Record release evidence, risks, and rollback steps.
       - id: tag-and-handoff

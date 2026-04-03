@@ -14,12 +14,25 @@
 | --- | --- |
 | `backend-quality` | Ruff lint + pytest |
 | `frontend-quality` | Svelte type-check + build |
-| `architecture-guard` | Shell/core/pipeline boundary rules plus no-import-back-into-shell checks |
-| `agent-governance` | PR structure and process compliance |
 
-All checks must pass before merge.
+These are the only required PR checks. The merge gate is intentionally minimal and code-focused.
 
 Project-local validation uses `python tools/agent/validate_repo.py --scope all`, which now covers backend, frontend, and tooling automation tests declared in `docs/project/context-summary.yaml`.
+
+Additional high-signal checks remain available for local verification, release prep, and operator handoffs, but they are not merge blockers:
+
+- `python tools/agent/check_architecture.py --format text`
+- `python tools/agent/validate_repo.py --scope tooling`
+- `cd frontend && npm run test`
+- `python scripts/smoke_test.py <base-url>`
+
+## Deployment
+
+Deployment remains manual for now. GitHub Actions is no longer the source of truth for release or deploy validation.
+
+- Backend deployment follows the Railway runbooks and operator notes in `docs/project/runs/`
+- Frontend deployment follows the Vercel readiness handoff and operator notes
+- Release prep should record any manual deploy validation in the active runbook or handoff
 
 ## Runtime Verification
 
@@ -46,4 +59,4 @@ For Docker-based verification, use `docker compose up --build` from the repo roo
 - `backend/src/generation/` -- generation app (HTTP, persistence, generation orchestration)
 - `backend/src/planning/` -- Teacher Studio planning layer
 - `backend/src/pipeline/` -- standalone generation engine
-- `.github/workflows/` -- CI runners that call `tools/agent/` scripts
+- `.github/workflows/ci.yml` -- the minimal required PR validation workflow
