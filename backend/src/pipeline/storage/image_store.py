@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from core.config import settings
 
 class ImageStore(ABC):
     """Abstract image storage interface."""
@@ -79,12 +79,10 @@ class GCSImageStore(ImageStore):
 
 def get_image_store() -> ImageStore:
     """Resolve storage backend based on environment."""
-    env = os.getenv("ENVIRONMENT", "development")
+    env = settings.app_env
 
     if env == "production":
-        bucket = os.getenv("GCS_BUCKET_NAME", "textbook-diagrams")
-        return GCSImageStore(bucket_name=bucket)
+        return GCSImageStore(bucket_name=settings.gcs_bucket_name)
     else:
         base_path = Path("data/images")
-        base_url = os.getenv("IMAGE_BASE_URL", "http://localhost:8000/images")
-        return LocalImageStore(base_path=base_path, base_url=base_url)
+        return LocalImageStore(base_path=base_path, base_url=settings.image_base_url)

@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import re
 import tomllib
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from core.config import Settings, bootstrap_environment
 from core.database.session import build_engine_kwargs
+from pipeline.storage.image_store import LocalImageStore, get_image_store
 from pipeline.runtime_policy import resolve_generation_timeout_seconds, resolve_runtime_policy_bundle
 from pipeline.types.requests import GenerationMode
 
@@ -255,6 +258,7 @@ def test_settings_require_google_client_id_in_production(monkeypatch) -> None:
 
 
 def test_settings_accept_safe_production_configuration(monkeypatch) -> None:
+    monkeypatch.delenv("APP_ENV", raising=False)
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://textbook:textbook@db:5432/textbook_agent")
     monkeypatch.setenv("DB_ECHO", "true")
@@ -300,6 +304,112 @@ def test_settings_normalize_log_level(monkeypatch) -> None:
     settings = Settings(_env_file=None)
 
     assert settings.log_level == "DEBUG"
+
+
+def test_settings_expose_image_storage_envs(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./textbook_agent.db")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-development-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "http://localhost:5173")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "http://127.0.0.1:5173")
+    monkeypatch.setenv("IMAGE_BASE_URL", "http://localhost:8000/custom-images")
+    monkeypatch.setenv("GCS_BUCKET_NAME", "custom-diagrams")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.image_base_url == "http://localhost:8000/custom-images"
+    assert settings.gcs_bucket_name == "custom-diagrams"
+
+
+def test_image_store_uses_app_env_and_typed_settings(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./textbook_agent.db")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-development-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "http://localhost:5173")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "http://127.0.0.1:5173")
+    monkeypatch.setenv("IMAGE_BASE_URL", "http://localhost:8000/custom-images")
+
+    monkeypatch.setattr(
+        "pipeline.storage.image_store.settings",
+        Settings(_env_file=None),
+    )
+
+    store = get_image_store()
+
+    assert isinstance(store, LocalImageStore)
+    assert store.base_url == "http://localhost:8000/custom-images"
+
+
+def test_image_store_uses_gcs_bucket_in_production(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://textbook:textbook@db:5432/textbook_agent")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-production-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://app.example.com")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "https://app.example.com")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "example-google-client-id")
+    monkeypatch.setenv("PDF_RENDER_BASE_URL", "https://app.example.com")
+    monkeypatch.setenv("GCS_BUCKET_NAME", "prod-diagrams")
+
+    class StubGCSImageStore:
+        def __init__(self, bucket_name: str):
+            self.bucket_name = bucket_name
+
+    monkeypatch.setattr(
+        "pipeline.storage.image_store.GCSImageStore",
+        StubGCSImageStore,
+    )
+    monkeypatch.setattr(
+        "pipeline.storage.image_store.settings",
+        Settings(_env_file=None),
+    )
+
+    store = get_image_store()
+
+    assert isinstance(store, StubGCSImageStore)
+    assert store.bucket_name == "prod-diagrams"
+
+
+def test_docker_compose_maps_root_google_client_id_into_backend_and_frontend() -> None:
+    compose_path = Path(__file__).resolve().parents[3] / "docker-compose.yml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    backend_env = compose["services"]["backend"]["environment"]
+    frontend_build_args = compose["services"]["frontend"]["build"]["args"]
+
+    assert backend_env["GOOGLE_CLIENT_ID"] == "${GOOGLE_CLIENT_ID:-}"
+    assert frontend_build_args["VITE_GOOGLE_CLIENT_ID"] == "${GOOGLE_CLIENT_ID:-}"
+
+
+def test_env_examples_do_not_advertise_removed_stale_keys() -> None:
+    root_example = (Path(__file__).resolve().parents[3] / ".env.example").read_text(
+        encoding="utf-8"
+    )
+    backend_example = (Path(__file__).resolve().parents[2] / ".env.example").read_text(
+        encoding="utf-8"
+    )
+    frontend_example = (
+        Path(__file__).resolve().parents[3] / "frontend" / ".env.example"
+    ).read_text(encoding="utf-8")
+
+    stale_keys = (
+        "MAX_RETRIES",
+        "RETRY_BASE_DELAY",
+        "QUALITY_CHECK_ENABLED",
+        "MAX_QUALITY_RERUNS",
+        "TEMPERATURE",
+        "CODE_LINE_SOFT_LIMIT",
+        "CODE_LINE_HARD_LIMIT",
+        "OUTPUT_DIR",
+        "OUTPUT_FORMAT",
+    )
+
+    for key in stale_keys:
+        pattern = rf"(?m)^{key}="
+        assert re.search(pattern, root_example) is None
+        assert re.search(pattern, backend_example) is None
+        assert re.search(pattern, frontend_example) is None
+
+    assert re.search(r"(?m)^VITE_GOOGLE_CLIENT_ID=", root_example) is None
+    assert re.search(r"(?m)^GOOGLE_CLIENT_ID=", frontend_example) is None
 
 
 def test_pytest_config_deselects_postgres_by_default() -> None:

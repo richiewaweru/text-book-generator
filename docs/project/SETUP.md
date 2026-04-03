@@ -30,6 +30,23 @@ For database-only Docker development, keep the app processes native and run:
 docker compose --profile dev up db-dev
 ```
 
+## Config Ownership
+
+Use a different env file for each run surface:
+
+| Surface | Env file | Notes |
+| --- | --- | --- |
+| Docker/Compose | repo-root `.env` | Only for `docker compose` from the repo root |
+| Native backend | `backend/.env` | Canonical backend-local runtime config |
+| Native frontend | `frontend/.env` | Canonical frontend-local browser config |
+
+Key ownership rules:
+- `GOOGLE_CLIENT_ID` belongs to the backend and Docker surfaces.
+- `VITE_GOOGLE_CLIENT_ID` belongs only to the native frontend surface.
+- Docker maps repo-root `GOOGLE_CLIENT_ID` into the frontend build as `VITE_GOOGLE_CLIENT_ID`.
+- `PUBLIC_API_URL` is the canonical frontend API base; `VITE_API_TARGET` is optional and dev-only.
+- `PIPELINE_*`, `PLANNING_*`, provider API keys, and backend runtime knobs belong in `backend/.env`.
+
 ## Railway Backend Deployment
 
 - Railway should deploy from the repo root using [railway.toml](/C:/Projects/Textbook%20agent/railway.toml).
@@ -51,9 +68,11 @@ docker compose --profile dev up db-dev
 
 - The repo-root `.env` is for Docker/compose runtime values.
 - `backend/.env` is for native backend development values.
+- `frontend/.env` is for native frontend development values.
 - Backend provider keys must be present in `backend/.env`.
-- `frontend/.env` must define `VITE_GOOGLE_CLIENT_ID`.
 - `backend/.env` must define `GOOGLE_CLIENT_ID`.
+- `frontend/.env` must define `VITE_GOOGLE_CLIENT_ID`.
+- For Docker-local sign-in, the repo-root `.env` must define `GOOGLE_CLIENT_ID`.
 - The Google Cloud OAuth client must list both `http://localhost:5173` and `http://127.0.0.1:5173` under `Authorized JavaScript origins`.
 - For Docker-local use, also add `http://localhost:3000` as an authorized JavaScript origin.
 - For Railway production, add the final frontend origin to Google OAuth authorized JavaScript origins before enabling sign-in there.
