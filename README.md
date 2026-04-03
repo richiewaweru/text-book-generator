@@ -24,6 +24,30 @@ cp .env.example .env
 npm run dev
 ```
 
+## Config Ownership
+
+Use one env file per surface:
+
+| Surface | Env file | Purpose |
+| --- | --- | --- |
+| Docker/Compose | repo-root `.env` | Full stack local Docker runtime only |
+| Native backend | `backend/.env` | FastAPI backend run directly from `backend/` |
+| Native frontend | `frontend/.env` | SvelteKit frontend run directly from `frontend/` |
+
+### Common variables
+
+| Variable | Owner file | Used by |
+| --- | --- | --- |
+| `GOOGLE_CLIENT_ID` | repo-root `.env`, `backend/.env` | Docker backend and native backend |
+| `VITE_GOOGLE_CLIENT_ID` | `frontend/.env` | Native frontend browser runtime |
+| `PUBLIC_API_URL` | repo-root `.env`, `frontend/.env` | Docker frontend build and native frontend |
+| `JWT_SECRET_KEY` | repo-root `.env`, `backend/.env` | Docker backend and native backend |
+| `DATABASE_URL` | `backend/.env` | Native backend only |
+| `POSTGRES_*` | repo-root `.env` | Docker Postgres and backend compose wiring |
+| `PIPELINE_*`, `PLANNING_*` | `backend/.env` | Backend-only routing/runtime knobs |
+
+For Docker, the repo-root `GOOGLE_CLIENT_ID` is mapped into both the backend runtime and the frontend build as `VITE_GOOGLE_CLIENT_ID`.
+
 Optional contract refresh from the sibling Lectio repo:
 
 ```bash
@@ -75,10 +99,11 @@ For Docker, use the repo-root `.env.example` and copy the needed runtime values 
 ## Local Run Requirements
 
 - Provider API keys must be present in `backend/.env`.
-- Runtime policy knobs live in `backend/.env`; for Docker runs, mirror the same names in the repo-root `.env`.
+- Runtime policy knobs live in `backend/.env`; for Docker runs, mirror only the Docker-needed values in the repo-root `.env`.
 - Google OAuth must be configured for local development:
-  - `frontend/.env` needs `VITE_GOOGLE_CLIENT_ID`
-  - `backend/.env` needs `GOOGLE_CLIENT_ID`
+  - native frontend: `frontend/.env` needs `VITE_GOOGLE_CLIENT_ID`
+  - native backend: `backend/.env` needs `GOOGLE_CLIENT_ID`
+  - Docker stack: repo-root `.env` needs `GOOGLE_CLIENT_ID`
   - the Google Cloud OAuth client must allow `http://localhost:5173` and `http://127.0.0.1:5173` as authorized JavaScript origins
   - if the OAuth consent screen is still in Testing mode, your sign-in email must be added as a test user
 - For Docker-local runs, the Google Cloud OAuth client must also allow `http://localhost:3000`

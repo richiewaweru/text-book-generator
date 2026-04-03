@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveClientApiBase, resolveDevProxyTarget } from './config';
+import {
+	googleClientIdMissingMessage,
+	resolveClientApiBase,
+	resolveDevProxyTarget,
+	resolveGoogleClientId
+} from '$lib/config/environment';
 
 describe('API config resolution', () => {
 	it('uses relative client paths when no API base is configured', () => {
@@ -34,6 +39,26 @@ describe('API config resolution', () => {
 	it('uses PUBLIC_API_URL for the dev proxy when no explicit VITE target is set', () => {
 		expect(resolveDevProxyTarget({ PUBLIC_API_URL: 'http://localhost:8001/' })).toBe(
 			'http://localhost:8001'
+		);
+	});
+
+	it('resolves the Google client id from the frontend env surface', () => {
+		expect(
+			resolveGoogleClientId({
+				VITE_GOOGLE_CLIENT_ID: 'google-client-id.apps.googleusercontent.com'
+			})
+		).toBe('google-client-id.apps.googleusercontent.com');
+	});
+
+	it('explains the native frontend env file when the Google client id is missing', () => {
+		expect(googleClientIdMissingMessage({ port: '5173' })).toContain(
+			'VITE_GOOGLE_CLIENT_ID in frontend/.env'
+		);
+	});
+
+	it('explains the repo-root env file for Docker-local sign-in', () => {
+		expect(googleClientIdMissingMessage({ port: '3000' })).toContain(
+			'GOOGLE_CLIENT_ID in the repo-root .env'
 		);
 	});
 });

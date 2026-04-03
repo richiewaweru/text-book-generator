@@ -6,6 +6,11 @@
 	import { isApiError } from '$lib/api/errors';
 	import { mountGoogleSignIn } from '$lib/auth/google';
 	import { navigateToLanding } from '$lib/auth/routing';
+	import {
+		googleClientIdMissingMessage,
+		resolveGoogleClientId,
+		type FrontendEnvironment
+	} from '$lib/config/environment';
 	import { authUser, setAuth } from '$lib/stores/auth';
 	import type { User } from '$lib/types';
 
@@ -46,9 +51,9 @@
 			return;
 		}
 
-		const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+		const clientId = resolveGoogleClientId(import.meta.env as FrontendEnvironment);
 		if (!clientId) {
-			errorMessage = 'Google sign-in is unavailable because the client ID is missing.';
+			errorMessage = googleClientIdMissingMessage();
 			return;
 		}
 

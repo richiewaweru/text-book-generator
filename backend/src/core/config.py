@@ -160,6 +160,8 @@ class Settings(BaseSettings):
     # Output
     report_output_dir: str = "outputs/reports"
     pdf_temp_dir: str = "outputs/pdf"
+    image_base_url: str = "http://localhost:8000/images"
+    gcs_bucket_name: str = "textbook-diagrams"
 
     # Authentication
     google_client_id: str = ""
