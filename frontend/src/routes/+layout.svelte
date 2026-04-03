@@ -11,6 +11,8 @@
 	const initialized = fromStore(authInitialized);
 	const user = fromStore(authUser);
 	const authed = fromStore(authIsAuthenticated);
+	export const prerender = false;
+    export const ssr = false;
 	const isPrintTextbookRoute = $derived(
 		page.url.pathname.startsWith('/textbook/') && page.url.searchParams.get('print') === 'true'
 	);
