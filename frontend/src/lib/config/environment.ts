@@ -1,5 +1,6 @@
 export interface FrontendEnvironment {
 	PUBLIC_API_URL?: string;
+	PUBLIC_GOOGLE_CLIENT_ID?: string;
 	VITE_API_TARGET?: string;
 	VITE_GOOGLE_CLIENT_ID?: string;
 }
@@ -35,13 +36,13 @@ export function resolveDevProxyTarget(
 }
 
 export function resolveGoogleClientId(env: FrontendEnvironment): string {
-	return (env.VITE_GOOGLE_CLIENT_ID ?? '').trim();
+	return (env.PUBLIC_GOOGLE_CLIENT_ID ?? env.VITE_GOOGLE_CLIENT_ID ?? '').trim();
 }
 
 export function googleClientIdMissingMessage(locationLike?: Pick<Location, 'port'> | null): string {
 	if (isDockerFrontendHost(locationLike)) {
-		return 'Google sign-in is unavailable because VITE_GOOGLE_CLIENT_ID is missing. Set GOOGLE_CLIENT_ID in the repo-root .env.';
+		return 'Google sign-in is unavailable because no Google client ID is configured. Set GOOGLE_CLIENT_ID in the repo-root .env for Docker, or provide PUBLIC_GOOGLE_CLIENT_ID/VITE_GOOGLE_CLIENT_ID for a native frontend build.';
 	}
 
-	return 'Google sign-in is unavailable because VITE_GOOGLE_CLIENT_ID is missing. Set VITE_GOOGLE_CLIENT_ID in frontend/.env.';
+	return 'Google sign-in is unavailable because no Google client ID is configured. Set PUBLIC_GOOGLE_CLIENT_ID or VITE_GOOGLE_CLIENT_ID in frontend/.env.';
 }
