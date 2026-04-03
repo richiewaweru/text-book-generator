@@ -295,8 +295,8 @@ class DiagramCallout(BaseModel):
 
 class DiagramContent(BaseModel):
     svg_content: str = ""
-    spec: Optional[DiagramSpec] = None
     image_url: Optional[str] = None
+    spec: Optional[DiagramSpec] = None
     caption: str
     alt_text: str
     zoom_label: Optional[str] = None
