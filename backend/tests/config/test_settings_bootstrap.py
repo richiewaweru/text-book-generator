@@ -245,6 +245,32 @@ def test_settings_reject_local_origins_in_production(monkeypatch) -> None:
         Settings(_env_file=None)
 
 
+def test_settings_reject_local_lesson_builder_url_in_production(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://textbook:textbook@db:5432/textbook_agent")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-production-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://app.example.com")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "http://localhost:3000")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "example-google-client-id")
+    monkeypatch.setenv("PDF_RENDER_BASE_URL", "https://app.example.com")
+
+    with pytest.raises(ValidationError, match="LESSON_BUILDER_PUBLIC_URL"):
+        Settings(_env_file=None)
+
+
+def test_settings_reject_local_pdf_render_base_url_in_production(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://textbook:textbook@db:5432/textbook_agent")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-production-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://app.example.com")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "https://app.example.com")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "example-google-client-id")
+    monkeypatch.setenv("PDF_RENDER_BASE_URL", "http://localhost:5173")
+
+    with pytest.raises(ValidationError, match="PDF_RENDER_BASE_URL"):
+        Settings(_env_file=None)
+
+
 def test_settings_require_google_client_id_in_production(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://textbook:textbook@db:5432/textbook_agent")

@@ -17,7 +17,7 @@
 
 ## Summary
 
-This phase finishes the repo-side work needed to deploy the backend to Railway reliably. The backend image now binds to Railway's injected `PORT`, `railway.toml` defines the Docker build and readiness contract, a smoke-test script checks the deployed backend's core surface, and the repo docs now explain the exact Railway variables and post-deploy workflow. The frontend remains a follow-on deployment, with this phase documenting the correct `PUBLIC_API_URL` and `VITE_API_TARGET` wiring rather than implementing Vercel deployment itself.
+This phase established the Railway deployment contract and backend runtime shape. The current repo already contains the core production primitives: repo-root `railway.toml`, dynamic `PORT` handling, `/health/ready` readiness checks, DB-backed document/report persistence, and strict `APP_ENV=production` validation through `Settings`. Backend deployment should stay strict: do not roll out to Railway until the real frontend origin is known and set consistently across `FRONTEND_ORIGIN`, `LESSON_BUILDER_PUBLIC_URL`, and `PDF_RENDER_BASE_URL`.
 
 ## Railway Backend Variables
 
@@ -32,10 +32,12 @@ Set these on the Railway backend service:
 | `ANTHROPIC_API_KEY` | yes | required for generation |
 | `FRONTEND_ORIGIN` | yes | exact future frontend origin, including `https://` |
 | `LESSON_BUILDER_PUBLIC_URL` | yes | exact future public frontend URL |
+| `PDF_RENDER_BASE_URL` | yes | exact future frontend URL while PDF export is enabled |
 | `JSON_LOGS=true` | yes | recommended for Railway log explorer |
 | `LOG_LEVEL=INFO` | yes | raise only for active debugging |
-| `LECTIO_CONTRACTS_DIR=/app/backend/contracts` | recommended | matches the image layout |
-| `GENERATION_MAX_CONCURRENT_PER_USER` and `PIPELINE_*` runtime vars | recommended | keep explicit production policy values |
+| `LECTIO_CONTRACTS_DIR=/app/backend/contracts` | recommended | matches the image layout and baked-in contracts copy |
+| `RUN_MIGRATIONS_ON_STARTUP=true` | recommended | pin the startup migration behavior explicitly in Railway |
+| `GENERATION_MAX_CONCURRENT_PER_USER` and `PIPELINE_*` runtime vars | recommended | keep explicit production policy values rather than relying on defaults |
 
 For Railway Postgres, create `DATABASE_URL` from plugin variables:
 
@@ -45,37 +47,60 @@ postgresql+asyncpg://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}
 
 ## Frontend Follow-on
 
-- When the frontend is deployed later, point it at the Railway backend with:
+- Backend-first deployment is not the intended production path. The backend currently validates against localhost-like frontend values in production, so wait until the real frontend domain exists.
+- When the frontend domain is known, set Railway to:
+  - `FRONTEND_ORIGIN=https://your-frontend.example.com`
+  - `LESSON_BUILDER_PUBLIC_URL=https://your-frontend.example.com`
+  - `PDF_RENDER_BASE_URL=https://your-frontend.example.com`
+- Then point the frontend at the Railway backend with:
   - `PUBLIC_API_URL=https://your-backend.up.railway.app`
   - `VITE_API_TARGET=https://your-backend.up.railway.app`
-- Then update Railway's `FRONTEND_ORIGIN` and `LESSON_BUILDER_PUBLIC_URL` to that exact frontend URL.
 - Add the same frontend origin to Google OAuth authorized JavaScript origins.
 
 ## Deployment Checklist
 
 1. Create a Railway project from the GitHub repo.
 2. Add a PostgreSQL plugin.
-3. Set the backend variables listed above.
-4. Deploy from `main`.
-5. Confirm Railway health check uses `/health/ready`.
-6. Run:
+3. Build `DATABASE_URL` with Railway Postgres references using the `postgresql+asyncpg://` scheme.
+4. Set the backend variables listed above, including the real frontend-origin values.
+5. Confirm `railway.toml` is the deploy source of truth and still uses `/health/ready`.
+6. Run a local migration smoke against PostgreSQL before the first Railway deploy:
+   - `cd backend`
+   - `DATABASE_URL=postgresql+asyncpg://... alembic upgrade head`
+   - `alembic current`
+7. Deploy from `main`.
+8. Run:
    - `python scripts/smoke_test.py https://your-backend.up.railway.app`
-7. Verify Google auth and one end-to-end generation manually after the frontend is connected.
+9. Verify Google auth and one end-to-end generation manually after the frontend is connected.
 
 ## Common Failure Modes
 
 - Build succeeds but app never becomes healthy:
   - verify Railway is using the repo-root [railway.toml](/C:/Projects/Textbook%20agent/railway.toml)
   - verify `PORT` is not hardcoded elsewhere
+  - verify `/health/ready` remains the Railway readiness target
 - App crashes on startup with config validation:
   - replace placeholder `JWT_SECRET_KEY`
   - ensure `APP_ENV=production`
-  - ensure `FRONTEND_ORIGIN` and `LESSON_BUILDER_PUBLIC_URL` are not localhost values
+  - ensure `FRONTEND_ORIGIN`, `LESSON_BUILDER_PUBLIC_URL`, and `PDF_RENDER_BASE_URL` are not localhost values
 - DB connection errors:
   - ensure `DATABASE_URL` uses `postgresql+asyncpg://`
+  - ensure the backend image still includes the declared `asyncpg` dependency from [backend/pyproject.toml](/C:/Projects/Textbook%20agent/backend/pyproject.toml)
 - CORS/login failures after frontend hookup:
   - ensure the frontend origin exactly matches Railway backend `FRONTEND_ORIGIN`
   - update Google OAuth origins to the final frontend URL
+
+## Persistence Notes
+
+- Documents are persisted in `generations.document_json`.
+- Reports are persisted in `generations.report_json`.
+- The container filesystem remains an ephemeral legacy/debug surface only.
+- This means Railway's ephemeral disk is acceptable for v1 core flows so long as user-facing reads continue to come from PostgreSQL-backed APIs.
+
+## Current Validation Notes
+
+- `railway.json` is not required; the repo uses [railway.toml](/C:/Projects/Textbook%20agent/railway.toml) as the deployment contract.
+- `app_env` and strict production validation already live in [backend/src/core/config.py](/C:/Projects/Textbook%20agent/backend/src/core/config.py); no separate startup-only JWT guard is needed.
 
 ## Validation Evidence
 

@@ -57,7 +57,7 @@ npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\
 
 For Docker runs, open `http://localhost:3000`.
 For native frontend runs, open `http://localhost:5173`.
-For Railway production, deploy the backend from the repo root with [railway.toml](/C:/Projects/Textbook%20agent/railway.toml) and then point the frontend to the Railway backend URL using `PUBLIC_API_URL` and `VITE_API_TARGET`.
+For Railway production, deploy the backend from the repo root with [railway.toml](/C:/Projects/Textbook%20agent/railway.toml). Keep the backend deploy strict: set a real frontend domain first, then configure `FRONTEND_ORIGIN`, `LESSON_BUILDER_PUBLIC_URL`, and `PDF_RENDER_BASE_URL` to that exact `https://` origin before the Railway rollout. After the backend is healthy, point the frontend to the Railway backend URL using `PUBLIC_API_URL` and `VITE_API_TARGET`.
 
 ## PDF Export
 
@@ -136,6 +136,7 @@ npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\
 - [`docs/project/SCHEMAS.md`](docs/project/SCHEMAS.md)
 - [`docs/project/runs/`](docs/project/runs/)
 - [`docs/project/runs/2026-04-02-phase-p6-railway-backend-deployment.md`](docs/project/runs/2026-04-02-phase-p6-railway-backend-deployment.md)
+- [`docs/project/runs/2026-04-03-backend-railway-readiness-handoff.md`](docs/project/runs/2026-04-03-backend-railway-readiness-handoff.md)
 
 ## Validation
 
