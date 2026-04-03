@@ -5,8 +5,9 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
+from core.rate_limit import limiter
 
 import core.events as core_events
 from core.llm import build_model, run_llm
@@ -237,7 +238,9 @@ async def create_brief(
 
 
 @router.post("/brief/stream")
+@limiter.limit("20/minute")
 async def stream_brief(
+    request: Request,
     brief: StudioBriefRequest,
     current_user: User = Depends(get_current_user),
 ):

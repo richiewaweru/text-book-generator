@@ -3,7 +3,8 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from core.rate_limit import limiter
 from pydantic import BaseModel
 
 from core.auth.google_auth import verify_google_token
@@ -29,7 +30,9 @@ class AuthResponse(BaseModel):
 
 
 @router.post("/google", response_model=AuthResponse)
+@limiter.limit("20/minute")
 async def google_login(
+    request: Request,
     body: GoogleAuthRequest,
     jwt_handler: JWTHandler = Depends(get_jwt_handler),
     user_repo: UserRepository = Depends(get_user_repository),

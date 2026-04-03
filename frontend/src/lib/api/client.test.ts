@@ -184,10 +184,8 @@ describe('client API helpers', () => {
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/generations/gen-123/document');
 	});
 
-	it('builds an EventSource URL with the token query string', () => {
-		expect(buildGenerationEventsUrl('gen-123')).toBe(
-			'/api/v1/generations/gen-123/events?token=test-token'
-		);
+	it('builds an EventSource URL without a token query string', () => {
+		expect(buildGenerationEventsUrl('gen-123')).toBe('/api/v1/generations/gen-123/events');
 	});
 
 	it('falls back to the query token when the auth store is empty', async () => {

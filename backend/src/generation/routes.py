@@ -28,6 +28,7 @@ from generation.dependencies import (
 from generation.pdf_export.cleanup import cleanup_files
 from generation.pdf_export.service import PDFExportRequest, export_generation_pdf
 from generation.dtos import GenerationAcceptedResponse, GenerationRequest
+from core.rate_limit import limiter
 from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_repository import GenerationRepository
 from pipeline.adapter import run_pipeline_streaming
@@ -99,7 +100,9 @@ async def _run_generation_job(
 
 
 @router.post("/generations", status_code=202, response_model=GenerationAcceptedResponse)
+@limiter.limit("10/minute")
 async def create_generation(
+    request: Request,
     req: GenerationRequest,
     current_user: User = Depends(get_current_user),
     profile_repo: StudentProfileRepository = Depends(get_student_profile_repository),

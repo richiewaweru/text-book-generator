@@ -8,6 +8,7 @@ import type {
 	GenerationRequest,
 	PDFExportRequest
 } from '$lib/types';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { ensureOk } from '$lib/api/errors';
 import { getToken } from '$lib/stores/auth';
 import { resolveClientApiBase, type ApiEnvironment } from './config';
@@ -66,13 +67,44 @@ export async function getGenerationDocument(id: string): Promise<GenerationDocum
 }
 
 export function buildGenerationEventsUrl(id: string): string {
-	const token = getAuthToken();
-	const base = buildApiUrl(`/api/v1/generations/${encodeURIComponent(id)}/events`);
-	if (!token) {
-		return base;
+	return buildApiUrl(`/api/v1/generations/${encodeURIComponent(id)}/events`);
+}
+
+export function connectGenerationEvents(
+	id: string,
+	handlers: {
+		onEvent: (eventType: string, data: string) => void;
+		onError: (err: unknown) => void;
+		onOpen?: () => void;
 	}
-	const separator = base.includes('?') ? '&' : '?';
-	return `${base}${separator}token=${encodeURIComponent(token)}`;
+): () => void {
+	const ctrl = new AbortController();
+	const url = buildApiUrl(`/api/v1/generations/${encodeURIComponent(id)}/events`);
+	const token = getAuthToken();
+	const headers: Record<string, string> = {};
+	if (token) {
+		headers['Authorization'] = `Bearer ${token}`;
+	}
+
+	fetchEventSource(url, {
+		signal: ctrl.signal,
+		headers,
+		async onopen(response) {
+			if (!response.ok) {
+				throw new Error(`SSE connection failed: ${response.status}`);
+			}
+			handlers.onOpen?.();
+		},
+		onmessage(msg) {
+			handlers.onEvent(msg.event ?? '', msg.data ?? '');
+		},
+		onerror(err) {
+			handlers.onError(err);
+			throw err; // stop fetchEventSource auto-retry; components own reconnect logic
+		},
+	});
+
+	return () => ctrl.abort();
 }
 
 export async function healthCheck(): Promise<{ status: string; version: string }> {

@@ -13,6 +13,7 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@microsoft/fetch-event-source": "^2.0.1",
 		"bits-ui": "^2.11.0",
 		"clsx": "^2.1.1",
 		"katex": "^0.16.22",
