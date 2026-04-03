@@ -25,7 +25,8 @@ vi.mock('lectio', async () => {
 				render: MockTemplateRender
 			}
 		},
-		LectioThemeSurface: MockLectioThemeSurface
+		LectioThemeSurface: MockLectioThemeSurface,
+		usePrintMode: () => () => false
 	};
 });
 

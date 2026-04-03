@@ -50,9 +50,18 @@ describe('API config resolution', () => {
 		).toBe('google-client-id.apps.googleusercontent.com');
 	});
 
+	it('prefers PUBLIC_GOOGLE_CLIENT_ID over VITE_GOOGLE_CLIENT_ID', () => {
+		expect(
+			resolveGoogleClientId({
+				PUBLIC_GOOGLE_CLIENT_ID: 'public-google-client-id.apps.googleusercontent.com',
+				VITE_GOOGLE_CLIENT_ID: 'vite-google-client-id.apps.googleusercontent.com'
+			})
+		).toBe('public-google-client-id.apps.googleusercontent.com');
+	});
+
 	it('explains the native frontend env file when the Google client id is missing', () => {
 		expect(googleClientIdMissingMessage({ port: '5173' })).toContain(
-			'VITE_GOOGLE_CLIENT_ID in frontend/.env'
+			'PUBLIC_GOOGLE_CLIENT_ID or VITE_GOOGLE_CLIENT_ID in frontend/.env'
 		);
 	});
 

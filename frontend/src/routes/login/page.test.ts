@@ -54,6 +54,7 @@ import LoginPage from './+page.svelte';
 describe('login page env guidance', () => {
 	beforeEach(() => {
 		authStore.set(null);
+		vi.stubEnv('PUBLIC_GOOGLE_CLIENT_ID', '');
 		vi.stubEnv('VITE_GOOGLE_CLIENT_ID', '');
 	});
 
@@ -66,6 +67,8 @@ describe('login page env guidance', () => {
 		render(LoginPage);
 
 		expect(await screen.findByText(/google sign-in is unavailable/i)).toBeTruthy();
-		expect(await screen.findByText(/vite_google_client_id is missing/i)).toBeTruthy();
+		expect(
+			await screen.findByText(/public_google_client_id\/vite_google_client_id/i)
+		).toBeTruthy();
 	});
 });
