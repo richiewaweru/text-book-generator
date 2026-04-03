@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 
 class DiagramPlan(BaseModel):
     enabled: bool
     reasoning: str
+    mode: Literal["svg", "image"] | None = None
     diagram_type: str | None = None
     focus_area: str | None = None
     key_concepts: list[str] = Field(default_factory=list)
