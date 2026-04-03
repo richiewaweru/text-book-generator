@@ -33,8 +33,17 @@
 
 	let { content }: { content: ExplanationContent } = $props();
 
+	function escapeHtml(str: string): string {
+		return str
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;');
+	}
+
 	function highlightEmphasis(text: string, phrases: string[]): string {
-		let result = text;
+		let result = escapeHtml(text);
 		for (const phrase of phrases) {
 			const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 			result = result.replace(

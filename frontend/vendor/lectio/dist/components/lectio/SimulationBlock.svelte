@@ -4,6 +4,7 @@
 	import { Card } from '../ui/card';
 	import { X, ZoomIn, ZoomOut } from 'lucide-svelte';
 	import { usePrintMode } from '../../utils/printContext';
+	import { sanitizeSvg } from '../../utils/sanitize';
 
 	let { content }: { content: SimulationContent } = $props();
 
@@ -54,7 +55,7 @@
 				aria-label={content.fallback_diagram.alt_text}
 				class="simulation-print-diagram"
 			>
-				{@html content.fallback_diagram.svg_content}
+				{@html sanitizeSvg(content.fallback_diagram.svg_content)}
 			</div>
 			{#if content.fallback_diagram.caption}
 				<p class="simulation-print-caption">{content.fallback_diagram.caption}</p>
@@ -117,7 +118,7 @@
 					aria-label={content.fallback_diagram.alt_text}
 					class="overflow-hidden rounded-[1rem] border border-border/70 bg-white [&_svg]:h-auto [&_svg]:w-full"
 				>
-					{@html content.fallback_diagram.svg_content}
+					{@html sanitizeSvg(content.fallback_diagram.svg_content)}
 				</div>
 				<p class="text-sm leading-6 text-muted-foreground">
 					{content.fallback_diagram.caption}

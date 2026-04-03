@@ -11,13 +11,14 @@
 		DialogOverlay
 	} from '../ui/dialog';
 	import { ZoomIn } from 'lucide-svelte';
+	import { sanitizeSvg } from '../../utils/sanitize';
 
 	let { content }: { content: DiagramContent } = $props();
 
 	type DiagramCallout = NonNullable<DiagramContent['callouts']>[number];
-	const hasImage = $derived(Boolean(content.image_url?.trim()));
-	const hasSvg = $derived(Boolean(content.svg_content?.trim()));
-	const showCallouts = $derived(Boolean(!hasImage && hasSvg && content.callouts?.length));
+	const hasImage = $derived(!!content.image_url);
+	const hasSvg = $derived(!!content.svg_content);
+	const showCallouts = $derived(hasSvg && !!(content.callouts?.length));
 
 	function getMarkerPosition(callout: DiagramCallout) {
 		const horizontalOffset = callout.x >= 72 ? -20 : callout.x <= 28 ? 20 : 0;
@@ -42,6 +43,21 @@
 			{/if}
 		</div>
 
+		{#if hasImage}
+			<figure class="lectio-diagram-figure">
+				<img
+					src={content.image_url}
+					alt={content.alt_text}
+					class="lectio-diagram-image"
+					loading="lazy"
+				/>
+				{#if content.caption}
+					<figcaption class="lectio-diagram-caption">
+						{content.caption}
+					</figcaption>
+				{/if}
+			</figure>
+		{:else}
 		<Dialog>
 			<DialogTrigger>
 				<div class="group relative cursor-pointer" role="img" aria-label={content.alt_text}>
@@ -49,7 +65,7 @@
 						{#if hasImage}
 							<img src={content.image_url} alt="" class="h-auto w-full" />
 						{:else if hasSvg}
-							{@html content.svg_content}
+							{@html sanitizeSvg(content.svg_content)}
 						{:else}
 							<div class="flex min-h-48 items-center justify-center p-6 text-sm text-muted-foreground">
 								Diagram source unavailable.
@@ -127,7 +143,7 @@
 							{#if hasImage}
 								<img src={content.image_url} alt="" class="h-auto w-full" />
 							{:else if hasSvg}
-								{@html content.svg_content}
+								{@html sanitizeSvg(content.svg_content)}
 							{:else}
 								<div class="flex min-h-64 items-center justify-center p-6 text-sm text-muted-foreground">
 									Diagram source unavailable.
@@ -147,6 +163,7 @@
 		{/if}
 
 		<p class="text-sm leading-6 text-muted-foreground">{content.caption}</p>
+		{/if}
 	</div>
 </Card>
 </div>
@@ -163,5 +180,27 @@
 		.diagram-block-dot {
 			display: none !important;
 		}
+	}
+
+	.lectio-diagram-figure {
+		margin: 0;
+	}
+
+	.lectio-diagram-image {
+		display: block;
+		width: 100%;
+		height: auto;
+		border-radius: 1.25rem;
+		border: 1px solid hsl(var(--border) / 0.7);
+		background: white;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+		object-fit: contain;
+	}
+
+	.lectio-diagram-caption {
+		margin-top: 0.5rem;
+		font-size: 0.875rem;
+		line-height: 1.625;
+		color: hsl(var(--muted-foreground));
 	}
 </style>

@@ -4,6 +4,7 @@
 	import { Button } from '../ui/button';
 	import { ChevronLeft, ChevronRight } from 'lucide-svelte';
 	import { usePrintMode } from '../../utils/printContext';
+	import { sanitizeSvg } from '../../utils/sanitize';
 
 let { content }: { content: DiagramSeriesContent } = $props();
 
@@ -36,7 +37,7 @@ const progressPercent = $derived(
 					{diagram.step_label}
 				</p>
 				<div class="overflow-hidden rounded-[1.25rem] border border-border/70 bg-white [&_svg]:h-auto [&_svg]:w-full">
-					{@html diagram.svg_content}
+					{@html sanitizeSvg(diagram.svg_content)}
 				</div>
 				<p class="text-sm leading-6 text-muted-foreground">{diagram.caption}</p>
 			</div>
@@ -122,7 +123,7 @@ const progressPercent = $derived(
 			</div>
 
 			<div class="overflow-hidden rounded-[1.25rem] border border-border/70 bg-white [&_svg]:h-auto [&_svg]:w-full">
-				{@html activeDiagram.svg_content}
+				{@html sanitizeSvg(activeDiagram.svg_content)}
 			</div>
 
 			<p class="text-sm leading-6 text-muted-foreground">{activeDiagram.caption}</p>
