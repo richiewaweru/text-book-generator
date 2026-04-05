@@ -11,7 +11,7 @@ import type {
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { ensureOk } from '$lib/api/errors';
 import { getToken } from '$lib/stores/auth';
-import { resolveClientApiBase, type ApiEnvironment } from './config';
+import { resolveClientApiBase, type FrontendEnvironment as ApiEnvironment } from '$lib/config/environment';
 
 const API_BASE = resolveClientApiBase(import.meta.env as ApiEnvironment);
 
