@@ -16,8 +16,10 @@
 	);
 
 	onMount(() => {
-		void bootstrapAuth(fetchCurrentUser);
+	void bootstrapAuth(fetchCurrentUser).catch((error) => {
+		console.error('bootstrapAuth crashed', error);
 	});
+});
 
 	$effect(() => {
 		if (!initialized.current) return;
