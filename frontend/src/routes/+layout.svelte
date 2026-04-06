@@ -16,8 +16,8 @@
 	);
 
 	onMount(() => {
+		mounted = true;
 		console.log('layout mounted');
-		console.log('initialized before bootstrap', initialized.current);
 		void bootstrapAuth(fetchCurrentUser)
 			.then((result) => {
 				console.log('bootstrap result', result);
@@ -90,6 +90,7 @@
 	{:else}
 		<p>Loading session...</p>
 	{/if}
+	<p>DEBUG mounted: {String(mounted)}</p>
 	<p>DEBUG initialized: {String(initialized.current)}</p>
 	<p>DEBUG authed: {String(authed.current)}</p>
 	<p>DEBUG path: {page.url.pathname}</p>
