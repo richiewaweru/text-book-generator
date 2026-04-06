@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { ExplanationContent } from '../../types';
 	import { Card } from '../ui/card';
+	import { renderBlockMarkdown } from '../../markdown';
 	import { BookOpen, Lightbulb, Info, TriangleAlert, GraduationCap } from 'lucide-svelte';
 
 	const calloutConfig = {
@@ -53,6 +54,19 @@
 		}
 		return result;
 	}
+
+	function renderBody(body: string, phrases: string[]): string {
+		// renderBlockMarkdown escapes HTML internally, so we apply emphasis on the HTML output directly
+		let result = renderBlockMarkdown(body);
+		for (const phrase of phrases) {
+			const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			result = result.replace(
+				new RegExp(escaped, 'gi'),
+				(match) => `<mark class="lectio-emphasis">${match}</mark>`
+			);
+		}
+		return result;
+	}
 </script>
 
 <Card class="border-primary/10 bg-white/88 p-6">
@@ -60,7 +74,7 @@
 		<div class="space-y-2">
 			<p class="eyebrow text-blue-600">Explanation</p>
 			<p class="text-base leading-7 text-foreground/84 prose prose-sm max-w-none">
-				{@html highlightEmphasis(content.body, content.emphasis)}
+				{@html renderBody(content.body, content.emphasis)}
 			</p>
 		</div>
 

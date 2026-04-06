@@ -3,6 +3,7 @@
 	import { Alert, AlertTitle, AlertDescription } from '../ui/alert';
 	import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../ui/collapsible';
 	import { TriangleAlert } from 'lucide-svelte';
+	import { renderInlineMarkdown } from '../../markdown';
 
 	let { content }: { content: PitfallContent } = $props();
 
@@ -19,12 +20,12 @@
 
 	{#if content.why}
 		<p class="mt-1 text-xs italic text-orange-600/80">
-			Why students think this: {content.why}
+			Why students think this: {@html renderInlineMarkdown(content.why)}
 		</p>
 	{/if}
 
 	<AlertDescription class="mt-1 text-sm leading-relaxed">
-		{content.correction}
+		{@html renderInlineMarkdown(content.correction)}
 	</AlertDescription>
 
 	{#if displayExamples.length > 0}
@@ -38,7 +39,7 @@
 				<div class="mt-2 space-y-2">
 					{#each displayExamples as example}
 						<div class="rounded-xl bg-white/70 p-2 text-xs italic text-muted-foreground">
-							{example}
+							{@html renderInlineMarkdown(example)}
 						</div>
 					{/each}
 				</div>

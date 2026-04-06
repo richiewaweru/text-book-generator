@@ -18,6 +18,8 @@ export { validateTemplateDefinition, validateTemplateContract, validateTemplateP
 export { basePresets, basePresetMap } from './presets/base-presets';
 // ── Utility ─────────────────────────────────────────
 export { cn } from './utils';
+// ── Markdown utilities ───────────────────────────────
+export { renderInlineMarkdown, renderBlockMarkdown, looksLikeLatex } from './markdown';
 // ── Print utilities ──────────────────────────────────
 export { default as RuledLines } from './print/RuledLines.svelte';
 export { default as Checkboxes } from './print/Checkboxes.svelte';

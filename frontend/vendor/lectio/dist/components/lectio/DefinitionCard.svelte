@@ -5,6 +5,7 @@
 	import { Badge } from '../ui/badge';
 	import { ChevronRight } from 'lucide-svelte';
 	import MathFormula from './MathFormula.svelte';
+	import { renderInlineMarkdown, looksLikeLatex } from '../../markdown';
 
 	let { content }: { content: DefinitionContent } = $props();
 	let showFormal = $state(false);
@@ -19,7 +20,7 @@
 
 		<div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
 			<p class="text-base leading-7 text-foreground/85">
-				{showFormal ? content.formal : content.plain}
+				{@html renderInlineMarkdown(showFormal ? content.formal : content.plain)}
 			</p>
 
 			{#if content.symbol}
@@ -48,7 +49,13 @@
 				<p class="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-fuchsia-700/80">
 					Notation
 				</p>
-				<MathFormula formula={content.notation} displayMode class="text-lg text-primary" />
+				{#if looksLikeLatex(content.notation)}
+					<MathFormula formula={content.notation} displayMode class="text-lg text-primary" />
+				{:else}
+					<p class="text-base leading-7 text-primary">
+						{@html renderInlineMarkdown(content.notation)}
+					</p>
+				{/if}
 			</div>
 		{/if}
 
