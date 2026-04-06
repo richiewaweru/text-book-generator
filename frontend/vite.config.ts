@@ -95,13 +95,13 @@ export default defineConfig(({ mode }) => {
 				'/health': apiTarget
 			}
 		},
-		build: {
+		/*build: {
 			rollupOptions: {
 				output: {
 					manualChunks: resolveManualChunk
 				}
 			}
-		},
+		},*/
 		test: {
 			environment: 'jsdom',
 			globals: true
