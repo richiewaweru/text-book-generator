@@ -129,20 +129,31 @@
 
 <style>
 	.onboarding {
-		max-width: 650px;
+		max-width: 720px;
 	}
 
 	h1 {
-		margin-bottom: 0.25rem;
+		margin: 0 0 0.5rem;
+		font-size: clamp(2rem, 4vw, 2.65rem);
+		line-height: 1.05;
+		letter-spacing: -0.02em;
+		color: #1f2b34;
 	}
 
 	p {
-		color: #aaa;
-		margin-bottom: 1.5rem;
+		max-width: 60ch;
+		color: #5c554c;
+		margin: 0 0 1.75rem;
+		font-size: 1.02rem;
+		line-height: 1.65;
 	}
 
 	.error {
-		color: #e57373;
+		color: #8e3b32;
 		margin-top: 1rem;
+		padding: 0.9rem 1rem;
+		border-radius: 12px;
+		background: rgba(255, 242, 238, 0.88);
+		border: 1px solid rgba(180, 92, 74, 0.18);
 	}
 </style>
