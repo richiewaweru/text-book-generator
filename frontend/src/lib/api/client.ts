@@ -10,8 +10,10 @@ import type {
 } from '$lib/types';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { ensureOk } from '$lib/api/errors';
-import { getToken } from '$lib/stores/auth';
-import { resolveClientApiBase, type FrontendEnvironment as ApiEnvironment } from '$lib/config/environment';
+import { get } from 'svelte/store';
+import { authToken } from '$lib/stores/auth';
+import { resolveClientApiBase, type ApiEnvironment } from './config';
+
 
 const API_BASE = resolveClientApiBase(import.meta.env as ApiEnvironment);
 
@@ -139,7 +141,7 @@ export async function downloadGenerationPdf(
 }
 
 function getAuthToken(): string | null {
-	return getToken() ?? getQueryToken();
+	return get(authToken) ?? getQueryToken();
 }
 
 function getQueryToken(): string | null {
