@@ -88,3 +88,8 @@ export async function bootstrapAuth(resolveCurrentUser: () => Promise<User>): Pr
 		initializedStore.set(true);
 	}
 }
+
+export function logout() {
+	setSession(null, null);
+	initializedStore.set(true);
+}
