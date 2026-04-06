@@ -1,4 +1,5 @@
 import { derived, get, writable } from 'svelte/store';
+
 import { isApiError } from '$lib/api/errors';
 import type { AuthResponse, User } from '$lib/types';
 
@@ -9,20 +10,14 @@ function hasStorage(): boolean {
 	return typeof localStorage !== 'undefined';
 }
 
-function safeLoadFromStorage(): { token: string | null; user: User | null } {
+function loadFromStorage(): { token: string | null; user: User | null } {
 	if (!hasStorage()) return { token: null, user: null };
-
 	try {
 		const token = localStorage.getItem(TOKEN_KEY);
 		const raw = localStorage.getItem(USER_KEY);
 		const user = raw ? (JSON.parse(raw) as User) : null;
 		return { token, user };
-	} catch (error) {
-		console.error('Failed to load auth from storage', error);
-		try {
-			localStorage.removeItem(TOKEN_KEY);
-			localStorage.removeItem(USER_KEY);
-		} catch {}
+	} catch {
 		return { token: null, user: null };
 	}
 }
@@ -33,16 +28,12 @@ const initializedStore = writable(false);
 
 function persistSession(token: string | null, user: User | null) {
 	if (!hasStorage()) return;
-
 	try {
 		if (token) localStorage.setItem(TOKEN_KEY, token);
 		else localStorage.removeItem(TOKEN_KEY);
-
 		if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
 		else localStorage.removeItem(USER_KEY);
-	} catch (error) {
-		console.error('Failed to persist auth session', error);
-	}
+	} catch {}
 }
 
 function setSession(token: string | null, user: User | null) {
@@ -62,7 +53,7 @@ export const authIsAuthenticated = derived(
 
 export async function bootstrapAuth(resolveCurrentUser: () => Promise<User>): Promise<User | null> {
 	try {
-		const stored = safeLoadFromStorage();
+		const stored = loadFromStorage();
 		tokenStore.set(stored.token);
 		userStore.set(stored.user);
 
@@ -80,13 +71,36 @@ export async function bootstrapAuth(resolveCurrentUser: () => Promise<User>): Pr
 				setSession(null, null);
 				return null;
 			}
-
-			console.error('bootstrapAuth fetchCurrentUser failed', error);
 			return stored.user;
 		}
 	} finally {
 		initializedStore.set(true);
 	}
+}
+
+export function getToken(): string | null {
+	return get(tokenStore);
+}
+
+export function getUser(): User | null {
+	return get(userStore);
+}
+
+export function isAuthenticated(): boolean {
+	return get(authIsAuthenticated);
+}
+
+export function isInitialized(): boolean {
+	return get(initializedStore);
+}
+
+export function setAuth(response: AuthResponse) {
+	setSession(response.access_token, response.user);
+	initializedStore.set(true);
+}
+
+export function updateUser(user: User) {
+	setSession(get(tokenStore), user);
 }
 
 export function logout() {
