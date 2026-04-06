@@ -33,7 +33,7 @@ from pipeline.types.section_content import (
     WhatNextContent,
 )
 from generation.entities.generation import Generation
-from core.entities.student_profile import StudentProfile
+from core.entities.student_profile import TeacherProfile
 from core.entities.user import User
 from app import app, create_app
 from generation.recovery import (
@@ -259,18 +259,18 @@ class FailingOnCallReportRepo(InMemoryReportRepo):
 
 
 class StaticProfileRepo:
-    def __init__(self, profile: StudentProfile | None) -> None:
+    def __init__(self, profile: TeacherProfile | None) -> None:
         self.profile = profile
 
-    async def find_by_user_id(self, user_id: str) -> StudentProfile | None:
+    async def find_by_user_id(self, user_id: str) -> TeacherProfile | None:
         _ = user_id
         return self.profile
 
-    async def create(self, profile: StudentProfile) -> StudentProfile:
+    async def create(self, profile: TeacherProfile) -> TeacherProfile:
         self.profile = profile
         return profile
 
-    async def update(self, profile: StudentProfile) -> StudentProfile:
+    async def update(self, profile: TeacherProfile) -> TeacherProfile:
         self.profile = profile
         return profile
 
@@ -289,18 +289,28 @@ class StaticUserRepo:
         return user
 
 
-PROFILE = StudentProfile(
+PROFILE = TeacherProfile(
     id="profile-id",
     user_id=TEST_USER.id,
-    age=16,
-    education_level="high_school",
-    interests=["math"],
-    learning_style="visual",
-    preferred_notation="plain",
-    prior_knowledge="basic algebra",
-    goals="understand limits",
-    preferred_depth="standard",
-    learner_description="Curious and steady",
+    teacher_role="teacher",
+    subjects=["mathematics"],
+    default_grade_band="high_school",
+    default_audience_description="Year 10 mixed-ability maths",
+    curriculum_framework="GCSE",
+    classroom_context="Limited devices and mixed confidence.",
+    planning_goals="More scaffolded first drafts.",
+    school_or_org_name="Riverside High",
+    delivery_preferences={
+        "tone": "supportive",
+        "reading_level": "standard",
+        "explanation_style": "balanced",
+        "example_style": "everyday",
+        "brevity": "balanced",
+        "use_visuals": True,
+        "print_first": False,
+        "more_practice": False,
+        "keep_short": False,
+    },
     created_at=_now(),
     updated_at=_now(),
 )

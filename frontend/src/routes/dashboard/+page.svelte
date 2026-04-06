@@ -10,11 +10,11 @@
 	import { getProfile } from '$lib/api/profile';
 	import { authUser, logout } from '$lib/stores/auth';
 	import { getTextbookRoute } from '$lib/navigation/textbook';
-	import type { StudentProfile, GenerationHistoryItem } from '$lib/types';
+	import type { TeacherProfile, GenerationHistoryItem } from '$lib/types';
 
 	const user = fromStore(authUser);
 
-	let profile = $state<StudentProfile | null>(null);
+	let profile = $state<TeacherProfile | null>(null);
 	let pastGenerations = $state<GenerationHistoryItem[]>([]);
 	let loadingProfile = $state(true);
 	let profileErrorMessage = $state<string | null>(null);
@@ -75,40 +75,58 @@
 				<p class="eyebrow">Shell + Pipeline</p>
 				<h1>Welcome back{user.current?.name ? `, ${user.current.name}` : ''}</h1>
 				<p class="subtitle">
-					The app shell handles auth, profile, and persistence. The pipeline now owns generation.
+					Your saved teacher profile powers workspace defaults, while Studio remains the place where each lesson gets planned and generated.
 				</p>
 			</div>
 		</section>
 
 		<section class="profile-summary">
-			<h2>Your Profile</h2>
+			<h2>Teacher Setup</h2>
 			<div class="profile-grid">
 				<div class="profile-item">
-					<span class="label">Education</span>
-					<span class="value">{profile.education_level.replace('_', ' ')}</span>
+					<span class="label">Teacher Role</span>
+					<span class="value">{profile.teacher_role.replace('_', ' ')}</span>
 				</div>
 				<div class="profile-item">
-					<span class="label">Age</span>
-					<span class="value">{profile.age}</span>
+					<span class="label">Default Grade Band</span>
+					<span class="value">{profile.default_grade_band.replace('_', ' ')}</span>
 				</div>
 				<div class="profile-item">
-					<span class="label">Learning Style</span>
-					<span class="value">{profile.learning_style.replace('_', ' ')}</span>
+					<span class="label">Tone</span>
+					<span class="value">{profile.delivery_preferences.tone.replace('_', ' ')}</span>
 				</div>
 				<div class="profile-item">
-					<span class="label">Notation</span>
-					<span class="value">{profile.preferred_notation.replace('_', ' ')}</span>
+					<span class="label">Brevity</span>
+					<span class="value">{profile.delivery_preferences.brevity.replace('_', ' ')}</span>
 				</div>
-				{#if profile.interests.length > 0}
+				{#if profile.subjects.length > 0}
 					<div class="profile-item wide">
-						<span class="label">Interests</span>
-						<span class="value">{profile.interests.join(', ')}</span>
+						<span class="label">Subjects</span>
+						<span class="value">{profile.subjects.join(', ')}</span>
 					</div>
 				{/if}
-				{#if profile.learner_description}
+				{#if profile.default_audience_description}
 					<div class="profile-item wide">
-						<span class="label">Learner Description</span>
-						<span class="value">{profile.learner_description}</span>
+						<span class="label">Default Audience</span>
+						<span class="value">{profile.default_audience_description}</span>
+					</div>
+				{/if}
+				{#if profile.curriculum_framework}
+					<div class="profile-item wide">
+						<span class="label">Curriculum</span>
+						<span class="value">{profile.curriculum_framework}</span>
+					</div>
+				{/if}
+				{#if profile.classroom_context}
+					<div class="profile-item wide">
+						<span class="label">Classroom Context</span>
+						<span class="value">{profile.classroom_context}</span>
+					</div>
+				{/if}
+				{#if profile.planning_goals}
+					<div class="profile-item wide">
+						<span class="label">Planning Goals</span>
+						<span class="value">{profile.planning_goals}</span>
 					</div>
 				{/if}
 			</div>

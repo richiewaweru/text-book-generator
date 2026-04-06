@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 
+	import { getProfile } from '$lib/api/profile';
 	import { commitPlan, listContracts, streamPlan } from '$lib/api/brief';
 	import { ApiError } from '$lib/api/errors';
 	import GenerationView from '$lib/components/studio/GenerationView.svelte';
@@ -10,6 +11,7 @@
 	import PlanStream from '$lib/components/studio/PlanStream.svelte';
 	import {
 		appendPlannedSection,
+		applyTeacherProfileDefaults,
 		beginPlanning,
 		briefDraft,
 		completePlanning,
@@ -172,6 +174,13 @@
 		if (!get(contracts).length) {
 			void loadContractCatalog();
 		}
+		void getProfile()
+			.then((profile) => {
+				applyTeacherProfileDefaults(profile);
+			})
+			.catch(() => {
+				// Profile gating happens before Studio loads; ignore prefill failures here.
+			});
 	});
 </script>
 

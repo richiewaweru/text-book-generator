@@ -6,39 +6,39 @@ from pydantic import BaseModel, Field
 
 from core.auth.middleware import get_current_user
 from core.dependencies import get_student_profile_repository
-from core.entities.student_profile import StudentProfile
+from core.entities.student_profile import DeliveryPreferences, TeacherProfile
 from core.entities.user import User
 from core.ports.student_profile_repository import StudentProfileRepository
-from core.value_objects import Depth, EducationLevel, LearningStyle, NotationLanguage
+from core.value_objects import GradeBand, TeacherRole
 
 router = APIRouter(prefix="/api/v1/profile", tags=["profile"])
 
 
 class ProfileCreateRequest(BaseModel):
-    age: int = Field(ge=8, le=99)
-    education_level: EducationLevel
-    interests: list[str] = Field(default_factory=list)
-    learning_style: LearningStyle
-    preferred_notation: NotationLanguage = NotationLanguage.PLAIN
-    prior_knowledge: str = ""
-    goals: str = ""
-    preferred_depth: Depth = Depth.STANDARD
-    learner_description: str = ""
+    teacher_role: TeacherRole = TeacherRole.TEACHER
+    subjects: list[str] = Field(default_factory=list)
+    default_grade_band: GradeBand = GradeBand.HIGH_SCHOOL
+    default_audience_description: str = ""
+    curriculum_framework: str = ""
+    classroom_context: str = ""
+    planning_goals: str = ""
+    school_or_org_name: str = ""
+    delivery_preferences: DeliveryPreferences = Field(default_factory=DeliveryPreferences)
 
 
 class ProfileUpdateRequest(BaseModel):
-    age: int | None = Field(default=None, ge=8, le=99)
-    education_level: EducationLevel | None = None
-    interests: list[str] | None = None
-    learning_style: LearningStyle | None = None
-    preferred_notation: NotationLanguage | None = None
-    prior_knowledge: str | None = None
-    goals: str | None = None
-    preferred_depth: Depth | None = None
-    learner_description: str | None = None
+    teacher_role: TeacherRole | None = None
+    subjects: list[str] | None = None
+    default_grade_band: GradeBand | None = None
+    default_audience_description: str | None = None
+    curriculum_framework: str | None = None
+    classroom_context: str | None = None
+    planning_goals: str | None = None
+    school_or_org_name: str | None = None
+    delivery_preferences: DeliveryPreferences | None = None
 
 
-@router.get("", response_model=StudentProfile)
+@router.get("", response_model=TeacherProfile)
 async def get_profile(
     current_user: User = Depends(get_current_user),
     profile_repo: StudentProfileRepository = Depends(get_student_profile_repository),
@@ -52,7 +52,7 @@ async def get_profile(
     return profile
 
 
-@router.post("", response_model=StudentProfile, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=TeacherProfile, status_code=status.HTTP_201_CREATED)
 async def create_profile(
     body: ProfileCreateRequest,
     current_user: User = Depends(get_current_user),
@@ -66,25 +66,25 @@ async def create_profile(
         )
 
     now = datetime.now(timezone.utc)
-    profile = StudentProfile(
+    profile = TeacherProfile(
         id=str(uuid.uuid4()),
         user_id=current_user.id,
-        age=body.age,
-        education_level=body.education_level,
-        interests=body.interests,
-        learning_style=body.learning_style,
-        preferred_notation=body.preferred_notation,
-        prior_knowledge=body.prior_knowledge,
-        goals=body.goals,
-        preferred_depth=body.preferred_depth,
-        learner_description=body.learner_description,
+        teacher_role=body.teacher_role,
+        subjects=body.subjects,
+        default_grade_band=body.default_grade_band,
+        default_audience_description=body.default_audience_description,
+        curriculum_framework=body.curriculum_framework,
+        classroom_context=body.classroom_context,
+        planning_goals=body.planning_goals,
+        school_or_org_name=body.school_or_org_name,
+        delivery_preferences=body.delivery_preferences,
         created_at=now,
         updated_at=now,
     )
     return await profile_repo.create(profile)
 
 
-@router.patch("", response_model=StudentProfile)
+@router.patch("", response_model=TeacherProfile)
 async def update_profile(
     body: ProfileUpdateRequest,
     current_user: User = Depends(get_current_user),
@@ -98,6 +98,11 @@ async def update_profile(
         )
 
     update_data = body.model_dump(exclude_none=True)
-    updated = existing.model_copy(update=update_data)
-    updated.updated_at = datetime.now(timezone.utc)
+    updated = TeacherProfile.model_validate(
+        {
+            **existing.model_dump(mode="python"),
+            **update_data,
+            "updated_at": datetime.now(timezone.utc),
+        }
+    )
     return await profile_repo.update(updated)

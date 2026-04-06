@@ -107,7 +107,7 @@
 <div class="login-container">
 	<div class="login-card">
 		<h1>Textbook Agent</h1>
-		<p>Sign in to create personalized textbooks tailored to your learning profile.</p>
+		<p>Sign in to set up your teacher workspace, plan lessons in Studio, and save reusable classroom defaults.</p>
 
 		<div id="google-signin-btn" class="google-btn-wrapper"></div>
 

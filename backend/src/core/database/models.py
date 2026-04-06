@@ -37,25 +37,31 @@ class StudentProfileModel(Base):
 
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey("users.id"), unique=True, nullable=False, index=True)
-    age = Column(Integer, nullable=False)
-    education_level = Column(String, nullable=False)
-    interests = Column(Text, default="[]")
-    learning_style = Column(String, nullable=False)
-    preferred_notation = Column(String, default="plain")
-    prior_knowledge = Column(Text, default="")
-    goals = Column(Text, default="")
-    preferred_depth = Column(String, default="standard")
-    learner_description = Column(Text, default="")
+    teacher_role = Column(String, nullable=False, default="teacher")
+    subjects = Column(Text, default="[]")
+    default_grade_band = Column(String, nullable=False, default="high_school")
+    default_audience_description = Column(Text, default="")
+    curriculum_framework = Column(Text, default="")
+    classroom_context = Column(Text, default="")
+    planning_goals = Column(Text, default="")
+    school_or_org_name = Column(String, default="")
+    delivery_preferences = Column(Text, default="{}")
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
     user = relationship("UserModel", back_populates="profile")
 
-    def get_interests_list(self) -> list[str]:
-        return json.loads(self.interests) if self.interests else []
+    def get_subjects_list(self) -> list[str]:
+        return json.loads(self.subjects) if self.subjects else []
 
-    def set_interests_list(self, values: list[str]) -> None:
-        self.interests = json.dumps(values)
+    def set_subjects_list(self, values: list[str]) -> None:
+        self.subjects = json.dumps(values)
+
+    def get_delivery_preferences(self) -> dict:
+        return json.loads(self.delivery_preferences) if self.delivery_preferences else {}
+
+    def set_delivery_preferences(self, values: dict) -> None:
+        self.delivery_preferences = json.dumps(values)
 
 
 class GenerationModel(Base):

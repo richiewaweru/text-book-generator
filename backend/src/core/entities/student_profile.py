@@ -1,23 +1,46 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from core.value_objects import Depth, EducationLevel, LearningStyle, NotationLanguage
+from core.value_objects import GradeBand, TeacherRole
+
+Tone = Literal["supportive", "neutral", "rigorous"]
+ReadingLevel = Literal["simple", "standard", "advanced"]
+ExplanationStyle = Literal["concrete-first", "concept-first", "balanced"]
+ExampleStyle = Literal["everyday", "academic", "exam"]
+Brevity = Literal["tight", "balanced", "expanded"]
 
 
-class StudentProfile(BaseModel):
-    """Persistent student profile - captures who the student is across sessions."""
+class DeliveryPreferences(BaseModel):
+    tone: Tone = "supportive"
+    reading_level: ReadingLevel = "standard"
+    explanation_style: ExplanationStyle = "balanced"
+    example_style: ExampleStyle = "everyday"
+    brevity: Brevity = "balanced"
+    use_visuals: bool = False
+    print_first: bool = False
+    more_practice: bool = False
+    keep_short: bool = False
+
+
+class TeacherProfile(BaseModel):
+    """Persistent teacher profile for reusable account and classroom defaults."""
 
     id: str
     user_id: str
-    age: int = Field(ge=8, le=99)
-    education_level: EducationLevel
-    interests: list[str] = Field(default_factory=list)
-    learning_style: LearningStyle
-    preferred_notation: NotationLanguage = NotationLanguage.PLAIN
-    prior_knowledge: str = ""
-    goals: str = ""
-    preferred_depth: Depth = Depth.STANDARD
-    learner_description: str = ""
+    teacher_role: TeacherRole = TeacherRole.TEACHER
+    subjects: list[str] = Field(default_factory=list)
+    default_grade_band: GradeBand = GradeBand.HIGH_SCHOOL
+    default_audience_description: str = ""
+    curriculum_framework: str = ""
+    classroom_context: str = ""
+    planning_goals: str = ""
+    school_or_org_name: str = ""
+    delivery_preferences: DeliveryPreferences = Field(default_factory=DeliveryPreferences)
     created_at: datetime
     updated_at: datetime
+
+
+# Backward-compatible alias while the persistence module names catch up.
+StudentProfile = TeacherProfile

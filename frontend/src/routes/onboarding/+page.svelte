@@ -9,27 +9,27 @@
 	import { getOnboardingRoute, isOnboardingEditMode, resolveOnboardingGuard } from '$lib/auth/routing';
 	import { createProfile, getProfile, updateProfile } from '$lib/api/profile';
 	import { authUser, logout, updateUser } from '$lib/stores/auth';
-	import type { ProfileCreateRequest, StudentProfile } from '$lib/types';
+	import type { TeacherProfile, TeacherProfileUpsertRequest } from '$lib/types';
 
 	let saving = $state(false);
 	let errorMessage: string | null = $state(null);
 	let loadingProfile = $state(false);
-	let initialData: ProfileCreateRequest | null = $state(null);
+	let initialData: TeacherProfileUpsertRequest | null = $state(null);
 
 	const user = fromStore(authUser);
 	const editMode = $derived(isOnboardingEditMode(page.url));
 
-	function toProfileFormData(profile: StudentProfile): ProfileCreateRequest {
+	function toProfileFormData(profile: TeacherProfile): TeacherProfileUpsertRequest {
 		return {
-			age: profile.age,
-			education_level: profile.education_level,
-			interests: profile.interests,
-			learning_style: profile.learning_style,
-			preferred_notation: profile.preferred_notation,
-			prior_knowledge: profile.prior_knowledge,
-			goals: profile.goals,
-			preferred_depth: profile.preferred_depth,
-			learner_description: profile.learner_description
+			teacher_role: profile.teacher_role,
+			subjects: profile.subjects,
+			default_grade_band: profile.default_grade_band,
+			default_audience_description: profile.default_audience_description,
+			curriculum_framework: profile.curriculum_framework,
+			classroom_context: profile.classroom_context,
+			planning_goals: profile.planning_goals,
+			school_or_org_name: profile.school_or_org_name,
+			delivery_preferences: profile.delivery_preferences
 		};
 	}
 
@@ -66,7 +66,7 @@
 		}
 	});
 
-	async function handleSubmit(data: ProfileCreateRequest) {
+	async function handleSubmit(data: TeacherProfileUpsertRequest) {
 		saving = true;
 		errorMessage = null;
 
@@ -102,12 +102,12 @@
 </script>
 
 <div class="onboarding">
-	<h1>{editMode ? 'Update your profile' : `Welcome${user.current?.name ? `, ${user.current.name}` : ''}!`}</h1>
+	<h1>{editMode ? 'Update your teacher setup' : `Welcome${user.current?.name ? `, ${user.current.name}` : ''}!`}</h1>
 	<p>
 		{#if editMode}
-			Refresh your learning profile to keep textbook generation aligned with your current goals.
+			Refresh your saved teaching defaults so Studio can start closer to how you actually work.
 		{:else}
-			Let's set up your learning profile. This helps us generate textbooks that are personalized to your needs.
+			Let's capture your teaching context, classroom defaults, and lesson preferences so the product can personalise your workspace.
 		{/if}
 	</p>
 

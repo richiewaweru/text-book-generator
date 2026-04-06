@@ -1,16 +1,16 @@
 import type { SectionContent } from 'lectio';
-import type { GenerationMode, PlanningGenerationSpec } from './studio';
+import type {
+	Brevity,
+	ExplanationStyle,
+	ExampleStyle,
+	GenerationMode,
+	PlanningGenerationSpec,
+	ReadingLevel,
+	Tone
+} from './studio';
 
-export type Depth = 'survey' | 'standard' | 'deep';
-export type NotationLanguage = 'plain' | 'math_notation' | 'python' | 'pseudocode';
-export type EducationLevel =
-	| 'elementary'
-	| 'middle_school'
-	| 'high_school'
-	| 'undergraduate'
-	| 'graduate'
-	| 'professional';
-export type LearningStyle = 'visual' | 'reading_writing' | 'kinesthetic' | 'auditory';
+export type TeacherRole = 'teacher' | 'tutor' | 'homeschool' | 'instructor';
+export type GradeBand = 'primary' | 'middle' | 'high_school' | 'undergraduate' | 'adult';
 
 export interface User {
 	id: string;
@@ -28,32 +28,44 @@ export interface AuthResponse {
 	user: User;
 }
 
-export interface StudentProfile {
+export interface TeacherDeliveryPreferences {
+	tone: Tone;
+	reading_level: ReadingLevel;
+	explanation_style: ExplanationStyle;
+	example_style: ExampleStyle;
+	brevity: Brevity;
+	use_visuals: boolean;
+	print_first: boolean;
+	more_practice: boolean;
+	keep_short: boolean;
+}
+
+export interface TeacherProfile {
 	id: string;
 	user_id: string;
-	age: number;
-	education_level: EducationLevel;
-	interests: string[];
-	learning_style: LearningStyle;
-	preferred_notation: NotationLanguage;
-	prior_knowledge: string;
-	goals: string;
-	preferred_depth: Depth;
-	learner_description: string;
+	teacher_role: TeacherRole;
+	subjects: string[];
+	default_grade_band: GradeBand;
+	default_audience_description: string;
+	curriculum_framework: string;
+	classroom_context: string;
+	planning_goals: string;
+	school_or_org_name: string;
+	delivery_preferences: TeacherDeliveryPreferences;
 	created_at: string;
 	updated_at: string;
 }
 
-export interface ProfileCreateRequest {
-	age: number;
-	education_level: EducationLevel;
-	interests: string[];
-	learning_style: LearningStyle;
-	preferred_notation: NotationLanguage;
-	prior_knowledge: string;
-	goals: string;
-	preferred_depth: Depth;
-	learner_description: string;
+export interface TeacherProfileUpsertRequest {
+	teacher_role: TeacherRole;
+	subjects: string[];
+	default_grade_band: GradeBand;
+	default_audience_description: string;
+	curriculum_framework: string;
+	classroom_context: string;
+	planning_goals: string;
+	school_or_org_name: string;
+	delivery_preferences: TeacherDeliveryPreferences;
 }
 
 export interface BriefRequest {

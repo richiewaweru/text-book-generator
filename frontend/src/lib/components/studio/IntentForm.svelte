@@ -134,6 +134,15 @@
 		);
 	}
 
+	$effect(() => {
+		if ($briefDraft.prior_knowledge.trim() || $briefDraft.extra_context.trim()) {
+			showPriorKnowledge = true;
+		}
+		if (hasCustomPreferences($briefDraft)) {
+			showPreferences = true;
+		}
+	});
+
 	function updateBrief(patch: Partial<UserBriefDraft>) {
 		briefDraft.update((draft) => ({
 			...draft,

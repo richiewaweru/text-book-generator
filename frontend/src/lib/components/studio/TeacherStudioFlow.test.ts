@@ -11,10 +11,18 @@ const { commitPlan, listContracts, streamPlan } = vi.hoisted(() => ({
 	streamPlan: vi.fn()
 }));
 
+const { getProfile } = vi.hoisted(() => ({
+	getProfile: vi.fn()
+}));
+
 vi.mock('$lib/api/brief', () => ({
 	commitPlan,
 	listContracts,
 	streamPlan
+}));
+
+vi.mock('$lib/api/profile', () => ({
+	getProfile
 }));
 
 import TeacherStudioFlow from './TeacherStudioFlow.svelte';
@@ -187,6 +195,31 @@ describe('TeacherStudioFlow', () => {
 		returnToIdle();
 		setContracts([]);
 		listContracts.mockResolvedValue(buildContracts());
+		getProfile.mockResolvedValue({
+			id: 'profile-1',
+			user_id: 'user-1',
+			teacher_role: 'teacher',
+			subjects: ['mathematics'],
+			default_grade_band: 'high_school',
+			default_audience_description: 'Year 10 mixed-ability maths',
+			curriculum_framework: 'GCSE',
+			classroom_context: 'Limited devices and a wide confidence range.',
+			planning_goals: 'More scaffolded first drafts.',
+			school_or_org_name: 'Riverside High',
+			delivery_preferences: {
+				tone: 'supportive',
+				reading_level: 'simple',
+				explanation_style: 'concrete-first',
+				example_style: 'everyday',
+				brevity: 'tight',
+				use_visuals: true,
+				print_first: true,
+				more_practice: true,
+				keep_short: false
+			},
+			created_at: '2026-04-06T00:00:00Z',
+			updated_at: '2026-04-06T00:00:00Z'
+		});
 		commitPlan.mockReset();
 	});
 
@@ -228,11 +261,17 @@ describe('TeacherStudioFlow', () => {
 
 		render(TeacherStudioFlow);
 
+		await waitFor(() =>
+			expect((screen.getByLabelText(/who is this for\?/i) as HTMLInputElement).value).toBe(
+				'Year 10 mixed-ability maths'
+			)
+		);
+		expect((screen.getByLabelText(/extra context/i) as HTMLTextAreaElement).value).toContain(
+			'Limited devices'
+		);
+
 		await fireEvent.input(screen.getByLabelText(/what do you want to teach\?/i), {
 			target: { value: 'Teach fractions' }
-		});
-		await fireEvent.input(screen.getByLabelText(/who is this for\?/i), {
-			target: { value: 'Year 5' }
 		});
 		await fireEvent.change(screen.getByLabelText(/generation mode/i), {
 			target: { value: 'strict' }
@@ -240,7 +279,13 @@ describe('TeacherStudioFlow', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /build lesson plan/i }));
 
 		expect(screen.getByText(/building the lesson structure in view/i)).toBeTruthy();
-		expect(streamPlan).toHaveBeenCalledWith(expect.objectContaining({ mode: 'strict' }));
+		expect(streamPlan).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mode: 'strict',
+				audience: 'Year 10 mixed-ability maths',
+				extra_context: 'Limited devices and a wide confidence range.'
+			})
+		);
 
 		releasePlan();
 

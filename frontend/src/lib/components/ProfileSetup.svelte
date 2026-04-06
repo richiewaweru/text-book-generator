@@ -1,16 +1,19 @@
 <script lang="ts">
 	import type {
-		ProfileCreateRequest,
-		EducationLevel,
-		LearningStyle,
-		NotationLanguage,
-		Depth
+		Brevity,
+		ExplanationStyle,
+		ExampleStyle,
+		GradeBand,
+		ReadingLevel,
+		TeacherProfileUpsertRequest,
+		TeacherRole,
+		Tone
 	} from '$lib/types';
 
 	interface Props {
-		onsubmit: (data: ProfileCreateRequest) => void;
+		onsubmit: (data: TeacherProfileUpsertRequest) => void;
 		disabled?: boolean;
-		initialData?: ProfileCreateRequest | null;
+		initialData?: TeacherProfileUpsertRequest | null;
 		submitLabel?: string;
 	}
 
@@ -21,16 +24,24 @@
 		submitLabel = 'Complete Setup'
 	}: Props = $props();
 
-	let age = $state(16);
-	let educationLevel: EducationLevel = $state('high_school');
-	let learningStyle: LearningStyle = $state('reading_writing');
-	let preferredNotation: NotationLanguage = $state('plain');
-	let preferredDepth: Depth = $state('standard');
-	let priorKnowledge = $state('');
-	let goals = $state('');
-	let learnerDescription = $state('');
-	let interests: string[] = $state([]);
-	let interestInput = $state('');
+	let teacherRole: TeacherRole = $state('teacher');
+	let defaultGradeBand: GradeBand = $state('high_school');
+	let defaultAudienceDescription = $state('');
+	let curriculumFramework = $state('');
+	let classroomContext = $state('');
+	let planningGoals = $state('');
+	let schoolOrOrgName = $state('');
+	let subjects: string[] = $state([]);
+	let subjectInput = $state('');
+	let tone: Tone = $state('supportive');
+	let readingLevel: ReadingLevel = $state('standard');
+	let explanationStyle: ExplanationStyle = $state('balanced');
+	let exampleStyle: ExampleStyle = $state('everyday');
+	let brevity: Brevity = $state('balanced');
+	let useVisuals = $state(false);
+	let printFirst = $state(false);
+	let morePractice = $state(false);
+	let keepShort = $state(false);
 	let initializedFromProps = $state(false);
 
 	$effect(() => {
@@ -38,146 +49,233 @@
 			return;
 		}
 
-		age = initialData.age;
-		educationLevel = initialData.education_level;
-		learningStyle = initialData.learning_style;
-		preferredNotation = initialData.preferred_notation;
-		preferredDepth = initialData.preferred_depth;
-		priorKnowledge = initialData.prior_knowledge;
-		goals = initialData.goals;
-		learnerDescription = initialData.learner_description;
-		interests = [...initialData.interests];
+		teacherRole = initialData.teacher_role;
+		defaultGradeBand = initialData.default_grade_band;
+		defaultAudienceDescription = initialData.default_audience_description;
+		curriculumFramework = initialData.curriculum_framework;
+		classroomContext = initialData.classroom_context;
+		planningGoals = initialData.planning_goals;
+		schoolOrOrgName = initialData.school_or_org_name;
+		subjects = [...initialData.subjects];
+		tone = initialData.delivery_preferences.tone;
+		readingLevel = initialData.delivery_preferences.reading_level;
+		explanationStyle = initialData.delivery_preferences.explanation_style;
+		exampleStyle = initialData.delivery_preferences.example_style;
+		brevity = initialData.delivery_preferences.brevity;
+		useVisuals = initialData.delivery_preferences.use_visuals;
+		printFirst = initialData.delivery_preferences.print_first;
+		morePractice = initialData.delivery_preferences.more_practice;
+		keepShort = initialData.delivery_preferences.keep_short;
 		initializedFromProps = true;
 	});
 
-	function addInterest() {
-		const tag = interestInput.trim().toLowerCase();
-		if (tag && !interests.includes(tag)) {
-			interests = [...interests, tag];
+	function addSubject() {
+		const tag = subjectInput.trim().toLowerCase();
+		if (tag && !subjects.includes(tag)) {
+			subjects = [...subjects, tag];
 		}
-		interestInput = '';
+		subjectInput = '';
 	}
 
-	function removeInterest(tag: string) {
-		interests = interests.filter((entry) => entry !== tag);
+	function removeSubject(tag: string) {
+		subjects = subjects.filter((entry) => entry !== tag);
 	}
 
-	function handleInterestKeydown(event: KeyboardEvent) {
+	function handleSubjectKeydown(event: KeyboardEvent) {
 		if (event.key === 'Enter' || event.key === ',') {
 			event.preventDefault();
-			addInterest();
+			addSubject();
 		}
 	}
 
 	function handleSubmit() {
 		onsubmit({
-			age,
-			education_level: educationLevel,
-			interests,
-			learning_style: learningStyle,
-			preferred_notation: preferredNotation,
-			prior_knowledge: priorKnowledge,
-			goals,
-			preferred_depth: preferredDepth,
-			learner_description: learnerDescription
+			teacher_role: teacherRole,
+			subjects,
+			default_grade_band: defaultGradeBand,
+			default_audience_description: defaultAudienceDescription,
+			curriculum_framework: curriculumFramework,
+			classroom_context: classroomContext,
+			planning_goals: planningGoals,
+			school_or_org_name: schoolOrOrgName,
+			delivery_preferences: {
+				tone,
+				reading_level: readingLevel,
+				explanation_style: explanationStyle,
+				example_style: exampleStyle,
+				brevity,
+				use_visuals: useVisuals,
+				print_first: printFirst,
+				more_practice: morePractice,
+				keep_short: keepShort
+			}
 		});
 	}
 </script>
 
 <form onsubmit={(event: Event) => { event.preventDefault(); handleSubmit(); }} class="profile-form">
 	<div class="form-section">
-		<h3>About You</h3>
+		<h3>Teacher Profile</h3>
+		<p class="hint">Save the teaching context and defaults you want the product to remember between sessions.</p>
 
 		<label>
-			Age
-			<input type="number" bind:value={age} min="8" max="99" required />
-		</label>
-
-		<label>
-			Education Level
-			<select bind:value={educationLevel}>
-				<option value="elementary">Elementary School</option>
-				<option value="middle_school">Middle School</option>
-				<option value="high_school">High School</option>
-				<option value="undergraduate">Undergraduate</option>
-				<option value="graduate">Graduate</option>
-				<option value="professional">Professional</option>
-			</select>
-		</label>
-	</div>
-
-	<div class="form-section">
-		<h3>Learning Preferences</h3>
-
-		<label>
-			How do you learn best?
-			<select bind:value={learningStyle}>
-				<option value="visual">Visual (diagrams, charts, images)</option>
-				<option value="reading_writing">Reading & Writing (text, notes)</option>
-				<option value="kinesthetic">Hands-on (exercises, experiments)</option>
-				<option value="auditory">Auditory (explanations, discussions)</option>
+			Teaching role
+			<select bind:value={teacherRole}>
+				<option value="teacher">Teacher</option>
+				<option value="tutor">Tutor</option>
+				<option value="homeschool">Homeschool educator</option>
+				<option value="instructor">Instructor</option>
 			</select>
 		</label>
 
 		<label>
-			Preferred Notation
-			<select bind:value={preferredNotation}>
-				<option value="plain">Plain English</option>
-				<option value="math_notation">Math Notation</option>
-				<option value="python">Python</option>
-				<option value="pseudocode">Pseudocode</option>
-			</select>
+			School or organisation (optional)
+			<input type="text" bind:value={schoolOrOrgName} placeholder="e.g. Riverside High School" />
 		</label>
 
-		<label>
-			Default Depth
-			<select bind:value={preferredDepth}>
-				<option value="survey">Survey (quick overview)</option>
-				<option value="standard">Standard</option>
-				<option value="deep">Deep (comprehensive)</option>
-			</select>
-		</label>
-	</div>
-
-	<div class="form-section">
-		<h3>Interests</h3>
-		<p class="hint">Add topics you're interested in. These help personalize examples and analogies.</p>
-
-		<div class="tag-input-wrapper">
-			<div class="tags">
-				{#each interests as tag}
-					<span class="tag">
-						{tag}
-						<button type="button" class="tag-remove" onclick={() => removeInterest(tag)}>&times;</button>
-					</span>
-				{/each}
+		<div>
+			<p class="field-title">Subjects you teach</p>
+			<p class="hint">Add one or more subjects so the dashboard and Studio can adapt recommendations.</p>
+			<div class="tag-input-wrapper">
+				<div class="tags">
+					{#each subjects as tag}
+						<span class="tag">
+							{tag}
+							<button type="button" class="tag-remove" onclick={() => removeSubject(tag)}>&times;</button>
+						</span>
+					{/each}
+				</div>
+				<input
+					type="text"
+					bind:value={subjectInput}
+					onkeydown={handleSubjectKeydown}
+					placeholder="Type a subject and press Enter"
+				/>
 			</div>
-			<input
-				type="text"
-				bind:value={interestInput}
-				onkeydown={handleInterestKeydown}
-				placeholder="Type an interest and press Enter"
-			/>
 		</div>
 	</div>
 
 	<div class="form-section">
-		<h3>Background</h3>
+		<h3>Default Classroom Context</h3>
 
 		<label>
-			What do you already know? (optional)
-			<textarea bind:value={priorKnowledge} placeholder="e.g. I'm comfortable with algebra and basic geometry..." rows="3"></textarea>
+			Default grade band
+			<select bind:value={defaultGradeBand}>
+				<option value="primary">Primary</option>
+				<option value="middle">Middle school</option>
+				<option value="high_school">High school</option>
+				<option value="undergraduate">Undergraduate</option>
+				<option value="adult">Adult learners</option>
+			</select>
 		</label>
 
 		<label>
-			What are your learning goals? (optional)
-			<textarea bind:value={goals} placeholder="e.g. I want to understand calculus well enough for college entrance exams..." rows="3"></textarea>
+			Default audience description
+			<textarea
+				bind:value={defaultAudienceDescription}
+				rows="3"
+				placeholder="e.g. Year 9 mixed-ability science class with a wide reading range"
+			></textarea>
 		</label>
 
 		<label>
-			Learner description (optional)
-			<textarea bind:value={learnerDescription} placeholder="Describe your learning abilities, gaps, or any signals that might help personalise content. e.g. I struggle with abstract concepts but do well with concrete examples..." rows="4"></textarea>
-			<span class="hint">This will be replaced by automated diagnostics in a future version.</span>
+			Curriculum or framework (optional)
+			<input
+				type="text"
+				bind:value={curriculumFramework}
+				placeholder="e.g. GCSE AQA, Common Core, IB MYP"
+			/>
+		</label>
+
+		<label>
+			Classroom context (optional)
+			<textarea
+				bind:value={classroomContext}
+				rows="4"
+				placeholder="e.g. Limited devices, mixed prior knowledge, several EAL learners, strong response to worked examples"
+			></textarea>
+		</label>
+	</div>
+
+	<div class="form-section">
+		<h3>Lesson Defaults</h3>
+		<p class="hint">These become starting defaults in Studio. You can still change them for each lesson.</p>
+
+		<label>
+			Tone
+			<select bind:value={tone}>
+				<option value="supportive">Supportive</option>
+				<option value="neutral">Neutral</option>
+				<option value="rigorous">Rigorous</option>
+			</select>
+		</label>
+
+		<label>
+			Reading level
+			<select bind:value={readingLevel}>
+				<option value="simple">Simple</option>
+				<option value="standard">Standard</option>
+				<option value="advanced">Advanced</option>
+			</select>
+		</label>
+
+		<label>
+			Explanation style
+			<select bind:value={explanationStyle}>
+				<option value="concrete-first">Concrete examples first</option>
+				<option value="concept-first">Concept first</option>
+				<option value="balanced">Balanced</option>
+			</select>
+		</label>
+
+		<label>
+			Example style
+			<select bind:value={exampleStyle}>
+				<option value="everyday">Everyday examples</option>
+				<option value="academic">Academic examples</option>
+				<option value="exam">Exam-style examples</option>
+			</select>
+		</label>
+
+		<label>
+			Brevity
+			<select bind:value={brevity}>
+				<option value="tight">Concise</option>
+				<option value="balanced">Balanced</option>
+				<option value="expanded">Expanded</option>
+			</select>
+		</label>
+
+		<div class="toggle-grid">
+			<label class="toggle-row">
+				<input type="checkbox" bind:checked={useVisuals} />
+				<span>Use visuals where they help</span>
+			</label>
+			<label class="toggle-row">
+				<input type="checkbox" bind:checked={printFirst} />
+				<span>Optimise for print layout</span>
+			</label>
+			<label class="toggle-row">
+				<input type="checkbox" bind:checked={morePractice} />
+				<span>Emphasise practice</span>
+			</label>
+			<label class="toggle-row">
+				<input type="checkbox" bind:checked={keepShort} />
+				<span>Keep lessons compact</span>
+			</label>
+		</div>
+	</div>
+
+	<div class="form-section">
+		<h3>Product Goals</h3>
+
+		<label>
+			What do you want help with most?
+			<textarea
+				bind:value={planningGoals}
+				rows="4"
+				placeholder="e.g. Faster first drafts, better scaffolds for mixed-ability classes, stronger exam-style practice"
+			></textarea>
 		</label>
 	</div>
 
@@ -225,6 +323,14 @@
 		color: #2b241d;
 	}
 
+	.field-title {
+		margin: 0;
+		font-size: 0.96rem;
+		font-weight: 600;
+		line-height: 1.4;
+		color: #2b241d;
+	}
+
 	input, textarea, select {
 		width: 100%;
 		box-sizing: border-box;
@@ -260,12 +366,8 @@
 		font-weight: 400;
 	}
 
-	select {
-		appearance: auto;
-	}
-
 	textarea {
-		min-height: 7.5rem;
+		min-height: 6.5rem;
 		resize: vertical;
 	}
 
@@ -308,10 +410,31 @@
 		color: #e57373;
 	}
 
-	.tag-remove:focus-visible {
-		outline: 2px solid rgba(84, 135, 171, 0.35);
-		outline-offset: 3px;
-		border-radius: 999px;
+	.toggle-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 0.75rem;
+	}
+
+	.toggle-row {
+		flex-direction: row;
+		align-items: center;
+		gap: 0.6rem;
+		padding: 0.85rem 0.95rem;
+		border: 1px solid rgba(53, 71, 86, 0.14);
+		border-radius: 12px;
+		background: rgba(255, 252, 247, 0.82);
+	}
+
+	.toggle-row input {
+		width: auto;
+		box-sizing: border-box;
+		padding: 0;
+		border: none;
+		border-radius: 0;
+		background: transparent;
+		box-shadow: none;
+		accent-color: #2b5067;
 	}
 
 	.submit-btn {
@@ -339,11 +462,6 @@
 		filter: brightness(1.04);
 	}
 
-	.submit-btn:focus-visible {
-		outline: 3px solid rgba(84, 135, 171, 0.25);
-		outline-offset: 3px;
-	}
-
 	.submit-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
@@ -361,7 +479,6 @@
 
 		.submit-btn {
 			width: 100%;
-			justify-content: center;
 		}
 	}
 </style>

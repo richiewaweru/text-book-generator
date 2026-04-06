@@ -49,7 +49,7 @@ from generation.dtos import (
     GenerationRequest,
 )
 from generation.entities.generation import Generation
-from core.entities.student_profile import StudentProfile
+from core.entities.student_profile import TeacherProfile
 from core.entities.user import User
 from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_report_repository import (
@@ -60,7 +60,6 @@ from core.ports.student_profile_repository import StudentProfileRepository
 from core.ports.user_repository import UserRepository
 from generation.failure import classify_generation_failure
 from generation.logging import GenerationLogger
-from core.value_objects import EducationLevel
 from generation.dependencies import (
     get_document_repository,
     get_generation_repository,
@@ -152,16 +151,15 @@ def _detail_item(generation: Generation) -> dict:
     }
 
 
-def _grade_band(profile: StudentProfile) -> str:
+def _grade_band(profile: TeacherProfile) -> str:
     mapping = {
-        EducationLevel.ELEMENTARY: "primary",
-        EducationLevel.MIDDLE_SCHOOL: "secondary",
-        EducationLevel.HIGH_SCHOOL: "secondary",
-        EducationLevel.UNDERGRADUATE: "advanced",
-        EducationLevel.GRADUATE: "advanced",
-        EducationLevel.PROFESSIONAL: "advanced",
+        "primary": "primary",
+        "middle": "secondary",
+        "high_school": "secondary",
+        "undergraduate": "advanced",
+        "adult": "advanced",
     }
-    return mapping[profile.education_level]
+    return mapping[profile.default_grade_band.value]
 
 
 def _generation_urls(generation_id: str) -> tuple[str, str, str]:
@@ -898,7 +896,7 @@ def _validate_template_and_preset(template_id: str, preset_id: str) -> None:
 async def enqueue_generation(
     *,
     current_user: User,
-    profile: StudentProfile | None,
+    profile: TeacherProfile | None,
     engine: GenerationEngine,
     gen_repo: GenerationRepository,
     document_repo: DocumentRepository,

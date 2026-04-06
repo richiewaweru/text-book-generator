@@ -20,8 +20,7 @@ from planning.prompt_builder import refine_plan_text
 from planning.section_composer import compose_sections
 from planning.template_scorer import choose_template
 from planning.visual_router import route_visuals
-from core.entities.student_profile import StudentProfile
-from core.value_objects import EducationLevel
+from core.entities.student_profile import TeacherProfile
 
 
 PlanningEvent = dict[str, object]
@@ -131,41 +130,6 @@ class TemplateSummary:
     learner_fit: list[str]
 
 
-def _grade_band(profile: StudentProfile | None) -> str | None:
-    if profile is None:
-        return None
-
-    mapping = {
-        EducationLevel.ELEMENTARY: "primary",
-        EducationLevel.MIDDLE_SCHOOL: "secondary",
-        EducationLevel.HIGH_SCHOOL: "secondary",
-        EducationLevel.UNDERGRADUATE: "advanced",
-        EducationLevel.GRADUATE: "advanced",
-        EducationLevel.PROFESSIONAL: "advanced",
-    }
-    return mapping[profile.education_level]
-
-
-def _profile_context(profile: StudentProfile | None) -> str:
-    if profile is None:
-        return "No learner profile was available."
-
-    interests = ", ".join(profile.interests) if profile.interests else "none listed"
-    return "\n".join(
-        [
-            f"Grade band: {_grade_band(profile) or 'unknown'}",
-            f"Age: {profile.age}",
-            f"Learning style: {profile.learning_style.value}",
-            f"Notation: {profile.preferred_notation.value}",
-            f"Preferred depth: {profile.preferred_depth.value}",
-            f"Interests: {interests}",
-            f"Prior knowledge: {profile.prior_knowledge or 'not provided'}",
-            f"Goals: {profile.goals or 'not provided'}",
-            f"Learner description: {profile.learner_description or 'not provided'}",
-        ]
-    )
-
-
 def _template_lines(templates: list[TemplateSummary]) -> str:
     return "\n".join(
         f"- {template.id} | {template.name} | intent: {template.intent} | learnerFit: {', '.join(template.learner_fit) or 'n/a'}"
@@ -176,9 +140,10 @@ def _template_lines(templates: list[TemplateSummary]) -> str:
 def _build_system_prompt(
     *,
     brief: BriefRequest,
-    profile: StudentProfile | None,
+    profile: TeacherProfile | None,
     templates: list[TemplateSummary],
 ) -> str:
+    _ = profile
     return "\n".join(
         [
             "You are the Teacher Studio brief interpreter.",
@@ -199,8 +164,6 @@ def _build_system_prompt(
             f"- intent: {brief.intent}",
             f"- audience: {brief.audience}",
             f"- extra_context: {brief.extra_context or 'none'}",
-            "Profile context:",
-            _profile_context(profile),
             "Live-safe templates:",
             _template_lines(templates),
         ]
@@ -268,7 +231,7 @@ class BriefPlannerService:
         self,
         brief: BriefRequest,
         *,
-        profile: StudentProfile | None,
+        profile: TeacherProfile | None,
         templates: list[TemplateSummary],
         model: Any,
         run_llm_fn: Callable[..., Awaitable[Any]],

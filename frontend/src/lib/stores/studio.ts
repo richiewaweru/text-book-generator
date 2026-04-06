@@ -7,6 +7,7 @@ import type {
 	StudioGenerationState,
 	StudioState,
 	StudioTemplateContract,
+	TeacherProfile,
 	UserBriefDraft
 } from '$lib/types';
 
@@ -37,6 +38,73 @@ export function emptyDraft(): UserBriefDraft {
 			print_first: false
 		}
 	};
+}
+
+function formatDefaultAudience(profile: TeacherProfile): string {
+	if (profile.default_audience_description.trim()) {
+		return profile.default_audience_description.trim();
+	}
+
+	const labels: Record<TeacherProfile['default_grade_band'], string> = {
+		primary: 'Primary class',
+		middle: 'Middle school class',
+		high_school: 'High school class',
+		undergraduate: 'Undergraduate cohort',
+		adult: 'Adult learners'
+	};
+
+	return labels[profile.default_grade_band];
+}
+
+export function applyTeacherProfileDefaults(profile: TeacherProfile): void {
+	const defaults = emptyDraft();
+	briefDraft.update((draft) => ({
+		...draft,
+		audience: draft.audience.trim() ? draft.audience : formatDefaultAudience(profile),
+		extra_context: draft.extra_context.trim()
+			? draft.extra_context
+			: profile.classroom_context.trim(),
+		preferences: {
+			tone:
+				draft.preferences.tone !== defaults.preferences.tone
+					? draft.preferences.tone
+					: profile.delivery_preferences.tone,
+			reading_level:
+				draft.preferences.reading_level !== defaults.preferences.reading_level
+					? draft.preferences.reading_level
+					: profile.delivery_preferences.reading_level,
+			explanation_style:
+				draft.preferences.explanation_style !== defaults.preferences.explanation_style
+					? draft.preferences.explanation_style
+					: profile.delivery_preferences.explanation_style,
+			example_style:
+				draft.preferences.example_style !== defaults.preferences.example_style
+					? draft.preferences.example_style
+					: profile.delivery_preferences.example_style,
+			brevity:
+				draft.preferences.brevity !== defaults.preferences.brevity
+					? draft.preferences.brevity
+					: profile.delivery_preferences.brevity
+		},
+		constraints: {
+			more_practice:
+				draft.constraints.more_practice !== defaults.constraints.more_practice
+					? draft.constraints.more_practice
+					: profile.delivery_preferences.more_practice,
+			keep_short:
+				draft.constraints.keep_short !== defaults.constraints.keep_short
+					? draft.constraints.keep_short
+					: profile.delivery_preferences.keep_short,
+			use_visuals:
+				draft.constraints.use_visuals !== defaults.constraints.use_visuals
+					? draft.constraints.use_visuals
+					: profile.delivery_preferences.use_visuals,
+			print_first:
+				draft.constraints.print_first !== defaults.constraints.print_first
+					? draft.constraints.print_first
+					: profile.delivery_preferences.print_first
+		}
+	}));
 }
 
 export function emptyPlanDraft(): PlanDraft {

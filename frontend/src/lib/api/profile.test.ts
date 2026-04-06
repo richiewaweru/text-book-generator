@@ -24,7 +24,7 @@ describe('profile API helpers', () => {
 			})
 		);
 
-		await updateProfile({ age: 21 });
+		await updateProfile({ teacher_role: 'tutor' });
 
 		const apiFetchMock = vi.mocked(apiFetch);
 

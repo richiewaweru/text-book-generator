@@ -1,14 +1,14 @@
-import type { StudentProfile, ProfileCreateRequest } from '$lib/types';
+import type { TeacherProfile, TeacherProfileUpsertRequest } from '$lib/types';
 import { ensureOk } from './errors';
 import { apiFetch } from './client';
 
-export async function getProfile(): Promise<StudentProfile> {
+export async function getProfile(): Promise<TeacherProfile> {
 	const response = await apiFetch('/api/v1/profile');
 	await ensureOk(response, 'Failed to fetch profile.');
 	return response.json();
 }
 
-export async function createProfile(data: ProfileCreateRequest): Promise<StudentProfile> {
+export async function createProfile(data: TeacherProfileUpsertRequest): Promise<TeacherProfile> {
 	const response = await apiFetch('/api/v1/profile', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -19,8 +19,8 @@ export async function createProfile(data: ProfileCreateRequest): Promise<Student
 }
 
 export async function updateProfile(
-	data: Partial<ProfileCreateRequest>
-): Promise<StudentProfile> {
+	data: Partial<TeacherProfileUpsertRequest>
+): Promise<TeacherProfile> {
 	const response = await apiFetch('/api/v1/profile', {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },

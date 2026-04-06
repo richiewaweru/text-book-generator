@@ -1,68 +1,60 @@
 from datetime import datetime, timezone
 
-import pytest
 from pydantic import ValidationError
 
-from core.entities.student_profile import StudentProfile
+from core.entities.student_profile import TeacherProfile
 from core.entities.user import User
-from core.value_objects import (
-    Depth,
-    EducationLevel,
-    LearningStyle,
-    NotationLanguage,
-)
+from core.value_objects import GradeBand, TeacherRole
 
 
-class TestStudentProfile:
+class TestTeacherProfile:
     def test_valid_profile(self):
         now = datetime.now(timezone.utc)
-        profile = StudentProfile(
+        profile = TeacherProfile(
             id="sp-1",
             user_id="u-1",
-            age=16,
-            education_level=EducationLevel.HIGH_SCHOOL,
-            interests=["gaming", "music"],
-            learning_style=LearningStyle.VISUAL,
-            preferred_notation=NotationLanguage.PLAIN,
-            prior_knowledge="Basic algebra",
-            goals="Pass SAT math",
-            preferred_depth=Depth.STANDARD,
+            teacher_role=TeacherRole.TUTOR,
+            subjects=["math", "physics"],
+            default_grade_band=GradeBand.ADULT,
+            default_audience_description="Adult learners returning to maths.",
+            curriculum_framework="Functional Skills",
+            classroom_context="Mixed confidence and limited devices.",
+            planning_goals="Faster planning and better scaffolds.",
             created_at=now,
             updated_at=now,
         )
-        assert profile.age == 16
-        assert profile.education_level == EducationLevel.HIGH_SCHOOL
-        assert len(profile.interests) == 2
-
-    def test_rejects_invalid_age(self):
-        now = datetime.now(timezone.utc)
-        with pytest.raises(ValidationError):
-            StudentProfile(
-                id="sp-1",
-                user_id="u-1",
-                age=5,
-                education_level=EducationLevel.ELEMENTARY,
-                learning_style=LearningStyle.VISUAL,
-                created_at=now,
-                updated_at=now,
-            )
+        assert profile.teacher_role == TeacherRole.TUTOR
+        assert profile.default_grade_band == GradeBand.ADULT
+        assert len(profile.subjects) == 2
 
     def test_defaults(self):
         now = datetime.now(timezone.utc)
-        profile = StudentProfile(
+        profile = TeacherProfile(
             id="sp-1",
             user_id="u-1",
-            age=20,
-            education_level=EducationLevel.UNDERGRADUATE,
-            learning_style=LearningStyle.READING_WRITING,
             created_at=now,
             updated_at=now,
         )
-        assert profile.interests == []
-        assert profile.prior_knowledge == ""
-        assert profile.goals == ""
-        assert profile.preferred_depth == Depth.STANDARD
-        assert profile.preferred_notation == NotationLanguage.PLAIN
+        assert profile.subjects == []
+        assert profile.teacher_role == TeacherRole.TEACHER
+        assert profile.default_grade_band == GradeBand.HIGH_SCHOOL
+        assert profile.delivery_preferences.tone == "supportive"
+        assert profile.delivery_preferences.brevity == "balanced"
+
+    def test_rejects_invalid_delivery_preferences(self):
+        now = datetime.now(timezone.utc)
+        try:
+            TeacherProfile(
+                id="sp-1",
+                user_id="u-1",
+                delivery_preferences={"tone": "chaotic"},
+                created_at=now,
+                updated_at=now,
+            )
+        except ValidationError:
+            pass
+        else:
+            raise AssertionError("Expected profile validation to fail for invalid tone")
 
 
 class TestUser:
@@ -90,16 +82,13 @@ class TestUser:
         assert user.has_profile is True
 
 
-class TestEducationLevel:
+class TestTeacherRole:
     def test_all_values(self):
-        expected = {
-            "elementary", "middle_school", "high_school",
-            "undergraduate", "graduate", "professional",
-        }
-        assert {e.value for e in EducationLevel} == expected
+        expected = {"teacher", "tutor", "homeschool", "instructor"}
+        assert {e.value for e in TeacherRole} == expected
 
 
-class TestLearningStyle:
+class TestGradeBand:
     def test_all_values(self):
-        expected = {"visual", "reading_writing", "kinesthetic", "auditory"}
-        assert {s.value for s in LearningStyle} == expected
+        expected = {"primary", "middle", "high_school", "undergraduate", "adult"}
+        assert {s.value for s in GradeBand} == expected

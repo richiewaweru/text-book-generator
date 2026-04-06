@@ -10,7 +10,7 @@ from planning.models import PlanningGenerationSpec, PlanningTemplateContract, St
 from pipeline.types.requests import SectionPlan
 from planning.dtos import BriefRequest, GenerationSpec
 from generation.dtos.generation_request import GenerationAcceptedResponse
-from core.entities.student_profile import StudentProfile
+from core.entities.student_profile import TeacherProfile
 from core.entities.user import User
 from app import app
 from generation.dependencies import (
@@ -33,28 +33,38 @@ TEST_USER = User(
     updated_at="2026-03-25T00:00:00+00:00",
 )
 
-TEST_PROFILE = StudentProfile(
+TEST_PROFILE = TeacherProfile(
     id="brief-profile-id",
     user_id=TEST_USER.id,
-    age=15,
-    education_level="high_school",
-    interests=["science", "writing"],
-    learning_style="visual",
-    preferred_notation="plain",
-    prior_knowledge="basic algebra",
-    goals="learn how ecosystems work",
-    preferred_depth="standard",
-    learner_description="Prefers clear examples and short explanations.",
+    teacher_role="teacher",
+    subjects=["science"],
+    default_grade_band="high_school",
+    default_audience_description="Year 9 mixed ability science",
+    curriculum_framework="KS3",
+    classroom_context="Mixed prior knowledge and limited device access.",
+    planning_goals="Faster planning and clearer scaffolds.",
+    school_or_org_name="Riverside High",
+    delivery_preferences={
+        "tone": "supportive",
+        "reading_level": "standard",
+        "explanation_style": "balanced",
+        "example_style": "everyday",
+        "brevity": "balanced",
+        "use_visuals": True,
+        "print_first": False,
+        "more_practice": False,
+        "keep_short": False,
+    },
     created_at="2026-03-25T00:00:00+00:00",
     updated_at="2026-03-25T00:00:00+00:00",
 )
 
 
 class StaticProfileRepo:
-    def __init__(self, profile: StudentProfile | None) -> None:
+    def __init__(self, profile: TeacherProfile | None) -> None:
         self.profile = profile
 
-    async def find_by_user_id(self, user_id: str) -> StudentProfile | None:
+    async def find_by_user_id(self, user_id: str) -> TeacherProfile | None:
         _ = user_id
         return self.profile
 
@@ -81,7 +91,7 @@ def _reset_dependency_overrides():
     app.dependency_overrides.clear()
 
 
-def _install_overrides(profile: StudentProfile | None) -> None:
+def _install_overrides(profile: TeacherProfile | None) -> None:
     app.dependency_overrides[get_current_user] = _override_current_user
 
     async def override_profile_repo():
@@ -398,7 +408,7 @@ class TestBriefApi:
             "Check Understanding",
         ]
 
-    async def test_brief_includes_profile_context(self):
+    async def test_brief_does_not_include_saved_profile_context(self):
         _install_overrides(TEST_PROFILE)
         catalog = _fake_live_safe_catalog()
         captured: dict[str, str] = {}
@@ -444,8 +454,8 @@ class TestBriefApi:
                 )
 
         assert response.status_code == 200
-        assert "Grade band: secondary" in captured["system_prompt"]
-        assert "Prefers clear examples and short explanations." in captured["system_prompt"]
+        assert "Profile context:" not in captured["system_prompt"]
+        assert "Mixed prior knowledge and limited device access." not in captured["system_prompt"]
 
     async def test_contracts_lists_live_safe_planning_contracts(self):
         _install_overrides(TEST_PROFILE)
