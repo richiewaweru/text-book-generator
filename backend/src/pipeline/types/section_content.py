@@ -41,7 +41,14 @@ class SectionHeaderContent(BaseModel):
 
 class HookHeroContent(BaseModel):
     headline: str
-    body: str
+    body: str = Field(
+        description=(
+            "The hook prose — creates felt need before the explanation. "
+            "May use **bold** for a single key term if needed. "
+            "Avoid heavy formatting — this is a motivating opener, not an explanation. "
+            "Max 80 words."
+        )
+    )
     anchor: str
     type: Literal['prose', 'quote', 'question', 'data-point'] = 'prose'
     svg_content: Optional[str] = None
@@ -56,8 +63,22 @@ class ExplanationCallout(BaseModel):
 
 
 class ExplanationContent(BaseModel):
-    body: str
-    emphasis: list[str]
+    body: str = Field(
+        description=(
+            "Sustained prose building a mental model. "
+            "May use **bold** for key terms and *italic* for emphasis. "
+            "Use a blank line (\\n\\n) to separate paragraphs. "
+            "Use --- on its own line for a thematic break between sections. "
+            "Do NOT use headers (##), bullet lists, or numbered lists — "
+            "use prose paragraphs only. Max 350 words."
+        )
+    )
+    emphasis: list[str] = Field(
+        description=(
+            "2–3 exact phrases from `body` to highlight visually. "
+            "Must appear verbatim in the body text. No markdown syntax — plain strings only."
+        )
+    )
     callouts: Optional[list[ExplanationCallout]] = None
 
 
@@ -72,7 +93,13 @@ class PrerequisiteContent(BaseModel):
 
 
 class WhatNextContent(BaseModel):
-    body: str
+    body: str = Field(
+        description=(
+            "1–2 sentences connecting this section forward. "
+            "May use **bold** for the upcoming concept name. "
+            "No lists, no headers. Max 50 words."
+        )
+    )
     next: str
     preview: Optional[str] = None
     prerequisites: Optional[list[str]] = None
@@ -91,10 +118,26 @@ class DefinitionContent(BaseModel):
     formal: str
     plain: str
     etymology: Optional[str] = None
-    notation: Optional[str] = None
+    notation: Optional[str] = Field(
+        default=None,
+        description=(
+            "A short KaTeX-renderable LaTeX string. "
+            "MUST contain LaTeX syntax — backslash commands, e.g. 'x > 3', '\\\\frac{a}{b}'. "
+            "Do NOT write plain English here — if you cannot express this as LaTeX, omit entirely. "
+            "Example good: 'a^2 + b^2 = c^2'. "
+            "Example bad: 'e.g. x > 3 means x can be any number greater than 3' — put that in `examples`."
+        )
+    )
     related_terms: Optional[list[str]] = None
     symbol: Optional[str] = None
-    examples: Optional[list[str]] = None
+    examples: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "Up to 3 plain-English usage examples showing the term in context. "
+            "This is where sentences like 'x > 3 means x can be any number greater than 3' belong. "
+            "Max 30 words each."
+        )
+    )
 
 
 class DefinitionFamilyContent(BaseModel):
