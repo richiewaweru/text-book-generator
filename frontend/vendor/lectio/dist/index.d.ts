@@ -17,6 +17,7 @@ export type { TemplateContract, TemplateDefinition, TemplatePresetDefinition, Te
 export { validateTemplateDefinition, validateTemplateContract, validateTemplatePreview } from './template-validation';
 export { basePresets, basePresetMap } from './presets/base-presets';
 export { cn } from './utils';
+export { renderInlineMarkdown, renderBlockMarkdown, looksLikeLatex } from './markdown';
 export { default as RuledLines } from './print/RuledLines.svelte';
 export { default as Checkboxes } from './print/Checkboxes.svelte';
 export { default as ExpandedSteps } from './print/ExpandedSteps.svelte';

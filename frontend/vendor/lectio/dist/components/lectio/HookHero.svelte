@@ -3,6 +3,7 @@
 	import { Badge } from '../ui/badge';
 	import { BarChart3, CircleHelp, Quote, Sparkles } from 'lucide-svelte';
 	import { sanitizeSvg } from '../../utils/sanitize';
+	import { renderInlineMarkdown } from '../../markdown';
 
 	let { content }: { content: HookHeroContent } = $props();
 
@@ -56,7 +57,7 @@
 				</div>
 			{:else}
 				<p class="max-w-2xl text-base leading-7 text-primary-foreground/82">
-					{content.body}
+					{@html renderInlineMarkdown(content.body)}
 				</p>
 			{/if}
 

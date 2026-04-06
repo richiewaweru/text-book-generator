@@ -2,6 +2,7 @@
 	import type { WorkedExampleContent, WorkedStep } from '../../types';
 	import { Card } from '../ui/card';
 	import { usePrintMode } from '../../utils/printContext';
+	import { renderInlineMarkdown } from '../../markdown';
 	import ExpandedSteps from '../../print/ExpandedSteps.svelte';
 	import { Badge } from '../ui/badge';
 	import { Button } from '../ui/button';
@@ -52,14 +53,14 @@
 			<p class="text-sm font-semibold uppercase tracking-[0.18em] text-violet-700">
 				{step.label}
 			</p>
-			<p class="text-base leading-7 text-foreground/85">{step.content}</p>
+			<p class="text-base leading-7 text-foreground/85">{@html renderInlineMarkdown(step.content)}</p>
 			{#if step.formula}
 				<div class="rounded-[1rem] bg-white/85 p-3 text-primary">
 					<MathFormula formula={step.formula} displayMode />
 				</div>
 			{/if}
 			{#if step.note}
-				<p class="text-sm italic leading-6 text-muted-foreground">Note: {step.note}</p>
+				<p class="text-sm italic leading-6 text-muted-foreground">Note: {@html renderInlineMarkdown(step.note)}</p>
 			{/if}
 			{#if step.diagram_ref}
 				<p class="text-xs font-semibold uppercase tracking-[0.16em] text-violet-700/75">
@@ -77,23 +78,23 @@
 				{example.method_label}
 			</Badge>
 		{/if}
-		<p class="text-sm leading-6 text-muted-foreground">{example.setup}</p>
+		<p class="text-sm leading-6 text-muted-foreground">{@html renderInlineMarkdown(example.setup)}</p>
 		<div class="space-y-4">
 			{#each example.steps as step, index}
 				{@render stepBlock(step, index)}
 			{/each}
 		</div>
 		<div class="rounded-[1rem] bg-violet-50 p-4 text-sm font-semibold leading-6 text-violet-950">
-			{example.conclusion}
+			{@html renderInlineMarkdown(example.conclusion)}
 		</div>
 	</div>
 {/snippet}
 
 {#if printMode}
 	<div class="worked-example-print">
-		<p class="worked-example-print-setup">{content.setup}</p>
+		<p class="worked-example-print-setup">{@html renderInlineMarkdown(content.setup)}</p>
 		<ExpandedSteps steps={content.steps} title={content.title} />
-		<p class="worked-example-print-conclusion">{content.conclusion}</p>
+		<p class="worked-example-print-conclusion">{@html renderInlineMarkdown(content.conclusion)}</p>
 		{#if content.answer}
 			<p class="worked-example-print-answer"><strong>Answer:</strong> {content.answer}</p>
 		{/if}
@@ -111,7 +112,7 @@
 				{/if}
 			</div>
 			<h3 class="text-2xl font-semibold font-serif text-primary">{content.title}</h3>
-			<p class="text-sm leading-6 text-muted-foreground">{content.setup}</p>
+			<p class="text-sm leading-6 text-muted-foreground">{@html renderInlineMarkdown(content.setup)}</p>
 		</div>
 
 		{#if mode === 'accordion'}
@@ -149,7 +150,7 @@
 		{/if}
 
 		<div class="rounded-[1.25rem] bg-white/85 p-4 text-sm font-semibold leading-7 text-primary">
-			{content.conclusion}
+			{@html renderInlineMarkdown(content.conclusion)}
 		</div>
 
 		{#if isComplete && content.answer}
