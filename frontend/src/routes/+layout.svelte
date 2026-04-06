@@ -16,10 +16,17 @@
 	);
 
 	onMount(() => {
-	void bootstrapAuth(fetchCurrentUser).catch((error) => {
-		console.error('bootstrapAuth crashed', error);
+		console.log('layout mounted');
+		console.log('initialized before bootstrap', initialized.current);
+		void bootstrapAuth(fetchCurrentUser)
+			.then((result) => {
+				console.log('bootstrap result', result);
+				console.log('initialized after bootstrap', initialized.current);
+			})
+			.catch((error) => {
+				console.error('bootstrap failed', error);
+			});
 	});
-});
 
 	$effect(() => {
 		if (!initialized.current) return;
@@ -79,6 +86,16 @@
 
 <main>
 	{#if initialized.current || isPrintTextbookRoute}
+		{@render children()}
+	{:else}
+		<p>Loading session...</p>
+	{/if}
+	<p>DEBUG initialized: {String(initialized.current)}</p>
+	<p>DEBUG authed: {String(authed.current)}</p>
+	<p>DEBUG path: {page.url.pathname}</p>
+
+	{#if initialized.current}
+		<p>INIT TRUE</p>
 		{@render children()}
 	{:else}
 		<p>Loading session...</p>
