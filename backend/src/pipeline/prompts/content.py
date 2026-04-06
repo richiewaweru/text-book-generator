@@ -17,6 +17,23 @@ from pipeline.prompts.shared import capacity_reminder_for_fields, shared_context
 from pipeline.types.requests import SectionPlan
 
 
+_FIELD_FORMATTING_RULES = """\
+## Field formatting rules
+
+- Body fields (explanation, hook, what_next, pitfall correction): prose only.
+  Use **bold** for key terms, *italic* for emphasis, `code` for inline notation in prose.
+  Use blank lines for paragraph breaks. Use --- for thematic breaks in explanation only.
+  Never use # headers or bullet lists inside body fields.
+
+- The `notation` field on DefinitionContent is LaTeX only.
+  If you cannot write valid LaTeX for the notation, omit the field entirely.
+  Plain English belongs in `examples`, not `notation`.
+
+- `emphasis` arrays contain plain strings — no markdown syntax inside them.
+
+- Short label fields (term, next, misconception, action): plain text, no markdown."""
+
+
 def _section_plan_policy_block(section_plan: SectionPlan) -> str:
     continuity = section_plan.continuity_notes or "none"
     required_components = ", ".join(section_plan.required_components) or "none"
@@ -60,6 +77,8 @@ Optional fields (include only when content genuinely warrants it):
 {chr(10).join(f'  - {f}' for f in optional)}
 
 {capacity_reminder_for_fields(required + optional)}
+
+{_FIELD_FORMATTING_RULES}
 
 Output a single SectionContent JSON object.
 Every field name must match the schema exactly (snake_case).
@@ -208,6 +227,8 @@ Pacing: {guidance['pacing']}
 {opt_block}
 
 {capacity_reminder_for_fields(active_fields)}
+
+{_FIELD_FORMATTING_RULES}
 
 Output valid JSON matching the schema exactly. No preamble, no markdown fences."""
 
