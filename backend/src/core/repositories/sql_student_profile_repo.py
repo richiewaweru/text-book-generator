@@ -74,6 +74,10 @@ def _apply_legacy_profile_defaults(model: StudentProfileModel) -> None:
 
 
 class SqlStudentProfileRepository(StudentProfileRepository):
+    # Production note: despite the legacy repository/model naming, this
+    # repository is the live persistence layer for teacher profiles today.
+    # Renaming is deferred because the current external DB can be reset later
+    # with insignificant product impact once the rollout stabilizes.
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 

@@ -33,6 +33,9 @@ class UserModel(Base):
 
 
 class StudentProfileModel(Base):
+    # Production note: this legacy table name is intentionally retained for now.
+    # It currently stores teacher-profile data, and the old learner columns are
+    # only kept for external DB compatibility during the rollout period.
     __tablename__ = "student_profiles"
 
     id = Column(String, primary_key=True)

@@ -42,5 +42,8 @@ class TeacherProfile(BaseModel):
     updated_at: datetime
 
 
-# Backward-compatible alias while the persistence module names catch up.
+# Backward-compatible alias while the persistence/database names catch up.
+# For the current product phase, this alias still represents the teacher
+# profile model, and the legacy student naming remains only to avoid churn
+# during rollout and external DB stabilization.
 StudentProfile = TeacherProfile
