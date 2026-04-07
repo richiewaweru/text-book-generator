@@ -266,7 +266,7 @@ def test_section_composer_respects_component_budgets_across_sections():
     assert any("explanation-block" in section.selected_components for section in explain_sections)
 
 
-def test_visual_router_applies_svg_override_when_print_first_is_enabled():
+def test_visual_router_uses_intent_regardless_of_print_first():
     contract = build_contract(
         template_id="procedure",
         intent="teach-procedure",
@@ -298,11 +298,9 @@ def test_visual_router_applies_svg_override_when_print_first_is_enabled():
     routed = route_visuals(brief, contract, compose_sections(brief, contract))
 
     assert any(section.visual_policy and section.visual_policy.required for section in routed)
-    assert all(
-        section.visual_policy.mode == "svg"
-        for section in routed
-        if section.visual_policy and section.visual_policy.required
-    )
+    for section in routed:
+        if section.visual_policy and section.role == "process":
+            assert section.visual_policy.mode == "image"
 
 
 def test_fallback_uses_contract_defaults_and_returns_reviewable_spec():

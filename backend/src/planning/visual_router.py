@@ -57,8 +57,6 @@ def _visual_intent(section: PlanningSectionPlan) -> PlanningVisualIntent:
 
 
 def _visual_mode(brief: NormalizedBrief, intent: str) -> PlanningVisualMode:
-    if brief.brief.constraints.print_first or brief.resolved_format == "printed-booklet":
-        return "svg"
     if intent in {"show_realism", "demonstrate_process", "compare_variants"}:
         return "image"
     return "image" if _classify_spatial(brief) else "svg"
