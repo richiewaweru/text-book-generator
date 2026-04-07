@@ -11,14 +11,8 @@
 
 	const isInteractive = $derived(
 		!!(
-			section.quiz ||
 			section.simulation ||
-			(section.simulations?.length ?? 0) > 0 ||
-			section.diagram ||
-			section.diagram_compare ||
-			section.diagram_series ||
-			section.timeline ||
-			section.reflection
+			(section.simulations?.length ?? 0) > 0
 		)
 	);
 	const sectionUrl = $derived.by(() => {
@@ -44,9 +38,9 @@
 			{@html qrSvg}
 		</div>
 		<div class="qr-copy">
-			<p class="qr-label">Interactive follow-up</p>
+			<p class="qr-label">Interactive simulation</p>
 			<h4>{section.header.title}</h4>
-			<p>Scan to open the live section with diagrams, checks, or interactive elements.</p>
+			<p>Scan to open and interact with this simulation in your browser.</p>
 			<p class="qr-url">{sectionUrl}</p>
 		</div>
 	</aside>
