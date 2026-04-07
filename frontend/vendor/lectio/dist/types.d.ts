@@ -276,13 +276,15 @@ export interface DiagramCompareContent {
     caption: string;
     alt_text: string;
 }
+export interface DiagramSeriesStep {
+    step_label: string;
+    caption: string;
+    svg_content?: string;
+    image_url?: string;
+}
 export interface DiagramSeriesContent {
     title: string;
-    diagrams: Array<{
-        svg_content: string;
-        step_label: string;
-        caption: string;
-    }>;
+    diagrams: DiagramSeriesStep[];
 }
 export interface TimelineEvent {
     id: string;

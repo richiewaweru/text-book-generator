@@ -15,6 +15,14 @@ let current = $state(0);
 
 const activeDiagram = $derived(content.diagrams[current] ?? content.diagrams[0]);
 
+function hasSvg(diagram: DiagramSeriesContent['diagrams'][number] | undefined): boolean {
+	return Boolean(diagram?.svg_content?.trim());
+}
+
+function hasImage(diagram: DiagramSeriesContent['diagrams'][number] | undefined): boolean {
+	return Boolean(diagram?.image_url?.trim());
+}
+
 $effect(() => {
 	current = content.diagrams.length === 0 ? 0 : Math.min(current, content.diagrams.length - 1);
 });
@@ -36,9 +44,17 @@ const progressPercent = $derived(
 					<span class="diagram-series-print-step">Step {index + 1}</span>
 					{diagram.step_label}
 				</p>
-				<div class="overflow-hidden rounded-[1.25rem] border border-border/70 bg-white [&_svg]:h-auto [&_svg]:w-full">
-					{@html sanitizeSvg(diagram.svg_content)}
-				</div>
+				{#if hasImage(diagram)}
+					<img
+						src={diagram.image_url}
+						alt={diagram.caption}
+						class="w-full overflow-hidden rounded-[1.25rem] border border-border/70 bg-white object-contain"
+					/>
+				{:else if hasSvg(diagram)}
+					<div class="overflow-hidden rounded-[1.25rem] border border-border/70 bg-white [&_svg]:h-auto [&_svg]:w-full">
+						{@html sanitizeSvg(diagram.svg_content ?? '')}
+					</div>
+				{/if}
 				<p class="text-sm leading-6 text-muted-foreground">{diagram.caption}</p>
 			</div>
 		{/each}
@@ -122,9 +138,17 @@ const progressPercent = $derived(
 				</div>
 			</div>
 
-			<div class="overflow-hidden rounded-[1.25rem] border border-border/70 bg-white [&_svg]:h-auto [&_svg]:w-full">
-				{@html sanitizeSvg(activeDiagram.svg_content)}
-			</div>
+			{#if hasImage(activeDiagram)}
+				<img
+					src={activeDiagram.image_url}
+					alt={activeDiagram.caption}
+					class="w-full overflow-hidden rounded-[1.25rem] border border-border/70 bg-white object-contain"
+				/>
+			{:else if hasSvg(activeDiagram)}
+				<div class="overflow-hidden rounded-[1.25rem] border border-border/70 bg-white [&_svg]:h-auto [&_svg]:w-full">
+					{@html sanitizeSvg(activeDiagram.svg_content ?? '')}
+				</div>
+			{/if}
 
 			<p class="text-sm leading-6 text-muted-foreground">{activeDiagram.caption}</p>
 		{/if}

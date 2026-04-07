@@ -51,10 +51,16 @@ class HookHeroContent(BaseModel):
     )
     anchor: str
     type: Literal['prose', 'quote', 'question', 'data-point'] = 'prose'
+    image: Optional['HookImage'] = None
     svg_content: Optional[str] = None
     quote_attribution: Optional[str] = None
     question_options: Optional[list[str]] = None
     data_point: Optional[dict] = None
+
+
+class HookImage(BaseModel):
+    url: str
+    alt: str
 
 
 class ExplanationCallout(BaseModel):
@@ -358,9 +364,16 @@ class DiagramCompareContent(BaseModel):
     after_details: Optional[list[str]] = None
 
 
+class DiagramSeriesStep(BaseModel):
+    step_label: str
+    caption: str
+    svg_content: str = ""
+    image_url: Optional[str] = None
+
+
 class DiagramSeriesContent(BaseModel):
     title: str
-    diagrams: list[dict]
+    diagrams: list[DiagramSeriesStep]
 
 
 class TimelineEvent(BaseModel):

@@ -44,6 +44,19 @@ class PipelineRequest(BaseModel):
         return self.mode != GenerationMode.DRAFT
 
 
+class SectionVisualPolicy(BaseModel):
+    required: bool = False
+    intent: Literal[
+        "explain_structure",
+        "show_realism",
+        "demonstrate_process",
+        "compare_variants",
+    ] | None = None
+    mode: Literal["image", "svg"] | None = None
+    goal: str | None = None
+    style_notes: str | None = None
+
+
 class SectionPlan(BaseModel):
     """One entry in the curriculum outline produced by curriculum_planner."""
 
@@ -72,5 +85,6 @@ class SectionPlan(BaseModel):
     optional_components: list[str] = Field(default_factory=list)
     interaction_policy: Literal["required", "allowed", "disabled"] = "allowed"
     diagram_policy: Literal["required", "allowed", "disabled"] = "allowed"
+    visual_policy: SectionVisualPolicy | None = None
     enrichment_enabled: bool = True
     continuity_notes: str | None = None

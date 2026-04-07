@@ -172,7 +172,7 @@ def get_image_client():
     Returns a GeminiImageClient if GOOGLE_API_KEY is set, else None.
     Lazy-imports to avoid errors when the Gemini SDK is not installed.
     """
-    api_key = _first_env("GOOGLE_API_KEY", "GEMINI_API_KEY")
+    api_key = _first_env("GOOGLE_CLOUD_NANO_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY")
     if not api_key:
         return None
     try:

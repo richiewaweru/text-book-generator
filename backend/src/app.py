@@ -3,11 +3,13 @@ import inspect
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
@@ -40,6 +42,7 @@ logger = logging.getLogger("uvicorn.error")
 __version__ = "0.1.0"
 _PRODUCTION_LIKE_ENVS = {"production", "staging"}
 _STALE_GENERATION_GRACE_SECONDS = 60.0
+_IMAGES_DIR = Path("data/images")
 
 
 
@@ -231,6 +234,9 @@ def create_app() -> FastAPI:
     app.add_middleware(SecurityHeadersMiddleware)
 
     register_error_handlers(app)
+
+    _IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    app.mount("/images", StaticFiles(directory=str(_IMAGES_DIR)), name="images")
 
     app.include_router(health_router)
     app.include_router(auth_router)
