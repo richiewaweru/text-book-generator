@@ -21,7 +21,7 @@ class GeminiImageClient:
     MODEL = "gemini-3.1-flash-image-preview"
 
     def __init__(self, *, api_key: str) -> None:
-        self._client = genai.Client(vertexai=True, api_key=api_key)
+        self._client = genai.Client(vertexai=False, api_key=api_key)
 
     async def generate_image(
         self,
@@ -100,5 +100,13 @@ class GeminiImageClient:
 
 @lru_cache(maxsize=1)
 def get_gemini_image_client() -> GeminiImageClient:
-    api_key = os.environ["GOOGLE_CLOUD_NANO_API_KEY"]
+    api_key = (
+        os.environ.get("GOOGLE_CLOUD_NANO_API_KEY")
+        or os.environ.get("GOOGLE_API_KEY")
+        or os.environ.get("GEMINI_API_KEY")
+    )
+    if not api_key:
+        raise RuntimeError(
+            "No Gemini API key found. Set GOOGLE_CLOUD_NANO_API_KEY, GOOGLE_API_KEY, or GEMINI_API_KEY."
+        )
     return GeminiImageClient(api_key=api_key)

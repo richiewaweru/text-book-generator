@@ -41,7 +41,7 @@ from pipeline.runtime_policy import (
     resolve_generation_max_concurrent_per_user,
     resolve_generation_timeout_seconds,
 )
-from pipeline.types.requests import GenerationMode, SectionPlan
+from pipeline.types.requests import GenerationMode, SectionPlan, SectionVisualPolicy
 from planning.dtos import GenerationSpec
 from planning.models import PlanningGenerationSpec, PlanningSectionPlan
 from generation.dtos import (
@@ -204,6 +204,17 @@ def _pipeline_section_from_planning(
             else "required" if interaction_required else "allowed"
         ),
         diagram_policy="required" if visual_required else "allowed",
+        visual_policy=(
+            SectionVisualPolicy(
+                required=section.visual_policy.required,
+                intent=section.visual_policy.intent,
+                mode=section.visual_policy.mode,
+                goal=section.visual_policy.goal,
+                style_notes=section.visual_policy.style_notes,
+            )
+            if section.visual_policy is not None
+            else None
+        ),
         continuity_notes=section.rationale,
     )
 

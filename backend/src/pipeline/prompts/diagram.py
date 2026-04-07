@@ -184,3 +184,42 @@ Emphasise these elements: {', '.join(diagram_plan.interaction_elements)}"""
         prompt += f"\nFocus on: {', '.join(diagram_plan.key_concepts)}"
 
     return prompt
+
+
+def build_series_step_image_prompt(
+    *,
+    section_title: str,
+    step_label: str,
+    step_index: int,
+    total_steps: int,
+    key_concept: str,
+    style_context: StyleContext,
+) -> str:
+    visual_style = _translate_style_to_image_keywords(style_context)
+
+    return (
+        f"Educational diagram, step {step_index + 1} of {total_steps}, for {section_title}. "
+        f"This step shows: {step_label}. "
+        f"Focus on: {key_concept}. "
+        f"Style: {visual_style}. "
+        "Requirements: white background, textbook quality, clear composition, "
+        "no text overlays, visually consistent with the other steps in the same sequence."
+    )
+
+
+def build_hook_image_prompt(
+    *,
+    section_title: str,
+    hook_headline: str,
+    hook_body: str,
+    style_context: StyleContext,
+) -> str:
+    visual_style = _translate_style_to_image_keywords(style_context)
+
+    return (
+        f"Educational visual anchor for a lesson about {section_title}. "
+        f"Hook question: {hook_headline}. "
+        f"Context: {hook_body[:200]}. "
+        f"Style: {visual_style}, realistic educational illustration, "
+        "classroom-appropriate, grounded in a real-world scene, no text overlays."
+    )
