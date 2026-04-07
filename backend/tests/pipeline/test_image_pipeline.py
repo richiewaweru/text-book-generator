@@ -19,6 +19,10 @@ from pipeline.types.requests import (
     SectionVisualPolicy,
 )
 from pipeline.types.section_content import (
+    ComparisonColumn,
+    ComparisonGridContent,
+    ComparisonRow,
+    DiagramCompareContent,
     DiagramSeriesContent,
     DiagramSeriesStep,
     ExplanationContent,
@@ -121,6 +125,8 @@ def _section(
     sid: str = "s-01",
     *,
     diagram_series: DiagramSeriesContent | None = None,
+    diagram_compare: DiagramCompareContent | None = None,
+    comparison_grid: ComparisonGridContent | None = None,
 ) -> SectionContent:
     return SectionContent(
         section_id=sid,
@@ -150,6 +156,8 @@ def _section(
         ),
         what_next=WhatNextContent(body="Next we cover integrals", next="Integrals"),
         diagram_series=diagram_series,
+        diagram_compare=diagram_compare,
+        comparison_grid=comparison_grid,
     )
 
 
@@ -159,6 +167,8 @@ def _state(
     section_plan: SectionPlan,
     section: SectionContent,
     key_concepts: list[str] | None = None,
+    compare_before_label: str | None = None,
+    compare_after_label: str | None = None,
 ) -> TextbookPipelineState:
     sid = section.section_id
     return TextbookPipelineState(
@@ -175,6 +185,8 @@ def _state(
                     enabled=True,
                     reasoning="needs an image",
                     mode="image",
+                    compare_before_label=compare_before_label,
+                    compare_after_label=compare_after_label,
                     key_concepts=key_concepts or ["derivative", "slope"],
                     visual_guidance="Clean and classroom-safe.",
                 ),
@@ -190,6 +202,14 @@ class FakeImageClient:
 
     async def generate_image(self, *, prompt, size="1024x1024", format="png", seed=None):
         self.prompts.append(prompt)
+        return ImageGenerationResult(bytes=b"PNG", format="png", mime_type="image/png")
+
+
+class FailAfterFirstImageClient(FakeImageClient):
+    async def generate_image(self, *, prompt, size="1024x1024", format="png", seed=None):
+        self.prompts.append(prompt)
+        if len(self.prompts) > 1:
+            raise RuntimeError("second compare image failed")
         return ImageGenerationResult(bytes=b"PNG", format="png", mime_type="image/png")
 
 
@@ -307,15 +327,79 @@ async def test_image_generator_populates_hook_image_for_show_realism_intro(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_image_generator_skips_diagram_compare_slots() -> None:
+async def test_image_generator_writes_compare_pair_and_preserves_compare_text(tmp_path) -> None:
+    store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
     client = FakeImageClient()
     state = _state(
         diagram_slot="diagram-compare",
         section_plan=_plan(role="compare", intent="compare_variants"),
-        section=_section(),
+        section=_section(
+            diagram_compare=DiagramCompareContent(
+                before_svg="<svg />",
+                after_svg="<svg />",
+                before_label="Unbalanced forces",
+                after_label="Balanced forces",
+                before_details=["Net force is not zero."],
+                after_details=["Net force cancels out."],
+                caption="Compare the force balance in the same system.",
+                alt_text="Before and after force balance comparison.",
+            ),
+            comparison_grid=ComparisonGridContent(
+                title="Force comparison",
+                columns=[
+                    ComparisonColumn(id="before", title="Before push", summary="Unbalanced"),
+                    ComparisonColumn(id="after", title="After push", summary="Balanced"),
+                ],
+                rows=[ComparisonRow(criterion="Net force", values=["Non-zero", "Zero"])],
+            ),
+        ),
+        compare_before_label="Before push",
+        compare_after_label="After push",
     )
 
-    result = await image_generator(state, _client=client)
+    result = await image_generator(state, _store=store, _client=client)
 
-    assert result == {"completed_nodes": ["image_generator"]}
-    assert client.prompts == []
+    section = result["generated_sections"]["s-01"]
+    assert section.diagram_compare is not None
+    assert section.diagram_compare.before_image_url == (
+        "http://test/images/gen-image-test/s-01/compare-before.png"
+    )
+    assert section.diagram_compare.after_image_url == (
+        "http://test/images/gen-image-test/s-01/compare-after.png"
+    )
+    assert section.diagram_compare.before_label == "Unbalanced forces"
+    assert section.diagram_compare.after_label == "Balanced forces"
+    assert section.diagram_compare.before_details == ["Net force is not zero."]
+    assert section.diagram_compare.after_details == ["Net force cancels out."]
+    assert section.diagram_compare.caption == "Compare the force balance in the same system."
+    assert section.diagram_compare.alt_text == "Before and after force balance comparison."
+    assert len(client.prompts) == 2
+    assert "same subject, same viewpoint" in client.prompts[0]
+    assert "'Before push'" in client.prompts[0]
+    assert "'After push'" in client.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_image_generator_returns_recoverable_error_when_compare_pair_fails(tmp_path) -> None:
+    store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
+    client = FailAfterFirstImageClient()
+    state = _state(
+        diagram_slot="diagram-compare",
+        section_plan=_plan(role="compare", intent="compare_variants"),
+        section=_section(
+            diagram_compare=DiagramCompareContent(
+                before_label="Before",
+                after_label="After",
+                caption="A compare caption",
+                alt_text="A compare alt text",
+            )
+        ),
+        compare_before_label="Before",
+        compare_after_label="After",
+    )
+
+    result = await image_generator(state, _store=store, _client=client)
+
+    assert result["completed_nodes"] == ["image_generator"]
+    assert result["errors"][0].recoverable is True
+    assert "DiagramCompare pair failed" in result["errors"][0].message

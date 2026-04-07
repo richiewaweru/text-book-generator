@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from pipeline.prompts.diagram import (
+    build_compare_image_prompts,
     build_hook_image_prompt,
     build_image_generation_prompt,
     build_series_step_image_prompt,
@@ -13,6 +14,7 @@ from pipeline.state import PipelineError, TextbookPipelineState
 from pipeline.storage.image_store import get_image_store
 from pipeline.types.section_content import (
     DiagramContent,
+    DiagramCompareContent,
     DiagramSeriesContent,
     DiagramSeriesStep,
     HookImage,
@@ -249,6 +251,80 @@ async def _maybe_generate_hook_image(
         return section
 
 
+def _seed_compare_content(section, composition_plan) -> DiagramCompareContent:
+    if section.diagram_compare is not None:
+        return section.diagram_compare
+    before_label = composition_plan.diagram.compare_before_label or "Before"
+    after_label = composition_plan.diagram.compare_after_label or "After"
+    return DiagramCompareContent(
+        before_label=before_label,
+        after_label=after_label,
+        caption=f"Before and after comparison for {section.header.title}",
+        alt_text=f"Before and after comparison illustrating changes in {section.header.title}.",
+    )
+
+
+async def _generate_compare_images(
+    *,
+    state: TextbookPipelineState,
+    section,
+    composition_plan,
+    sid: str,
+    store,
+    client,
+    generation_id: str,
+):
+    compare_content = _seed_compare_content(section, composition_plan)
+    prompt_before_label = (
+        composition_plan.diagram.compare_before_label or compare_content.before_label or "Before"
+    )
+    prompt_after_label = (
+        composition_plan.diagram.compare_after_label or compare_content.after_label or "After"
+    )
+    before_prompt, after_prompt = build_compare_image_prompts(
+        section=section,
+        diagram_plan=composition_plan.diagram,
+        style_context=state.style_context,
+        before_label=prompt_before_label,
+        after_label=prompt_after_label,
+    )
+
+    try:
+        before_bytes, after_bytes = await asyncio.gather(
+            _generate_with_retry(client, before_prompt, _IMAGE_TIMEOUT_SECONDS),
+            _generate_with_retry(client, after_prompt, _IMAGE_TIMEOUT_SECONDS),
+        )
+        before_url, after_url = await asyncio.gather(
+            store.store_image(
+                before_bytes,
+                generation_id=generation_id,
+                section_id=sid,
+                filename="compare-before.png",
+                format="png",
+            ),
+            store.store_image(
+                after_bytes,
+                generation_id=generation_id,
+                section_id=sid,
+                filename="compare-after.png",
+                format="png",
+            ),
+        )
+    except Exception as exc:
+        raise RuntimeError(f"DiagramCompare pair failed: {exc}") from exc
+
+    return section.model_copy(
+        update={
+            "diagram_compare": compare_content.model_copy(
+                update={
+                    "before_image_url": before_url,
+                    "after_image_url": after_url,
+                }
+            )
+        }
+    )
+
+
 async def image_generator(
     state: TextbookPipelineState | dict,
     *,
@@ -294,10 +370,6 @@ async def image_generator(
         }
 
     visual_slot = _get_visual_slot(state)
-    if visual_slot == "diagram-compare":
-        logger.info("image_generator: diagram-compare stays SVG-only, skipping section %s", sid)
-        return {"completed_nodes": ["image_generator"]}
-
     generation_id = state.request.generation_id or "unknown"
 
     try:
@@ -306,6 +378,16 @@ async def image_generator(
 
         if visual_slot == "diagram-series":
             updated_section = await _generate_series_images(
+                state=state,
+                section=section,
+                composition_plan=composition_plan,
+                sid=sid,
+                store=store,
+                client=client,
+                generation_id=generation_id,
+            )
+        elif visual_slot == "diagram-compare":
+            updated_section = await _generate_compare_images(
                 state=state,
                 section=section,
                 composition_plan=composition_plan,

@@ -79,9 +79,21 @@ def _diagram_type(section) -> str:
         return "process"
     if section.timeline is not None:
         return "timeline"
-    if section.comparison_grid is not None:
+    if section.diagram_compare is not None or section.comparison_grid is not None:
         return "comparison"
     return "concept_map"
+
+
+def _compare_labels(section) -> tuple[str | None, str | None]:
+    if section.comparison_grid is not None and len(section.comparison_grid.columns) >= 2:
+        before = section.comparison_grid.columns[0].title.strip() or "Before"
+        after = section.comparison_grid.columns[1].title.strip() or "After"
+        return before, after
+    if section.diagram_compare is not None:
+        before = section.diagram_compare.before_label.strip() or "Before"
+        after = section.diagram_compare.after_label.strip() or "After"
+        return before, after
+    return None, None
 
 
 def pick_interaction_type(state: TextbookPipelineState, section) -> str:
@@ -113,6 +125,7 @@ def _heuristic_fallback(
     if section.definition is not None:
         key_concepts.append(section.definition.term)
     key_concepts.extend(section.explanation.emphasis[:3])
+    compare_before_label, compare_after_label = _compare_labels(section)
 
     return CompositionPlan(
         diagram=DiagramPlan(
@@ -124,6 +137,8 @@ def _heuristic_fallback(
                 else "The reviewed section plan keeps this section text-first."
             ),
             diagram_type=_diagram_type(section) if diagram_enabled else None,
+            compare_before_label=compare_before_label if diagram_enabled else None,
+            compare_after_label=compare_after_label if diagram_enabled else None,
             focus_area="process" if section.process is not None else "explanation",
             key_concepts=key_concepts[:4],
             visual_guidance=(
@@ -193,6 +208,7 @@ class CompositionDecision(BaseModel):
 def _to_composition_plan(
     decision: CompositionDecision,
     *,
+    section,
     diagram_allowed: bool,
     interaction_allowed: bool,
     visual_mode: str | None = None,
@@ -200,11 +216,14 @@ def _to_composition_plan(
     """Convert LLM decision to CompositionPlan, enforcing guard-rail overrides."""
 
     enabled = decision.diagram.enabled and diagram_allowed
+    compare_before_label, compare_after_label = _compare_labels(section)
     diagram = DiagramPlan(
         enabled=enabled,
         mode=visual_mode if enabled else None,
         reasoning=decision.diagram.reasoning,
         diagram_type=decision.diagram.diagram_type,
+        compare_before_label=compare_before_label if enabled else None,
+        compare_after_label=compare_after_label if enabled else None,
         key_concepts=decision.diagram.key_concepts,
         visual_guidance=decision.diagram.visual_guidance,
         fallback_from_interaction=decision.diagram.fallback_from_interaction,
@@ -326,6 +345,7 @@ async def composition_planner(
 
         composition = _to_composition_plan(
             result.output,
+            section=section,
             diagram_allowed=diagram_ok,
             interaction_allowed=interaction_ok,
             visual_mode=visual_mode,
