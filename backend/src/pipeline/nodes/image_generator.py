@@ -9,7 +9,10 @@ from pipeline.prompts.diagram import (
     build_image_generation_prompt,
     build_series_step_image_prompt,
 )
-from pipeline.providers.gemini_image_client import get_gemini_image_client
+from pipeline.providers.gemini_image_client import (
+    get_gemini_image_client,
+    resolve_gemini_image_api_key,
+)
 from pipeline.state import PipelineError, TextbookPipelineState
 from pipeline.storage.image_store import get_image_store
 from pipeline.types.section_content import (
@@ -79,6 +82,45 @@ def _visual_intent(state: TextbookPipelineState) -> str:
     return getattr(visual_policy, "intent", None) or "explain_structure"
 
 
+async def _store_image_with_logging(
+    store,
+    *,
+    image_bytes: bytes,
+    generation_id: str,
+    section_id: str,
+    filename: str,
+    format: str,
+    variant: str,
+) -> str:
+    try:
+        image_url = await store.store_image(
+            image_bytes,
+            generation_id=generation_id,
+            section_id=section_id,
+            filename=filename,
+            format=format,
+        )
+    except Exception as exc:
+        logger.error(
+            "image_generator: FAIL sid=%s reason=store_failed variant=%s error_type=%s error=%s",
+            section_id,
+            variant,
+            type(exc).__name__,
+            exc,
+        )
+        raise RuntimeError(
+            f"Image storage failed for {variant}: {type(exc).__name__}: {exc}"
+        ) from exc
+
+    logger.info(
+        "image_generator: STORE_SUCCESS sid=%s variant=%s image_url=%s",
+        section_id,
+        variant,
+        image_url,
+    )
+    return image_url
+
+
 async def _generate_single_image(
     *,
     state: TextbookPipelineState,
@@ -94,13 +136,25 @@ async def _generate_single_image(
         diagram_plan=composition_plan.diagram,
         style_context=state.style_context,
     )
+    logger.info(
+        "image_generator: CALLING_GEMINI sid=%s variant=single prompt_length=%d",
+        sid,
+        len(prompt),
+    )
     image_bytes = await _generate_with_retry(client, prompt, _IMAGE_TIMEOUT_SECONDS)
-    image_url = await store.store_image(
-        image_bytes,
+    logger.info(
+        "image_generator: GEMINI_SUCCESS sid=%s variant=single bytes=%d",
+        sid,
+        len(image_bytes),
+    )
+    image_url = await _store_image_with_logging(
+        store,
+        image_bytes=image_bytes,
         generation_id=generation_id,
         section_id=sid,
         filename="diagram.png",
         format="png",
+        variant="single",
     )
 
     existing = section.diagram or DiagramContent(
@@ -164,13 +218,29 @@ async def _generate_series_images(
         )
 
         try:
+            logger.info(
+                "image_generator: CALLING_GEMINI sid=%s variant=series step=%d/%d prompt_length=%d",
+                sid,
+                index + 1,
+                len(seed_steps),
+                len(prompt),
+            )
             image_bytes = await _generate_with_retry(client, prompt, _IMAGE_TIMEOUT_SECONDS)
-            image_url = await store.store_image(
-                image_bytes,
+            logger.info(
+                "image_generator: GEMINI_SUCCESS sid=%s variant=series step=%d/%d bytes=%d",
+                sid,
+                index + 1,
+                len(seed_steps),
+                len(image_bytes),
+            )
+            image_url = await _store_image_with_logging(
+                store,
+                image_bytes=image_bytes,
                 generation_id=generation_id,
                 section_id=sid,
                 filename=f"series-step-{index + 1}.png",
                 format="png",
+                variant=f"series-step-{index + 1}",
             )
             rendered_steps.append(step.model_copy(update={"image_url": image_url}))
         except Exception as exc:
@@ -222,13 +292,25 @@ async def _maybe_generate_hook_image(
     )
 
     try:
+        logger.info(
+            "image_generator: CALLING_GEMINI sid=%s variant=hook prompt_length=%d",
+            sid,
+            len(prompt),
+        )
         image_bytes = await _generate_with_retry(client, prompt, _IMAGE_TIMEOUT_SECONDS)
-        image_url = await store.store_image(
-            image_bytes,
+        logger.info(
+            "image_generator: GEMINI_SUCCESS sid=%s variant=hook bytes=%d",
+            sid,
+            len(image_bytes),
+        )
+        image_url = await _store_image_with_logging(
+            store,
+            image_bytes=image_bytes,
             generation_id=generation_id,
             section_id=sid,
             filename="hook.png",
             format="png",
+            variant="hook",
         )
         return section.model_copy(
             update={
@@ -290,24 +372,40 @@ async def _generate_compare_images(
     )
 
     try:
+        logger.info(
+            "image_generator: CALLING_GEMINI sid=%s variant=compare prompts=%d,%d",
+            sid,
+            len(before_prompt),
+            len(after_prompt),
+        )
         before_bytes, after_bytes = await asyncio.gather(
             _generate_with_retry(client, before_prompt, _IMAGE_TIMEOUT_SECONDS),
             _generate_with_retry(client, after_prompt, _IMAGE_TIMEOUT_SECONDS),
         )
+        logger.info(
+            "image_generator: GEMINI_SUCCESS sid=%s variant=compare before_bytes=%d after_bytes=%d",
+            sid,
+            len(before_bytes),
+            len(after_bytes),
+        )
         before_url, after_url = await asyncio.gather(
-            store.store_image(
-                before_bytes,
+            _store_image_with_logging(
+                store,
+                image_bytes=before_bytes,
                 generation_id=generation_id,
                 section_id=sid,
                 filename="compare-before.png",
                 format="png",
+                variant="compare-before",
             ),
-            store.store_image(
-                after_bytes,
+            _store_image_with_logging(
+                store,
+                image_bytes=after_bytes,
                 generation_id=generation_id,
                 section_id=sid,
                 filename="compare-after.png",
                 format="png",
+                variant="compare-after",
             ),
         )
     except Exception as exc:
@@ -336,14 +434,31 @@ async def image_generator(
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
     section = state.generated_sections.get(sid)
+    generation_id = state.request.generation_id or "unknown"
 
     composition_plan = (state.composition_plans or {}).get(sid)
     if not composition_plan or not composition_plan.diagram.enabled:
+        logger.info(
+            "image_generator: SKIP sid=%s reason=diagram_not_enabled plan_exists=%s enabled=%s",
+            sid,
+            composition_plan is not None,
+            composition_plan.diagram.enabled if composition_plan is not None else False,
+        )
         return {"completed_nodes": ["image_generator"]}
     if composition_plan.diagram.mode != "image":
+        logger.info(
+            "image_generator: SKIP sid=%s reason=mode_not_image mode=%s",
+            sid,
+            composition_plan.diagram.mode,
+        )
         return {"completed_nodes": ["image_generator"]}
 
     if section is None:
+        logger.error(
+            "image_generator: FAIL sid=%s reason=no_section_content available_sections=%s",
+            sid,
+            list(state.generated_sections.keys()),
+        )
         return {
             "errors": [
                 PipelineError(
@@ -357,6 +472,10 @@ async def image_generator(
         }
 
     if state.style_context is None:
+        logger.error(
+            "image_generator: FAIL sid=%s reason=no_style_context",
+            sid,
+        )
         return {
             "errors": [
                 PipelineError(
@@ -370,12 +489,99 @@ async def image_generator(
         }
 
     visual_slot = _get_visual_slot(state)
-    generation_id = state.request.generation_id or "unknown"
+    logger.info(
+        "image_generator: START sid=%s generation_id=%s slot=%s intent=%s",
+        sid,
+        generation_id,
+        visual_slot,
+        _visual_intent(state),
+    )
 
     try:
         store = _store or get_image_store()
-        client = _client or get_gemini_image_client()
+        logger.info(
+            "image_generator: store_resolved sid=%s store_type=%s source=%s target=%s",
+            sid,
+            type(store).__name__,
+            "injected" if _store is not None else "default",
+            store.describe_target(),
+        )
+    except Exception as exc:
+        logger.error(
+            "image_generator: FAIL sid=%s reason=store_init_failed error_type=%s error=%s",
+            sid,
+            type(exc).__name__,
+            exc,
+        )
+        return {
+            "errors": [
+                PipelineError(
+                    node="image_generator",
+                    section_id=sid,
+                    message=f"Image store init failed: {type(exc).__name__}: {exc}",
+                    recoverable=True,
+                )
+            ],
+            "completed_nodes": ["image_generator"],
+        }
 
+    api_key = resolve_gemini_image_api_key()
+    logger.info(
+        "image_generator: api_key_present=%s sid=%s checked_vars=%s",
+        bool(api_key),
+        sid,
+        ",".join(
+            ("GOOGLE_CLOUD_NANO_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY")
+        ),
+    )
+    if _client is None and not api_key:
+        logger.error(
+            "image_generator: FAIL sid=%s reason=no_api_key",
+            sid,
+        )
+        return {
+            "errors": [
+                PipelineError(
+                    node="image_generator",
+                    section_id=sid,
+                    message=(
+                        "No Gemini API key found for image generation. "
+                        "Set GOOGLE_CLOUD_NANO_API_KEY, GOOGLE_API_KEY, or GEMINI_API_KEY."
+                    ),
+                    recoverable=True,
+                )
+            ],
+            "completed_nodes": ["image_generator"],
+        }
+
+    try:
+        client = _client or get_gemini_image_client()
+        logger.info(
+            "image_generator: client_resolved sid=%s client_type=%s source=%s",
+            sid,
+            type(client).__name__,
+            "injected" if _client is not None else "default",
+        )
+    except Exception as exc:
+        logger.error(
+            "image_generator: FAIL sid=%s reason=client_init_failed error_type=%s error=%s",
+            sid,
+            type(exc).__name__,
+            exc,
+        )
+        return {
+            "errors": [
+                PipelineError(
+                    node="image_generator",
+                    section_id=sid,
+                    message=f"Gemini image client init failed: {type(exc).__name__}: {exc}",
+                    recoverable=True,
+                )
+            ],
+            "completed_nodes": ["image_generator"],
+        }
+
+    try:
         if visual_slot == "diagram-series":
             updated_section = await _generate_series_images(
                 state=state,
@@ -419,19 +625,29 @@ async def image_generator(
 
         generated = dict(state.generated_sections)
         generated[sid] = updated_section
+        logger.info(
+            "image_generator: SUCCESS sid=%s slot=%s",
+            sid,
+            visual_slot,
+        )
         return {
             "generated_sections": generated,
             "completed_nodes": ["image_generator"],
         }
     except asyncio.TimeoutError:
+        logger.error(
+            "image_generator: FAIL sid=%s reason=timeout attempts=%d",
+            sid,
+            _MAX_ATTEMPTS,
+        )
         return {
             "errors": [
                 PipelineError(
                     node="image_generator",
                     section_id=sid,
                     message=(
-                        f"Image generation timed out after {_MAX_ATTEMPTS} attempts. "
-                        "Section ships without image."
+                        f"Image generation timed out after {_MAX_ATTEMPTS} attempts "
+                        "while calling Gemini."
                     ),
                     recoverable=True,
                 )
@@ -439,12 +655,21 @@ async def image_generator(
             "completed_nodes": ["image_generator"],
         }
     except Exception as exc:
+        logger.error(
+            "image_generator: FAIL sid=%s reason=unexpected error_type=%s error=%s",
+            sid,
+            type(exc).__name__,
+            exc,
+        )
+        message = str(exc)
+        if not message.startswith(("Image storage failed", "DiagramCompare pair failed")):
+            message = f"Image generation failed: {type(exc).__name__}: {exc}"
         return {
             "errors": [
                 PipelineError(
                     node="image_generator",
                     section_id=sid,
-                    message=f"Image generation failed after {_MAX_ATTEMPTS} attempts: {exc}",
+                    message=message,
                     recoverable=True,
                 )
             ],

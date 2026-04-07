@@ -213,6 +213,33 @@ class FailAfterFirstImageClient(FakeImageClient):
         return ImageGenerationResult(bytes=b"PNG", format="png", mime_type="image/png")
 
 
+class FailingStore(LocalImageStore):
+    async def store_image(
+        self,
+        image_bytes: bytes,
+        *,
+        generation_id: str,
+        section_id: str,
+        filename: str,
+        format: str = "png",
+    ) -> str:
+        _ = (image_bytes, generation_id, section_id, filename, format)
+        raise RuntimeError("upload denied")
+
+
+def _capture_node_logs(monkeypatch) -> list[str]:
+    messages: list[str] = []
+
+    def _record(message: str, *args, **kwargs) -> None:
+        _ = kwargs
+        messages.append(message % args if args else message)
+
+    monkeypatch.setattr("pipeline.nodes.image_generator.logger.info", _record)
+    monkeypatch.setattr("pipeline.nodes.image_generator.logger.error", _record)
+    monkeypatch.setattr("pipeline.nodes.image_generator.logger.warning", _record)
+    return messages
+
+
 def _plan(
     *,
     sid: str = "s-01",
@@ -403,3 +430,127 @@ async def test_image_generator_returns_recoverable_error_when_compare_pair_fails
     assert result["completed_nodes"] == ["image_generator"]
     assert result["errors"][0].recoverable is True
     assert "DiagramCompare pair failed" in result["errors"][0].message
+
+
+@pytest.mark.asyncio
+async def test_image_generator_logs_success_path(tmp_path, monkeypatch) -> None:
+    store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
+    client = FakeImageClient()
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    )
+
+    messages = _capture_node_logs(monkeypatch)
+
+    result = await image_generator(state, _store=store, _client=client)
+
+    assert result["generated_sections"]["s-01"].diagram is not None
+    assert any("image_generator: START sid=s-01" in message for message in messages)
+    assert any("image_generator: CALLING_GEMINI sid=s-01 variant=single" in message for message in messages)
+    assert any("image_generator: STORE_SUCCESS sid=s-01 variant=single" in message for message in messages)
+    assert any("image_generator: SUCCESS sid=s-01 slot=diagram-block" in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_image_generator_returns_recoverable_error_when_api_key_missing(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    )
+
+    monkeypatch.setattr("pipeline.nodes.image_generator.get_image_store", lambda: store)
+    monkeypatch.setattr("pipeline.nodes.image_generator.resolve_gemini_image_api_key", lambda: None)
+    messages = _capture_node_logs(monkeypatch)
+
+    result = await image_generator(state)
+
+    assert result["completed_nodes"] == ["image_generator"]
+    assert result["errors"][0].recoverable is True
+    assert "No Gemini API key found for image generation." in result["errors"][0].message
+    assert any("image_generator: FAIL sid=s-01 reason=no_api_key" in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_image_generator_returns_recoverable_error_when_store_init_fails(
+    monkeypatch,
+) -> None:
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    )
+
+    def _boom():
+        raise RuntimeError("bucket unavailable")
+
+    monkeypatch.setattr("pipeline.nodes.image_generator.get_image_store", _boom)
+    messages = _capture_node_logs(monkeypatch)
+
+    result = await image_generator(state, _client=FakeImageClient())
+
+    assert result["completed_nodes"] == ["image_generator"]
+    assert result["errors"][0].recoverable is True
+    assert "Image store init failed: RuntimeError: bucket unavailable" == result["errors"][0].message
+    assert any("image_generator: FAIL sid=s-01 reason=store_init_failed" in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_image_generator_returns_recoverable_error_when_client_init_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    )
+
+    monkeypatch.setattr("pipeline.nodes.image_generator.get_image_store", lambda: store)
+    monkeypatch.setattr("pipeline.nodes.image_generator.resolve_gemini_image_api_key", lambda: "test-key")
+
+    def _boom():
+        raise RuntimeError("auth rejected")
+
+    monkeypatch.setattr("pipeline.nodes.image_generator.get_gemini_image_client", _boom)
+    messages = _capture_node_logs(monkeypatch)
+
+    result = await image_generator(state)
+
+    assert result["completed_nodes"] == ["image_generator"]
+    assert result["errors"][0].recoverable is True
+    assert result["errors"][0].message == "Gemini image client init failed: RuntimeError: auth rejected"
+    assert any("image_generator: FAIL sid=s-01 reason=client_init_failed" in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_image_generator_returns_recoverable_error_when_store_upload_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = FailingStore(base_path=tmp_path, base_url="http://test/images")
+    client = FakeImageClient()
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    )
+
+    messages = _capture_node_logs(monkeypatch)
+
+    result = await image_generator(state, _store=store, _client=client)
+
+    assert result["completed_nodes"] == ["image_generator"]
+    assert result["errors"][0].recoverable is True
+    assert "Image storage failed for single: RuntimeError: upload denied" in result["errors"][0].message
+    assert any(
+        "image_generator: FAIL sid=s-01 reason=store_failed variant=single" in message
+        for message in messages
+    )

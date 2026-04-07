@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import PackageNotFoundError, version
 from time import perf_counter
-from typing import Literal
+from typing import Awaitable, Callable, Literal, Sequence
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -64,6 +64,31 @@ class ReadinessResponse(BaseModel):
     dependencies: list[DependencyStatus]
     generations: GenerationSummary | None = None
     pdf_exports: PDFExportTelemetrySnapshot | None = None
+
+
+class ImageProbeResponse(BaseModel):
+    status: Literal["ok", "degraded", "unavailable"]
+    timestamp: str
+    version: str
+    dependencies: list[DependencyStatus]
+    probe_image_bytes: int | None = None
+
+
+ReadinessCheck = Callable[[], Awaitable[DependencyStatus]]
+ImageProbeRunner = Callable[[], Awaitable[tuple[list[DependencyStatus], int | None]]]
+
+_additional_readiness_checks: list[ReadinessCheck] = []
+_image_probe_runner: ImageProbeRunner | None = None
+
+
+def configure_health_extensions(
+    *,
+    readiness_checks: Sequence[ReadinessCheck] | None = None,
+    image_probe_runner: ImageProbeRunner | None = None,
+) -> None:
+    global _additional_readiness_checks, _image_probe_runner
+    _additional_readiness_checks = list(readiness_checks or [])
+    _image_probe_runner = image_probe_runner
 
 
 async def _check_database() -> DependencyStatus:
@@ -194,6 +219,16 @@ def _overall_status(dependencies: list[DependencyStatus]) -> Literal["ok", "degr
     return "ok"
 
 
+def _dependency_rollup(
+    dependencies: list[DependencyStatus],
+) -> Literal["ok", "degraded", "unavailable"]:
+    if any(dep.status == "unreachable" for dep in dependencies):
+        return "unavailable"
+    if any(dep.status != "ok" for dep in dependencies):
+        return "degraded"
+    return "ok"
+
+
 def _readiness_status_code(status: Literal["ok", "degraded", "unavailable"]) -> int:
     return 503 if status == "unavailable" else 200
 
@@ -212,14 +247,31 @@ async def health_check(request: Request) -> LivenessResponse:
 
 async def _build_readiness_payload(request: Request) -> ReadinessResponse:
     now = datetime.now(timezone.utc)
-    db_status, event_bus_status, playwright_status, temp_dir_status, generation_summary = await asyncio.gather(
+    (
+        db_status,
+        event_bus_status,
+        playwright_status,
+        temp_dir_status,
+        generation_summary,
+    ) = await asyncio.gather(
         _check_database(),
         _check_event_bus(),
         _check_playwright_runtime(),
         _check_pdf_temp_dir(),
         _get_generation_summary(),
     )
-    dependencies = [db_status, event_bus_status, playwright_status, temp_dir_status]
+    extra_statuses: list[DependencyStatus] = []
+    if _additional_readiness_checks:
+        extra_statuses = list(
+            await asyncio.gather(*(check() for check in _additional_readiness_checks))
+        )
+    dependencies = [
+        db_status,
+        event_bus_status,
+        playwright_status,
+        temp_dir_status,
+        *extra_statuses,
+    ]
     overall = _overall_status(dependencies)
     started_at = getattr(request.app.state, "started_at", None)
     uptime_seconds = (now - started_at).total_seconds() if started_at else None
@@ -250,5 +302,36 @@ async def readiness_check(request: Request) -> JSONResponse:
     payload = await _build_readiness_payload(request)
     return JSONResponse(
         status_code=_readiness_status_code(payload.status),
+        content=payload.model_dump(mode="json"),
+    )
+
+
+@router.post("/health/image/probe", response_model=ImageProbeResponse)
+async def image_probe_check() -> JSONResponse:
+    if _image_probe_runner is None:
+        payload = ImageProbeResponse(
+            status="degraded",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            version=__version__,
+            dependencies=[
+                DependencyStatus(
+                    name="image_probe",
+                    status="degraded",
+                    detail="No image probe runner configured.",
+                )
+            ],
+        )
+        return JSONResponse(status_code=503, content=payload.model_dump(mode="json"))
+
+    dependencies, probe_image_bytes = await _image_probe_runner()
+    payload = ImageProbeResponse(
+        status=_dependency_rollup(dependencies),
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        version=__version__,
+        dependencies=dependencies,
+        probe_image_bytes=probe_image_bytes,
+    )
+    return JSONResponse(
+        status_code=200 if payload.status == "ok" else 503,
         content=payload.model_dump(mode="json"),
     )
