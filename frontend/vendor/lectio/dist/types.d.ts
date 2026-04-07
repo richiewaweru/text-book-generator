@@ -267,8 +267,10 @@ export interface DiagramContent {
     figure_number?: number;
 }
 export interface DiagramCompareContent {
-    before_svg: string;
-    after_svg: string;
+    before_svg?: string;
+    after_svg?: string;
+    before_image_url?: string;
+    after_image_url?: string;
     before_label: string;
     after_label: string;
     before_details?: string[];

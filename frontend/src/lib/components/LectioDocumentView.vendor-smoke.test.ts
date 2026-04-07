@@ -8,15 +8,15 @@ import LectioDocumentView from './LectioDocumentView.svelte';
 const imagePipelineDocument = {
 	generation_id: 'gen_vendor_smoke',
 	subject: 'Newtonian motion',
-	context: 'A vendor-smoke lesson proving hook images and diagram-series images render end-to-end.',
-	template_id: 'diagram-led',
+	context: 'A vendor-smoke lesson proving hook, diagram-series, and diagram-compare images render end-to-end.',
+	template_id: 'open-canvas',
 	preset_id: 'blue-classroom',
 	status: 'completed',
 	section_manifest: [],
 	sections: [
 		{
 			section_id: 'sec_vendor_smoke',
-			template_id: 'diagram-led',
+			template_id: 'open-canvas',
 			header: {
 				title: 'Diagram-led walkthrough',
 				subject: 'Physics',
@@ -50,6 +50,16 @@ const imagePipelineDocument = {
 							'<svg viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg"><text x="12" y="44">Force applied</text></svg>'
 					}
 				]
+			},
+			diagram_compare: {
+				before_label: 'Before push',
+				after_label: 'After push',
+				before_image_url: '/images/compare-before.png',
+				after_image_url: '/images/compare-after.png',
+				before_details: ['Net force is not yet acting.'],
+				after_details: ['The net force now changes the motion.'],
+				caption: 'The same scene before and after the applied force changes the motion.',
+				alt_text: 'Before and after comparison showing the same object before and after a push.'
 			},
 			practice: {
 				problems: [
@@ -85,8 +95,8 @@ describe('LectioDocumentView vendor smoke', () => {
 		cleanup();
 	});
 
-	it('renders vendored hook and diagram-series images through the real Lectio package', async () => {
-		render(LectioDocumentView, {
+	it('renders vendored hook, diagram-series, and diagram-compare images through the real Lectio package', async () => {
+		const { container } = render(LectioDocumentView, {
 			props: {
 				document: imagePipelineDocument
 			}
@@ -96,6 +106,12 @@ describe('LectioDocumentView vendor smoke', () => {
 		expect(
 			screen.getByRole('img', { name: 'A generated step image for the diagram series.' })
 		).toBeTruthy();
+		expect(
+			container.querySelector('img[src="/images/compare-before.png"]')
+		).toBeTruthy();
+		expect(
+			container.querySelector('img[src="/images/compare-after.png"]')
+		).toBeTruthy();
 		expect(screen.getByText('Diagram-led walkthrough')).toBeTruthy();
 		expect(screen.getByText('Force changes motion')).toBeTruthy();
 
@@ -103,5 +119,11 @@ describe('LectioDocumentView vendor smoke', () => {
 
 		expect(screen.getByText('Step 2 of 2')).toBeTruthy();
 		expect(screen.getByText('Force applied')).toBeTruthy();
+
+		await fireEvent.input(screen.getByLabelText('Reveal the after state'), {
+			target: { value: '100' }
+		});
+
+		expect(screen.getByText('The net force now changes the motion.')).toBeTruthy();
 	});
 });

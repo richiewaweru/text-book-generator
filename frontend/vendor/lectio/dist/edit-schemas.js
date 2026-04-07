@@ -407,8 +407,10 @@ const schemasById = {
     'diagram-compare': {
         component_id: 'diagram-compare',
         fields: [
-            { field: 'before_svg', label: 'Before SVG', input: 'svg', required: true },
-            { field: 'after_svg', label: 'After SVG', input: 'svg', required: true },
+            { field: 'before_svg', label: 'Before SVG', input: 'svg', required: false },
+            { field: 'after_svg', label: 'After SVG', input: 'svg', required: false },
+            { field: 'before_image_url', label: 'Before image URL', input: 'text', required: false },
+            { field: 'after_image_url', label: 'After image URL', input: 'text', required: false },
             { field: 'before_label', label: 'Before label', input: 'text', required: true, maxWords: 6 },
             { field: 'after_label', label: 'After label', input: 'text', required: true, maxWords: 6 },
             { field: 'caption', label: 'Caption', input: 'textarea', required: true, maxWords: 60 },

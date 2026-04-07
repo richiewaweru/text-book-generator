@@ -10,6 +10,8 @@ class DiagramPlan(BaseModel):
     reasoning: str
     mode: Literal["svg", "image"] | None = None
     diagram_type: str | None = None
+    compare_before_label: str | None = None
+    compare_after_label: str | None = None
     focus_area: str | None = None
     key_concepts: list[str] = Field(default_factory=list)
     visual_guidance: str | None = None

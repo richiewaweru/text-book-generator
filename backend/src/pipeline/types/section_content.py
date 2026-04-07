@@ -354,8 +354,10 @@ class DiagramContent(BaseModel):
 
 
 class DiagramCompareContent(BaseModel):
-    before_svg: str
-    after_svg: str
+    before_svg: str = ""
+    after_svg: str = ""
+    before_image_url: Optional[str] = None
+    after_image_url: Optional[str] = None
     before_label: str
     after_label: str
     caption: str

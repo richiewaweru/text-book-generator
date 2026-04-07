@@ -223,3 +223,41 @@ def build_hook_image_prompt(
         f"Style: {visual_style}, realistic educational illustration, "
         "classroom-appropriate, grounded in a real-world scene, no text overlays."
     )
+
+
+def build_compare_image_prompts(
+    *,
+    section: SectionContent,
+    diagram_plan: DiagramPlan,
+    style_context: StyleContext,
+    before_label: str,
+    after_label: str,
+) -> tuple[str, str]:
+    visual_style = _translate_style_to_image_keywords(style_context)
+    shared_requirements = (
+        f"Educational before-and-after comparison for {section.header.title}. "
+        f"Concept: {section.hook.body[:220]}. "
+        f"Context: {section.explanation.body[:300]}. "
+        f"Style: {visual_style}. "
+        "Requirements: textbook quality, no text overlays, same subject, same viewpoint, "
+        "same framing, same camera distance, same composition, same background, and same "
+        "lighting in both images. Only the pedagogically meaningful change should differ "
+        "between the before and after states."
+    )
+
+    if diagram_plan.visual_guidance:
+        shared_requirements += f" Visual guidance: {diagram_plan.visual_guidance}."
+    if diagram_plan.key_concepts:
+        shared_requirements += f" Focus on: {', '.join(diagram_plan.key_concepts)}."
+
+    before_prompt = (
+        f"{shared_requirements} "
+        f"Render the BEFORE state for the comparison, aligned to the label '{before_label}'. "
+        "Show the baseline condition before the transformation happens."
+    )
+    after_prompt = (
+        f"{shared_requirements} "
+        f"Render the AFTER state for the comparison, aligned to the label '{after_label}'. "
+        "Show the transformed condition after the change while preserving the same scene."
+    )
+    return before_prompt, after_prompt

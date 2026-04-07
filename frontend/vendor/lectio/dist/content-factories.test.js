@@ -34,4 +34,12 @@ describe('content-factories', () => {
             expect(() => getEmptyContent(id)).not.toThrow();
         }
     });
+    it('seeds diagram compare content with both svg and image fields for builder parity', () => {
+        expect(getEmptyContent('diagram-compare')).toMatchObject({
+            before_svg: '',
+            after_svg: '',
+            before_image_url: '',
+            after_image_url: ''
+        });
+    });
 });

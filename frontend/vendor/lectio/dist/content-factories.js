@@ -123,6 +123,8 @@ const factories = {
     'diagram-compare': () => ({
         before_svg: '',
         after_svg: '',
+        before_image_url: '',
+        after_image_url: '',
         before_label: '',
         after_label: '',
         caption: '',

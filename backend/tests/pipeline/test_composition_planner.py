@@ -16,6 +16,10 @@ from pipeline.nodes.composition_planner import (
 from pipeline.state import StyleContext, TextbookPipelineState
 from pipeline.types.requests import GenerationMode, PipelineRequest, SectionPlan
 from pipeline.types.section_content import (
+    ComparisonColumn,
+    ComparisonGridContent,
+    ComparisonRow,
+    DiagramCompareContent,
     ExplanationContent,
     HookHeroContent,
     PracticeContent,
@@ -107,7 +111,12 @@ def _style_context() -> StyleContext:
     )
 
 
-def _section(sid: str = "s-01") -> SectionContent:
+def _section(
+    sid: str = "s-01",
+    *,
+    diagram_compare: DiagramCompareContent | None = None,
+    comparison_grid: ComparisonGridContent | None = None,
+) -> SectionContent:
     return SectionContent(
         section_id=sid,
         template_id="guided-concept-path",
@@ -135,6 +144,8 @@ def _section(sid: str = "s-01") -> SectionContent:
             ]
         ),
         what_next=WhatNextContent(body="Next we cover integrals", next="Integrals"),
+        diagram_compare=diagram_compare,
+        comparison_grid=comparison_grid,
     )
 
 
@@ -278,6 +289,7 @@ def test_to_composition_plan_enforces_guard_rails() -> None:
 
     plan = _to_composition_plan(
         decision,
+        section=_section("s-01"),
         diagram_allowed=False,
         interaction_allowed=False,
     )
@@ -311,6 +323,7 @@ def test_to_composition_plan_populates_interactions_list() -> None:
 
     plan = _to_composition_plan(
         decision,
+        section=_section("s-01"),
         diagram_allowed=True,
         interaction_allowed=True,
     )
@@ -320,6 +333,58 @@ def test_to_composition_plan_populates_interactions_list() -> None:
     # Singular field mirrors first enabled interaction
     assert plan.interaction.enabled is True
     assert plan.interaction.interaction_type == "graph_slider"
+
+
+def test_to_composition_plan_populates_compare_labels_from_comparison_grid() -> None:
+    decision = _mock_llm_decision(diagram_enabled=True)
+    plan = _to_composition_plan(
+        decision,
+        section=_section(
+            "s-01",
+            comparison_grid=ComparisonGridContent(
+                title="Compare",
+                columns=[
+                    ComparisonColumn(id="before", title="Before state", summary="Earlier"),
+                    ComparisonColumn(id="after", title="After state", summary="Later"),
+                ],
+                rows=[ComparisonRow(criterion="Motion", values=["Rest", "Movement"])],
+            ),
+        ),
+        diagram_allowed=True,
+        interaction_allowed=False,
+    )
+
+    assert plan.diagram.compare_before_label == "Before state"
+    assert plan.diagram.compare_after_label == "After state"
+
+
+def test_to_composition_plan_falls_back_to_existing_compare_labels_or_defaults() -> None:
+    decision = _mock_llm_decision(diagram_enabled=True)
+    seeded = _to_composition_plan(
+        decision,
+        section=_section(
+            "s-01",
+            diagram_compare=DiagramCompareContent(
+                before_label="Natural",
+                after_label="Driven",
+                caption="Caption",
+                alt_text="Alt text",
+            ),
+        ),
+        diagram_allowed=True,
+        interaction_allowed=False,
+    )
+    defaulted = _to_composition_plan(
+        decision,
+        section=_section("s-01"),
+        diagram_allowed=True,
+        interaction_allowed=False,
+    )
+
+    assert seeded.diagram.compare_before_label == "Natural"
+    assert seeded.diagram.compare_after_label == "Driven"
+    assert defaulted.diagram.compare_before_label is None
+    assert defaulted.diagram.compare_after_label is None
 
 
 _TEST_MODEL_OVERRIDES = {"fast": TestModel()}
