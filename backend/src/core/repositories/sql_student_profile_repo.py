@@ -3,6 +3,7 @@ import logging
 import uuid
 from datetime import datetime
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,16 @@ from core.ports.student_profile_repository import StudentProfileRepository
 from core.value_objects import GradeBand, TeacherRole
 
 logger = logging.getLogger(__name__)
+
+_LEGACY_AGE_DEFAULT = 18
+_LEGACY_EDUCATION_LEVEL_DEFAULT = "high_school"
+_LEGACY_INTERESTS_DEFAULT = "[]"
+_LEGACY_LEARNING_STYLE_DEFAULT = "reading_writing"
+_LEGACY_PREFERRED_NOTATION_DEFAULT = "plain"
+_LEGACY_PRIOR_KNOWLEDGE_DEFAULT = ""
+_LEGACY_GOALS_DEFAULT = ""
+_LEGACY_PREFERRED_DEPTH_DEFAULT = "standard"
+_LEGACY_LEARNER_DESCRIPTION_DEFAULT = ""
 
 
 def _safe_json_loads(raw: str | None, fallback):
@@ -37,6 +48,29 @@ def _safe_grade_band(raw: str | None) -> GradeBand:
     except ValueError:
         logger.warning("Unknown legacy default_grade_band '%s'; defaulting to high_school", raw)
         return GradeBand.HIGH_SCHOOL
+
+
+def _apply_legacy_profile_defaults(model: StudentProfileModel) -> None:
+    """Keep teacher-profile writes compatible with external hybrid schemas."""
+
+    if getattr(model, "age", None) is None:
+        model.age = _LEGACY_AGE_DEFAULT
+    if not getattr(model, "education_level", None):
+        model.education_level = _LEGACY_EDUCATION_LEVEL_DEFAULT
+    if not getattr(model, "interests", None):
+        model.interests = _LEGACY_INTERESTS_DEFAULT
+    if not getattr(model, "learning_style", None):
+        model.learning_style = _LEGACY_LEARNING_STYLE_DEFAULT
+    if not getattr(model, "preferred_notation", None):
+        model.preferred_notation = _LEGACY_PREFERRED_NOTATION_DEFAULT
+    if getattr(model, "prior_knowledge", None) is None:
+        model.prior_knowledge = _LEGACY_PRIOR_KNOWLEDGE_DEFAULT
+    if getattr(model, "goals", None) is None:
+        model.goals = _LEGACY_GOALS_DEFAULT
+    if not getattr(model, "preferred_depth", None):
+        model.preferred_depth = _LEGACY_PREFERRED_DEPTH_DEFAULT
+    if getattr(model, "learner_description", None) is None:
+        model.learner_description = _LEGACY_LEARNER_DESCRIPTION_DEFAULT
 
 
 class SqlStudentProfileRepository(StudentProfileRepository):
@@ -66,8 +100,21 @@ class SqlStudentProfileRepository(StudentProfileRepository):
             created_at=now,
             updated_at=now,
         )
+        _apply_legacy_profile_defaults(model)
         self._session.add(model)
-        await self._session.commit()
+        try:
+            await self._session.commit()
+        except SQLAlchemyError:
+            await self._session.rollback()
+            logger.exception(
+                "Teacher profile create failed",
+                extra={
+                    "user_id": profile.user_id,
+                    "profile_id": model.id,
+                    "teacher_role": profile.teacher_role.value,
+                },
+            )
+            raise
         await self._session.refresh(model)
         return self._to_entity(model)
 
@@ -87,7 +134,20 @@ class SqlStudentProfileRepository(StudentProfileRepository):
         model.school_or_org_name = profile.school_or_org_name
         model.delivery_preferences = profile.delivery_preferences.model_dump_json()
         model.updated_at = datetime.utcnow()
-        await self._session.commit()
+        _apply_legacy_profile_defaults(model)
+        try:
+            await self._session.commit()
+        except SQLAlchemyError:
+            await self._session.rollback()
+            logger.exception(
+                "Teacher profile update failed",
+                extra={
+                    "user_id": profile.user_id,
+                    "profile_id": model.id,
+                    "teacher_role": profile.teacher_role.value,
+                },
+            )
+            raise
         await self._session.refresh(model)
         return self._to_entity(model)
 
