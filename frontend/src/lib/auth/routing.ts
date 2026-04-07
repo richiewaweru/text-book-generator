@@ -29,6 +29,15 @@ export function resolveOnboardingGuard(user: User | null, editMode: boolean): st
 	return null;
 }
 
+export function shouldRedirectToOnboarding(user: User | null, path: string): boolean {
+	if (!user || user.has_profile) {
+		return false;
+	}
+
+	const safePaths = ['/login', '/onboarding', '/dashboard', '/studio'];
+	return !safePaths.some((safePath) => path.startsWith(safePath));
+}
+
 export async function navigateToLanding(
 	user: User,
 	navigate: (path: string, options: { replaceState: boolean }) => void | Promise<void>,
@@ -47,14 +56,23 @@ export async function navigateToLanding(
 	return destination;
 }
 
-export function resolveDashboardProfileFailure(error: unknown): { redirectTo?: string; message?: string } {
+export function resolveDashboardProfileFailure(
+	error: unknown,
+	options: { hasProfileHint?: boolean } = {}
+): { redirectTo?: string; message?: string } {
 	if (isApiError(error)) {
 		if (error.status === 401) {
 			return { redirectTo: '/login' };
 		}
 
 		if (error.status === 404) {
-			return { redirectTo: '/onboarding' };
+			return {
+				redirectTo: options.hasProfileHint ? getOnboardingRoute({ edit: true }) : '/onboarding'
+			};
+		}
+
+		if (error.status >= 500 && options.hasProfileHint) {
+			return { redirectTo: getOnboardingRoute({ edit: true }) };
 		}
 
 		return { message: error.detail };

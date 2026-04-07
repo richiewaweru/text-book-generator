@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime
 
@@ -9,6 +10,33 @@ from core.database.models import StudentProfileModel
 from core.entities.student_profile import DeliveryPreferences, TeacherProfile
 from core.ports.student_profile_repository import StudentProfileRepository
 from core.value_objects import GradeBand, TeacherRole
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_json_loads(raw: str | None, fallback):
+    if not raw:
+        return fallback
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _safe_teacher_role(raw: str | None) -> TeacherRole:
+    try:
+        return TeacherRole(raw or TeacherRole.TEACHER.value)
+    except ValueError:
+        logger.warning("Unknown legacy teacher_role '%s'; defaulting to teacher", raw)
+        return TeacherRole.TEACHER
+
+
+def _safe_grade_band(raw: str | None) -> GradeBand:
+    try:
+        return GradeBand(raw or GradeBand.HIGH_SCHOOL.value)
+    except ValueError:
+        logger.warning("Unknown legacy default_grade_band '%s'; defaulting to high_school", raw)
+        return GradeBand.HIGH_SCHOOL
 
 
 class SqlStudentProfileRepository(StudentProfileRepository):
@@ -65,19 +93,27 @@ class SqlStudentProfileRepository(StudentProfileRepository):
 
     @staticmethod
     def _to_entity(model: StudentProfileModel) -> TeacherProfile:
+        subjects = _safe_json_loads(model.subjects, [])
+        if not isinstance(subjects, list):
+            subjects = []
+
+        raw_preferences = _safe_json_loads(model.delivery_preferences, {})
+        if not isinstance(raw_preferences, dict):
+            raw_preferences = {}
+
         return TeacherProfile(
             id=model.id,
             user_id=model.user_id,
-            teacher_role=TeacherRole(model.teacher_role),
-            subjects=json.loads(model.subjects) if model.subjects else [],
-            default_grade_band=GradeBand(model.default_grade_band),
+            teacher_role=_safe_teacher_role(model.teacher_role),
+            subjects=[str(subject).strip() for subject in subjects if str(subject).strip()],
+            default_grade_band=_safe_grade_band(model.default_grade_band),
             default_audience_description=model.default_audience_description or "",
             curriculum_framework=model.curriculum_framework or "",
             classroom_context=model.classroom_context or "",
             planning_goals=model.planning_goals or "",
             school_or_org_name=model.school_or_org_name or "",
             delivery_preferences=DeliveryPreferences.model_validate(
-                json.loads(model.delivery_preferences) if model.delivery_preferences else {}
+                raw_preferences
             ),
             created_at=model.created_at,
             updated_at=model.updated_at,
