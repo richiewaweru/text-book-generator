@@ -7,7 +7,13 @@ const { authState } = vi.hoisted(() => ({
 }));
 
 vi.mock('$lib/stores/auth', () => ({
-	getToken: () => authState.token
+	getToken: () => authState.token,
+	authToken: {
+		subscribe(run: (value: string | null) => void) {
+			run(authState.token);
+			return () => {};
+		}
+	}
 }));
 
 import {

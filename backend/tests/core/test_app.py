@@ -53,6 +53,16 @@ def test_cors_localhost_origin_expands_to_local_variants() -> None:
     ]
 
 
+def test_images_static_route_is_mounted() -> None:
+    image_routes = [
+        route for route in app_module.app.routes
+        if getattr(route, "path", None) == "/images"
+    ]
+
+    assert image_routes, "Expected /images static mount to be registered"
+    assert getattr(image_routes[0], "name", None) == "images"
+
+
 @pytest.mark.asyncio
 async def test_stale_generations_marked_failed_only_when_older_than_threshold(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "stale-cutoff.db"

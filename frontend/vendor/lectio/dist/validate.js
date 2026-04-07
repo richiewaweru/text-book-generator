@@ -87,6 +87,10 @@ function validateDiagramSeries(content, warnings) {
     if (content.diagrams.length > 4)
         warnings.push(warn('DiagramSeries', 'diagrams max 4'));
     content.diagrams.forEach((diagram, index) => {
+        const hasSvg = Boolean(diagram.svg_content?.trim());
+        const hasImage = Boolean(diagram.image_url?.trim());
+        if (!hasSvg && !hasImage)
+            warnings.push(warn('DiagramSeries', `diagram ${index + 1} requires svg_content or image_url`));
         if (words(diagram.step_label) > 8)
             warnings.push(warn('DiagramSeries', `diagram ${index + 1} step_label exceeds 8 words`));
         if (words(diagram.caption) > 40)
