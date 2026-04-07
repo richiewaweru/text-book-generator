@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { fromStore } from 'svelte/store';
+	import { shouldRedirectToOnboarding } from '$lib/auth/routing';
 	import { fetchCurrentUser } from '$lib/api/auth';
 	import { authInitialized, authIsAuthenticated, authUser, bootstrapAuth, logout } from '$lib/stores/auth';
 
@@ -24,7 +25,6 @@
 		if (!initialized.current) return;
 		const path = page.url.pathname;
 		const isLogin = path.startsWith('/login');
-		const isOnboarding = path.startsWith('/onboarding');
 		if (isPrintTextbookRoute) {
 			return;
 		}
@@ -36,7 +36,7 @@
 			return;
 		}
 
-		if (!user.current.has_profile && !isOnboarding) {
+		if (shouldRedirectToOnboarding(user.current, path)) {
 			goto('/onboarding', { replaceState: true });
 		}
 	});

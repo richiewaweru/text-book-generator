@@ -9,7 +9,8 @@ import {
 	navigateToLanding,
 	resolveDashboardProfileFailure,
 	resolveLandingRoute,
-	resolveOnboardingGuard
+	resolveOnboardingGuard,
+	shouldRedirectToOnboarding
 } from './routing';
 
 const baseUser: User = {
@@ -36,6 +37,14 @@ describe('auth routing helpers', () => {
 		expect(resolveOnboardingGuard(baseUser, false)).toBeNull();
 	});
 
+	it('only uses the shell onboarding redirect on routes that cannot self-heal', () => {
+		expect(shouldRedirectToOnboarding(baseUser, '/')).toBe(true);
+		expect(shouldRedirectToOnboarding(baseUser, '/dashboard')).toBe(false);
+		expect(shouldRedirectToOnboarding(baseUser, '/studio')).toBe(false);
+		expect(shouldRedirectToOnboarding(baseUser, '/onboarding')).toBe(false);
+		expect(shouldRedirectToOnboarding({ ...baseUser, has_profile: true }, '/')).toBe(false);
+	});
+
 	it('detects onboarding edit mode and builds the edit route', () => {
 		expect(getOnboardingRoute()).toBe('/onboarding');
 		expect(getOnboardingRoute({ edit: true })).toBe('/onboarding?mode=edit');
@@ -47,8 +56,22 @@ describe('auth routing helpers', () => {
 		expect(resolveDashboardProfileFailure(new ApiError(404, 'Profile not found'))).toEqual({
 			redirectTo: '/onboarding'
 		});
+		expect(
+			resolveDashboardProfileFailure(new ApiError(404, 'Profile not found'), {
+				hasProfileHint: true
+			})
+		).toEqual({
+			redirectTo: '/onboarding?mode=edit'
+		});
 		expect(resolveDashboardProfileFailure(new ApiError(401, 'Invalid or expired token'))).toEqual({
 			redirectTo: '/login'
+		});
+		expect(
+			resolveDashboardProfileFailure(new ApiError(500, 'Legacy row mismatch'), {
+				hasProfileHint: true
+			})
+		).toEqual({
+			redirectTo: '/onboarding?mode=edit'
 		});
 		expect(resolveDashboardProfileFailure(new ApiError(500, 'Server exploded'))).toEqual({
 			message: 'Server exploded'

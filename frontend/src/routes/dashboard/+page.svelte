@@ -29,7 +29,9 @@
 		try {
 			profile = await getProfile();
 		} catch (err) {
-			const resolution = resolveDashboardProfileFailure(err);
+			const resolution = resolveDashboardProfileFailure(err, {
+				hasProfileHint: user.current?.has_profile ?? false
+			});
 			if (resolution.redirectTo) {
 				if (resolution.redirectTo === '/login') {
 					logout();

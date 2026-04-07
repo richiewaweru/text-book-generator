@@ -15,6 +15,7 @@
 	let errorMessage: string | null = $state(null);
 	let loadingProfile = $state(false);
 	let initialData: TeacherProfileUpsertRequest | null = $state(null);
+	let recoveringExistingProfile = $state(false);
 
 	const user = fromStore(authUser);
 	const editMode = $derived(isOnboardingEditMode(page.url));
@@ -40,7 +41,7 @@
 			return;
 		}
 
-		if (!editMode) {
+		if (!editMode && user.current?.has_profile) {
 			return;
 		}
 
@@ -48,6 +49,11 @@
 		try {
 			const profile = await getProfile();
 			initialData = toProfileFormData(profile);
+			recoveringExistingProfile = !editMode;
+
+			if (!user.current?.has_profile && user.current) {
+				updateUser({ ...user.current, has_profile: true });
+			}
 		} catch (err) {
 			if (isApiError(err) && err.status === 401) {
 				logout();
@@ -56,7 +62,9 @@
 			}
 
 			if (isApiError(err) && err.status === 404) {
-				goto(getOnboardingRoute(), { replaceState: true });
+				if (editMode) {
+					goto(getOnboardingRoute(), { replaceState: true });
+				}
 				return;
 			}
 
@@ -71,10 +79,19 @@
 		errorMessage = null;
 
 		try {
-			if (editMode) {
+			if (editMode || recoveringExistingProfile) {
 				await updateProfile(data);
 			} else {
-				await createProfile(data);
+				try {
+					await createProfile(data);
+				} catch (err) {
+					if (isApiError(err) && err.status === 409) {
+						recoveringExistingProfile = true;
+						await updateProfile(data);
+					} else {
+						throw err;
+					}
+				}
 			}
 
 			try {
@@ -102,14 +119,20 @@
 </script>
 
 <div class="onboarding">
-	<h1>{editMode ? 'Update your teacher setup' : `Welcome${user.current?.name ? `, ${user.current.name}` : ''}!`}</h1>
+	<h1>{editMode || recoveringExistingProfile ? 'Update your teacher setup' : `Welcome${user.current?.name ? `, ${user.current.name}` : ''}!`}</h1>
 	<p>
-		{#if editMode}
+		{#if editMode || recoveringExistingProfile}
 			Refresh your saved teaching defaults so Studio can start closer to how you actually work.
 		{:else}
 			Let's capture your teaching context, classroom defaults, and lesson preferences so the product can personalise your workspace.
 		{/if}
 	</p>
+
+	{#if recoveringExistingProfile && !editMode}
+		<p class="recovery-note">
+			We found an existing profile for this account and switched into recovery mode so you can resave it safely.
+		</p>
+	{/if}
 
 	{#if loadingProfile}
 		<p>Loading your profile...</p>
@@ -118,7 +141,7 @@
 			onsubmit={handleSubmit}
 			disabled={saving}
 			initialData={initialData}
-			submitLabel={editMode ? 'Save Profile' : 'Complete Setup'}
+			submitLabel={editMode || recoveringExistingProfile ? 'Save Profile' : 'Complete Setup'}
 		/>
 	{/if}
 
@@ -155,5 +178,14 @@
 		border-radius: 12px;
 		background: rgba(255, 242, 238, 0.88);
 		border: 1px solid rgba(180, 92, 74, 0.18);
+	}
+
+	.recovery-note {
+		color: #70541d;
+		margin-top: -0.75rem;
+		padding: 0.8rem 0.95rem;
+		border-radius: 12px;
+		background: rgba(255, 247, 225, 0.9);
+		border: 1px solid rgba(183, 138, 38, 0.2);
 	}
 </style>
