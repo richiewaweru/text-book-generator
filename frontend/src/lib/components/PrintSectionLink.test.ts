@@ -46,8 +46,27 @@ describe('PrintSectionLink', () => {
 		cleanup();
 	});
 
-	it('renders a QR block for interactive sections', () => {
+	it('renders a QR block for sections with simulations', () => {
 		render(PrintSectionLink, {
+			generationId: 'gen-123',
+			section: {
+				...baseSection,
+				simulations: [
+					{
+						spec: { type: 'graph_slider', goal: 'Explore slope', print_translation: 'static_midstate', dimensions: { width: 600, height: 400 } },
+						fallback_diagram: null,
+						html_content: null
+					}
+				]
+			}
+		});
+
+		expect(screen.getByText(/interactive simulation/i)).toBeTruthy();
+		expect(screen.getByText(/scan to open/i)).toBeTruthy();
+	});
+
+	it('does NOT render a QR for sections with only a quiz', () => {
+		const { container } = render(PrintSectionLink, {
 			generationId: 'gen-123',
 			section: {
 				...baseSection,
@@ -60,9 +79,24 @@ describe('PrintSectionLink', () => {
 			}
 		});
 
-		expect(screen.getByText(/interactive follow-up/i)).toBeTruthy();
-		expect(screen.getByText(/scan to open the live section/i)).toBeTruthy();
-		expect(screen.getByText(/textbook\/gen-123#section-s-01/i)).toBeTruthy();
+		expect(container.textContent?.trim()).toBe('');
+	});
+
+	it('does NOT render a QR for sections with only a diagram', () => {
+		const { container } = render(PrintSectionLink, {
+			generationId: 'gen-123',
+			section: {
+				...baseSection,
+				diagram: {
+					svg_content: '<svg/>',
+					alt_text: 'A diagram',
+					caption: null,
+					callouts: []
+				}
+			}
+		});
+
+		expect(container.textContent?.trim()).toBe('');
 	});
 
 	it('stays hidden for non-interactive sections', () => {
