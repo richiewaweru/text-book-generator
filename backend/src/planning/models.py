@@ -85,6 +85,7 @@ class StudioBriefRequest(BaseModel):
     signals: TeacherSignals = Field(default_factory=TeacherSignals)
     preferences: DeliveryPreferences = Field(default_factory=DeliveryPreferences)
     constraints: TeacherConstraints = Field(default_factory=TeacherConstraints)
+    forced_template_id: str | None = None
 
     @field_validator("intent", "audience", "prior_knowledge", "extra_context")
     @classmethod

@@ -5,9 +5,10 @@
 	interface Props {
 		errorMessage?: string | null;
 		onRetry?: () => void;
+		replanningFor?: string | null;
 	}
 
-	let { errorMessage = null, onRetry = () => {} }: Props = $props();
+	let { errorMessage = null, onRetry = () => {}, replanningFor = null }: Props = $props();
 
 	const progressValue = $derived.by(() => {
 		if ($planDraft.is_complete) {
@@ -100,7 +101,7 @@
 		<div class="section-panel-header">
 			<div>
 				<p class="label">Sections</p>
-				<h3>Arriving now</h3>
+				<h3>{replanningFor ? `Replanning for ${replanningFor}…` : 'Arriving now'}</h3>
 			</div>
 			<p class="status-caption">Each section appears as soon as its structure is ready.</p>
 		</div>

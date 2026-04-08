@@ -14,6 +14,7 @@ from planning.models import (
     PlanningGenerationSpec,
     PlanningTemplateContract,
     StudioBriefRequest,
+    TemplateDecision,
 )
 from planning.normalizer import normalize_brief
 from planning.prompt_builder import refine_plan_text
@@ -42,7 +43,24 @@ class PlanningService:
         emit: PlanningEmitter | None = None,
     ) -> PlanningGenerationSpec:
         normalized = normalize_brief(brief)
-        selected_contract, decision = choose_template(normalized, contracts)
+        if brief.forced_template_id:
+            chosen_contract = next(
+                (c for c in contracts if c.id == brief.forced_template_id), None
+            )
+            if chosen_contract is None:
+                raise ValueError(
+                    f"Forced template '{brief.forced_template_id}' not in live-safe catalog."
+                )
+            decision = TemplateDecision(
+                chosen_id=chosen_contract.id,
+                chosen_name=chosen_contract.name,
+                rationale="Teacher selected this template during review.",
+                fit_score=1.0,
+                alternatives=[],
+            )
+            selected_contract = chosen_contract
+        else:
+            selected_contract, decision = choose_template(normalized, contracts)
         early_rationale = decision.rationale
 
         if emit is not None:

@@ -33,19 +33,35 @@ const HEAVY_COMPONENTS = new Set([
 ]);
 
 const COMPONENT_LABELS: Record<string, string> = {
-	'hook-hero': 'Hook hero',
-	'explanation-block': 'Explanation',
-	'practice-stack': 'Practice stack',
-	'what-next-bridge': 'What next bridge',
-	'worked-example-card': 'Worked example',
-	'diagram-block': 'Diagram',
-	'diagram-series': 'Diagram series',
-	'diagram-compare': 'Compare diagram',
-	'simulation-block': 'Simulation',
-	'section-header': 'Section header',
-	'process-steps': 'Process steps',
-	'student-textbox': 'Student textbox',
-	'summary-block': 'Summary'
+	'section-header':       'Section Header',
+	'hook-hero':            'Opening Hook',
+	'explanation-block':    'Core Explanation',
+	'prerequisite-strip':   'Prerequisites',
+	'what-next-bridge':     'What Next',
+	'interview-anchor':     'Explain Out Loud',
+	'callout-block':        'Callout',
+	'summary-block':        'Summary',
+	'section-divider':      'Section Divider',
+	'definition-card':      'Key Term Definition',
+	'definition-family':    'Definition Family',
+	'glossary-rail':        'Glossary Rail',
+	'glossary-inline':      'Inline Glossary',
+	'insight-strip':        'Insight Strip',
+	'key-fact':             'Key Fact',
+	'comparison-grid':      'Comparison Table',
+	'worked-example-card':  'Worked Example',
+	'process-steps':        'Process Steps',
+	'practice-stack':       'Practice Problems',
+	'student-textbox':      'Student Write-in',
+	'short-answer':         'Short Answer',
+	'fill-in-blank':        'Fill in the Blank',
+	'pitfall-alert':        'Common Mistake Alert',
+	'reflection-prompt':    'Reflection Prompt',
+	'timeline-block':       'Timeline',
+	'diagram-block':        'Diagram',
+	'diagram-series':       'Diagram Series',
+	'diagram-compare':      'Before / After Diagram',
+	'simulation-block':     'Interactive Simulation',
 };
 
 export function roleLabel(role: SectionRole): string {
@@ -60,7 +76,14 @@ export function isHeavyComponent(componentId: string): boolean {
 	return HEAVY_COMPONENTS.has(componentId);
 }
 
-export function componentLabel(componentId: string): string {
+export function componentLabel(
+	componentId: string,
+	contractComponents?: Array<{ id: string; teacher_label?: string }>
+): string {
+	if (contractComponents) {
+		const match = contractComponents.find((c) => c.id === componentId);
+		if (match?.teacher_label) return match.teacher_label;
+	}
 	return COMPONENT_LABELS[componentId] ?? componentId.replace(/-/g, ' ');
 }
 
@@ -78,4 +101,23 @@ export function visualPolicyLabel(policy: VisualPolicy | null): string | null {
 	}
 
 	return 'Visual required';
+}
+
+const VISUAL_INTENT_LABELS: Record<string, string> = {
+	demonstrate_process: 'demonstrate process',
+	compare_variants:    'compare variants',
+	show_realism:        'show realism',
+	explain_structure:   'explain structure',
+};
+
+export function visualPolicyDetail(
+	policy: VisualPolicy | null
+): { chip: string; goal: string | null } | null {
+	if (!policy?.required) return null;
+	const modeLabel = policy.mode === 'svg' ? 'SVG' : policy.mode === 'image' ? 'Image' : 'Visual';
+	const intentLabel = policy.intent
+		? (VISUAL_INTENT_LABELS[policy.intent] ?? policy.intent)
+		: null;
+	const chip = intentLabel ? `${modeLabel} · ${intentLabel}` : modeLabel;
+	return { chip, goal: policy.goal ?? null };
 }

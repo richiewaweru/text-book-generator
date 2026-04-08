@@ -70,6 +70,7 @@ export interface StudioBriefRequest {
 	signals: TeacherSignals;
 	preferences: DeliveryPreferences;
 	constraints: TeacherConstraints;
+	forced_template_id?: string;
 }
 
 export type UserBriefDraft = StudioBriefRequest;

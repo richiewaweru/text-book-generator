@@ -510,3 +510,59 @@ def test_section_focus_fallback_in_bridge():
     if not focus2:
         focus2 = f"Section {section2.order}"
     assert focus2 == "Explanation"
+
+
+def test_forced_template_id_bypasses_selection():
+    """PlannerService uses forced_template_id regardless of signal affinity scores."""
+    brief = build_brief(forced_template_id="procedure")
+    contracts = [
+        build_contract(template_id="guided-concept-path"),
+        build_contract(template_id="procedure", name="Procedure"),
+    ]
+
+    async def fake_run_llm_fn(**kwargs):
+        return SimpleNamespace(
+            output=PlanningRefinementOutput.model_validate(
+                {
+                    "lesson_rationale": "Procedure rationale.",
+                    "warning": None,
+                    "sections": [
+                        {"title": "Step one", "rationale": "First step."},
+                    ],
+                }
+            )
+        )
+
+    class FakeAgent:
+        def __init__(self, *, model, output_type, system_prompt) -> None:
+            pass
+
+    with patch("planning.prompt_builder.Agent", FakeAgent):
+        result = asyncio.run(
+            PlanningService().plan(
+                brief,
+                contracts=contracts,
+                model=object(),
+                run_llm_fn=fake_run_llm_fn,
+            )
+        )
+
+    assert result.template_id == "procedure"
+    assert result.template_decision.fit_score == 1.0
+    assert result.template_decision.chosen_id == "procedure"
+
+
+def test_forced_template_id_raises_if_not_in_catalog():
+    """PlannerService raises ValueError when forced_template_id is not in the contracts list."""
+    brief = build_brief(forced_template_id="nonexistent-template")
+    contracts = [build_contract(template_id="guided-concept-path")]
+
+    with pytest.raises(ValueError, match="not in live-safe catalog"):
+        asyncio.run(
+            PlanningService().plan(
+                brief,
+                contracts=contracts,
+                model=object(),
+                run_llm_fn=lambda **_: None,
+            )
+        )
