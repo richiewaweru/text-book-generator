@@ -188,15 +188,60 @@ async def test_diagram_enabled_when_plan_and_contract_support() -> None:
 
 
 @pytest.mark.asyncio
-async def test_diagram_disabled_when_plan_says_no() -> None:
+async def test_diagram_disabled_when_plan_says_no_and_contract_does_not_require() -> None:
+    """Diagram is disabled only when neither plan nor contract requires it."""
     state = _state(
         generated_sections={"s-01": _section("s-01")},
         current_section_plan=_plan("s-01", needs_diagram=False),
+        # Default _contract() has diagram-block in optional_components only
     )
     result = await composition_planner(state)
     plan = result["composition_plans"]["s-01"]
     assert plan.diagram.enabled is False
     assert plan.diagram.diagram_type is None
+
+
+@pytest.mark.asyncio
+async def test_diagram_enabled_when_contract_requires_diagram_block() -> None:
+    """Contract authority overrides needs_diagram=False."""
+    state = _state(
+        generated_sections={"s-01": _section("s-01")},
+        current_section_plan=_plan("s-01", needs_diagram=False),
+        contract=_contract(required_components=[
+            "section-header",
+            "hook-hero",
+            "explanation-block",
+            "practice-stack",
+            "what-next-bridge",
+            "diagram-block",
+        ]),
+    )
+    result = await composition_planner(state)
+    plan = result["composition_plans"]["s-01"]
+    assert plan.diagram.enabled is True
+
+
+@pytest.mark.asyncio
+async def test_visual_policy_mode_flows_through_to_composition_plan() -> None:
+    """visual_policy.mode='image' on SectionPlan produces DiagramPlan.mode='image'."""
+    from pipeline.types.requests import SectionVisualPolicy
+
+    section_plan = _plan("s-01", needs_diagram=True).model_copy(update={
+        "visual_policy": SectionVisualPolicy(
+            required=True,
+            mode="image",
+            intent="explain_structure",
+            style_notes="Classroom-friendly.",
+        )
+    })
+    state = _state(
+        generated_sections={"s-01": _section("s-01")},
+        current_section_plan=section_plan,
+    )
+    result = await composition_planner(state)
+    plan = result["composition_plans"]["s-01"]
+    assert plan.diagram.enabled is True
+    assert plan.diagram.mode == "image"
 
 
 @pytest.mark.asyncio

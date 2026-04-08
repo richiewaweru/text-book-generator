@@ -40,20 +40,46 @@ def _has_simulation_slot(contract) -> bool:
     return "simulation-block" in components
 
 
+_DIAGRAM_COMPONENTS = {"diagram-block", "diagram-series", "diagram-compare"}
+
+
 def _has_diagram_slot(contract) -> bool:
     components = set(contract.required_components) | set(contract.optional_components)
-    return bool({"diagram-block", "diagram-series", "diagram-compare"} & components)
+    return bool(_DIAGRAM_COMPONENTS & components)
 
 
 def _diagram_allowed(state: TextbookPipelineState) -> bool:
     plan = state.current_section_plan
     if plan is None:
         return False
-    if plan.diagram_policy == "disabled":
+
+    # Hard disable: explicit policy override takes absolute priority
+    if getattr(plan, "diagram_policy", None) == "disabled":
         return False
+
+    # Contract must have a diagram slot — no point enabling if there's nowhere to render
     if not _has_diagram_slot(state.contract):
         return False
-    return plan.diagram_policy == "required" or bool(plan.needs_diagram)
+
+    # PRIORITY 1: Contract authority — if the template requires a diagram component,
+    # always allow. This handles template switches and direct API calls where the
+    # section plan's needs_diagram/diagram_policy wasn't correctly populated.
+    if _DIAGRAM_COMPONENTS & set(state.contract.required_components):
+        return True
+
+    # PRIORITY 2: Section plan explicit signals
+    if getattr(plan, "diagram_policy", None) == "required":
+        return True
+
+    if getattr(plan, "needs_diagram", False):
+        return True
+
+    # PRIORITY 3: Planner selected a diagram component but didn't bump diagram_policy
+    section_required = set(getattr(plan, "required_components", []))
+    if _DIAGRAM_COMPONENTS & section_required:
+        return True
+
+    return False
 
 
 def _interaction_allowed(state: TextbookPipelineState) -> bool:
