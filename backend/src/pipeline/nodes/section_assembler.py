@@ -14,8 +14,19 @@ STATE CONTRACT
 
 from __future__ import annotations
 
+import json
+import sys
+
 from pipeline.contracts import validate_section_for_template
 from pipeline.state import PipelineError, QCReport, TextbookPipelineState
+
+
+def diag(tag: str, **fields) -> None:
+    sys.stderr.write(f"DIAG::{tag}::{json.dumps(fields, default=str)}\n")
+    sys.stderr.flush()
+
+
+diag("BUILD_MARKER", file="section_assembler", version="diag_v1")
 
 
 def _check_capacity(section_dict: dict) -> list[str]:
@@ -117,6 +128,17 @@ async def section_assembler(
     )
 
     if not is_valid:
+        payload = {
+            "section_id": sid,
+            "violations": violations,
+            "required_components": getattr(state.contract, "required_components", None),
+            "always_present": getattr(state.contract, "always_present", None),
+            "available_components": getattr(state.contract, "available_components", None),
+            "section_has_diagram": getattr(section, "diagram", None) is not None,
+        }
+        diag("ASSEMBLER_CONTRACT_VIOLATION", **payload)
+        if any("diagram" in violation.lower() for violation in violations):
+            diag("ASSEMBLER_MISSING_DIAGRAM", **payload)
         return {
             "errors": [
                 PipelineError(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -45,6 +46,11 @@ from core.events import TraceClosedEvent, TraceRegisteredEvent
 router = APIRouter(prefix="/api/v1", tags=["brief"])
 logger = logging.getLogger(__name__)
 _PLANNING_CALLER = "brief_interpreter"
+
+
+def diag(tag: str, **fields) -> None:
+    sys.stderr.write(f"DIAG::{tag}::{json.dumps(fields, default=str)}\n")
+    sys.stderr.flush()
 
 
 def _legacy_live_safe_templates() -> list[TemplateSummary]:
@@ -101,8 +107,35 @@ def _pipeline_section_from_planning(
     )
     interaction_required = any(component == "simulation-block" for component in selected)
     focus = section.focus_note or section.objective or section.rationale or section.title
+    computed_diagram_policy = "required" if visual_required else "allowed"
+    pipeline_visual_policy = (
+        SectionVisualPolicy(
+            required=section.visual_policy.required,
+            intent=section.visual_policy.intent,
+            mode=section.visual_policy.mode,
+            goal=section.visual_policy.goal,
+            style_notes=section.visual_policy.style_notes,
+        )
+        if section.visual_policy is not None
+        else None
+    )
     if not focus:
         focus = f"Section {section.order}"
+    diag(
+        "PIPELINE_SECTION_FROM_PLANNING",
+        source="planning_routes",
+        section_id=section.id,
+        title=section.title,
+        selected_components=selected,
+        planning_visual_policy=(
+            section.visual_policy.model_dump() if section.visual_policy else None
+        ),
+        computed_needs_diagram=needs_diagram,
+        computed_diagram_policy=computed_diagram_policy,
+        pipeline_visual_policy=(
+            pipeline_visual_policy.model_dump() if pipeline_visual_policy else None
+        ),
+    )
     return SectionPlan(
         section_id=section.id,
         title=section.title,
@@ -120,18 +153,8 @@ def _pipeline_section_from_planning(
             if generation_mode == GenerationMode.DRAFT
             else "required" if interaction_required else "allowed"
         ),
-        diagram_policy="required" if visual_required else "allowed",
-        visual_policy=(
-            SectionVisualPolicy(
-                required=section.visual_policy.required,
-                intent=section.visual_policy.intent,
-                mode=section.visual_policy.mode,
-                goal=section.visual_policy.goal,
-                style_notes=section.visual_policy.style_notes,
-            )
-            if section.visual_policy is not None
-            else None
-        ),
+        diagram_policy=computed_diagram_policy,
+        visual_policy=pipeline_visual_policy,
         continuity_notes=section.rationale,
     )
 
@@ -391,5 +414,4 @@ async def commit_brief(
         section_plans=_pipeline_sections_from_planning_spec(committed),
         planning_spec_json=committed.model_dump_json(),
     )
-
 
