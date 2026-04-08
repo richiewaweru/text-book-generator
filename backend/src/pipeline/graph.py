@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import inspect
 from time import perf_counter
+from typing import Any, Callable
 
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
@@ -37,6 +38,26 @@ from pipeline.runtime_diagnostics import (
     publish_runtime_event,
 )
 from pipeline.state import TextbookPipelineState
+
+
+def _normalize_langgraph_config_signature(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Force the config annotation to resolve to the runtime type LangGraph expects."""
+    signature = inspect.signature(fn)
+    config = signature.parameters.get("config")
+    expected = RunnableConfig | None
+
+    if config is None or config.annotation == expected:
+        return fn
+
+    fn.__signature__ = signature.replace(
+        parameters=[
+            parameter.replace(annotation=expected)
+            if parameter.name == "config"
+            else parameter
+            for parameter in signature.parameters.values()
+        ]
+    )
+    return fn
 
 
 async def _invoke_node(
@@ -278,11 +299,23 @@ def build_graph(checkpointer=None) -> StateGraph:
     workflow = StateGraph(TextbookPipelineState)
 
     # Register nodes
-    workflow.add_node("curriculum_planner", _instrumented_curriculum_planner)
-    workflow.add_node("process_section", process_section)
-    workflow.add_node("retry_diagram", retry_diagram)
-    workflow.add_node("retry_field", retry_field)
-    workflow.add_node("retry_interaction", retry_interaction)
+    workflow.add_node(
+        "curriculum_planner",
+        _normalize_langgraph_config_signature(_instrumented_curriculum_planner),
+    )
+    workflow.add_node(
+        "process_section",
+        _normalize_langgraph_config_signature(process_section),
+    )
+    workflow.add_node(
+        "retry_diagram",
+        _normalize_langgraph_config_signature(retry_diagram),
+    )
+    workflow.add_node("retry_field", _normalize_langgraph_config_signature(retry_field))
+    workflow.add_node(
+        "retry_interaction",
+        _normalize_langgraph_config_signature(retry_interaction),
+    )
 
     # Entry point
     workflow.set_entry_point("curriculum_planner")

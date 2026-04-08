@@ -10,6 +10,7 @@ All other tests use deterministic state or the contracts on disk.
 
 from __future__ import annotations
 
+import warnings
 from types import SimpleNamespace
 
 from langgraph.graph import END
@@ -178,6 +179,21 @@ class TestGraphTopology:
 
         graph = build_graph()
         assert graph is not None
+
+    def test_graph_compile_does_not_emit_config_signature_warnings(self):
+        from pipeline.graph import build_graph
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            graph = build_graph()
+
+        assert graph is not None
+        config_warnings = [
+            warning
+            for warning in caught
+            if "The 'config' parameter should be typed as" in str(warning.message)
+        ]
+        assert config_warnings == []
 
     def test_fan_out_produces_sends_per_section(self):
         from pipeline.graph import fan_out_sections
