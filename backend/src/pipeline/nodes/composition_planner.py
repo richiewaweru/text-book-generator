@@ -42,17 +42,24 @@ def diag(tag: str, **fields) -> None:
 diag("BUILD_MARKER", file="composition_planner", version="diag_v1")
 
 
+def _all_contract_components(contract) -> set[str]:
+    return (
+        set(getattr(contract, "required_components", []) or [])
+        | set(getattr(contract, "optional_components", []) or [])
+        | set(getattr(contract, "always_present", []) or [])
+        | set(getattr(contract, "available_components", []) or [])
+    )
+
+
 def _has_simulation_slot(contract) -> bool:
-    components = set(contract.required_components) | set(contract.optional_components)
-    return "simulation-block" in components
+    return "simulation-block" in _all_contract_components(contract)
 
 
 _DIAGRAM_COMPONENTS = {"diagram-block", "diagram-series", "diagram-compare"}
 
 
 def _has_diagram_slot(contract) -> bool:
-    components = set(contract.required_components) | set(contract.optional_components)
-    return bool(_DIAGRAM_COMPONENTS & components)
+    return bool(_DIAGRAM_COMPONENTS & _all_contract_components(contract))
 
 
 def _diagram_allowed(state: TextbookPipelineState) -> bool:

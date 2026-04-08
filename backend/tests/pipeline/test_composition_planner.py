@@ -9,6 +9,7 @@ from pipeline.nodes.composition_planner import (
     CompositionDecision,
     DiagramDecision,
     InteractionDecision,
+    _has_diagram_slot,
     _to_composition_plan,
     composition_planner,
     pick_interaction_type,
@@ -290,6 +291,82 @@ def test_pick_interaction_type_probability_gives_probability_tree() -> None:
     state = _state(request=_request(subject="Probability and Statistics"))
     section = _section("s-01")
     assert pick_interaction_type(state, section) == "probability_tree"
+
+
+def test_has_diagram_slot_reads_always_present() -> None:
+    contract = _contract(
+        required_components=[],
+        optional_components=[],
+        available_components=[],
+        always_present=["section-header", "diagram-block", "what-next-bridge"],
+    )
+
+    assert _has_diagram_slot(contract) is True
+
+
+def test_has_diagram_slot_reads_available_components() -> None:
+    contract = _contract(
+        required_components=[],
+        optional_components=[],
+        available_components=["hook-hero", "diagram-block", "callout-block"],
+        always_present=["section-header", "what-next-bridge"],
+    )
+
+    assert _has_diagram_slot(contract) is True
+
+
+@pytest.mark.asyncio
+async def test_diagram_allowed_when_always_present_has_diagram_block_and_plan_requires() -> None:
+    plan = _plan("s-01", needs_diagram=True).model_copy(update={
+        "diagram_policy": "required",
+        "required_components": ["section-header", "diagram-block", "what-next-bridge"],
+    })
+    state = _state(
+        generated_sections={"s-01": _section("s-01")},
+        current_section_plan=plan,
+        contract=_contract(
+            required_components=[],
+            optional_components=[],
+            available_components=["hook-hero", "callout-block"],
+            always_present=["section-header", "diagram-block", "what-next-bridge"],
+        ),
+    )
+
+    result = await composition_planner(state)
+
+    assert result["composition_plans"]["s-01"].diagram.enabled is True
+
+
+@pytest.mark.asyncio
+async def test_image_mode_preserved_when_visual_policy_requests_image() -> None:
+    from pipeline.types.requests import SectionVisualPolicy
+
+    plan = _plan("s-01", needs_diagram=True).model_copy(update={
+        "diagram_policy": "required",
+        "required_components": ["section-header", "diagram-block", "what-next-bridge"],
+        "visual_policy": SectionVisualPolicy(
+            required=True,
+            intent="show_realism",
+            mode="image",
+            goal="Ground the learner in a realistic visual anchor.",
+            style_notes="Classroom-friendly educational image.",
+        ),
+    })
+    state = _state(
+        generated_sections={"s-01": _section("s-01")},
+        current_section_plan=plan,
+        contract=_contract(
+            required_components=[],
+            optional_components=[],
+            available_components=["diagram-block", "callout-block"],
+            always_present=["section-header", "what-next-bridge"],
+        ),
+    )
+
+    result = await composition_planner(state)
+
+    assert result["composition_plans"]["s-01"].diagram.enabled is True
+    assert result["composition_plans"]["s-01"].diagram.mode == "image"
 
 
 # ---------------------------------------------------------------------------
