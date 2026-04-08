@@ -79,6 +79,11 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
     if _DIAGRAM_COMPONENTS & section_required:
         return True
 
+    # PRIORITY 4: visual_policy.required is the visual router's explicit signal
+    vp = getattr(plan, "visual_policy", None)
+    if vp is not None and getattr(vp, "required", False):
+        return True
+
     return False
 
 

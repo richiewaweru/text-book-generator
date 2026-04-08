@@ -121,7 +121,6 @@ def _pipeline_section_from_planning(
             else "required" if interaction_required else "allowed"
         ),
         diagram_policy="required" if visual_required else "allowed",
-        continuity_notes=section.rationale,
         visual_policy=(
             SectionVisualPolicy(
                 required=section.visual_policy.required,
@@ -133,6 +132,7 @@ def _pipeline_section_from_planning(
             if section.visual_policy is not None
             else None
         ),
+        continuity_notes=section.rationale,
     )
 
 
