@@ -17,6 +17,7 @@
 		"bits-ui": "^2.11.0",
 		"clsx": "^2.1.1",
 		"dompurify": "^3.3.3",
+		"marked": "^15.0.0",
 		"katex": "^0.16.22",
 		"lectio": "file:./vendor/lectio",
 		"lucide-svelte": "^0.542.0",
