@@ -1,3 +1,6 @@
+import sys
+print("IMGGEN_MODULE_LOADED", file=sys.stderr, flush=True)
+
 from __future__ import annotations
 
 import asyncio
@@ -431,6 +434,16 @@ async def image_generator(
     _client=None,
 ) -> dict:
     _ = model_overrides
+    _s = state if isinstance(state, dict) else state.model_dump() if hasattr(state, 'model_dump') else {}
+    _sid = _s.get('current_section_id', 'UNKNOWN')
+    _plans = _s.get('composition_plans') or {}
+    _plan = _plans.get(_sid)
+    _mode = _plan.get('diagram', {}).get('mode') if isinstance(_plan, dict) else getattr(getattr(_plan, 'diagram', None), 'mode', None) if _plan else None
+    _enabled = _plan.get('diagram', {}).get('enabled') if isinstance(_plan, dict) else getattr(getattr(_plan, 'diagram', None), 'enabled', None) if _plan else None
+    print(
+        f"IMGGEN_CALLED sid={_sid} mode={_mode} enabled={_enabled} plan_exists={_plan is not None}",
+        file=sys.stderr, flush=True
+    )
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
     section = state.generated_sections.get(sid)
