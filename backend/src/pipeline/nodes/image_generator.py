@@ -1,7 +1,7 @@
+from __future__ import annotations
+
 import sys
 print("IMGGEN_MODULE_LOADED", file=sys.stderr, flush=True)
-
-from __future__ import annotations
 
 import asyncio
 import logging
