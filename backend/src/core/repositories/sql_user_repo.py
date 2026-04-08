@@ -14,6 +14,15 @@ class SqlUserRepository(UserRepository):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def _load_user_model(self, user_id: str) -> UserModel:
+        stmt = (
+            select(UserModel)
+            .options(selectinload(UserModel.profile))
+            .where(UserModel.id == user_id)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one()
+
     async def find_by_email(self, email: str) -> User | None:
         stmt = (
             select(UserModel)
@@ -46,8 +55,8 @@ class SqlUserRepository(UserRepository):
         )
         self._session.add(model)
         await self._session.commit()
-        await self._session.refresh(model)
-        return self._to_entity(model)
+        created = await self._load_user_model(model.id)
+        return self._to_entity(created)
 
     async def update(self, user: User) -> User:
         stmt = select(UserModel).where(UserModel.id == user.id)
@@ -57,8 +66,8 @@ class SqlUserRepository(UserRepository):
         model.picture_url = user.picture_url
         model.updated_at = datetime.utcnow()
         await self._session.commit()
-        await self._session.refresh(model)
-        return self._to_entity(model)
+        updated = await self._load_user_model(model.id)
+        return self._to_entity(updated)
 
     @staticmethod
     def _to_entity(model: UserModel) -> User:
