@@ -53,9 +53,21 @@ describe('PrintSectionLink', () => {
 				...baseSection,
 				simulations: [
 					{
-						spec: { type: 'graph_slider', goal: 'Explore slope', print_translation: 'static_midstate', dimensions: { width: 600, height: 400 } },
-						fallback_diagram: null,
-						html_content: null
+						spec: {
+							type: 'graph_slider',
+							goal: 'Explore slope',
+							anchor_content: {},
+							context: {
+								learner_level: 'secondary',
+								template_id: 'guided-concept-path',
+								color_mode: 'light',
+								accent_color: '#2563eb',
+								surface_color: '#ffffff',
+								font_mono: 'ui-monospace'
+							},
+							print_translation: 'static_midstate',
+							dimensions: { width: '100%', height: 400, resizable: false }
+						}
 					}
 				]
 			}
@@ -90,7 +102,7 @@ describe('PrintSectionLink', () => {
 				diagram: {
 					svg_content: '<svg/>',
 					alt_text: 'A diagram',
-					caption: null,
+					caption: '',
 					callouts: []
 				}
 			}
