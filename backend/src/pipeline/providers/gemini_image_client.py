@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from functools import lru_cache
 
@@ -8,6 +9,13 @@ from google import genai
 from google.genai import types
 
 from pipeline.providers.image_client import ImageFormat, ImageGenerationResult, ImageSize
+
+logger = logging.getLogger(__name__)
+_API_KEY_ENV_NAMES = (
+    "GOOGLE_CLOUD_NANO_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+)
 
 
 class GeminiImageClient:
@@ -22,6 +30,10 @@ class GeminiImageClient:
 
     def __init__(self, *, api_key: str) -> None:
         self._client = genai.Client(vertexai=False, api_key=api_key)
+        logger.info(
+            "GeminiImageClient: initialised model=%s vertexai=False",
+            self.MODEL,
+        )
 
     async def generate_image(
         self,
@@ -98,13 +110,17 @@ class GeminiImageClient:
         )
 
 
+def resolve_gemini_image_api_key() -> str | None:
+    for env_name in _API_KEY_ENV_NAMES:
+        value = os.environ.get(env_name)
+        if value:
+            return value
+    return None
+
+
 @lru_cache(maxsize=1)
 def get_gemini_image_client() -> GeminiImageClient:
-    api_key = (
-        os.environ.get("GOOGLE_CLOUD_NANO_API_KEY")
-        or os.environ.get("GOOGLE_API_KEY")
-        or os.environ.get("GEMINI_API_KEY")
-    )
+    api_key = resolve_gemini_image_api_key()
     if not api_key:
         raise RuntimeError(
             "No Gemini API key found. Set GOOGLE_CLOUD_NANO_API_KEY, GOOGLE_API_KEY, or GEMINI_API_KEY."

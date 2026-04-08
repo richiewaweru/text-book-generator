@@ -65,11 +65,20 @@ class TestHealthRoutes:
         async def fake_temp_dir() -> DependencyStatus:
             return DependencyStatus(name="pdf_temp_dir", status="ok", latency_ms=1.1)
 
+        async def fake_gemini_image() -> DependencyStatus:
+            return DependencyStatus(name="gemini_image", status="ok", latency_ms=5.5, detail="model=test")
+
+        async def fake_image_store() -> DependencyStatus:
+            return DependencyStatus(name="image_store", status="ok", latency_ms=3.3, detail="local")
+
         monkeypatch.setattr(health_routes, "_check_database", fake_database)
         monkeypatch.setattr(health_routes, "_check_event_bus", fake_event_bus)
         monkeypatch.setattr(health_routes, "_check_playwright_runtime", fake_playwright)
         monkeypatch.setattr(health_routes, "_check_pdf_temp_dir", fake_temp_dir)
         monkeypatch.setattr(health_routes, "_get_generation_summary", fake_summary)
+        health_routes.configure_health_extensions(
+            readiness_checks=[fake_gemini_image, fake_image_store],
+        )
 
         with TestClient(app) as client:
             deep_response = client.get("/health/deep")
@@ -85,6 +94,8 @@ class TestHealthRoutes:
         assert deep_payload["instance_id"] == ready_payload["instance_id"]
         assert deep_payload["dependencies"] == ready_payload["dependencies"]
         assert deep_payload["generations"] == ready_payload["generations"]
+        assert _dependency_by_name(deep_payload, "gemini_image")["status"] == "ok"
+        assert _dependency_by_name(deep_payload, "image_store")["status"] == "ok"
         assert "pdf_exports" in deep_payload
         assert "timestamp" in deep_payload
         assert "timestamp" in ready_payload
@@ -110,11 +121,20 @@ class TestHealthRoutes:
         async def fake_temp_dir() -> DependencyStatus:
             return DependencyStatus(name="pdf_temp_dir", status="ok")
 
+        async def fake_gemini_image() -> DependencyStatus:
+            return DependencyStatus(name="gemini_image", status="ok", detail="model=test")
+
+        async def fake_image_store() -> DependencyStatus:
+            return DependencyStatus(name="image_store", status="ok", detail="local")
+
         monkeypatch.setattr(health_routes, "_check_database", fake_database)
         monkeypatch.setattr(health_routes, "_check_event_bus", fake_event_bus)
         monkeypatch.setattr(health_routes, "_check_playwright_runtime", fake_playwright)
         monkeypatch.setattr(health_routes, "_check_pdf_temp_dir", fake_temp_dir)
         monkeypatch.setattr(health_routes, "_get_generation_summary", fake_summary)
+        health_routes.configure_health_extensions(
+            readiness_checks=[fake_gemini_image, fake_image_store],
+        )
 
         with TestClient(create_app()) as client:
             response = client.get("/health/ready")
@@ -147,11 +167,20 @@ class TestHealthRoutes:
         async def fake_temp_dir() -> DependencyStatus:
             return DependencyStatus(name="pdf_temp_dir", status="ok")
 
+        async def fake_gemini_image() -> DependencyStatus:
+            return DependencyStatus(name="gemini_image", status="ok", detail="model=test")
+
+        async def fake_image_store() -> DependencyStatus:
+            return DependencyStatus(name="image_store", status="ok", detail="local")
+
         monkeypatch.setattr(health_routes, "_check_database", fake_database)
         monkeypatch.setattr(health_routes, "_check_event_bus", fake_event_bus)
         monkeypatch.setattr(health_routes, "_check_playwright_runtime", fake_playwright)
         monkeypatch.setattr(health_routes, "_check_pdf_temp_dir", fake_temp_dir)
         monkeypatch.setattr(health_routes, "_get_generation_summary", fake_summary)
+        health_routes.configure_health_extensions(
+            readiness_checks=[fake_gemini_image, fake_image_store],
+        )
 
         with TestClient(create_app()) as client:
             response = client.get("/health/ready")
@@ -164,6 +193,61 @@ class TestHealthRoutes:
         assert event_bus["detail"] == "probe timeout"
         playwright = _dependency_by_name(payload, "playwright")
         assert playwright["status"] == "degraded"
+
+    def test_readiness_returns_degraded_when_image_dependencies_are_not_ready(self, monkeypatch):
+        app = create_app()
+
+        async def fake_database() -> DependencyStatus:
+            return DependencyStatus(name="postgres", status="ok", latency_ms=2.4)
+
+        async def fake_event_bus() -> DependencyStatus:
+            return DependencyStatus(name="event_bus", status="ok")
+
+        async def fake_summary() -> GenerationSummary:
+            return GenerationSummary(
+                running=1,
+                pending=0,
+                failed_last_hour=0,
+                completed_last_hour=2,
+            )
+
+        async def fake_playwright() -> DependencyStatus:
+            return DependencyStatus(name="playwright", status="ok")
+
+        async def fake_temp_dir() -> DependencyStatus:
+            return DependencyStatus(name="pdf_temp_dir", status="ok")
+
+        async def fake_gemini_image() -> DependencyStatus:
+            return DependencyStatus(
+                name="gemini_image",
+                status="degraded",
+                detail="Missing GOOGLE_CLOUD_NANO_API_KEY.",
+            )
+
+        async def fake_image_store() -> DependencyStatus:
+            return DependencyStatus(
+                name="image_store",
+                status="degraded",
+                detail="GCS bucket is not accessible",
+            )
+
+        monkeypatch.setattr(health_routes, "_check_database", fake_database)
+        monkeypatch.setattr(health_routes, "_check_event_bus", fake_event_bus)
+        monkeypatch.setattr(health_routes, "_check_playwright_runtime", fake_playwright)
+        monkeypatch.setattr(health_routes, "_check_pdf_temp_dir", fake_temp_dir)
+        monkeypatch.setattr(health_routes, "_get_generation_summary", fake_summary)
+        health_routes.configure_health_extensions(
+            readiness_checks=[fake_gemini_image, fake_image_store],
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/health/ready")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "degraded"
+        assert _dependency_by_name(payload, "gemini_image")["status"] == "degraded"
+        assert _dependency_by_name(payload, "image_store")["status"] == "degraded"
 
     def test_readiness_includes_generation_summary(self, monkeypatch):
         async def fake_database() -> DependencyStatus:
@@ -186,11 +270,20 @@ class TestHealthRoutes:
         async def fake_temp_dir() -> DependencyStatus:
             return DependencyStatus(name="pdf_temp_dir", status="ok")
 
+        async def fake_gemini_image() -> DependencyStatus:
+            return DependencyStatus(name="gemini_image", status="ok", detail="model=test")
+
+        async def fake_image_store() -> DependencyStatus:
+            return DependencyStatus(name="image_store", status="ok", detail="local")
+
         monkeypatch.setattr(health_routes, "_check_database", fake_database)
         monkeypatch.setattr(health_routes, "_check_event_bus", fake_event_bus)
         monkeypatch.setattr(health_routes, "_check_playwright_runtime", fake_playwright)
         monkeypatch.setattr(health_routes, "_check_pdf_temp_dir", fake_temp_dir)
         monkeypatch.setattr(health_routes, "_get_generation_summary", fake_summary)
+        health_routes.configure_health_extensions(
+            readiness_checks=[fake_gemini_image, fake_image_store],
+        )
 
         with TestClient(create_app()) as client:
             response = client.get("/health/deep")
@@ -204,6 +297,62 @@ class TestHealthRoutes:
             "completed_last_hour": 6,
         }
         assert payload["pdf_exports"]["total_exports"] >= 0
+
+    def test_image_probe_returns_200_when_probe_succeeds(self):
+        app = create_app()
+
+        async def fake_runner():
+            return (
+                [
+                    DependencyStatus(name="gemini_image_probe", status="ok", detail="model=test"),
+                    DependencyStatus(name="image_store_probe", status="ok", detail="local"),
+                ],
+                4096,
+            )
+
+        health_routes.configure_health_extensions(
+            image_probe_runner=fake_runner,
+        )
+
+        with TestClient(app) as client:
+            response = client.post("/health/image/probe")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["probe_image_bytes"] == 4096
+
+    def test_image_probe_returns_503_when_probe_fails(self):
+        app = create_app()
+
+        async def fake_runner():
+            return (
+                [
+                    DependencyStatus(
+                        name="gemini_image_probe",
+                        status="unreachable",
+                        detail="TimeoutError: probe timed out",
+                    ),
+                    DependencyStatus(
+                        name="image_store_probe",
+                        status="ok",
+                        detail="local",
+                    ),
+                ],
+                None,
+            )
+
+        health_routes.configure_health_extensions(
+            image_probe_runner=fake_runner,
+        )
+
+        with TestClient(app) as client:
+            response = client.post("/health/image/probe")
+
+        assert response.status_code == 503
+        payload = response.json()
+        assert payload["status"] == "unavailable"
+        assert _dependency_by_name(payload, "gemini_image_probe")["status"] == "unreachable"
 
     async def test_generation_summary_counts_rows_from_database(self, db_session):
         now = datetime.now(timezone.utc).replace(tzinfo=None)

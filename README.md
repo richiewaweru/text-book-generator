@@ -97,6 +97,31 @@ The generation runtime is now configured through env-backed settings instead of 
 `backend/.env.example` is the authoritative native-backend reference.
 For Docker, use the repo-root `.env.example` and copy the needed runtime values into the repo-root `.env`.
 
+## Image Diagnostics
+
+The backend now exposes image-pipeline readiness through:
+
+- `GET /health/deep`
+- `GET /health/ready`
+- `POST /health/image/probe`
+
+Look for dependency entries named `gemini_image` and `image_store` in the readiness payloads. Use `POST /health/image/probe` when you want an explicit go/no-go check that Gemini can generate an image right now and that the active image store still appears writable.
+
+Railway logs now use stable `image_generator:` markers. The main signatures are:
+
+- `reason=no_api_key`: Gemini image key is missing
+- `reason=client_init_failed`: Gemini client could not initialise
+- `reason=store_init_failed`: image store could not initialise
+- `reason=store_failed`: upload/storage failed after image generation
+- `GEMINI_SUCCESS` followed by `STORE_SUCCESS`: end-to-end image path worked
+
+Railway image env vars:
+
+- `GOOGLE_CLOUD_NANO_API_KEY`
+- `GCS_BUCKET_NAME`
+- `GCS_SERVICE_ACCOUNT_JSON`
+- `GCS_IMAGE_BASE_URL`
+
 ## Local Run Requirements
 
 - Provider API keys must be present in `backend/.env`.

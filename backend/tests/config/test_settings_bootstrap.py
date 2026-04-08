@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import re
+import sys
 import tomllib
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -393,6 +396,53 @@ def test_image_store_uses_gcs_bucket_in_production(monkeypatch) -> None:
 
     assert isinstance(store, StubGCSImageStore)
     assert store.bucket_name == "prod-diagrams"
+
+
+def test_gcs_image_store_uses_service_account_json_and_base_url(monkeypatch) -> None:
+    monkeypatch.setenv("GCS_SERVICE_ACCOUNT_JSON", json.dumps({"project_id": "proj-1"}))
+    monkeypatch.setenv("GCS_IMAGE_BASE_URL", "https://storage.googleapis.com/prod-diagrams")
+
+    captured: dict[str, object] = {}
+
+    class FakeStorageClient:
+        def __init__(self, *, credentials=None, project=None):
+            captured["credentials"] = credentials
+            captured["project"] = project
+
+        def bucket(self, bucket_name: str):
+            captured["bucket_name"] = bucket_name
+            return SimpleNamespace(name=bucket_name)
+
+    def fake_from_service_account_info(info: dict[str, str]) -> str:
+        captured["service_account_info"] = info
+        return "creds"
+
+    monkeypatch.setitem(
+        sys.modules,
+        "google.cloud",
+        SimpleNamespace(storage=SimpleNamespace(Client=FakeStorageClient)),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "google.oauth2",
+        SimpleNamespace(
+            service_account=SimpleNamespace(
+                Credentials=SimpleNamespace(
+                    from_service_account_info=fake_from_service_account_info
+                )
+            )
+        ),
+    )
+
+    from pipeline.storage.image_store import GCSImageStore
+
+    store = GCSImageStore("prod-diagrams")
+
+    assert store.credential_source == "service_account_json"
+    assert store.base_url == "https://storage.googleapis.com/prod-diagrams"
+    assert captured["service_account_info"] == {"project_id": "proj-1"}
+    assert captured["project"] == "proj-1"
+    assert captured["bucket_name"] == "prod-diagrams"
 
 
 def test_docker_compose_maps_root_google_client_id_into_backend_and_frontend() -> None:

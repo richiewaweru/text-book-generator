@@ -21,7 +21,7 @@ from core.database.migrations import upgrade_database
 from core.database.models import GenerationModel
 from core.database.session import async_session_factory, engine
 from core.errors import register_error_handlers
-from core.health.routes import router as health_router
+from core.health.routes import configure_health_extensions, router as health_router
 from core.logging import configure_logging
 from core.middleware.request_id import RequestIdMiddleware
 from core.pdf_export_runtime import cleanup_stale_pdf_exports
@@ -29,6 +29,11 @@ from core.routes.auth import router as auth_router
 from core.routes.profile import router as profile_router
 from core.routes.shares import router as shares_router
 from generation.dependencies import get_document_repository, get_generation_repository
+from generation.image_pipeline_health import (
+    check_gemini_image_provider,
+    check_image_store,
+    run_image_probe,
+)
 from generation.recovery import mark_stale_generations_failed
 from generation.repositories.sql_document_repo import SqlDocumentRepository
 from generation.repositories.sql_generation_repo import SqlGenerationRepository
@@ -213,6 +218,10 @@ def create_app() -> FastAPI:
         version=__version__,
         description="AI-agnostic pipeline for generating personalized textbooks",
         lifespan=lifespan,
+    )
+    configure_health_extensions(
+        readiness_checks=[check_gemini_image_provider, check_image_store],
+        image_probe_runner=run_image_probe,
     )
 
     app.state.limiter = limiter

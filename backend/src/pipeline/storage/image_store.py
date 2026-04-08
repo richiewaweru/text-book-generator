@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
+from uuid import uuid4
 
 from core.config import settings
 
@@ -21,6 +25,16 @@ class ImageStore(ABC):
         format: str = "png",
     ) -> str:
         """Store image and return a public URL."""
+        ...
+
+    @abstractmethod
+    async def probe_write_access(self) -> tuple[bool, str]:
+        """Return whether the store appears writable plus a diagnostic detail."""
+        ...
+
+    @abstractmethod
+    def describe_target(self) -> str:
+        """Return a short human-readable description of the storage target."""
         ...
 
 
@@ -50,14 +64,45 @@ class LocalImageStore(ImageStore):
 
         return f"{self.base_url}/{generation_id}/{section_id}/{filename}"
 
+    async def probe_write_access(self) -> tuple[bool, str]:
+        probe_dir = self.base_path / "_health"
+        probe_file = probe_dir / f".probe-{uuid4().hex}"
+
+        try:
+            probe_dir.mkdir(parents=True, exist_ok=True)
+            probe_file.write_bytes(b"ok")
+            probe_file.unlink(missing_ok=True)
+        except Exception as exc:
+            return False, f"local write failed at {self.base_path}: {type(exc).__name__}: {exc}"
+
+        return True, f"local path writable at {self.base_path}"
+
+    def describe_target(self) -> str:
+        return f"local:{self.base_path}"
+
 
 class GCSImageStore(ImageStore):
     """Google Cloud Storage for production."""
 
     def __init__(self, bucket_name: str):
         from google.cloud import storage
+        from google.oauth2 import service_account
 
-        self.client = storage.Client()
+        self.bucket_name = bucket_name
+        self.base_url = os.getenv("GCS_IMAGE_BASE_URL", "").rstrip("/")
+        creds_json = os.getenv("GCS_SERVICE_ACCOUNT_JSON", "").strip()
+        self.credential_source = "application_default"
+
+        if creds_json:
+            info = json.loads(creds_json)
+            credentials = service_account.Credentials.from_service_account_info(info)
+            self.client = storage.Client(
+                credentials=credentials,
+                project=info.get("project_id"),
+            )
+            self.credential_source = "service_account_json"
+        else:
+            self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
 
     async def store_image(
@@ -72,9 +117,45 @@ class GCSImageStore(ImageStore):
         """Store in GCS and return public URL."""
         blob_path = f"{generation_id}/{section_id}/{filename}"
         blob = self.bucket.blob(blob_path)
-        blob.upload_from_string(image_bytes, content_type=f"image/{format}")
-        blob.make_public()
-        return blob.public_url
+
+        def _upload() -> str:
+            blob.upload_from_string(image_bytes, content_type=f"image/{format}")
+            if self.base_url:
+                return f"{self.base_url}/{blob_path}"
+            blob.make_public()
+            return blob.public_url
+
+        return await asyncio.to_thread(_upload)
+
+    async def probe_write_access(self) -> tuple[bool, str]:
+        def _probe() -> tuple[bool, str]:
+            if not self.bucket.exists():
+                return False, f"GCS bucket '{self.bucket_name}' is not accessible"
+
+            permissions = self.bucket.test_iam_permissions(["storage.objects.create"])
+            if "storage.objects.create" not in permissions:
+                return (
+                    False,
+                    f"GCS bucket '{self.bucket_name}' is missing storage.objects.create permission",
+                )
+
+            return (
+                True,
+                f"GCS bucket '{self.bucket_name}' writable via {self.credential_source}",
+            )
+
+        try:
+            return await asyncio.to_thread(_probe)
+        except Exception as exc:
+            return (
+                False,
+                f"GCS write probe failed for '{self.bucket_name}': {type(exc).__name__}: {exc}",
+            )
+
+    def describe_target(self) -> str:
+        if self.base_url:
+            return f"gcs:{self.bucket_name} base_url={self.base_url}"
+        return f"gcs:{self.bucket_name} auth={self.credential_source}"
 
 
 def get_image_store() -> ImageStore:
