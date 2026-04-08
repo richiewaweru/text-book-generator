@@ -12,7 +12,9 @@ Slot: FAST
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import sys
 
 from core.llm.logging import NodeLogger
 from pydantic import BaseModel, Field
@@ -32,7 +34,12 @@ logger = logging.getLogger(__name__)
 _COMPOSITION_TIMEOUT = 15.0
 
 
-# ── Guard-rail helpers (hard constraints that override LLM decisions) ─────────
+def diag(tag: str, **fields) -> None:
+    sys.stderr.write(f"DIAG::{tag}::{json.dumps(fields, default=str)}\n")
+    sys.stderr.flush()
+
+
+diag("BUILD_MARKER", file="composition_planner", version="diag_v1")
 
 
 def _has_simulation_slot(contract) -> bool:
@@ -50,40 +57,101 @@ def _has_diagram_slot(contract) -> bool:
 
 def _diagram_allowed(state: TextbookPipelineState) -> bool:
     plan = state.current_section_plan
+    diag(
+        "DIAGRAM_ALLOWED_INPUT",
+        section_id=state.current_section_id,
+        plan_exists=plan is not None,
+        plan_required_components=getattr(plan, "required_components", None),
+        plan_diagram_policy=getattr(plan, "diagram_policy", None),
+        plan_needs_diagram=getattr(plan, "needs_diagram", None),
+        plan_visual_policy=(
+            getattr(plan, "visual_policy", None).model_dump()
+            if getattr(plan, "visual_policy", None) is not None
+            else None
+        ),
+        contract_required_components=getattr(state.contract, "required_components", None),
+        contract_always_present=getattr(state.contract, "always_present", None),
+    )
     if plan is None:
+        diag(
+            "DIAGRAM_ALLOWED_DECISION",
+            section_id=state.current_section_id,
+            decision=False,
+            reason="plan_none",
+        )
         return False
 
-    # Hard disable: explicit policy override takes absolute priority
     if getattr(plan, "diagram_policy", None) == "disabled":
+        diag(
+            "DIAGRAM_ALLOWED_DECISION",
+            section_id=state.current_section_id,
+            decision=False,
+            reason="diagram_policy_disabled",
+        )
         return False
 
-    # Contract must have a diagram slot — no point enabling if there's nowhere to render
     if not _has_diagram_slot(state.contract):
+        diag(
+            "DIAGRAM_ALLOWED_DECISION",
+            section_id=state.current_section_id,
+            decision=False,
+            reason="no_diagram_slot",
+        )
         return False
 
-    # PRIORITY 1: Contract authority — if the template requires a diagram component,
-    # always allow. This handles template switches and direct API calls where the
-    # section plan's needs_diagram/diagram_policy wasn't correctly populated.
     if _DIAGRAM_COMPONENTS & set(state.contract.required_components):
+        diag(
+            "DIAGRAM_ALLOWED_DECISION",
+            section_id=state.current_section_id,
+            decision=True,
+            reason="contract_required_components_contains_diagram",
+        )
         return True
 
-    # PRIORITY 2: Section plan explicit signals
     if getattr(plan, "diagram_policy", None) == "required":
+        diag(
+            "DIAGRAM_ALLOWED_DECISION",
+            section_id=state.current_section_id,
+            decision=True,
+            reason="diagram_policy_required",
+        )
         return True
 
     if getattr(plan, "needs_diagram", False):
+        diag(
+            "DIAGRAM_ALLOWED_DECISION",
+            section_id=state.current_section_id,
+            decision=True,
+            reason="needs_diagram",
+        )
         return True
 
-    # PRIORITY 3: Planner selected a diagram component but didn't bump diagram_policy
     section_required = set(getattr(plan, "required_components", []))
     if _DIAGRAM_COMPONENTS & section_required:
+        diag(
+            "DIAGRAM_ALLOWED_DECISION",
+            section_id=state.current_section_id,
+            decision=True,
+            reason="required_components_contains_diagram",
+        )
         return True
 
-    # PRIORITY 4: visual_policy.required is the visual router's explicit signal
     vp = getattr(plan, "visual_policy", None)
     if vp is not None and getattr(vp, "required", False):
+        diag(
+            "DIAGRAM_ALLOWED_DECISION",
+            section_id=state.current_section_id,
+            decision=True,
+            reason="visual_policy_required",
+        )
         return True
 
+    diag(
+        "DIAGRAM_ALLOWED_DECISION",
+        section_id=state.current_section_id,
+        decision=False,
+        reason="fell_through_false",
+    )
     return False
 
 
@@ -100,9 +168,6 @@ def _interaction_allowed(state: TextbookPipelineState) -> bool:
     if not _has_simulation_slot(state.contract):
         return False
     return True
-
-
-# ── Heuristic fallback (preserves pre-LLM behavior) ─────────────────────────
 
 
 def _diagram_type(section) -> str:
@@ -199,9 +264,6 @@ def _heuristic_fallback(
     )
 
 
-# ── LLM output schema ───────────────────────────────────────────────────────
-
-
 class DiagramDecision(BaseModel):
     enabled: bool
     reasoning: str
@@ -231,9 +293,6 @@ class CompositionDecision(BaseModel):
     interactions: list[InteractionDecision] = Field(default_factory=list)
     reasoning: str = ""
     confidence: str = "medium"
-
-
-# ── Main node ────────────────────────────────────────────────────────────────
 
 
 def _to_composition_plan(
@@ -277,7 +336,6 @@ def _to_composition_plan(
             )
         )
 
-    # Build the singular interaction for backward compat
     first_enabled = next((i for i in interactions if i.enabled), None)
     singular = first_enabled or InteractionPlan(
         enabled=False,
@@ -317,7 +375,6 @@ async def composition_planner(
     diagram_ok = _diagram_allowed(state)
     interaction_ok = _interaction_allowed(state)
 
-    # Extract visual_policy.mode from the section plan (None if not set)
     plan = state.current_section_plan
     visual_policy = getattr(plan, "visual_policy", None) if plan is not None else None
     visual_mode = (
@@ -326,7 +383,6 @@ async def composition_planner(
         else None
     )
 
-    # If both are disabled by guards, skip the LLM call entirely
     if not diagram_ok and not interaction_ok:
         composition = _heuristic_fallback(
             state,
@@ -335,12 +391,18 @@ async def composition_planner(
             interaction_enabled=False,
             visual_mode=visual_mode,
         )
+        diag(
+            "COMPOSITION_PLAN_DIAGRAM",
+            section_id=state.current_section_id,
+            enabled=composition.diagram.enabled,
+            mode=composition.diagram.mode,
+            source="heuristic_skip",
+        )
         return {
             "composition_plans": {sid: composition},
             "completed_nodes": ["composition_planner"],
         }
 
-    # Try LLM-powered composition decision
     try:
         system_prompt = build_composition_system_prompt(state.contract)
         user_prompt = build_composition_user_prompt(
@@ -381,6 +443,13 @@ async def composition_planner(
             interaction_allowed=interaction_ok,
             visual_mode=visual_mode,
         )
+        diag(
+            "COMPOSITION_PLAN_DIAGRAM",
+            section_id=state.current_section_id,
+            enabled=composition.diagram.enabled,
+            mode=composition.diagram.mode,
+            source="llm",
+        )
 
     except Exception:
         node_logger.warning(
@@ -395,8 +464,14 @@ async def composition_planner(
             interaction_enabled=interaction_ok,
             visual_mode=visual_mode,
         )
+        diag(
+            "COMPOSITION_PLAN_DIAGRAM",
+            section_id=state.current_section_id,
+            enabled=composition.diagram.enabled,
+            mode=composition.diagram.mode,
+            source="heuristic_fallback",
+        )
 
-    # Update interaction usage tracking
     updated_usage = dict(state.interaction_usage)
     for interaction in composition.interactions:
         if interaction.enabled and interaction.interaction_type:

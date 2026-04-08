@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import json
 import sys
-print("IMGGEN_MODULE_LOADED", file=sys.stderr, flush=True)
 
 import asyncio
 import logging
@@ -31,6 +31,14 @@ logger = logging.getLogger(__name__)
 _IMAGE_TIMEOUT_SECONDS = 45.0
 _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF = (1.0, 2.0)
+
+
+def diag(tag: str, **fields) -> None:
+    sys.stderr.write(f"DIAG::{tag}::{json.dumps(fields, default=str)}\n")
+    sys.stderr.flush()
+
+
+diag("BUILD_MARKER", file="image_generator", version="diag_v1")
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -434,15 +442,29 @@ async def image_generator(
     _client=None,
 ) -> dict:
     _ = model_overrides
-    _s = state if isinstance(state, dict) else state.model_dump() if hasattr(state, 'model_dump') else {}
-    _sid = _s.get('current_section_id', 'UNKNOWN')
-    _plans = _s.get('composition_plans') or {}
+    _s = state if isinstance(state, dict) else state.model_dump() if hasattr(state, "model_dump") else {}
+    _sid = _s.get("current_section_id", "UNKNOWN")
+    _plans = _s.get("composition_plans") or {}
     _plan = _plans.get(_sid)
-    _mode = _plan.get('diagram', {}).get('mode') if isinstance(_plan, dict) else getattr(getattr(_plan, 'diagram', None), 'mode', None) if _plan else None
-    _enabled = _plan.get('diagram', {}).get('enabled') if isinstance(_plan, dict) else getattr(getattr(_plan, 'diagram', None), 'enabled', None) if _plan else None
-    print(
-        f"IMGGEN_CALLED sid={_sid} mode={_mode} enabled={_enabled} plan_exists={_plan is not None}",
-        file=sys.stderr, flush=True
+    _mode = _plan.get("diagram", {}).get("mode") if isinstance(_plan, dict) else getattr(getattr(_plan, "diagram", None), "mode", None) if _plan else None
+    _enabled = _plan.get("diagram", {}).get("enabled") if isinstance(_plan, dict) else getattr(getattr(_plan, "diagram", None), "enabled", None) if _plan else None
+    _current_section_plan = _s.get("current_section_plan")
+    if isinstance(_current_section_plan, dict):
+        _current_plan_visual_policy = _current_section_plan.get("visual_policy")
+    else:
+        _current_visual_policy = getattr(_current_section_plan, "visual_policy", None)
+        _current_plan_visual_policy = (
+            _current_visual_policy.model_dump()
+            if _current_visual_policy is not None and hasattr(_current_visual_policy, "model_dump")
+            else _current_visual_policy
+        )
+    diag(
+        "IMGGEN_GATE",
+        section_id=_sid,
+        mode=_mode,
+        enabled=_enabled,
+        plan_exists=_plan is not None,
+        current_plan_visual_policy=_current_plan_visual_policy,
     )
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
@@ -84,6 +85,11 @@ event_bus = core_events.event_bus
 
 router = APIRouter(prefix="/api/v1", tags=["generation"])
 _HEARTBEAT_INTERVAL_SECONDS = 30.0
+
+
+def diag(tag: str, **fields) -> None:
+    sys.stderr.write(f"DIAG::{tag}::{json.dumps(fields, default=str)}\n")
+    sys.stderr.flush()
 
 
 def _history_item(generation: Generation) -> dict:
@@ -184,8 +190,35 @@ def _pipeline_section_from_planning(
     needs_worked_example = any(component == "worked-example-card" for component in selected)
     interaction_required = any(component == "simulation-block" for component in selected)
     focus = section.focus_note or section.objective or section.rationale or section.title
+    computed_diagram_policy = "required" if visual_required else "allowed"
+    pipeline_visual_policy = (
+        SectionVisualPolicy(
+            required=section.visual_policy.required,
+            intent=section.visual_policy.intent,
+            mode=section.visual_policy.mode,
+            goal=section.visual_policy.goal,
+            style_notes=section.visual_policy.style_notes,
+        )
+        if section.visual_policy is not None
+        else None
+    )
     if not focus:
         focus = f"Section {section.order}"
+    diag(
+        "PIPELINE_SECTION_FROM_PLANNING",
+        source="generation_service",
+        section_id=section.id,
+        title=section.title,
+        selected_components=selected,
+        planning_visual_policy=(
+            section.visual_policy.model_dump() if section.visual_policy else None
+        ),
+        computed_needs_diagram=needs_diagram,
+        computed_diagram_policy=computed_diagram_policy,
+        pipeline_visual_policy=(
+            pipeline_visual_policy.model_dump() if pipeline_visual_policy else None
+        ),
+    )
     return SectionPlan(
         section_id=section.id,
         title=section.title,
@@ -203,18 +236,8 @@ def _pipeline_section_from_planning(
             if generation_mode == GenerationMode.DRAFT
             else "required" if interaction_required else "allowed"
         ),
-        diagram_policy="required" if visual_required else "allowed",
-        visual_policy=(
-            SectionVisualPolicy(
-                required=section.visual_policy.required,
-                intent=section.visual_policy.intent,
-                mode=section.visual_policy.mode,
-                goal=section.visual_policy.goal,
-                style_notes=section.visual_policy.style_notes,
-            )
-            if section.visual_policy is not None
-            else None
-        ),
+        diagram_policy=computed_diagram_policy,
+        visual_policy=pipeline_visual_policy,
         continuity_notes=section.rationale,
     )
 

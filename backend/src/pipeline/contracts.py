@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -52,6 +53,11 @@ def _contracts_dir() -> Path:
 # ── Raw loaders (cached) ─────────────────────────────────────────────────────
 
 _META_FILES = {"component-field-map", "component-registry", "preset-registry"}
+
+
+def diag(tag: str, **fields) -> None:
+    sys.stderr.write(f"DIAG::{tag}::{json.dumps(fields, default=str)}\n")
+    sys.stderr.flush()
 
 
 @lru_cache(maxsize=None)
@@ -100,14 +106,39 @@ def _load_preset_registry() -> dict[str, dict]:
 
 
 def _required_components(contract: dict) -> list[str]:
+    template_id = contract.get("id")
     required = contract.get("required_components")
     if isinstance(required, list):
+        diag(
+            "CONTRACT_RESOLVED_REQUIREMENTS",
+            template_id=template_id,
+            required_components=required,
+            always_present=contract.get("always_present"),
+            resolved_required_components=required,
+            source="required_components",
+        )
         return required
 
     always_present = contract.get("always_present")
     if isinstance(always_present, list):
+        diag(
+            "CONTRACT_RESOLVED_REQUIREMENTS",
+            template_id=template_id,
+            required_components=contract.get("required_components"),
+            always_present=always_present,
+            resolved_required_components=always_present,
+            source="always_present",
+        )
         return always_present
 
+    diag(
+        "CONTRACT_RESOLVED_REQUIREMENTS",
+        template_id=template_id,
+        required_components=contract.get("required_components"),
+        always_present=contract.get("always_present"),
+        resolved_required_components=[],
+        source="none",
+    )
     return []
 
 
@@ -183,9 +214,24 @@ def validate_section_for_template(
     violations = []
     field_map = _load_field_map()
     contract = _load_contract_raw(template_id)
+    resolved_required_components = _required_components(contract)
+    diag(
+        "CONTRACT_VALIDATION_START",
+        template_id=template_id,
+        resolved_required_components=resolved_required_components,
+        section_keys=sorted(section.keys()),
+    )
 
-    for component_id in _required_components(contract):
+    for component_id in resolved_required_components:
         field = field_map.get(component_id)
+        content_present = bool(section.get(field)) if field is not None else False
+        diag(
+            "CONTRACT_REQUIRED_CHECK",
+            template_id=template_id,
+            component_id=component_id,
+            field=field,
+            content_present=content_present,
+        )
         if field is None:
             continue
         if not section.get(field):
@@ -200,6 +246,11 @@ def validate_section_for_template(
             f"does not match expected '{template_id}'"
         )
 
+    diag(
+        "CONTRACT_VALIDATION_RESULT",
+        template_id=template_id,
+        violations=violations,
+    )
     return len(violations) == 0, violations
 
 
