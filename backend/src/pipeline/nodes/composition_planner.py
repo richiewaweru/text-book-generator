@@ -45,15 +45,39 @@ def _has_diagram_slot(contract) -> bool:
     return bool({"diagram-block", "diagram-series", "diagram-compare"} & components)
 
 
+_DIAGRAM_COMPONENTS = {"diagram-block", "diagram-series", "diagram-compare"}
+
+
 def _diagram_allowed(state: TextbookPipelineState) -> bool:
     plan = state.current_section_plan
     if plan is None:
         return False
+
+    # Hard disable: explicit policy override takes absolute priority.
     if plan.diagram_policy == "disabled":
         return False
+
+    # Template must have a diagram slot — no point generating without a renderer.
     if not _has_diagram_slot(state.contract):
         return False
-    return plan.diagram_policy == "required" or bool(plan.needs_diagram)
+
+    # Existing correct signals from the planning flow.
+    if plan.diagram_policy == "required":
+        return True
+    if bool(plan.needs_diagram):
+        return True
+
+    # Planner selected a diagram component for this section.
+    # Primary new check: diagram-block in required_components is sufficient.
+    if _DIAGRAM_COMPONENTS & set(getattr(plan, "required_components", [])):
+        return True
+
+    # visual_policy.required is the visual router's explicit signal.
+    vp = getattr(plan, "visual_policy", None)
+    if vp is not None and getattr(vp, "required", False):
+        return True
+
+    return False
 
 
 def _interaction_allowed(state: TextbookPipelineState) -> bool:

@@ -12,7 +12,7 @@ from core.rate_limit import limiter
 import core.events as core_events
 from core.llm import build_model, run_llm
 from pipeline.contracts import get_contract, list_template_ids, validate_preset_for_template
-from pipeline.types.requests import GenerationMode, SectionPlan
+from pipeline.types.requests import GenerationMode, SectionPlan, SectionVisualPolicy
 from generation.dtos import GenerationAcceptedResponse
 from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_report_repository import (
@@ -121,6 +121,17 @@ def _pipeline_section_from_planning(
             else "required" if interaction_required else "allowed"
         ),
         diagram_policy="required" if visual_required else "allowed",
+        visual_policy=(
+            SectionVisualPolicy(
+                required=section.visual_policy.required,
+                intent=section.visual_policy.intent,
+                mode=section.visual_policy.mode,
+                goal=section.visual_policy.goal,
+                style_notes=section.visual_policy.style_notes,
+            )
+            if section.visual_policy is not None
+            else None
+        ),
         continuity_notes=section.rationale,
     )
 
