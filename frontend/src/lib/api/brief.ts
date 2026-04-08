@@ -97,6 +97,13 @@ export async function* streamPlan(
 	}
 }
 
+export async function* streamReplan(
+	brief: StudioBriefRequest,
+	forced_template_id: string
+): AsyncGenerator<PlanningStreamEvent> {
+	yield* streamPlan({ ...brief, forced_template_id });
+}
+
 export async function commitPlan(spec: PlanningGenerationSpec): Promise<GenerationAccepted> {
 	const response = await apiFetch('/api/v1/brief/commit', {
 		method: 'POST',

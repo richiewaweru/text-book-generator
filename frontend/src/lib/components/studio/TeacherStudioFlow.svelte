@@ -3,7 +3,7 @@
 	import { get } from 'svelte/store';
 
 	import { getProfile } from '$lib/api/profile';
-	import { commitPlan, listContracts, streamPlan } from '$lib/api/brief';
+	import { commitPlan, listContracts, streamPlan, streamReplan } from '$lib/api/brief';
 	import { ApiError } from '$lib/api/errors';
 	import GenerationView from '$lib/components/studio/GenerationView.svelte';
 	import IntentForm from '$lib/components/studio/IntentForm.svelte';
@@ -25,7 +25,7 @@
 		setTemplateDecision,
 		studioState
 	} from '$lib/stores/studio';
-	import { swapTemplateInSpec } from '$lib/studio/template-swap';
+	import { mergeAuthoredSections, type AuthoredSection } from '$lib/studio/template-swap';
 	import type {
 		PlanningErrorEvent,
 		PlanningTemplateSelectedEvent,
@@ -43,6 +43,7 @@
 	let planningError = $state<string | null>(null);
 	let commitError = $state<string | null>(null);
 	let committing = $state(false);
+	let swappingTemplateName = $state<string | null>(null);
 
 	const stateSummary = $derived(
 		$studioState === 'idle'
@@ -123,13 +124,53 @@
 		}
 	}
 
-	function handleTemplateSwap(contract: StudioTemplateContract) {
+	async function handleTemplateSwap(contract: StudioTemplateContract) {
 		const current = get(editedSpec);
-		if (!current || current.template_id === contract.id) {
-			return;
-		}
+		if (!current || current.template_id === contract.id) return;
 
-		editedSpec.set(swapTemplateInSpec(current, contract));
+		const authoredSections: AuthoredSection[] = current.sections.map((s) => ({
+			order: s.order,
+			title: s.title,
+			focus_note: s.focus_note
+		}));
+		const originalSpec = current;
+
+		swappingTemplateName = contract.name;
+		planningError = null;
+		beginPlanning();
+
+		const startedAt = performance.now();
+
+		try {
+			for await (const event of streamReplan(current.source_brief, contract.id)) {
+				if (event.event === 'template_selected') {
+					const e = event as PlanningTemplateSelectedEvent;
+					setTemplateDecision(e.data.template_decision, e.data.lesson_rationale, e.data.warning);
+					continue;
+				}
+				if (event.event === 'section_planned') {
+					appendPlannedSection(event.data.section);
+					continue;
+				}
+				if (event.event === 'plan_complete') {
+					const merged = mergeAuthoredSections(event.data.spec, authoredSections);
+					completePlanning(merged, performance.now() - startedAt);
+					continue;
+				}
+				if (event.event === 'plan_error') {
+					const e = event as PlanningErrorEvent;
+					const merged = mergeAuthoredSections(e.data.spec, authoredSections);
+					completePlanning(merged, performance.now() - startedAt);
+					planningError = e.data.warning ?? 'Replan fell back to defaults. Review carefully.';
+					continue;
+				}
+			}
+		} catch (error) {
+			completePlanning(originalSpec, performance.now() - startedAt);
+			planningError = errorMessage(error, 'Replan failed. Your original plan has been restored.');
+		} finally {
+			swappingTemplateName = null;
+		}
 	}
 
 	async function handleCommit() {
@@ -228,7 +269,7 @@
 		{#if $studioState === 'idle'}
 			<IntentForm onSubmit={handlePlan} />
 		{:else if $studioState === 'planning'}
-			<PlanStream errorMessage={planningError} onRetry={handleRetryPlanning} />
+			<PlanStream errorMessage={planningError} onRetry={handleRetryPlanning} replanningFor={swappingTemplateName} />
 		{:else if $studioState === 'reviewing'}
 			<PlanReview
 				busy={committing}

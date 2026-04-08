@@ -5,6 +5,7 @@
 		isHeavyComponent,
 		roleLabel,
 		roleTone,
+		visualPolicyDetail,
 		visualPolicyLabel
 	} from '$lib/studio/presentation';
 	import type { StudioTemplateContract } from '$lib/types';
@@ -245,14 +246,19 @@
 							</div>
 							<div class="section-tags">
 								<span class={`role-pill role-${roleTone(section.role)}`}>{roleLabel(section.role)}</span>
-								{#if visualPolicyLabel(section.visual_policy)}
-									<span class="visual-pill">{visualPolicyLabel(section.visual_policy)}</span>
+								{#if visualPolicyDetail(section.visual_policy)}
+									{@const vd = visualPolicyDetail(section.visual_policy)}
+									<span class="visual-pill">{vd?.chip}</span>
 								{/if}
 								<button class="toggle-pill" type="button" onclick={() => toggleSection(section.id)}>
 									{expandedSections[section.id] ? 'Hide details' : 'Details'}
 								</button>
 							</div>
 						</div>
+
+						{#if section.objective}
+							<p class="section-objective">{section.objective}</p>
+						{/if}
 
 						<div class="component-row">
 							{#each section.selected_components as component}
@@ -267,12 +273,15 @@
 								{#if section.objective || section.rationale}
 									<p class="section-copy">{section.objective || section.rationale}</p>
 								{/if}
+								{#if visualPolicyDetail(section.visual_policy)?.goal}
+									<p class="visual-goal">{visualPolicyDetail(section.visual_policy)?.goal}</p>
+								{/if}
 								<label class="field">
 									<span>Focus note</span>
 									<textarea
 										rows="3"
 										value={section.focus_note ?? ''}
-										placeholder="Add a focus note for the generator (optional)"
+										placeholder="Optional: guide what the AI emphasises — e.g. 'Use a river ecosystem example'"
 										aria-label={`Section ${section.order} focus note`}
 										oninput={(event) =>
 											handleFocusInput(section.id, (event.currentTarget as HTMLTextAreaElement).value)}
@@ -557,6 +566,20 @@
 	.visual-pill {
 		background: #fff8e4;
 		color: #805d16;
+	}
+
+	.section-objective {
+		font-size: 0.82rem;
+		color: #625a50;
+		line-height: 1.45;
+		margin: 0.25rem 0.1rem 0;
+	}
+
+	.visual-goal {
+		font-size: 0.8rem;
+		color: #625a50;
+		font-style: italic;
+		margin-top: 0.3rem;
 	}
 
 	.toggle-pill {

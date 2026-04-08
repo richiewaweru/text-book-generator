@@ -62,6 +62,32 @@ function buildAlternatives(
 	return alternatives.slice(0, 3);
 }
 
+export interface AuthoredSection {
+	order: number;
+	title: string | null;
+	focus_note: string | null;
+}
+
+export function mergeAuthoredSections(
+	newSpec: PlanningGenerationSpec,
+	authored: AuthoredSection[]
+): PlanningGenerationSpec {
+	const authoredByOrder = new Map(authored.map((a) => [a.order, a]));
+
+	return {
+		...newSpec,
+		sections: newSpec.sections.map((section) => {
+			const edit = authoredByOrder.get(section.order);
+			if (!edit) return section;
+			return {
+				...section,
+				title: edit.title ?? section.title,
+				focus_note: edit.focus_note ?? section.focus_note
+			};
+		})
+	};
+}
+
 export function swapTemplateInSpec(
 	spec: PlanningGenerationSpec,
 	contract: StudioTemplateContract

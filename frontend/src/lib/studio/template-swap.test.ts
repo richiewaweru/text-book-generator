@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { PlanningGenerationSpec, StudioTemplateContract } from '$lib/types';
 
-import { componentsForRole, swapTemplateInSpec } from './template-swap';
+import { componentsForRole, mergeAuthoredSections, swapTemplateInSpec } from './template-swap';
 
 function buildSpec(): PlanningGenerationSpec {
 	return {
@@ -128,6 +128,34 @@ function buildContract(): StudioTemplateContract {
 		generation_guidance: {}
 	};
 }
+
+describe('mergeAuthoredSections', () => {
+	it('merges teacher-authored titles by order', () => {
+		const spec = buildSpec();
+		const authored = [{ order: 1, title: 'My title', focus_note: 'Focus here' }];
+		const merged = mergeAuthoredSections(spec, authored);
+		expect(merged.sections[0].title).toBe('My title');
+		expect(merged.sections[0].focus_note).toBe('Focus here');
+	});
+
+	it('drops authored edits for orders that no longer exist', () => {
+		const spec = buildSpec();
+		const authored = [
+			{ order: 1, title: 'Keep', focus_note: null },
+			{ order: 2, title: 'Orphaned', focus_note: null }
+		];
+		const merged = mergeAuthoredSections(spec, authored);
+		expect(merged.sections).toHaveLength(1);
+		expect(merged.sections[0].title).toBe('Keep');
+	});
+
+	it('uses planner title when authored title is null', () => {
+		const spec = buildSpec();
+		const authored = [{ order: 1, title: null, focus_note: null }];
+		const merged = mergeAuthoredSections(spec, authored);
+		expect(merged.sections[0].title).toBe(spec.sections[0].title);
+	});
+});
 
 describe('template swap', () => {
 	it('maps role defaults from the selected contract into the editable spec', () => {
