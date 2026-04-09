@@ -142,6 +142,25 @@ async def _assemble_section(
 
     section_dict = section.model_dump(exclude_none=True)
     pending_assets = pending_visual_fields(typed)
+    if mode == "final" and pending_assets:
+        partials = dict(typed.partial_sections)
+        partials[section_id] = PartialSectionRecord(
+            section_id=section.section_id,
+            template_id=section.template_id,
+            content=section,
+            status="awaiting_assets",
+            pending_assets=pending_assets,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        lifecycle = dict(typed.section_lifecycle)
+        lifecycle[section_id] = "awaiting_assets"
+        return {
+            "partial_sections": partials,
+            "section_pending_assets": {section_id: pending_assets},
+            "section_lifecycle": lifecycle,
+            "completed_nodes": [node_name],
+        }
+
     is_valid, violations = validate_section_for_template(
         section_dict,
         typed.contract.id,
