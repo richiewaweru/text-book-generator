@@ -79,6 +79,24 @@ class FailedSectionEntry(BaseModel):
     failure_detail: NodeFailureDetail | None = None
 
 
+class PipelinePartialSectionEntry(BaseModel):
+    section_id: str
+    template_id: str
+    content: SectionContent
+    status: str = "partial"
+    pending_assets: list[str] = Field(default_factory=list)
+    updated_at: datetime
+
+    @field_validator("updated_at", mode="before")
+    @classmethod
+    def _normalize_updated_at(cls, value: datetime | str) -> datetime:
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value)
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+
 class PipelineDocument(BaseModel):
     generation_id: str
     subject: str
@@ -89,6 +107,7 @@ class PipelineDocument(BaseModel):
     status: Literal["pending", "running", "completed", "failed"] = "pending"
     section_manifest: list[PipelineSectionManifestItem] = Field(default_factory=list)
     sections: list[SectionContent] = Field(default_factory=list)
+    partial_sections: list[PipelinePartialSectionEntry] = Field(default_factory=list)
     failed_sections: list[FailedSectionEntry] = Field(default_factory=list)
     qc_reports: list[PipelineSectionReport] = Field(default_factory=list)
     quality_passed: bool | None = None
@@ -123,6 +142,7 @@ __all__ = [
     "PipelineDocument",
     "PipelineErrorInfo",
     "PipelineIssue",
+    "PipelinePartialSectionEntry",
     "PipelineResult",
     "PipelineSectionManifestItem",
     "PipelineSectionReport",

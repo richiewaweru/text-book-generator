@@ -18,6 +18,7 @@ from pipeline.api import (
     PipelineDocument,
     PipelineErrorInfo,
     FailedSectionEntry,
+    PipelinePartialSectionEntry,
     PipelineResult,
     PipelineSectionManifestItem,
     PipelineSectionReport,
@@ -28,6 +29,10 @@ from pipeline.events import (
     PipelineStartEvent,
     QCCompleteEvent,
     RuntimeProgressEvent,
+    SectionAssetPendingEvent,
+    SectionAssetReadyEvent,
+    SectionFinalEvent,
+    SectionPartialEvent,
     SectionReadyEvent,
     SectionStartedEvent,
 )
@@ -135,6 +140,37 @@ def _build_failed_sections(state: TextbookPipelineState) -> list[FailedSectionEn
     return failed_sections
 
 
+def _build_partial_sections(state: TextbookPipelineState) -> list[PipelinePartialSectionEntry]:
+    final_ids = set(state.assembled_sections)
+    failed_ids = set(state.failed_sections)
+    manifest_positions = {
+        item.section_id: item.position
+        for item in _build_section_manifest(state)
+    }
+
+    partial_sections = [
+        PipelinePartialSectionEntry(
+            section_id=record.section_id,
+            template_id=record.template_id,
+            content=record.content,
+            status=state.section_lifecycle.get(record.section_id, record.status),
+            pending_assets=list(
+                state.section_pending_assets.get(record.section_id, record.pending_assets)
+            ),
+            updated_at=record.updated_at,
+        )
+        for record in state.partial_sections.values()
+        if record.section_id not in final_ids and record.section_id not in failed_ids
+    ]
+    partial_sections.sort(
+        key=lambda item: (
+            manifest_positions.get(item.section_id, len(manifest_positions) + 1),
+            item.section_id,
+        )
+    )
+    return partial_sections
+
+
 def _build_document(
     command: PipelineCommand,
     state: TextbookPipelineState,
@@ -165,6 +201,7 @@ def _build_document(
         status=status,
         section_manifest=_build_section_manifest(state),
         sections=_sorted_sections(state),
+        partial_sections=_build_partial_sections(state),
         failed_sections=_build_failed_sections(state),
         qc_reports=reports,
         quality_passed=quality_passed,
@@ -278,22 +315,80 @@ async def run_pipeline_streaming(
                     emitted_started_sections = True
 
                 if node_name in {"process_section", "retry_diagram", "retry_field", "retry_interaction"}:
+                    partials = output.get("partial_sections", {}) if isinstance(output, dict) else {}
+                    for section_id, partial in partials.items():
+                        entry = PipelinePartialSectionEntry.model_validate(partial)
+                        if section_id in typed_state.assembled_sections or section_id in typed_state.failed_sections:
+                            continue
+                        await _emit(
+                            SectionPartialEvent(
+                                generation_id=command.generation_id or "",
+                                section_id=section_id,
+                                section=entry.content,
+                                template_id=entry.template_id,
+                                status=entry.status,
+                                pending_assets=list(entry.pending_assets),
+                                updated_at=entry.updated_at.isoformat(),
+                            ),
+                            on_event,
+                        )
+
+                    asset_pending = output.get("_asset_pending", {}) if isinstance(output, dict) else {}
+                    for section_id, pending_assets in asset_pending.items():
+                        partial = typed_state.partial_sections.get(section_id)
+                        updated_at = (
+                            partial.updated_at
+                            if partial is not None
+                            else datetime.now(timezone.utc).isoformat()
+                        )
+                        await _emit(
+                            SectionAssetPendingEvent(
+                                generation_id=command.generation_id or "",
+                                section_id=section_id,
+                                pending_assets=list(pending_assets),
+                                status=typed_state.section_lifecycle.get(section_id, "awaiting_assets"),
+                                updated_at=updated_at,
+                            ),
+                            on_event,
+                        )
+
+                    asset_ready = output.get("_asset_ready", {}) if isinstance(output, dict) else {}
+                    for section_id, payload in asset_ready.items():
+                        await _emit(
+                            SectionAssetReadyEvent(
+                                generation_id=command.generation_id or "",
+                                section_id=section_id,
+                                ready_assets=list(payload.get("ready_assets", [])),
+                                pending_assets=list(payload.get("pending_assets", [])),
+                                updated_at=datetime.now(timezone.utc).isoformat(),
+                            ),
+                            on_event,
+                        )
+
                     assembled = output.get("assembled_sections", {}) if isinstance(output, dict) else {}
                     total_sections = len(typed_state.curriculum_outline or []) or command.section_count
                     completed_sections = len(typed_state.assembled_sections)
                     for section_id, section in assembled.items():
                         await runtime_context.progress.mark_section_ready(section_id)
+                        final_event = SectionFinalEvent(
+                            generation_id=command.generation_id or "",
+                            section_id=section_id,
+                            section=(
+                                section
+                                if isinstance(section, SectionContent)
+                                else SectionContent.model_validate(section)
+                            ),
+                            completed_sections=completed_sections,
+                            total_sections=total_sections,
+                        )
+                        await _emit(final_event, on_event)
                         await _emit(
                             SectionReadyEvent(
-                                generation_id=command.generation_id or "",
-                                section_id=section_id,
-                                section=(
-                                    section
-                                    if isinstance(section, SectionContent)
-                                    else SectionContent.model_validate(section)
-                                ),
-                                completed_sections=completed_sections,
-                                total_sections=total_sections,
+                                generation_id=final_event.generation_id,
+                                section_id=final_event.section_id,
+                                section=final_event.section,
+                                completed_sections=final_event.completed_sections,
+                                total_sections=final_event.total_sections,
                             ),
                             on_event,
                         )

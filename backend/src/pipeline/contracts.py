@@ -210,16 +210,25 @@ def get_lesson_flow(template_id: str) -> list[str]:
 def validate_section_for_template(
     section: dict,
     template_id: str,
+    *,
+    mode: str = "final",
+    allow_missing_fields: set[str] | None = None,
+    additional_required_fields: set[str] | None = None,
 ) -> tuple[bool, list[str]]:
     violations = []
     field_map = _load_field_map()
     contract = _load_contract_raw(template_id)
     resolved_required_components = _required_components(contract)
+    allowed_missing_fields = allow_missing_fields or set()
+    extra_required_fields = additional_required_fields or set()
     diag(
         "CONTRACT_VALIDATION_START",
         template_id=template_id,
+        mode=mode,
         resolved_required_components=resolved_required_components,
         section_keys=sorted(section.keys()),
+        allow_missing_fields=sorted(allowed_missing_fields),
+        additional_required_fields=sorted(extra_required_fields),
     )
 
     for component_id in resolved_required_components:
@@ -234,10 +243,20 @@ def validate_section_for_template(
         )
         if field is None:
             continue
+        if mode == "partial" and field in allowed_missing_fields:
+            continue
         if not section.get(field):
             violations.append(
                 f"Required component '{component_id}' has no content "
                 f"(missing field: '{field}')"
+            )
+
+    for field in sorted(extra_required_fields):
+        if mode == "partial" and field in allowed_missing_fields:
+            continue
+        if not section.get(field):
+            violations.append(
+                f"Required field '{field}' has no content for template '{template_id}'"
             )
 
     if section.get("template_id") != template_id:

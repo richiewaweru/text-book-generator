@@ -3,8 +3,9 @@ Composite per-section node with explicit execution phases.
 
 Phase 1: content_generator
 Phase 2: composition_planner
-Phase 3: diagram_generator || interaction_generator
-Phase 4: section_assembler -> qc_agent
+Phase 3: partial_section_assembler
+Phase 4: diagram_generator || image_generator || interaction_generator
+Phase 5: section_assembler -> qc_agent
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pipeline.nodes.image_generator import image_generator
 from pipeline.nodes.interaction_decider import interaction_decider
 from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.nodes.qc_agent import qc_agent
-from pipeline.nodes.section_assembler import section_assembler
+from pipeline.nodes.section_assembler import partial_section_assembler, section_assembler
 from pipeline.nodes.section_runner import _run_parallel_phase, run_section_steps
 from pipeline.runtime_context import get_runtime_context
 from pipeline.state import TextbookPipelineState, merge_state_updates
@@ -30,8 +31,6 @@ async def _run_interaction_path(
     model_overrides: dict | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
-    """Preserve the existing interaction_decider -> interaction_generator path."""
-
     return await run_section_steps(
         state,
         steps=[
@@ -49,14 +48,10 @@ async def process_section(
     model_overrides: dict | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
-    """Run the phased per-section pipeline and merge the step outputs."""
-
     typed = TextbookPipelineState.parse(state)
     runtime_context = get_runtime_context(config)
     section_id = typed.current_section_id
-    is_retry = (
-        section_id is not None and typed.pending_rerender_for(section_id) is not None
-    )
+    is_retry = section_id is not None and typed.pending_rerender_for(section_id) is not None
 
     if runtime_context is not None and section_id is not None:
         await runtime_context.progress.queue_section(section_id)
@@ -87,7 +82,16 @@ async def process_section(
         merge_state_updates(raw_state, phase2)
         typed = TextbookPipelineState.parse(raw_state)
 
-        phase3 = await _run_parallel_phase(
+        phase3 = await run_section_steps(
+            typed,
+            steps=[("partial_section_assembler", partial_section_assembler)],
+            model_overrides=model_overrides,
+            config=config,
+        )
+        merge_state_updates(raw_state, phase3)
+        typed = TextbookPipelineState.parse(raw_state)
+
+        phase4 = await _run_parallel_phase(
             typed,
             steps=[
                 ("diagram_generator", diagram_generator),
@@ -98,10 +102,10 @@ async def process_section(
             model_overrides=model_overrides,
             config=config,
         )
-        merge_state_updates(raw_state, phase3)
+        merge_state_updates(raw_state, phase4)
         typed = TextbookPipelineState.parse(raw_state)
 
-        phase4 = await run_section_steps(
+        phase5 = await run_section_steps(
             typed,
             steps=[
                 ("section_assembler", section_assembler),
@@ -111,10 +115,31 @@ async def process_section(
             config=config,
         )
 
-        final_output: dict = {}
-        for phase in (phase1, phase2, phase3, phase4):
-            merge_state_updates(final_output, phase)
-        return final_output
+        output: dict = {}
+        for phase in (phase1, phase2, phase3, phase4, phase5):
+            merge_state_updates(output, phase)
+
+        initial_pending_assets = phase3.get("section_pending_assets", {}).get(section_id, [])
+        final_pending_assets = phase5.get("section_pending_assets", {}).get(
+            section_id,
+            phase4.get("section_pending_assets", {}).get(section_id, initial_pending_assets),
+        )
+        if initial_pending_assets:
+            output["_asset_pending"] = {section_id: list(initial_pending_assets)}
+            ready_assets = [
+                asset
+                for asset in initial_pending_assets
+                if asset not in set(final_pending_assets)
+            ]
+            if ready_assets:
+                output["_asset_ready"] = {
+                    section_id: {
+                        "ready_assets": ready_assets,
+                        "pending_assets": list(final_pending_assets),
+                    }
+                }
+
+        return output
     finally:
         if runtime_context is not None and section_id is not None:
             runtime_context.limiters.section.release()

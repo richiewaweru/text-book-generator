@@ -749,6 +749,56 @@ class TestSectionAssembler:
         warnings = _check_capacity(section_dict)
         assert any("hook.headline" in w for w in warnings)
 
+    async def test_partial_section_assembler_allows_pending_required_visual(self):
+        from pipeline.nodes.section_assembler import partial_section_assembler
+
+        state = _base_state(
+            contract=_contract(
+                required_components=[
+                    "section-header",
+                    "hook-hero",
+                    "explanation-block",
+                    "practice-stack",
+                    "what-next-bridge",
+                    "diagram-block",
+                ],
+                optional_components=["definition-card"],
+            ),
+            current_section_id="s-01",
+            generated_sections={"s-01": _section("s-01")},
+        )
+        result = await partial_section_assembler(state)
+
+        assert result["partial_sections"]["s-01"].status == "awaiting_assets"
+        assert result["partial_sections"]["s-01"].pending_assets == ["diagram"]
+        assert result["section_pending_assets"]["s-01"] == ["diagram"]
+        assert result["section_lifecycle"]["s-01"] == "awaiting_assets"
+        assert "partial_section_assembler" in result["completed_nodes"]
+
+    async def test_final_section_assembler_rejects_missing_required_visual(self):
+        from pipeline.nodes.section_assembler import section_assembler
+
+        state = _base_state(
+            contract=_contract(
+                required_components=[
+                    "section-header",
+                    "hook-hero",
+                    "explanation-block",
+                    "practice-stack",
+                    "what-next-bridge",
+                    "diagram-block",
+                ],
+                optional_components=["definition-card"],
+            ),
+            current_section_id="s-01",
+            generated_sections={"s-01": _section("s-01")},
+        )
+        result = await section_assembler(state)
+
+        assert "assembled_sections" not in result
+        assert result["errors"][0].node == "section_assembler"
+        assert "diagram" in result["errors"][0].message
+
 
 # ── Preset validation (uses contracts on disk) ───────────────────────────────
 
@@ -1351,6 +1401,7 @@ class TestProcessSectionComposite:
         assert result["completed_nodes"] == [
             "content_generator",
             "composition_planner",
+            "partial_section_assembler",
             "diagram_generator",
             "image_generator",
             "interaction_decider",

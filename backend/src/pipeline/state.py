@@ -2,19 +2,6 @@
 pipeline.state
 
 The single state object that flows through the LangGraph pipeline.
-
-Field ownership rules (enforced by convention):
-    curriculum_planner    -> curriculum_outline, style_context
-    content_generator     -> generated_sections, failed_sections, node_failures
-    composition_planner   -> composition_plans, interaction_usage
-    diagram_generator     -> generated_sections[id].diagram, diagram_outcomes
-    interaction_generator -> generated_sections[id].simulation,
-                             generated_sections[id].simulations, interaction_specs
-    section_assembler     -> assembled_sections, qc_reports (capacity warnings)
-    qc_agent              -> qc_reports (semantic issues), rerender_requests
-
-Annotated[list, operator.add] = append-only (LangGraph reducer).
-Plain fields = last-write-wins.
 """
 
 from __future__ import annotations
@@ -26,25 +13,16 @@ from typing import Annotated, Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from pipeline.types.composition import CompositionPlan
+from pipeline.types.requests import PipelineRequest, SectionPlan
 from pipeline.types.section_content import InteractionSpec, SectionContent
 from pipeline.types.template_contract import TemplateContractSummary
-from pipeline.types.requests import PipelineRequest, SectionPlan
 
 
 def _merge_dicts(left: dict, right: dict) -> dict:
-    """LangGraph reducer: merge dicts from concurrent fan-out writes."""
-
     return {**left, **right}
 
 
 def _merge_rerender_requests(left: dict, right: dict) -> dict:
-    """
-    Merge per-section rerender requests.
-
-    A `None` value in `right` acts as a delete tombstone so retries can be
-    consumed and cleared after a repair pass.
-    """
-
     merged = dict(left)
     for section_id, request in right.items():
         if request is None:
@@ -55,8 +33,6 @@ def _merge_rerender_requests(left: dict, right: dict) -> dict:
 
 
 def merge_state_updates(state: dict[str, Any], output: dict[str, Any]) -> None:
-    """Apply one node output onto a raw state dict using pipeline reducers."""
-
     for key, value in output.items():
         if (
             key == "rerender_requests"
@@ -148,13 +124,21 @@ class FailedSectionRecord(BaseModel):
     failure_detail: NodeFailureDetail
 
 
+class PartialSectionRecord(BaseModel):
+    section_id: str
+    template_id: str
+    content: SectionContent
+    status: str = "partial"
+    pending_assets: list[str] = Field(default_factory=list)
+    updated_at: str
+
+
 class TextbookPipelineState(BaseModel):
     request: PipelineRequest
     contract: TemplateContractSummary
 
     curriculum_outline: Optional[list[SectionPlan]] = None
     style_context: Optional[StyleContext] = None
-
     current_section_id: Optional[str] = None
     current_section_plan: Optional[SectionPlan] = None
 
@@ -168,6 +152,15 @@ class TextbookPipelineState(BaseModel):
         default_factory=dict
     )
     interaction_usage: Annotated[dict[str, int], _merge_dicts] = Field(
+        default_factory=dict
+    )
+    partial_sections: Annotated[dict[str, PartialSectionRecord], _merge_dicts] = Field(
+        default_factory=dict
+    )
+    section_pending_assets: Annotated[dict[str, list[str]], _merge_dicts] = Field(
+        default_factory=dict
+    )
+    section_lifecycle: Annotated[dict[str, str], _merge_dicts] = Field(
         default_factory=dict
     )
     assembled_sections: Annotated[dict[str, SectionContent], _merge_dicts] = Field(
@@ -201,13 +194,10 @@ class TextbookPipelineState(BaseModel):
     diagram_outcomes: Annotated[dict[str, str], _merge_dicts] = Field(
         default_factory=dict
     )
-
     status: PipelineStatus = PipelineStatus.PENDING
 
     @classmethod
     def parse(cls, raw: "TextbookPipelineState | dict") -> "TextbookPipelineState":
-        """Convert LangGraph's dict state into a typed model instance."""
-
         if isinstance(raw, cls):
             return raw
         return cls.model_validate(raw)
@@ -242,7 +232,7 @@ class TextbookPipelineState(BaseModel):
         raise TypeError("rerender_requests must be a dict, list, or None")
 
     def has_errors_for(self, section_id: str) -> bool:
-        return any(e.section_id == section_id for e in self.errors)
+        return any(error.section_id == section_id for error in self.errors)
 
     def rerender_count_for(self, section_id: str) -> int:
         return self.rerender_count.get(section_id, 0)

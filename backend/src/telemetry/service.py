@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 _REPORT_EVENT_TYPES = {
     "pipeline_start",
     "section_started",
+    "section_partial",
+    "section_asset_pending",
+    "section_asset_ready",
+    "section_final",
     "section_attempt_started",
     "node_started",
     "node_finished",

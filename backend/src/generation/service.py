@@ -24,12 +24,23 @@ from core.auth.jwt_handler import JWTHandler
 from core.database.session import async_session_factory
 from core.dependencies import get_jwt_handler, get_settings
 from core.ports.generation_engine import GenerationEngine
-from pipeline.api import PipelineCommand, PipelineDocument, PipelineSectionManifestItem
+from pipeline.api import (
+    FailedSectionEntry,
+    PipelineCommand,
+    PipelineDocument,
+    PipelinePartialSectionEntry,
+    PipelineSectionManifestItem,
+)
 from pipeline.contracts import get_contract, validate_preset_for_template
 from pipeline.events import (
     CompleteEvent,
     ErrorEvent,
     RuntimeProgressEvent,
+    SectionAssetPendingEvent,
+    SectionAssetReadyEvent,
+    SectionFailedEvent,
+    SectionFinalEvent,
+    SectionPartialEvent,
     SectionReadyEvent,
     SectionStartedEvent,
 )
@@ -364,6 +375,30 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
             "section_id": event.get("section_id"),
             "label": f"Generating {event.get('title', 'section')}",
         }]
+    if event_type == "section_partial":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "drafting_partial",
+            "section_id": event.get("section_id"),
+            "label": "Drafting section",
+        }]
+    if event_type == "section_asset_pending":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "awaiting_assets",
+            "section_id": event.get("section_id"),
+            "label": "Waiting for visuals",
+        }]
+    if event_type == "section_asset_ready":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "finalizing_section",
+            "section_id": event.get("section_id"),
+            "label": "Finalizing section",
+        }]
     if event_type == "node_started":
         node = event.get("node")
         if node == "diagram_generator":
@@ -419,6 +454,7 @@ def _initial_document(
     *,
     section_manifest: list[PipelineSectionManifestItem] | None = None,
     sections: list | None = None,
+    partial_sections: list | None = None,
     failed_sections: list | None = None,
     qc_reports: list | None = None,
     status_value: str = "pending",
@@ -434,6 +470,7 @@ def _initial_document(
         status=status_value,
         section_manifest=section_manifest or [],
         sections=sections or [],
+        partial_sections=partial_sections or [],
         failed_sections=failed_sections or [],
         qc_reports=qc_reports or [],
         created_at=generation.created_at,
@@ -500,10 +537,155 @@ def _replace_or_append_section(document: PipelineDocument, section) -> PipelineD
     return document.model_copy(
         update={
             "sections": _sort_sections_by_manifest(sections, document.section_manifest),
+            "partial_sections": [
+                partial
+                for partial in document.partial_sections
+                if partial.section_id != section.section_id
+            ],
             "failed_sections": [
                 failed
                 for failed in document.failed_sections
                 if failed.section_id != section.section_id
+            ],
+            "updated_at": datetime.now(timezone.utc),
+            "status": "running",
+        }
+    )
+
+
+def _sort_partial_sections_by_manifest(
+    partial_sections: list[PipelinePartialSectionEntry],
+    section_manifest: list[PipelineSectionManifestItem],
+) -> list[PipelinePartialSectionEntry]:
+    manifest = _normalize_manifest_items(section_manifest)
+    if not manifest:
+        return partial_sections
+
+    positions = {item.section_id: item.position for item in manifest}
+    fallback_position = len(positions) + 1
+    return sorted(
+        partial_sections,
+        key=lambda section: (
+            positions.get(section.section_id, fallback_position),
+            section.section_id,
+        ),
+    )
+
+
+def _replace_or_append_partial_section(
+    document: PipelineDocument,
+    partial_section,
+) -> PipelineDocument:
+    entry = (
+        partial_section
+        if isinstance(partial_section, PipelinePartialSectionEntry)
+        else PipelinePartialSectionEntry.model_validate(partial_section)
+    )
+    partial_sections = list(document.partial_sections)
+    for index, existing in enumerate(partial_sections):
+        if existing.section_id == entry.section_id:
+            partial_sections[index] = entry
+            break
+    else:
+        partial_sections.append(entry)
+    return document.model_copy(
+        update={
+            "partial_sections": _sort_partial_sections_by_manifest(
+                partial_sections,
+                document.section_manifest,
+            ),
+            "failed_sections": [
+                failed
+                for failed in document.failed_sections
+                if failed.section_id != entry.section_id
+            ],
+            "updated_at": datetime.now(timezone.utc),
+            "status": "running",
+        }
+    )
+
+
+def _update_partial_section_assets(
+    document: PipelineDocument,
+    *,
+    section_id: str,
+    pending_assets: list[str],
+    status_value: str | None = None,
+) -> PipelineDocument:
+    partial_sections = list(document.partial_sections)
+    updated = False
+    for index, existing in enumerate(partial_sections):
+        if existing.section_id != section_id:
+            continue
+        partial_sections[index] = existing.model_copy(
+            update={
+                "pending_assets": list(pending_assets),
+                "status": status_value or ("awaiting_assets" if pending_assets else "partial"),
+                "updated_at": datetime.now(timezone.utc),
+            }
+        )
+        updated = True
+        break
+    if not updated:
+        return document
+    return document.model_copy(
+        update={
+            "partial_sections": _sort_partial_sections_by_manifest(
+                partial_sections,
+                document.section_manifest,
+            ),
+            "updated_at": datetime.now(timezone.utc),
+            "status": "running",
+        }
+    )
+
+
+def _remove_partial_section(document: PipelineDocument, section_id: str) -> PipelineDocument:
+    partial_sections = [
+        partial
+        for partial in document.partial_sections
+        if partial.section_id != section_id
+    ]
+    if len(partial_sections) == len(document.partial_sections):
+        return document
+    return document.model_copy(
+        update={
+            "partial_sections": partial_sections,
+            "updated_at": datetime.now(timezone.utc),
+            "status": "running",
+        }
+    )
+
+
+def _replace_or_append_failed_section(
+    document: PipelineDocument,
+    failed_section,
+) -> PipelineDocument:
+    entry = (
+        failed_section
+        if isinstance(failed_section, FailedSectionEntry)
+        else FailedSectionEntry.model_validate(failed_section)
+    )
+    failed_sections = list(document.failed_sections)
+    for index, existing in enumerate(failed_sections):
+        if existing.section_id == entry.section_id:
+            failed_sections[index] = entry
+            break
+    else:
+        failed_sections.append(entry)
+    failed_sections.sort(key=lambda item: (item.position, item.section_id))
+    return document.model_copy(
+        update={
+            "failed_sections": failed_sections,
+            "partial_sections": [
+                partial
+                for partial in document.partial_sections
+                if partial.section_id != entry.section_id
+            ],
+            "sections": [
+                section
+                for section in document.sections
+                if section.section_id != entry.section_id
             ],
             "updated_at": datetime.now(timezone.utc),
             "status": "running",
@@ -761,8 +943,61 @@ async def _run_generation_job(
                 position=event.position,
             )
             await document_repo.save_document(document)
+        if isinstance(event, SectionPartialEvent):
+            document = _replace_or_append_partial_section(
+                document,
+                PipelinePartialSectionEntry(
+                    section_id=event.section_id,
+                    template_id=event.template_id,
+                    content=event.section,
+                    status=event.status,
+                    pending_assets=list(event.pending_assets),
+                    updated_at=event.updated_at,
+                ),
+            )
+            await document_repo.save_document(document)
+        if isinstance(event, SectionAssetPendingEvent):
+            document = _update_partial_section_assets(
+                document,
+                section_id=event.section_id,
+                pending_assets=list(event.pending_assets),
+                status_value=event.status,
+            )
+            await document_repo.save_document(document)
+        if isinstance(event, SectionAssetReadyEvent):
+            document = _update_partial_section_assets(
+                document,
+                section_id=event.section_id,
+                pending_assets=list(event.pending_assets),
+            )
+            await document_repo.save_document(document)
+        if isinstance(event, SectionFinalEvent):
+            document = _remove_partial_section(document, event.section_id)
+            await document_repo.save_document(document)
         if isinstance(event, SectionReadyEvent):
             document = _replace_or_append_section(document, event.section)
+            await document_repo.save_document(document)
+        if isinstance(event, SectionFailedEvent):
+            document = _replace_or_append_failed_section(
+                document,
+                FailedSectionEntry(
+                    section_id=event.section_id,
+                    title=event.title,
+                    position=event.position,
+                    focus=event.focus,
+                    bridges_from=event.bridges_from,
+                    bridges_to=event.bridges_to,
+                    needs_diagram=event.needs_diagram,
+                    needs_worked_example=event.needs_worked_example,
+                    failed_at_node=event.failed_at_node,
+                    error_type=event.error_type,
+                    error_summary=event.error_summary,
+                    attempt_count=event.attempt_count,
+                    can_retry=event.can_retry,
+                    missing_components=list(event.missing_components),
+                    failure_detail=event.failure_detail,
+                ),
+            )
             await document_repo.save_document(document)
         if isinstance(event, (LLMCallStartedEvent, LLMCallSucceededEvent, LLMCallFailedEvent)):
             _log_trace_event(generation.id, event)
