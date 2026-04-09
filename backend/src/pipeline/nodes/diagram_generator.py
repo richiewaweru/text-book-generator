@@ -54,12 +54,16 @@ def _get_diagram_slot(contract) -> str:
 def _publish_outcome(generation_id: str, section_id: str | None, outcome: str) -> None:
     if section_id is None:
         return
+    normalized = {
+        "spec_success": "success",
+        "skipped_image_mode": "skipped",
+    }.get(outcome, outcome)
     publish_runtime_event(
         generation_id,
         DiagramOutcomeEvent(
             generation_id=generation_id,
             section_id=section_id,
-            outcome=outcome,
+            outcome=normalized,
         ),
     )
 

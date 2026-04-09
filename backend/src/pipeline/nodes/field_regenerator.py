@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import json
 
+import core.events as core_events
 from langchain_core.runnables.config import RunnableConfig
 from pydantic_ai import Agent
 
 from core.config import settings as app_settings
+from pipeline.events import FieldRegenOutcomeEvent
 from pipeline.llm_runner import run_llm
 from pipeline.prompts.field_regen import (
     RETRYABLE_FIELDS,
@@ -35,6 +37,28 @@ from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, TextbookPipelineState
 
 
+def _publish_field_regen_outcome(
+    generation_id: str,
+    section_id: str | None,
+    *,
+    field_name: str,
+    outcome: str,
+    error_message: str | None = None,
+) -> None:
+    if not generation_id or not section_id:
+        return
+    core_events.event_bus.publish(
+        generation_id,
+        FieldRegenOutcomeEvent(
+            generation_id=generation_id,
+            section_id=section_id,
+            field_name=field_name,
+            outcome=outcome,
+            error_message=error_message,
+        ),
+    )
+
+
 async def field_regenerator(
     state: TextbookPipelineState | dict,
     *,
@@ -44,6 +68,7 @@ async def field_regenerator(
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
     request = state.pending_rerender_for(sid)
+    generation_id = state.request.generation_id or ""
 
     if request is None:
         return {"completed_nodes": ["field_regenerator"]}
@@ -103,6 +128,12 @@ async def field_regenerator(
         patched_payload = section.model_dump(exclude_none=True)
         patched_payload[request.block_type] = raw_field
         patched_section = type(section).model_validate(patched_payload)
+        _publish_field_regen_outcome(
+            generation_id,
+            sid,
+            field_name=request.block_type,
+            outcome="success",
+        )
 
         return {
             "generated_sections": {**state.generated_sections, sid: patched_section},
@@ -111,6 +142,13 @@ async def field_regenerator(
         }
 
     except json.JSONDecodeError as exc:
+        _publish_field_regen_outcome(
+            generation_id,
+            sid,
+            field_name=request.block_type,
+            outcome="failed",
+            error_message=f"Failed to parse regenerated field JSON: {exc}",
+        )
         return {
             "errors": [
                 PipelineError(
@@ -123,6 +161,13 @@ async def field_regenerator(
             "completed_nodes": ["field_regenerator"],
         }
     except Exception as exc:
+        _publish_field_regen_outcome(
+            generation_id,
+            sid,
+            field_name=request.block_type,
+            outcome="failed",
+            error_message=f"Field regeneration failed: {exc}",
+        )
         return {
             "errors": [
                 PipelineError(
