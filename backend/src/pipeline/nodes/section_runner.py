@@ -139,8 +139,16 @@ def _build_section_output(
         output["composition_plans"] = {section_id: after_state.composition_plans[section_id]}
     if section_id and section_id in after_state.interaction_specs:
         output["interaction_specs"] = {section_id: after_state.interaction_specs[section_id]}
+    if section_id and section_id in after_state.partial_sections:
+        output["partial_sections"] = {section_id: after_state.partial_sections[section_id]}
     if section_id and section_id in after_state.assembled_sections:
         output["assembled_sections"] = {section_id: after_state.assembled_sections[section_id]}
+    if section_id and section_id in after_state.section_pending_assets:
+        output["section_pending_assets"] = {
+            section_id: after_state.section_pending_assets[section_id]
+        }
+    if section_id and section_id in after_state.section_lifecycle:
+        output["section_lifecycle"] = {section_id: after_state.section_lifecycle[section_id]}
     if section_id and section_id in after_state.qc_reports:
         output["qc_reports"] = {section_id: after_state.qc_reports[section_id]}
     if section_id and section_id in after_state.failed_sections:
@@ -412,7 +420,10 @@ async def _run_parallel_phase(
             elif key in {
                 "composition_plans",
                 "interaction_specs",
+                "partial_sections",
                 "assembled_sections",
+                "section_pending_assets",
+                "section_lifecycle",
                 "qc_reports",
                 "failed_sections",
                 "diagram_outcomes",
@@ -630,6 +641,12 @@ async def run_section_steps(
                 )
                 step_state.failed_sections[section_id] = record
                 raw["failed_sections"] = dict(step_state.failed_sections)
+                section_lifecycle = dict(step_state.section_lifecycle)
+                section_lifecycle[section_id] = "failed"
+                raw["section_lifecycle"] = section_lifecycle
+                section_pending_assets = dict(step_state.section_pending_assets)
+                section_pending_assets[section_id] = []
+                raw["section_pending_assets"] = section_pending_assets
             node_logger.warning(
                 "Short-circuiting section %s after content_generator produced no content",
                 section_id,
@@ -642,11 +659,33 @@ async def run_section_steps(
             break
 
         if (
-            node_name == "section_assembler"
+            node_name in {"partial_section_assembler", "section_assembler"}
             and section_id
-            and section_id not in step_state.assembled_sections
+            and (
+                (
+                    node_name == "partial_section_assembler"
+                    and section_id not in step_state.partial_sections
+                )
+                or (
+                    node_name == "section_assembler"
+                    and section_id not in step_state.assembled_sections
+                )
+            )
         ):
             node_logger = _node_logger(generation_id, section_id, node_name)
+            pending_assets = step_state.section_pending_assets.get(section_id, [])
+            lifecycle = step_state.section_lifecycle.get(section_id)
+            if (
+                node_name == "section_assembler"
+                and pending_assets
+                and lifecycle in {"partial", "awaiting_assets"}
+            ):
+                node_logger.info(
+                    "Deferring final assembly for section %s while assets are still pending: %s",
+                    section_id,
+                    pending_assets,
+                )
+                break
             record = step_state.failed_sections.get(section_id)
             if record is None:
                 record = _synthetic_failed_section(
@@ -658,9 +697,16 @@ async def run_section_steps(
                 )
                 step_state.failed_sections[section_id] = record
                 raw["failed_sections"] = dict(step_state.failed_sections)
+                section_lifecycle = dict(step_state.section_lifecycle)
+                section_lifecycle[section_id] = "failed"
+                raw["section_lifecycle"] = section_lifecycle
+                section_pending_assets = dict(step_state.section_pending_assets)
+                section_pending_assets[section_id] = []
+                raw["section_pending_assets"] = section_pending_assets
             node_logger.warning(
-                "Short-circuiting section %s after section_assembler produced no assembled section",
+                "Short-circuiting section %s after %s produced no section output",
                 section_id,
+                node_name,
             )
             _publish_section_failed(generation_id=generation_id, record=_coerce_failed_section(record))
             break

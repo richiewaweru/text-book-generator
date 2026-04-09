@@ -17,6 +17,7 @@ from langgraph.graph import END
 from langgraph.types import Send
 
 from pipeline.state import (
+    PartialSectionRecord,
     PipelineError,
     QCReport,
     RerenderRequest,
@@ -209,6 +210,7 @@ class TestGraphTopology:
 
         assert len(sends) == 3
         assert all(isinstance(s, Send) for s in sends)
+        assert all(s.node == "prepare_section" for s in sends)
         sids = [s.arg["current_section_id"] for s in sends]
         assert sids == ["s-01", "s-02", "s-03"]
 
@@ -240,6 +242,125 @@ class TestGraphTopology:
 
 
 # ── QC routing ───────────────────────────────────────────────────────────────
+
+
+class TestSectionPhaseRouting:
+
+    def test_route_after_prepare_section_returns_end_without_current_section(self):
+        from pipeline.graph import route_after_prepare_section
+
+        state = _base_state(current_section_id=None)
+
+        assert route_after_prepare_section(state) == END
+
+    def test_route_after_prepare_section_returns_end_for_failed_section(self):
+        from pipeline.graph import route_after_prepare_section
+
+        state = _base_state(
+            current_section_id="s-01",
+            failed_sections={
+                "s-01": {
+                    "section_id": "s-01",
+                    "title": "Test Section s-01",
+                    "position": 1,
+                    "focus": "Test focus",
+                    "failed_at_node": "prepare_section",
+                    "error_type": "test_failure",
+                    "error_summary": "prepare_section failed",
+                    "failure_detail": {
+                        "node": "prepare_section",
+                        "section_id": "s-01",
+                        "timestamp": "2026-04-09T00:00:00+00:00",
+                        "error_type": "test_failure",
+                        "error_message": "prepare_section failed",
+                    },
+                }
+            },
+            generated_sections={"s-01": _section("s-01")},
+        )
+
+        assert route_after_prepare_section(state) == END
+
+    def test_route_after_prepare_section_returns_end_when_generated_section_missing(self):
+        from pipeline.graph import route_after_prepare_section
+
+        state = _base_state(current_section_id="s-01", generated_sections={})
+
+        assert route_after_prepare_section(state) == END
+
+    def test_route_after_prepare_section_routes_to_asset_generation_when_pending(self):
+        from pipeline.graph import route_after_prepare_section
+
+        state = _base_state(
+            current_section_id="s-01",
+            generated_sections={"s-01": _section("s-01")},
+            section_pending_assets={"s-01": ["diagram"]},
+        )
+
+        assert route_after_prepare_section(state) == "generate_section_assets"
+
+    def test_route_after_prepare_section_routes_to_finalize_without_pending_assets(self):
+        from pipeline.graph import route_after_prepare_section
+
+        state = _base_state(
+            current_section_id="s-01",
+            generated_sections={"s-01": _section("s-01")},
+            section_pending_assets={"s-01": []},
+        )
+
+        assert route_after_prepare_section(state) == "finalize_section"
+
+    def test_route_after_generate_section_assets_returns_end_without_current_section(self):
+        from pipeline.graph import route_after_generate_section_assets
+
+        state = _base_state(current_section_id=None)
+
+        assert route_after_generate_section_assets(state) == END
+
+    def test_route_after_generate_section_assets_returns_end_for_failed_section(self):
+        from pipeline.graph import route_after_generate_section_assets
+
+        state = _base_state(
+            current_section_id="s-01",
+            failed_sections={
+                "s-01": {
+                    "section_id": "s-01",
+                    "title": "Test Section s-01",
+                    "position": 1,
+                    "focus": "Test focus",
+                    "failed_at_node": "generate_section_assets",
+                    "error_type": "test_failure",
+                    "error_summary": "generate_section_assets failed",
+                    "failure_detail": {
+                        "node": "generate_section_assets",
+                        "section_id": "s-01",
+                        "timestamp": "2026-04-09T00:00:00+00:00",
+                        "error_type": "test_failure",
+                        "error_message": "generate_section_assets failed",
+                    },
+                }
+            },
+            generated_sections={"s-01": _section("s-01")},
+        )
+
+        assert route_after_generate_section_assets(state) == END
+
+    def test_route_after_generate_section_assets_returns_end_when_generated_section_missing(self):
+        from pipeline.graph import route_after_generate_section_assets
+
+        state = _base_state(current_section_id="s-01", generated_sections={})
+
+        assert route_after_generate_section_assets(state) == END
+
+    def test_route_after_generate_section_assets_routes_to_finalize(self):
+        from pipeline.graph import route_after_generate_section_assets
+
+        state = _base_state(
+            current_section_id="s-01",
+            generated_sections={"s-01": _section("s-01")},
+        )
+
+        assert route_after_generate_section_assets(state) == "finalize_section"
 
 
 class TestQCRouting:
@@ -375,7 +496,6 @@ class TestQCRouting:
         assert event.section_id == "s-01"
         assert event.next_attempt == 2
         assert event.reason == "Simulation needs clearer controls"
-
     def test_multi_field_block_routes_to_full_prepare_section(self):
         state = _base_state(
             current_section_id="s-01",
@@ -412,7 +532,7 @@ class TestQCRouting:
         result = route_after_qc(state)
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0].node == "process_section"
+        assert result[0].node == "prepare_section"
 
     def test_max_rerenders_respected(self):
         state = _base_state(
@@ -648,7 +768,7 @@ class TestQCRouting:
         result = route_after_qc(state)
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0].node == "process_section"
+        assert result[0].node == "prepare_section"
 
 
 # ── Section assembler (deterministic, uses contracts on disk) ────────────────
@@ -792,6 +912,90 @@ class TestSectionAssembler:
 
         warnings = _check_capacity(section_dict)
         assert any("hook.headline" in w for w in warnings)
+
+    async def test_partial_section_assembler_allows_pending_required_visual(self):
+        from pipeline.nodes.section_assembler import partial_section_assembler
+
+        state = _base_state(
+            contract=_contract(
+                required_components=[
+                    "section-header",
+                    "hook-hero",
+                    "explanation-block",
+                    "practice-stack",
+                    "what-next-bridge",
+                    "diagram-block",
+                ],
+                optional_components=["definition-card"],
+            ),
+            current_section_id="s-01",
+            generated_sections={"s-01": _section("s-01")},
+        )
+        result = await partial_section_assembler(state)
+
+        assert result["partial_sections"]["s-01"].status == "awaiting_assets"
+        assert result["partial_sections"]["s-01"].pending_assets == ["diagram"]
+        assert result["section_pending_assets"]["s-01"] == ["diagram"]
+        assert result["section_lifecycle"]["s-01"] == "awaiting_assets"
+        assert "partial_section_assembler" in result["completed_nodes"]
+
+    async def test_final_section_assembler_defers_while_required_visual_is_pending(self):
+        from pipeline.nodes.section_assembler import section_assembler
+
+        state = _base_state(
+            contract=_contract(
+                required_components=[
+                    "section-header",
+                    "hook-hero",
+                    "explanation-block",
+                    "practice-stack",
+                    "what-next-bridge",
+                    "diagram-block",
+                ],
+                optional_components=["definition-card"],
+            ),
+            current_section_id="s-01",
+            generated_sections={"s-01": _section("s-01")},
+        )
+        result = await section_assembler(state)
+
+        assert "assembled_sections" not in result
+        assert "errors" not in result
+        assert result["section_pending_assets"]["s-01"] == ["diagram"]
+        assert result["section_lifecycle"]["s-01"] == "awaiting_assets"
+
+    async def test_final_section_assembler_succeeds_after_required_visual_writeback(self):
+        from pipeline.nodes.section_assembler import section_assembler
+
+        state = _base_state(
+            contract=_contract(
+                required_components=[
+                    "section-header",
+                    "hook-hero",
+                    "explanation-block",
+                    "practice-stack",
+                    "what-next-bridge",
+                    "diagram-block",
+                ],
+                optional_components=["definition-card"],
+            ),
+            current_section_id="s-01",
+            generated_sections={
+                "s-01": _section("s-01").model_copy(
+                    update={
+                        "diagram": DiagramContent(
+                            svg_content="<svg/>",
+                            caption="diagram",
+                            alt_text="diagram",
+                        )
+                    }
+                )
+            },
+        )
+        result = await section_assembler(state)
+
+        assert "s-01" in result["assembled_sections"]
+        assert result["section_pending_assets"]["s-01"] == []
 
 
 # ── Preset validation (uses contracts on disk) ───────────────────────────────
@@ -1019,7 +1223,7 @@ class TestRunPipelineStreamingEvents:
                     }
                 }
                 yield {
-                    "process_section": {
+                    "finalize_section": {
                         "assembled_sections": {
                             "s-02": _section("s-02"),
                             "s-01": _section("s-01"),
@@ -1045,6 +1249,128 @@ class TestRunPipelineStreamingEvents:
         assert [item.section_id for item in result.document.section_manifest] == ["s-01", "s-02"]
         assert [item.position for item in result.document.section_manifest] == [1, 2]
         assert [section.section_id for section in result.document.sections] == ["s-01", "s-02"]
+
+    async def test_streaming_normalizes_partial_section_record_and_emits_ordered_events(self, monkeypatch):
+        from pipeline import run as run_mod
+        from pipeline.events import (
+            SectionAssetPendingEvent,
+            SectionAssetReadyEvent,
+            SectionFinalEvent,
+            SectionPartialEvent,
+        )
+
+        partial_section = _section("s-01")
+        final_section = partial_section.model_copy(
+            update={
+                "diagram": DiagramContent(
+                    svg_content="<svg/>",
+                    caption="diagram",
+                    alt_text="diagram",
+                )
+            }
+        )
+
+        class _Graph:
+            async def astream(self, initial_state, config=None):
+                _ = initial_state, config
+                yield {
+                    "curriculum_planner": {
+                        "curriculum_outline": [_plan("s-01", 1)]
+                    }
+                }
+                yield {
+                    "prepare_section": {
+                        "partial_sections": {
+                            "s-01": PartialSectionRecord(
+                                section_id="s-01",
+                                template_id=partial_section.template_id,
+                                content=partial_section,
+                                status="awaiting_assets",
+                                pending_assets=["diagram"],
+                                updated_at="2026-04-09T00:00:00+00:00",
+                            )
+                        },
+                        "section_pending_assets": {"s-01": ["diagram"]},
+                        "section_lifecycle": {"s-01": "awaiting_assets"},
+                        "_asset_pending": {"s-01": ["diagram"]},
+                    }
+                }
+                yield {
+                    "generate_section_assets": {
+                        "generated_sections": {"s-01": final_section},
+                        "partial_sections": {
+                            "s-01": PartialSectionRecord(
+                                section_id="s-01",
+                                template_id=final_section.template_id,
+                                content=final_section,
+                                status="partial",
+                                pending_assets=[],
+                                updated_at="2026-04-09T00:00:01+00:00",
+                            )
+                        },
+                        "section_pending_assets": {"s-01": []},
+                        "section_lifecycle": {"s-01": "partial"},
+                        "_asset_ready": {
+                            "s-01": {
+                                "ready_assets": ["diagram"],
+                                "pending_assets": [],
+                            }
+                        },
+                    }
+                }
+                yield {
+                    "finalize_section": {
+                        "assembled_sections": {"s-01": final_section},
+                        "qc_reports": {
+                            "s-01": QCReport(
+                                section_id="s-01",
+                                passed=True,
+                                issues=[],
+                                warnings=[],
+                            )
+                        },
+                    }
+                }
+
+        monkeypatch.setattr(run_mod, "build_graph", lambda: _Graph())
+
+        events = []
+
+        async def on_event(event):
+            events.append(event)
+
+        command = run_mod.PipelineCommand(
+            generation_id="gen-stream-order",
+            subject="Mathematics",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=1,
+        )
+
+        await run_mod.run_pipeline_streaming(command, on_event=on_event)
+
+        ordered_types = [
+            type(event)
+            for event in events
+            if isinstance(
+                event,
+                (
+                    SectionPartialEvent,
+                    SectionAssetPendingEvent,
+                    SectionAssetReadyEvent,
+                    SectionFinalEvent,
+                ),
+            )
+        ]
+        assert ordered_types == [
+            SectionPartialEvent,
+            SectionAssetPendingEvent,
+            SectionAssetReadyEvent,
+            SectionFinalEvent,
+        ]
 
 
 # ── Process section composite (forwards qc_reports) ─────────────────────────
@@ -1293,6 +1619,24 @@ class TestProcessSectionComposite:
         async def fake_interaction_generator(state, *, model_overrides=None):
             return {"completed_nodes": ["interaction_generator"]}
 
+        async def fake_partial_assembler(state, *, model_overrides=None):
+            typed = TextbookPipelineState.parse(state)
+            return {
+                "partial_sections": {
+                    sid: PartialSectionRecord(
+                        section_id=sid,
+                        template_id=typed.generated_sections[sid].template_id,
+                        content=typed.generated_sections[sid],
+                        status="awaiting_assets",
+                        pending_assets=["diagram"],
+                        updated_at="2026-04-09T00:00:00+00:00",
+                    )
+                },
+                "section_pending_assets": {sid: ["diagram"]},
+                "section_lifecycle": {sid: "awaiting_assets"},
+                "completed_nodes": ["partial_section_assembler"],
+            }
+
         async def fake_assembler(state, *, model_overrides=None):
             typed = TextbookPipelineState.parse(state)
             return {
@@ -1315,6 +1659,7 @@ class TestProcessSectionComposite:
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
         monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
+        monkeypatch.setattr(ps_mod, "partial_section_assembler", fake_partial_assembler)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
         monkeypatch.setattr(
@@ -1356,6 +1701,24 @@ class TestProcessSectionComposite:
         async def fake_interaction_generator(state, *, model_overrides=None):
             return {"completed_nodes": ["interaction_generator"]}
 
+        async def fake_partial_assembler(state, *, model_overrides=None):
+            typed = TextbookPipelineState.parse(state)
+            return {
+                "partial_sections": {
+                    sid: PartialSectionRecord(
+                        section_id=sid,
+                        template_id=typed.generated_sections[sid].template_id,
+                        content=typed.generated_sections[sid],
+                        status="awaiting_assets",
+                        pending_assets=["diagram"],
+                        updated_at="2026-04-09T00:00:00+00:00",
+                    )
+                },
+                "section_pending_assets": {sid: ["diagram"]},
+                "section_lifecycle": {sid: "awaiting_assets"},
+                "completed_nodes": ["partial_section_assembler"],
+            }
+
         async def fake_assembler(state, *, model_overrides=None):
             return {
                 "errors": [
@@ -1382,6 +1745,7 @@ class TestProcessSectionComposite:
         monkeypatch.setattr(ps_mod, "image_generator", fake_image_generator)
         monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
+        monkeypatch.setattr(ps_mod, "partial_section_assembler", fake_partial_assembler)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
 
@@ -1395,6 +1759,7 @@ class TestProcessSectionComposite:
         assert result["completed_nodes"] == [
             "content_generator",
             "composition_planner",
+            "partial_section_assembler",
             "diagram_generator",
             "image_generator",
             "interaction_decider",

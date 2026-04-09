@@ -6,8 +6,8 @@ Validates assembled section content against the template contract
 
 STATE CONTRACT
     Reads:  current_section_id, generated_sections, contract
-    Writes: assembled_sections[current_section_id], qc_reports (capacity warnings),
-            completed_nodes, errors
+    Writes: partial_sections/current_section_id or assembled_sections[current_section_id],
+            qc_reports (capacity warnings), completed_nodes, errors
     Model:  none
     Skips:  never
 """
@@ -16,9 +16,16 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 
 from pipeline.contracts import validate_section_for_template
-from pipeline.state import PipelineError, QCReport, TextbookPipelineState
+from pipeline.section_assets import pending_visual_fields, required_visual_fields
+from pipeline.state import (
+    PartialSectionRecord,
+    PipelineError,
+    QCReport,
+    TextbookPipelineState,
+)
 
 
 def diag(tag: str, **fields) -> None:
@@ -30,11 +37,6 @@ diag("BUILD_MARKER", file="section_assembler", version="diag_v1")
 
 
 def _check_capacity(section_dict: dict) -> list[str]:
-    """
-    Check capacity limits for all fields present in the section.
-    Returns a list of warning strings -- not blocking violations.
-    These mirror src/lib/validate.ts exactly.
-    """
     warnings = []
 
     def words(text: str | None) -> int:
@@ -61,11 +63,11 @@ def _check_capacity(section_dict: dict) -> list[str]:
         warnings.append(f"practice has {len(problems)} problems -- minimum 2")
     if len(problems) > 5:
         warnings.append(f"practice has {len(problems)} problems -- maximum 5")
-    for i, problem in enumerate(problems):
+    for index, problem in enumerate(problems):
         hints = problem.get("hints", [])
         if len(hints) > 3:
             warnings.append(
-                f"practice problem {i + 1} has {len(hints)} hints -- max 3"
+                f"practice problem {index + 1} has {len(hints)} hints -- max 3"
             )
 
     glossary = section_dict.get("glossary")
@@ -99,41 +101,80 @@ async def section_assembler(
     *,
     model_overrides: dict | None = None,
 ) -> dict:
-    """Validate the generated section and attach non-blocking QC warnings."""
+    return await _assemble_section(state, mode="final", model_overrides=model_overrides)
 
+
+async def partial_section_assembler(
+    state: TextbookPipelineState | dict,
+    *,
+    model_overrides: dict | None = None,
+) -> dict:
+    return await _assemble_section(state, mode="partial", model_overrides=model_overrides)
+
+
+async def _assemble_section(
+    state: TextbookPipelineState | dict,
+    *,
+    mode: str,
+    model_overrides: dict | None = None,
+) -> dict:
     _ = model_overrides
-    state = TextbookPipelineState.parse(state)
-    sid = state.current_section_id
+    typed = TextbookPipelineState.parse(state)
+    section_id = typed.current_section_id
+    node_name = "partial_section_assembler" if mode == "partial" else "section_assembler"
 
-    section = state.generated_sections.get(sid)
+    section = typed.generated_sections.get(section_id)
     if not section:
         return {
             "errors": [
                 PipelineError(
-                    node="section_assembler",
-                    section_id=sid,
-                    message=f"No generated content found for section {sid}. "
-                    f"content_generator may have failed.",
+                    node=node_name,
+                    section_id=section_id,
+                    message=(
+                        f"No generated content found for section {section_id}. "
+                        "content_generator may have failed."
+                    ),
                     recoverable=False,
                 )
             ],
-            "completed_nodes": ["section_assembler"],
+            "completed_nodes": [node_name],
         }
 
     section_dict = section.model_dump(exclude_none=True)
+    pending_assets = pending_visual_fields(typed)
+    if mode == "final" and pending_assets:
+        partials = dict(typed.partial_sections)
+        partials[section_id] = PartialSectionRecord(
+            section_id=section.section_id,
+            template_id=section.template_id,
+            content=section,
+            status="awaiting_assets",
+            pending_assets=pending_assets,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        lifecycle = dict(typed.section_lifecycle)
+        lifecycle[section_id] = "awaiting_assets"
+        return {
+            "partial_sections": partials,
+            "section_pending_assets": {section_id: pending_assets},
+            "section_lifecycle": lifecycle,
+            "completed_nodes": [node_name],
+        }
 
-    # -- Layer 3a: Contract compliance -----------------------------------------
     is_valid, violations = validate_section_for_template(
-        section_dict, state.contract.id
+        section_dict,
+        typed.contract.id,
+        mode=mode,
+        allow_missing_fields=set(pending_assets),
+        additional_required_fields=set(required_visual_fields(typed)),
     )
-
     if not is_valid:
         payload = {
-            "section_id": sid,
+            "section_id": section_id,
             "violations": violations,
-            "required_components": getattr(state.contract, "required_components", None),
-            "always_present": getattr(state.contract, "always_present", None),
-            "available_components": getattr(state.contract, "available_components", None),
+            "required_components": getattr(typed.contract, "required_components", None),
+            "always_present": getattr(typed.contract, "always_present", None),
+            "available_components": getattr(typed.contract, "available_components", None),
             "section_has_diagram": getattr(section, "diagram", None) is not None,
         }
         diag("ASSEMBLER_CONTRACT_VIOLATION", **payload)
@@ -142,35 +183,52 @@ async def section_assembler(
         return {
             "errors": [
                 PipelineError(
-                    node="section_assembler",
-                    section_id=sid,
+                    node=node_name,
+                    section_id=section_id,
                     message=f"Contract violation: {'; '.join(violations)}",
                     recoverable=True,
                 )
             ],
-            "completed_nodes": ["section_assembler"],
+            "completed_nodes": [node_name],
         }
 
-    # -- Layer 3b: Capacity limits ---------------------------------------------
-    capacity_warnings = _check_capacity(section_dict)
-
-    # Capacity warnings are non-blocking -- section is assembled regardless.
-    # The QC agent will see these and can escalate if they degrade learning.
     qc_report = QCReport(
-        section_id=sid,
+        section_id=section_id,
         passed=True,
         issues=[],
-        warnings=capacity_warnings,
+        warnings=_check_capacity(section_dict),
     )
+    reports = dict(typed.qc_reports)
+    reports[section_id] = qc_report
 
-    assembled = dict(state.assembled_sections)
-    assembled[sid] = section
+    if mode == "partial":
+        partials = dict(typed.partial_sections)
+        partials[section_id] = PartialSectionRecord(
+            section_id=section.section_id,
+            template_id=section.template_id,
+            content=section,
+            status="awaiting_assets" if pending_assets else "partial",
+            pending_assets=pending_assets,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        lifecycle = dict(typed.section_lifecycle)
+        lifecycle[section_id] = "awaiting_assets" if pending_assets else "partial"
+        return {
+            "partial_sections": partials,
+            "section_pending_assets": {section_id: pending_assets},
+            "section_lifecycle": lifecycle,
+            "qc_reports": reports,
+            "completed_nodes": [node_name],
+        }
 
-    reports = dict(state.qc_reports)
-    reports[sid] = qc_report
-
+    assembled = dict(typed.assembled_sections)
+    assembled[section_id] = section
+    lifecycle = dict(typed.section_lifecycle)
+    lifecycle[section_id] = "final"
     return {
         "assembled_sections": assembled,
+        "section_pending_assets": {section_id: []},
+        "section_lifecycle": lifecycle,
         "qc_reports": reports,
-        "completed_nodes": ["section_assembler"],
+        "completed_nodes": [node_name],
     }

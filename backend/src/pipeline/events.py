@@ -47,6 +47,44 @@ class SectionReadyEvent(BaseModel):
     total_sections: int
 
 
+class SectionPartialEvent(BaseModel):
+    type: Literal["section_partial"] = "section_partial"
+    generation_id: str
+    section_id: str
+    section: SectionContent
+    template_id: str
+    status: str
+    pending_assets: list[str] = Field(default_factory=list)
+    updated_at: str
+
+
+class SectionAssetPendingEvent(BaseModel):
+    type: Literal["section_asset_pending"] = "section_asset_pending"
+    generation_id: str
+    section_id: str
+    pending_assets: list[str] = Field(default_factory=list)
+    status: str
+    updated_at: str
+
+
+class SectionAssetReadyEvent(BaseModel):
+    type: Literal["section_asset_ready"] = "section_asset_ready"
+    generation_id: str
+    section_id: str
+    ready_assets: list[str] = Field(default_factory=list)
+    pending_assets: list[str] = Field(default_factory=list)
+    updated_at: str
+
+
+class SectionFinalEvent(BaseModel):
+    type: Literal["section_final"] = "section_final"
+    generation_id: str
+    section_id: str
+    section: SectionContent
+    completed_sections: int
+    total_sections: int
+
+
 class QCCompleteEvent(BaseModel):
     type: Literal["qc_complete"] = "qc_complete"
     generation_id: str
@@ -274,6 +312,10 @@ LLMCallFailedEvent = core_events.LLMCallFailedEvent
 PipelineEvent = (
     PipelineStartEvent
     | SectionStartedEvent
+    | SectionPartialEvent
+    | SectionAssetPendingEvent
+    | SectionAssetReadyEvent
+    | SectionFinalEvent
     | SectionReadyEvent
     | QCCompleteEvent
     | RuntimePolicyEvent
@@ -312,6 +354,10 @@ __all__ = [
     "QCCompleteEvent",
     "RuntimePolicyEvent",
     "RuntimeProgressEvent",
+    "SectionAssetPendingEvent",
+    "SectionAssetReadyEvent",
+    "SectionFinalEvent",
+    "SectionPartialEvent",
     "SectionReadyEvent",
     "SectionStartedEvent",
     "SectionAttemptStartedEvent",

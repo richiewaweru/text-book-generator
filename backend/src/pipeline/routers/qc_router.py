@@ -8,7 +8,7 @@ Returns list[Send] to fan out retries for failing sections, routed to
 the narrowest possible retry scope:
     - diagram-only failures  -> retry_diagram  (re-runs diagram + assembler + QC)
     - text field failures    -> retry_field    (re-generates one field via FAST LLM)
-    - unknown / multi-field  -> process_section (full rerun)
+    - unknown / multi-field  -> prepare_section (full rerun from partial path)
 """
 
 import core.events as core_events
@@ -157,7 +157,7 @@ def route_after_qc(state: TextbookPipelineState | dict) -> list[Send] | str:
         elif scope == "field":
             sends.append(Send("retry_field", base))
         else:
-            sends.append(Send("process_section", base))
+            sends.append(Send("prepare_section", base))
 
     if sends:
         return sends
