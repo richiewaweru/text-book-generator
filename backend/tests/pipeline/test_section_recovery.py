@@ -292,11 +292,27 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
                 "composition_plans": {"s-01": composition},
                 "completed_nodes": ["composition_planner"],
             }
+        if first == "partial_section_assembler":
+            return {
+                "partial_sections": {
+                    "s-01": {
+                        "section_id": "s-01",
+                        "template_id": section.template_id,
+                        "content": section,
+                        "status": "awaiting_assets",
+                        "pending_assets": ["diagram"],
+                        "updated_at": "2026-04-08T00:00:00+00:00",
+                    }
+                },
+                "section_pending_assets": {"s-01": ["diagram"]},
+                "completed_nodes": ["partial_section_assembler"],
+            }
         return {
             "assembled_sections": {"s-01": section_with_simulation},
             "qc_reports": {
                 "s-01": QCReport(section_id="s-01", passed=True, issues=[], warnings=[])
             },
+            "section_pending_assets": {"s-01": []},
             "completed_nodes": ["section_assembler", "qc_agent"],
         }
 
@@ -322,6 +338,7 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
     assert result["completed_nodes"] == [
         "content_generator",
         "composition_planner",
+        "partial_section_assembler",
         "diagram_generator",
         "interaction_generator",
         "section_assembler",

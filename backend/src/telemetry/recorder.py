@@ -200,6 +200,14 @@ class GenerationReportRecorder:
             self._handle_pipeline_start(payload)
         elif event_type == "section_started":
             self._handle_section_started(payload)
+        elif event_type == "section_partial":
+            self._handle_section_partial(payload)
+        elif event_type == "section_asset_pending":
+            self._handle_section_asset_pending(payload)
+        elif event_type == "section_asset_ready":
+            self._handle_section_asset_ready(payload)
+        elif event_type == "section_final":
+            self._handle_section_final(payload)
         elif event_type == "section_attempt_started":
             self._handle_section_attempt_started(payload)
         elif event_type == "node_started":
@@ -352,6 +360,38 @@ class GenerationReportRecorder:
         section.position = payload.get("position", section.position)
         if section.status == "stalled":
             section.status = "planned"
+
+    def _handle_section_partial(self, payload: dict[str, Any]) -> None:
+        section = self._ensure_section(payload["section_id"])
+        section.status = "running"
+        section.completed_at = None
+        partial_payload = payload.get("section", {})
+        delivered = self._delivered_components(partial_payload)
+        section.delivered_components = delivered
+        section.missing_components = [
+            component for component in section.expected_components if component not in delivered
+        ]
+        section.final_error = None
+        section.failure_detail = None
+
+    def _handle_section_asset_pending(self, payload: dict[str, Any]) -> None:
+        section = self._ensure_section(payload["section_id"])
+        section.status = "running"
+        pending_assets = list(payload.get("pending_assets", []))
+        for asset in pending_assets:
+            if asset not in section.missing_components:
+                section.missing_components.append(asset)
+        section.missing_components.sort()
+
+    def _handle_section_asset_ready(self, payload: dict[str, Any]) -> None:
+        section = self._ensure_section(payload["section_id"])
+        section.status = "running"
+        pending_assets = set(payload.get("pending_assets", []))
+        section.missing_components = [
+            component
+            for component in section.missing_components
+            if component in pending_assets or component not in payload.get("ready_assets", [])
+        ]
 
     def _handle_section_attempt_started(self, payload: dict[str, Any]) -> None:
         section = self._ensure_section(payload["section_id"])
@@ -508,6 +548,9 @@ class GenerationReportRecorder:
             component for component in section.expected_components if component not in delivered
         ]
 
+    def _handle_section_final(self, payload: dict[str, Any]) -> None:
+        self._handle_section_ready(payload)
+
     def _handle_complete(self, payload: dict[str, Any]) -> None:
         self._report.status = "completed"
         self._report.completed_at = _as_utc(payload.get("completed_at")) or self._report.completed_at
@@ -554,6 +597,31 @@ class GenerationReportRecorder:
                 component for component in section.expected_components if component not in delivered
             ]
             section.final_error = None
+
+        for partial_section in document.partial_sections:
+            payload = (
+                partial_section
+                if isinstance(partial_section, dict)
+                else partial_section.model_dump(exclude_none=True)
+            )
+            section = self._ensure_section(payload["section_id"])
+            if section.status == "ready":
+                continue
+            section.title = payload.get("content", {}).get("header", {}).get("title", section.title)
+            content = payload.get("content", {})
+            delivered = self._delivered_components(content)
+            section.status = "running"
+            section.completed_at = None
+            section.delivered_components = delivered
+            section.missing_components = [
+                component for component in section.expected_components if component not in delivered
+            ]
+            for pending_asset in payload.get("pending_assets", []):
+                if pending_asset not in section.missing_components:
+                    section.missing_components.append(pending_asset)
+            section.missing_components.sort()
+            section.final_error = None
+            section.failure_detail = None
 
         for failed_section in document.failed_sections:
             payload = (
