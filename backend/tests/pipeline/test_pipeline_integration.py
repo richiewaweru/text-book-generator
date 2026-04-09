@@ -332,7 +332,51 @@ class TestQCRouting:
         assert len(result) == 1
         assert result[0].node == "retry_diagram"
 
-    def test_multi_field_block_routes_to_full_process_section(self):
+    def test_interaction_block_routes_to_retry_interaction_and_emits_event(self, monkeypatch):
+        from pipeline.events import InteractionRetryQueuedEvent
+        from pipeline.routers.qc_router import route_after_qc
+
+        published: list[tuple[str, object]] = []
+
+        def _publish(generation_id: str, event: object) -> None:
+            published.append((generation_id, event))
+
+        monkeypatch.setattr("pipeline.routers.qc_router.core_events.event_bus.publish", _publish)
+
+        state = _base_state(
+            request=_request(generation_id="gen-qc-route"),
+            current_section_id="s-01",
+            assembled_sections={"s-01": _section("s-01")},
+            qc_reports={
+                "s-01": QCReport(
+                    section_id="s-01",
+                    passed=False,
+                    issues=[
+                        {
+                            "severity": "blocking",
+                            "block": "simulation",
+                            "message": "Simulation needs clearer controls",
+                        }
+                    ],
+                    warnings=[],
+                )
+            },
+        )
+
+        result = route_after_qc(state)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].node == "retry_interaction"
+        assert len(published) == 1
+        generation_id, event = published[0]
+        assert generation_id == "gen-qc-route"
+        assert isinstance(event, InteractionRetryQueuedEvent)
+        assert event.section_id == "s-01"
+        assert event.next_attempt == 2
+        assert event.reason == "Simulation needs clearer controls"
+
+    def test_multi_field_block_routes_to_full_prepare_section(self):
         state = _base_state(
             current_section_id="s-01",
             assembled_sections={"s-01": _section("s-01")},

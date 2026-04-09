@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from pipeline.api import PipelineDocument, PipelineResult
 from pipeline.events import (
+    InteractionOutcomeEvent,
     LLMCallStartedEvent,
     LLMCallSucceededEvent,
     SectionStartedEvent,
@@ -25,6 +26,7 @@ from generation.dependencies import (
     get_generation_repository,
     get_report_repository,
 )
+from core.database.session import get_async_session
 from core.dependencies import get_student_profile_repository
 from core.auth.middleware import get_current_user
 
@@ -136,6 +138,18 @@ class StaticProfileRepo:
         return self.profile
 
 
+class _ReportRouteSession:
+    async def execute(self, statement):
+        _ = statement
+
+        class _Result:
+            @staticmethod
+            def first():
+                return (TEST_USER.id,)
+
+        return _Result()
+
+
 @asynccontextmanager
 async def _client(app):
     async with app.router.lifespan_context(app):
@@ -167,11 +181,15 @@ async def test_generation_job_logs_llm_trace_events() -> None:
     async def override_report_repo():
         return report_repo
 
+    async def override_async_session():
+        yield _ReportRouteSession()
+
     app.dependency_overrides[get_current_user] = override_current_user
     app.dependency_overrides[get_generation_repository] = override_generation_repo
     app.dependency_overrides[get_document_repository] = override_document_repo
     app.dependency_overrides[get_student_profile_repository] = override_profile_repo
     app.dependency_overrides[get_report_repository] = override_report_repo
+    app.dependency_overrides[get_async_session] = override_async_session
 
     async def fake_run_pipeline(command, on_event=None):
         generation_id = command.generation_id or "trace-gen"
@@ -285,11 +303,15 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
     async def override_report_repo():
         return report_repo
 
+    async def override_async_session():
+        yield _ReportRouteSession()
+
     app.dependency_overrides[get_current_user] = override_current_user
     app.dependency_overrides[get_generation_repository] = override_generation_repo
     app.dependency_overrides[get_document_repository] = override_document_repo
     app.dependency_overrides[get_student_profile_repository] = override_profile_repo
     app.dependency_overrides[get_report_repository] = override_report_repo
+    app.dependency_overrides[get_async_session] = override_async_session
 
     async def fake_run_pipeline(command, on_event=None):
         generation_id = command.generation_id or "trace-gen"
@@ -325,6 +347,15 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
                 tokens_in=500,
                 tokens_out=300,
                 cost_usd=0.004,
+            ),
+        )
+        event_bus.publish(
+            generation_id,
+            InteractionOutcomeEvent(
+                generation_id=generation_id,
+                section_id="s-01",
+                outcome="skipped",
+                skip_reason="no_plan",
             ),
         )
         return PipelineResult(
@@ -366,6 +397,9 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
                     },
                 )
                 await asyncio.sleep(0.1)
+                report_response = await client.get(
+                    f"/api/v1/generations/{response.json()['generation_id']}/report"
+                )
     finally:
         app.dependency_overrides.clear()
 
@@ -374,4 +408,8 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
     assert "section_started" in timeline_types
     assert "llm_call_started" in timeline_types
     assert "llm_call_succeeded" in timeline_types
+    assert "interaction_outcome" in timeline_types
+    assert report_response.status_code == 200
+    assert report_response.json()["sections"][0]["interaction_outcome"] == "skipped"
+    assert report_response.json()["sections"][0]["interaction_skip_reason"] == "no_plan"
 

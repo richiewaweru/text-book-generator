@@ -1,5 +1,6 @@
 from pipeline.reporting import (
     GenerationReport,
+    GenerationReportFieldRegenAttempt,
     GenerationReportLLMAttempt,
     GenerationReportNode,
     GenerationReportRetry,
@@ -10,6 +11,7 @@ from pipeline.reporting import (
 
 __all__ = [
     "GenerationReport",
+    "GenerationReportFieldRegenAttempt",
     "GenerationReportLLMAttempt",
     "GenerationReportNode",
     "GenerationReportRetry",
@@ -17,4 +19,3 @@ __all__ = [
     "GenerationReportSummary",
     "GenerationTimelineEvent",
 ]
-

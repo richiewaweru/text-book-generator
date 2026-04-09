@@ -214,6 +214,59 @@ class DiagramOutcomeEvent(BaseModel):
     )
 
 
+class ImageOutcomeEvent(BaseModel):
+    type: Literal["image_outcome"] = "image_outcome"
+    generation_id: str
+    section_id: str
+    outcome: Literal["success", "timeout", "error", "skipped"]
+    attempts: int = 1
+    error_message: str | None = None
+    duration_ms: float | None = None
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class InteractionOutcomeEvent(BaseModel):
+    type: Literal["interaction_outcome"] = "interaction_outcome"
+    generation_id: str
+    section_id: str
+    outcome: Literal["generated", "skipped"]
+    skip_reason: Literal[
+        "policy_disabled",
+        "no_slot",
+        "low_interaction_level",
+        "no_plan",
+    ] | None = None
+    interaction_count: int = 0
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class InteractionRetryQueuedEvent(BaseModel):
+    type: Literal["interaction_retry_queued"] = "interaction_retry_queued"
+    generation_id: str
+    section_id: str
+    next_attempt: int = 2
+    reason: str = ""
+    queued_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class FieldRegenOutcomeEvent(BaseModel):
+    type: Literal["field_regen_outcome"] = "field_regen_outcome"
+    generation_id: str
+    section_id: str
+    field_name: str
+    outcome: Literal["success", "failed"]
+    error_message: str | None = None
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
 LLMCallStartedEvent = core_events.LLMCallStartedEvent
 LLMCallSucceededEvent = core_events.LLMCallSucceededEvent
 LLMCallFailedEvent = core_events.LLMCallFailedEvent
@@ -239,6 +292,10 @@ PipelineEvent = (
     | ValidationRepairAttemptedEvent
     | ValidationRepairSucceededEvent
     | DiagramOutcomeEvent
+    | ImageOutcomeEvent
+    | InteractionOutcomeEvent
+    | InteractionRetryQueuedEvent
+    | FieldRegenOutcomeEvent
 )
 
 
@@ -266,6 +323,10 @@ __all__ = [
     "ValidationRepairAttemptedEvent",
     "ValidationRepairSucceededEvent",
     "DiagramOutcomeEvent",
+    "ImageOutcomeEvent",
+    "InteractionOutcomeEvent",
+    "InteractionRetryQueuedEvent",
+    "FieldRegenOutcomeEvent",
     "PipelineEventBus",
     "event_bus",
     "LLMCallStartedEvent",

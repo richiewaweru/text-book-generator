@@ -1,5 +1,6 @@
 from telemetry.dtos.generation_report import (
     GenerationReport,
+    GenerationReportFieldRegenAttempt,
     GenerationReportLLMAttempt,
     GenerationReportNode,
     GenerationReportRetry,
@@ -10,6 +11,7 @@ from telemetry.dtos.generation_report import (
 
 __all__ = [
     "GenerationReport",
+    "GenerationReportFieldRegenAttempt",
     "GenerationReportLLMAttempt",
     "GenerationReportNode",
     "GenerationReportRetry",

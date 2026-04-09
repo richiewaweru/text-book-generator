@@ -1,5 +1,6 @@
 from .generation_report import (
     GenerationReport,
+    GenerationReportFieldRegenAttempt,
     GenerationReportLLMAttempt,
     GenerationReportNode,
     GenerationReportRetry,
@@ -10,6 +11,7 @@ from .generation_report import (
 
 __all__ = [
     "GenerationReport",
+    "GenerationReportFieldRegenAttempt",
     "GenerationReportLLMAttempt",
     "GenerationReportNode",
     "GenerationReportRetry",
@@ -17,4 +19,3 @@ __all__ = [
     "GenerationReportSummary",
     "GenerationTimelineEvent",
 ]
-

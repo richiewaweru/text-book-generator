@@ -9,6 +9,10 @@ from core.events import event_bus
 from pipeline.api import PipelineDocument, PipelineSectionReport
 from pipeline.events import (
     DiagramOutcomeEvent,
+    FieldRegenOutcomeEvent,
+    ImageOutcomeEvent,
+    InteractionOutcomeEvent,
+    InteractionRetryQueuedEvent,
     LLMCallFailedEvent,
     LLMCallStartedEvent,
     LLMCallSucceededEvent,
@@ -441,6 +445,114 @@ async def test_recorder_tracks_failed_sections_repairs_and_diagram_outcomes() ->
     assert report.summary.diagram_skip_count == 1
     assert report.summary.failed_sections == 1
     assert any(section.section_id == "s-02" and section.status == "failed" for section in report.sections)
+
+
+@pytest.mark.asyncio
+async def test_recorder_tracks_image_interaction_and_field_regen_metrics() -> None:
+    generation = _generation("gen-asset-telemetry")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        SectionStartedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            title="Interactive section",
+            position=1,
+        )
+    )
+    await recorder.apply_event(
+        ImageOutcomeEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            outcome="success",
+        )
+    )
+    await recorder.apply_event(
+        InteractionOutcomeEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            outcome="generated",
+            interaction_count=2,
+        )
+    )
+    await recorder.apply_event(
+        InteractionRetryQueuedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            next_attempt=2,
+            reason="Simulation needs clearer controls",
+        )
+    )
+    await recorder.apply_event(
+        FieldRegenOutcomeEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            field_name="hook",
+            outcome="success",
+        )
+    )
+    await recorder.apply_event(
+        SectionStartedEvent(
+            generation_id=generation.id,
+            section_id="s-02",
+            title="Fallback section",
+            position=2,
+        )
+    )
+    await recorder.apply_event(
+        ImageOutcomeEvent(
+            generation_id=generation.id,
+            section_id="s-02",
+            outcome="timeout",
+            error_message="Image generation timed out",
+        )
+    )
+    await recorder.apply_event(
+        InteractionOutcomeEvent(
+            generation_id=generation.id,
+            section_id="s-02",
+            outcome="skipped",
+            skip_reason="no_slot",
+        )
+    )
+    await recorder.apply_event(
+        FieldRegenOutcomeEvent(
+            generation_id=generation.id,
+            section_id="s-02",
+            field_name="explanation",
+            outcome="failed",
+            error_message="Model returned invalid JSON",
+        )
+    )
+    await recorder.finalize_failure(error="Generation failed")
+
+    report = await repo.load_report(generation.id)
+    section_one = next(section for section in report.sections if section.section_id == "s-01")
+    section_two = next(section for section in report.sections if section.section_id == "s-02")
+
+    assert section_one.image_outcome == "success"
+    assert section_one.interaction_outcome == "generated"
+    assert section_one.interaction_count == 2
+    assert section_one.interaction_retry_count == 1
+    assert section_one.field_regen_attempts[0].field == "hook"
+    assert section_one.field_regen_attempts[0].outcome == "success"
+
+    assert section_two.image_outcome == "timeout"
+    assert section_two.image_error == "Image generation timed out"
+    assert section_two.interaction_outcome == "skipped"
+    assert section_two.interaction_skip_reason == "no_slot"
+    assert section_two.field_regen_attempts[0].field == "explanation"
+    assert section_two.field_regen_attempts[0].outcome == "failed"
+    assert section_two.field_regen_attempts[0].error == "Model returned invalid JSON"
+
+    assert report.summary.image_success_count == 1
+    assert report.summary.image_failure_count == 1
+    assert report.summary.image_skip_count == 0
+    assert report.summary.interaction_skip_count == 1
+    assert report.summary.interaction_retry_count == 1
+    assert report.summary.field_regen_count == 2
+    assert report.summary.field_regen_success_count == 1
 
 
 @pytest.mark.asyncio

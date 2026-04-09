@@ -12,6 +12,9 @@ STATE CONTRACT:
 
 from __future__ import annotations
 
+import core.events as core_events
+
+from pipeline.events import InteractionOutcomeEvent
 from pipeline.nodes.composition_planner import pick_interaction_type
 from pipeline.state import TextbookPipelineState
 from pipeline.types.composition import InteractionPlan
@@ -21,6 +24,28 @@ from pipeline.types.section_content import InteractionSpec, SimulationContent
 def _has_simulation_slot(contract) -> bool:
     components = set(contract.required_components) | set(contract.optional_components)
     return "simulation-block" in components
+
+
+def _publish_interaction_outcome(
+    generation_id: str,
+    section_id: str | None,
+    outcome: str,
+    *,
+    skip_reason: str | None = None,
+    interaction_count: int = 0,
+) -> None:
+    if not generation_id or not section_id:
+        return
+    core_events.event_bus.publish(
+        generation_id,
+        InteractionOutcomeEvent(
+            generation_id=generation_id,
+            section_id=section_id,
+            outcome=outcome,
+            skip_reason=skip_reason,
+            interaction_count=interaction_count,
+        ),
+    )
 
 
 def _build_interaction_spec(
@@ -87,11 +112,46 @@ async def interaction_generator(
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
     section = state.generated_sections.get(sid)
+    generation_id = state.request.generation_id or ""
     if sid is None or section is None:
+        return {"completed_nodes": ["interaction_generator"]}
+
+    section_plan = state.current_section_plan
+    if section_plan is not None and section_plan.interaction_policy == "disabled":
+        _publish_interaction_outcome(
+            generation_id,
+            sid,
+            "skipped",
+            skip_reason="policy_disabled",
+        )
+        return {"completed_nodes": ["interaction_generator"]}
+
+    if state.contract.interaction_level not in {"medium", "high"}:
+        _publish_interaction_outcome(
+            generation_id,
+            sid,
+            "skipped",
+            skip_reason="low_interaction_level",
+        )
+        return {"completed_nodes": ["interaction_generator"]}
+
+    if not _has_simulation_slot(state.contract):
+        _publish_interaction_outcome(
+            generation_id,
+            sid,
+            "skipped",
+            skip_reason="no_slot",
+        )
         return {"completed_nodes": ["interaction_generator"]}
 
     composition = state.composition_plans.get(sid)
     if composition is None:
+        _publish_interaction_outcome(
+            generation_id,
+            sid,
+            "skipped",
+            skip_reason="no_plan",
+        )
         return {"completed_nodes": ["interaction_generator"]}
 
     # Gather interaction plans: prefer list, fall back to singular
@@ -102,6 +162,12 @@ async def interaction_generator(
     # Filter to enabled only
     enabled_plans = [p for p in interaction_plans if p.enabled]
     if not enabled_plans:
+        _publish_interaction_outcome(
+            generation_id,
+            sid,
+            "skipped",
+            skip_reason="no_plan",
+        )
         return {"completed_nodes": ["interaction_generator"]}
 
     # Build SimulationContent for each enabled plan
@@ -129,6 +195,12 @@ async def interaction_generator(
         simulations.append(simulation)
 
     if not simulations:
+        _publish_interaction_outcome(
+            generation_id,
+            sid,
+            "skipped",
+            skip_reason="no_plan",
+        )
         return {"completed_nodes": ["interaction_generator"]}
 
     # Update section with both singular (backward compat) and plural fields
@@ -147,5 +219,12 @@ async def interaction_generator(
     # Backward compat: populate interaction_specs for retry path
     if first_spec is not None:
         result["interaction_specs"] = {sid: first_spec}
+
+    _publish_interaction_outcome(
+        generation_id,
+        sid,
+        "generated",
+        interaction_count=len(simulations),
+    )
 
     return result
