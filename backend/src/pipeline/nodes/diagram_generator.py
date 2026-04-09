@@ -17,7 +17,6 @@ from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
-from pipeline.console_diagnostics import force_console_log
 from pipeline.events import DiagramOutcomeEvent
 from pipeline.llm_runner import run_llm
 from pipeline.prompts.diagram import (
@@ -30,10 +29,8 @@ from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, TextbookPipelineState
 from pipeline.types.section_content import DiagramContent, DiagramSpec
-from pipeline.visual_resolution import (
-    resolve_effective_visual_mode,
-    resolve_effective_visual_targets,
-)
+
+_DIAGRAM_COMPONENTS = {"diagram-block", "diagram-series", "diagram-compare"}
 
 
 class DiagramOutput(BaseModel):
@@ -41,12 +38,17 @@ class DiagramOutput(BaseModel):
     caption: str
     alt_text: str
 
-def _get_supported_targets(state: TextbookPipelineState) -> list[str]:
-    return [
-        target
-        for target in resolve_effective_visual_targets(state)
-        if target in {"diagram", "diagram_series", "diagram_compare"}
-    ]
+
+def _has_diagram_slot(contract) -> bool:
+    all_components = set(contract.required_components) | set(contract.optional_components)
+    return bool(_DIAGRAM_COMPONENTS & all_components)
+
+
+def _get_diagram_slot(contract) -> str:
+    for slot in ("diagram-block", "diagram-series", "diagram-compare"):
+        if slot in contract.required_components or slot in contract.optional_components:
+            return slot
+    return "diagram-block"
 
 
 def _publish_outcome(generation_id: str, section_id: str | None, outcome: str) -> None:
@@ -102,7 +104,7 @@ async def _generate_spec_diagram(
                 section_title=section.header.title,
                 hook_body=section.hook.body,
                 explanation_excerpt=section.explanation.body,
-                diagram_slot="diagram-block",
+                diagram_slot=_get_diagram_slot(state.contract),
                 diagram_type=plan.diagram.diagram_type if plan is not None else None,
                 key_concepts=plan.diagram.key_concepts if plan is not None else None,
                 visual_guidance=plan.diagram.visual_guidance if plan is not None else None,
@@ -137,23 +139,14 @@ async def diagram_generator(
     )
     outcomes = dict(state.diagram_outcomes)
     plan = state.composition_plans.get(sid)
-    targets = _get_supported_targets(state)
-    mode = resolve_effective_visual_mode(state)
-    force_console_log(
-        "VISUAL_RESOLVE",
-        "DIAGRAM_GENERATOR",
-        section_id=sid,
-        mode=mode,
-        targets=targets,
-    )
 
-    if not targets:
+    if not _has_diagram_slot(state.contract):
         if sid:
             outcomes[sid] = "skipped"
             _publish_outcome(state.request.generation_id or "", sid, "skipped")
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
 
-    if mode == "image":
+    if plan is not None and plan.diagram.mode == "image":
         if sid:
             outcomes[sid] = "skipped_image_mode"
             _publish_outcome(state.request.generation_id or "", sid, "skipped_image_mode")
@@ -172,36 +165,6 @@ async def diagram_generator(
         outcomes[sid] = "skipped"
         _publish_outcome(state.request.generation_id or "", sid, "skipped")
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
-
-    unsupported_targets = [target for target in targets if target != "diagram"]
-    if unsupported_targets:
-        message = (
-            "SVG diagram generation does not support the resolved visual target(s): "
-            f"{', '.join(unsupported_targets)}. "
-            "Switch this section to image mode or provide an inline SVG surface."
-        )
-        force_console_log(
-            "VISUAL_RESOLVE",
-            "UNSUPPORTED_SVG_TARGETS",
-            section_id=sid,
-            mode=mode,
-            targets=targets,
-            message=message,
-        )
-        outcomes[sid] = "error"
-        _publish_outcome(state.request.generation_id or "", sid, "error")
-        return {
-            "errors": [
-                PipelineError(
-                    node="diagram_generator",
-                    section_id=sid,
-                    message=message,
-                    recoverable=True,
-                )
-            ],
-            "diagram_outcomes": outcomes,
-            "completed_nodes": ["diagram_generator"],
-        }
 
     if state.style_context is None:
         outcomes[sid] = "error"

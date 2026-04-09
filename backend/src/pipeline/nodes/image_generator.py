@@ -8,8 +8,6 @@ import logging
 import time
 
 import core.events as core_events
-
-from pipeline.console_diagnostics import force_console_log
 from pipeline.prompts.diagram import (
     build_compare_image_prompts,
     build_hook_image_prompt,
@@ -30,12 +28,6 @@ from pipeline.types.section_content import (
     DiagramSeriesStep,
     HookImage,
 )
-from pipeline.visual_resolution import (
-    pending_visual_targets,
-    resolve_effective_visual_mode,
-    resolve_effective_visual_targets,
-    target_is_satisfied,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +42,6 @@ def diag(tag: str, **fields) -> None:
 
 
 diag("BUILD_MARKER", file="image_generator", version="diag_v1")
-
-
-def _imggen_diag(event: str, **fields) -> None:
-    force_console_log("IMGGEN_AI", event, **fields)
 
 
 def _publish_image_outcome(
@@ -91,13 +79,6 @@ def _is_retryable(exc: Exception) -> bool:
 async def _generate_with_retry(client, prompt: str, timeout: float) -> tuple[bytes, int]:
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            _imggen_diag(
-                "ATTEMPT",
-                attempt=attempt,
-                max_attempts=_MAX_ATTEMPTS,
-                prompt_length=len(prompt),
-                timeout_seconds=timeout,
-            )
             result = await asyncio.wait_for(
                 client.generate_image(prompt=prompt, size="1024x1024", format="png"),
                 timeout=timeout,
@@ -118,31 +99,22 @@ async def _generate_with_retry(client, prompt: str, timeout: float) -> tuple[byt
                 "timeout" if is_timeout else exc,
                 backoff,
             )
-            _imggen_diag(
-                "RETRY",
-                attempt=attempt,
-                max_attempts=_MAX_ATTEMPTS,
-                retryable=retryable,
-                is_timeout=is_timeout,
-                backoff_seconds=backoff,
-                error_type=type(exc).__name__,
-                error_message=str(exc),
-            )
             await asyncio.sleep(backoff)
     raise RuntimeError("image generation retry loop exited unexpectedly")
+
+
+def _get_visual_slot(state: TextbookPipelineState) -> str:
+    components = set(state.contract.required_components) | set(state.contract.optional_components)
+    for slot in ("diagram-series", "diagram-compare", "diagram-block"):
+        if slot in components:
+            return slot
+    return "diagram-block"
+
 
 def _visual_intent(state: TextbookPipelineState) -> str:
     plan = state.current_section_plan
     visual_policy = getattr(plan, "visual_policy", None) if plan is not None else None
     return getattr(visual_policy, "intent", None) or "explain_structure"
-
-
-def _image_targets(state: TextbookPipelineState) -> list[str]:
-    return [
-        target
-        for target in resolve_effective_visual_targets(state)
-        if target in {"diagram", "diagram_series", "diagram_compare"}
-    ]
 
 
 async def _store_image_with_logging(
