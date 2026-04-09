@@ -104,7 +104,7 @@ class PipelineDocument(BaseModel):
     mode: PipelineMode = PipelineMode.BALANCED
     template_id: str
     preset_id: str
-    status: Literal["pending", "running", "completed", "failed"] = "pending"
+    status: Literal["pending", "running", "partial", "completed", "failed"] = "pending"
     section_manifest: list[PipelineSectionManifestItem] = Field(default_factory=list)
     sections: list[SectionContent] = Field(default_factory=list)
     partial_sections: list[PipelinePartialSectionEntry] = Field(default_factory=list)

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from pipeline.state import TextbookPipelineState
+from pipeline.visual_resolution import (
+    pending_visual_fields as resolve_pending_visual_fields,
+    required_visual_fields as resolve_required_visual_fields,
+)
 
-_VISUAL_COMPONENT_TO_FIELD = {
-    "diagram-block": "diagram",
-    "diagram-compare": "diagram_compare",
-    "diagram-series": "diagram_series",
-}
-_VISUAL_FIELDS = set(_VISUAL_COMPONENT_TO_FIELD.values())
+_VISUAL_FIELDS = {"diagram", "diagram_compare", "diagram_series"}
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
@@ -32,49 +31,14 @@ def _requires_visual_from_plan(state: TextbookPipelineState) -> bool:
 
 
 def required_visual_fields(state: TextbookPipelineState) -> list[str]:
-    plan = state.current_section_plan
-    candidates: list[str] = []
-
-    if plan is not None:
-        candidates.extend(plan.required_components)
-    candidates.extend(state.contract.required_components)
-
-    mapped = [
-        _VISUAL_COMPONENT_TO_FIELD[component_id]
-        for component_id in candidates
-        if component_id in _VISUAL_COMPONENT_TO_FIELD
-    ]
-    if mapped:
-        return _dedupe_preserve_order(mapped)
-
-    if not _requires_visual_from_plan(state):
-        return []
-
-    available = set(state.contract.required_components) | set(state.contract.optional_components)
-    for component_id in ("diagram-series", "diagram-compare", "diagram-block"):
-        if component_id in available:
-            return [_VISUAL_COMPONENT_TO_FIELD[component_id]]
-    return ["diagram"]
+    return _dedupe_preserve_order(resolve_required_visual_fields(state))
 
 
 def pending_visual_fields(state: TextbookPipelineState) -> list[str]:
-    section_id = state.current_section_id
-    if section_id is None:
-        return []
-    section = state.generated_sections.get(section_id)
-    if section is None:
-        return []
-
-    payload = section.model_dump(exclude_none=True)
-    return [
-        field_name
-        for field_name in required_visual_fields(state)
-        if not payload.get(field_name)
-    ]
+    return _dedupe_preserve_order(resolve_pending_visual_fields(state))
 
 
 def is_required_visual_block(state: TextbookPipelineState, block_type: str | None) -> bool:
     if not block_type:
         return False
     return block_type in _VISUAL_FIELDS and block_type in set(required_visual_fields(state))
-

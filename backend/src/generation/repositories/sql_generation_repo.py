@@ -74,7 +74,7 @@ class SqlGenerationRepository(GenerationRepository):
             model.quality_passed = quality_passed
         if generation_time_seconds is not None:
             model.generation_time_seconds = generation_time_seconds
-        if status in ("completed", "failed"):
+        if status in ("completed", "failed", "partial"):
             model.completed_at = self._db_datetime(datetime.now(timezone.utc))
         await self._session.commit()
 
@@ -90,7 +90,7 @@ class SqlGenerationRepository(GenerationRepository):
         stmt = (
             select(GenerationModel)
             .where(GenerationModel.user_id == user_id)
-            .order_by(GenerationModel.created_at.desc())
+            .order_by(GenerationModel.created_at.desc(), GenerationModel.id.desc())
             .limit(limit)
             .offset(offset)
         )

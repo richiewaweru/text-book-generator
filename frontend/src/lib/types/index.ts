@@ -135,7 +135,7 @@ export interface GenerationHistoryItem {
 	id: string;
 	subject: string;
 	mode: GenerationMode;
-	status: 'pending' | 'running' | 'completed' | 'failed';
+	status: 'pending' | 'running' | 'partial' | 'completed' | 'failed';
 	error_type: string | null;
 	error_code: string | null;
 	requested_template_id: string;
@@ -154,7 +154,7 @@ export interface GenerationDetail {
 	subject: string;
 	context: string;
 	mode: GenerationMode;
-	status: 'pending' | 'running' | 'completed' | 'failed';
+	status: 'pending' | 'running' | 'partial' | 'completed' | 'failed';
 	error: string | null;
 	error_type: string | null;
 	error_code: string | null;
@@ -218,6 +218,15 @@ export interface GenerationSectionReport {
 	warnings: string[];
 }
 
+export interface PipelinePartialSectionEntry {
+	section_id: string;
+	template_id: string;
+	content: SectionContent;
+	status: string;
+	pending_assets: string[];
+	updated_at: string;
+}
+
 export interface GenerationDocument {
 	generation_id: string;
 	subject: string;
@@ -225,9 +234,10 @@ export interface GenerationDocument {
 	mode: GenerationMode;
 	template_id: string;
 	preset_id: string;
-	status: 'pending' | 'running' | 'completed' | 'failed';
+	status: 'pending' | 'running' | 'partial' | 'completed' | 'failed';
 	section_manifest: PipelineSectionManifestItem[];
 	sections: SectionContent[];
+	partial_sections?: PipelinePartialSectionEntry[];
 	failed_sections: FailedSectionEntry[];
 	qc_reports: GenerationSectionReport[];
 	quality_passed: boolean | null;
@@ -256,6 +266,44 @@ export interface SectionStartedEvent {
 
 export interface SectionReadyEvent {
 	type: 'section_ready';
+	generation_id: string;
+	section_id: string;
+	section: SectionContent;
+	completed_sections: number;
+	total_sections: number;
+}
+
+export interface SectionPartialEvent {
+	type: 'section_partial';
+	generation_id: string;
+	section_id: string;
+	section: SectionContent;
+	template_id: string;
+	status: string;
+	pending_assets: string[];
+	updated_at: string;
+}
+
+export interface SectionAssetPendingEvent {
+	type: 'section_asset_pending';
+	generation_id: string;
+	section_id: string;
+	pending_assets: string[];
+	status: string;
+	updated_at: string;
+}
+
+export interface SectionAssetReadyEvent {
+	type: 'section_asset_ready';
+	generation_id: string;
+	section_id: string;
+	ready_assets: string[];
+	pending_assets: string[];
+	updated_at: string;
+}
+
+export interface SectionFinalEvent {
+	type: 'section_final';
 	generation_id: string;
 	section_id: string;
 	section: SectionContent;
@@ -356,9 +404,13 @@ export interface RuntimeProgressEvent {
 export type ProgressUpdateStage =
 	| 'planning'
 	| 'generating_section'
+	| 'drafting_partial'
+	| 'awaiting_assets'
 	| 'generating_diagram'
+	| 'generating_image'
 	| 'checking_quality'
 	| 'repairing'
+	| 'finalizing_section'
 	| 'finalizing'
 	| 'complete'
 	| 'failed';
@@ -374,6 +426,10 @@ export interface ProgressUpdateEvent {
 export interface CompleteEvent {
 	type: 'complete';
 	generation_id: string;
+	final_status?: 'completed' | 'partial';
+	quality_passed?: boolean | null;
+	completed_sections?: number | null;
+	total_sections?: number | null;
 	document_url?: string;
 	report_url?: string;
 	completed_at: string;
@@ -387,9 +443,23 @@ export interface ErrorEvent {
 	completed_at: string;
 }
 
+export interface GenerationFailedEvent {
+	type: 'generation_failed';
+	generation_id: string;
+	message: string;
+	error_type?: string | null;
+	error_code?: string | null;
+	report_url?: string;
+	completed_at: string;
+}
+
 export type GenerationStreamEvent =
 	| PipelineStartEvent
 	| SectionStartedEvent
+	| SectionPartialEvent
+	| SectionAssetPendingEvent
+	| SectionAssetReadyEvent
+	| SectionFinalEvent
 	| SectionReadyEvent
 	| SectionFailedEvent
 	| QCCompleteEvent
@@ -397,6 +467,7 @@ export type GenerationStreamEvent =
 	| RuntimeProgressEvent
 	| ProgressUpdateEvent
 	| CompleteEvent
+	| GenerationFailedEvent
 	| ErrorEvent;
 
 export type {

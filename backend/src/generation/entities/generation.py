@@ -11,7 +11,7 @@ class Generation(BaseModel):
     subject: str
     context: str = ""
     mode: GenerationMode = GenerationMode.BALANCED
-    status: Literal["pending", "running", "completed", "failed"] = "pending"
+    status: Literal["pending", "running", "partial", "completed", "failed"] = "pending"
     document_path: str | None = None
     error: str | None = None
     error_type: str | None = None

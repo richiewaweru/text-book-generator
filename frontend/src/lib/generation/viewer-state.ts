@@ -4,8 +4,13 @@ import { parseIncomingSection } from '$lib/parse-section';
 import type {
 	FailedSectionEntry,
 	GenerationDocument,
+	PipelinePartialSectionEntry,
 	PipelineSectionManifestItem,
+	SectionAssetPendingEvent,
+	SectionAssetReadyEvent,
 	SectionFailedEvent,
+	SectionFinalEvent,
+	SectionPartialEvent,
 	SectionReadyEvent,
 	SectionStartedEvent
 } from '$lib/types';
@@ -14,12 +19,23 @@ export interface ViewerWarning {
 	message: string;
 }
 
+export type ViewerSectionStatus =
+	| 'queued'
+	| 'writing'
+	| 'visual_pending'
+	| 'finalizing'
+	| 'completed'
+	| 'failed'
+	| 'blocked';
+
 export interface ViewerSectionSlot {
 	section_id: string;
 	title: string;
 	position: number;
-	status: 'ready' | 'pending' | 'failed';
+	status: ViewerSectionStatus;
 	section: SectionContent | null;
+	partial: PipelinePartialSectionEntry | null;
+	failure: FailedSectionEntry | null;
 }
 
 function sortManifest(
@@ -64,12 +80,85 @@ function sortFailedSections(
 	});
 }
 
+function sortPartialSections(
+	partialSections: PipelinePartialSectionEntry[],
+	manifest: PipelineSectionManifestItem[]
+): PipelinePartialSectionEntry[] {
+	const positions = new Map(manifest.map((item) => [item.section_id, item.position]));
+	const fallbackPosition = manifest.length + 1;
+	return [...partialSections].sort((left, right) => {
+		const leftPosition = positions.get(left.section_id) ?? fallbackPosition;
+		const rightPosition = positions.get(right.section_id) ?? fallbackPosition;
+		return leftPosition - rightPosition || left.section_id.localeCompare(right.section_id);
+	});
+}
+
+function replaceOrAppendPartialSection(
+	document: GenerationDocument,
+	entry: PipelinePartialSectionEntry
+): GenerationDocument {
+	const partialSections = [...(document.partial_sections ?? [])];
+	const existingIndex = partialSections.findIndex((item) => item.section_id === entry.section_id);
+	if (existingIndex >= 0) {
+		partialSections[existingIndex] = entry;
+	} else {
+		partialSections.push(entry);
+	}
+
+	return normalizeDocument({
+		...document,
+		status: 'running',
+		updated_at: new Date().toISOString(),
+		partial_sections: partialSections,
+		failed_sections: document.failed_sections.filter((item) => item.section_id !== entry.section_id)
+	});
+}
+
+function updatePartialSectionAssets(
+	document: GenerationDocument,
+	sectionId: string,
+	partialStatus: string,
+	pendingAssets: string[],
+	updatedAt: string
+): GenerationDocument {
+	const partialSections = [...(document.partial_sections ?? [])];
+	const existingIndex = partialSections.findIndex((item) => item.section_id === sectionId);
+	if (existingIndex < 0) {
+		return document;
+	}
+
+	partialSections[existingIndex] = {
+		...partialSections[existingIndex],
+		status: partialStatus,
+		pending_assets: [...pendingAssets],
+		updated_at: updatedAt
+	};
+
+	return normalizeDocument({
+		...document,
+		status: 'running',
+		updated_at: new Date().toISOString(),
+		partial_sections: partialSections
+	});
+}
+
+function derivePartialSlotStatus(entry: PipelinePartialSectionEntry): ViewerSectionStatus {
+	if (entry.pending_assets.length > 0 || entry.status === 'awaiting_assets') {
+		return 'visual_pending';
+	}
+	if (entry.status === 'finalizing') {
+		return 'finalizing';
+	}
+	return 'writing';
+}
+
 export function normalizeDocument(document: GenerationDocument): GenerationDocument {
 	const section_manifest = sortManifest(document.section_manifest);
 	return {
 		...document,
 		section_manifest,
 		sections: sortSectionsByManifest(document.sections, section_manifest),
+		partial_sections: sortPartialSections(document.partial_sections ?? [], section_manifest),
 		failed_sections: sortFailedSections(document.failed_sections ?? [], section_manifest)
 	};
 }
@@ -93,6 +182,78 @@ export function applySectionStarted(
 	});
 }
 
+export function applySectionPartial(
+	document: GenerationDocument,
+	payload: SectionPartialEvent
+): { document: GenerationDocument; warning: ViewerWarning | null } {
+	try {
+		const section = parseIncomingSection(payload.section);
+		const entry: PipelinePartialSectionEntry = {
+			section_id: payload.section_id,
+			template_id: payload.template_id,
+			content: section,
+			status: payload.status,
+			pending_assets: [...payload.pending_assets],
+			updated_at: payload.updated_at
+		};
+
+		return {
+			document: replaceOrAppendPartialSection(document, entry),
+			warning: null
+		};
+	} catch (error) {
+		return {
+			document,
+			warning: {
+				message:
+					error instanceof Error ? error.message : '[Lectio] Invalid partial section from pipeline.'
+			}
+		};
+	}
+}
+
+export function applySectionAssetPending(
+	document: GenerationDocument,
+	payload: SectionAssetPendingEvent
+): GenerationDocument {
+	return updatePartialSectionAssets(
+		document,
+		payload.section_id,
+		payload.status,
+		payload.pending_assets,
+		payload.updated_at
+	);
+}
+
+export function applySectionAssetReady(
+	document: GenerationDocument,
+	payload: SectionAssetReadyEvent
+): GenerationDocument {
+	return updatePartialSectionAssets(
+		document,
+		payload.section_id,
+		payload.pending_assets.length > 0 ? 'awaiting_assets' : 'finalizing',
+		payload.pending_assets,
+		payload.updated_at
+	);
+}
+
+export function applySectionFinal(
+	document: GenerationDocument,
+	payload: Pick<SectionFinalEvent, 'section_id'>
+): GenerationDocument {
+	return normalizeDocument({
+		...document,
+		status: 'running',
+		updated_at: new Date().toISOString(),
+		partial_sections: (document.partial_sections ?? []).map((entry) =>
+			entry.section_id === payload.section_id
+				? { ...entry, status: 'finalizing', pending_assets: [] }
+				: entry
+		)
+	});
+}
+
 export function applySectionReady(
 	document: GenerationDocument,
 	payload: Pick<SectionReadyEvent, 'section' | 'section_id'>
@@ -113,6 +274,9 @@ export function applySectionReady(
 				status: 'running',
 				updated_at: new Date().toISOString(),
 				sections,
+				partial_sections: (document.partial_sections ?? []).filter(
+					(entry) => entry.section_id !== payload.section_id
+				),
 				failed_sections: document.failed_sections.filter(
 					(entry) => entry.section_id !== payload.section_id
 				)
@@ -124,9 +288,7 @@ export function applySectionReady(
 			document,
 			warning: {
 				message:
-					error instanceof Error
-						? error.message
-						: '[Lectio] Invalid section from pipeline.'
+					error instanceof Error ? error.message : '[Lectio] Invalid section from pipeline.'
 			}
 		};
 	}
@@ -163,9 +325,13 @@ export function applySectionFailed(
 
 	return normalizeDocument({
 		...document,
-		status: 'running',
+		status: document.status === 'failed' ? 'failed' : 'running',
 		updated_at: new Date().toISOString(),
-		failed_sections: failedSections
+		failed_sections: failedSections,
+		partial_sections: (document.partial_sections ?? []).filter(
+			(entry) => entry.section_id !== payload.section_id
+		),
+		sections: document.sections.filter((entry) => entry.section_id !== payload.section_id)
 	});
 }
 
@@ -181,53 +347,108 @@ export function buildSectionSlots(
 	const manifest = normalized?.section_manifest ?? [];
 	const readySections = normalized?.sections ?? [];
 	const failedSections = normalized?.failed_sections ?? [];
+	const partialSections = normalized?.partial_sections ?? [];
 	const readyById = new Map(readySections.map((section) => [section.section_id, section]));
 	const failedById = new Map(failedSections.map((section) => [section.section_id, section]));
+	const partialById = new Map(partialSections.map((section) => [section.section_id, section]));
+	const terminal = normalized
+		? ['completed', 'partial', 'failed'].includes(normalized.status)
+		: false;
 
 	if (manifest.length > 0) {
 		const manifestIds = new Set(manifest.map((item) => item.section_id));
-		const slots = manifest.map((item) => ({
-			section_id: item.section_id,
-			title: item.title,
-			position: item.position,
-			status: readyById.has(item.section_id)
-				? 'ready'
-				: failedById.has(item.section_id)
+		const slots = manifest.map((item) => {
+			const ready = readyById.get(item.section_id) ?? null;
+			const failed = failedById.get(item.section_id) ?? null;
+			const partial = partialById.get(item.section_id) ?? null;
+			const status: ViewerSectionStatus = ready
+				? 'completed'
+				: failed
 					? 'failed'
-					: 'pending',
-			section: readyById.get(item.section_id) ?? null
-		})) satisfies ViewerSectionSlot[];
-		const orphanSections = readySections
+					: partial
+						? derivePartialSlotStatus(partial)
+						: terminal
+							? 'blocked'
+							: 'queued';
+
+			return {
+				section_id: item.section_id,
+				title: item.title,
+				position: item.position,
+				status,
+				section: ready,
+				partial,
+				failure: failed
+			};
+		}) satisfies ViewerSectionSlot[];
+
+		const orphanReady = readySections
 			.filter((section) => !manifestIds.has(section.section_id))
 			.map((section, index) => ({
 				section_id: section.section_id,
 				title: section.header.title,
 				position: manifest.length + index + 1,
-				status: 'ready' as const,
-				section
+				status: 'completed' as const,
+				section,
+				partial: null,
+				failure: null
 			}));
-		const orphanFailures = failedSections
+		const orphanPartial = partialSections
+			.filter((section) => !manifestIds.has(section.section_id))
+			.map((section, index) => ({
+				section_id: section.section_id,
+				title: section.content.header.title,
+				position: manifest.length + orphanReady.length + index + 1,
+				status: derivePartialSlotStatus(section),
+				section: null,
+				partial: section,
+				failure: null
+			}));
+		const orphanFailed = failedSections
 			.filter((section) => !manifestIds.has(section.section_id))
 			.map((section, index) => ({
 				section_id: section.section_id,
 				title: section.title,
-				position: manifest.length + orphanSections.length + index + 1,
+				position: manifest.length + orphanReady.length + orphanPartial.length + index + 1,
 				status: 'failed' as const,
-				section: null
+				section: null,
+				partial: null,
+				failure: section
 			}));
-		return [...slots, ...orphanSections, ...orphanFailures];
+		return [...slots, ...orphanReady, ...orphanPartial, ...orphanFailed];
 	}
 
-	const total = Math.max(sectionCount ?? 0, readySections.length, failedSections.length);
+	const total = Math.max(
+		sectionCount ?? 0,
+		readySections.length,
+		failedSections.length,
+		partialSections.length
+	);
 	return Array.from({ length: total }, (_, index) => {
-		const section = readySections[index] ?? null;
+		const ready = readySections[index] ?? null;
 		const failed = failedSections[index] ?? null;
+		const partial = partialSections[index] ?? null;
+		const status: ViewerSectionStatus = ready
+			? 'completed'
+			: failed
+				? 'failed'
+				: partial
+					? derivePartialSlotStatus(partial)
+					: terminal
+						? 'blocked'
+						: 'queued';
 		return {
-			section_id: section?.section_id ?? failed?.section_id ?? `pending-${index + 1}`,
-			title: section?.header.title ?? failed?.title ?? `Section ${index + 1}`,
+			section_id: ready?.section_id ?? failed?.section_id ?? partial?.section_id ?? `pending-${index + 1}`,
+			title:
+				ready?.header.title ??
+				failed?.title ??
+				partial?.content.header.title ??
+				`Section ${index + 1}`,
 			position: index + 1,
-			status: section ? 'ready' : failed ? 'failed' : 'pending',
-			section
+			status,
+			section: ready,
+			partial,
+			failure: failed
 		};
 	});
 }

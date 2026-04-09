@@ -119,6 +119,10 @@ class RuntimeProgressEvent(BaseModel):
 class CompleteEvent(BaseModel):
     type: Literal["complete"] = "complete"
     generation_id: str
+    final_status: Literal["completed", "partial"] = "completed"
+    quality_passed: bool | None = None
+    completed_sections: int | None = None
+    total_sections: int | None = None
     document_url: str | None = None
     report_url: str | None = None
     completed_at: str = Field(
@@ -130,6 +134,18 @@ class ErrorEvent(BaseModel):
     type: Literal["error"] = "error"
     generation_id: str
     message: str
+    report_url: str | None = None
+    completed_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class GenerationFailedEvent(BaseModel):
+    type: Literal["generation_failed"] = "generation_failed"
+    generation_id: str
+    message: str
+    error_type: str | None = None
+    error_code: str | None = None
     report_url: str | None = None
     completed_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -322,6 +338,7 @@ PipelineEvent = (
     | RuntimeProgressEvent
     | CompleteEvent
     | ErrorEvent
+    | GenerationFailedEvent
     | LLMCallStartedEvent
     | LLMCallSucceededEvent
     | LLMCallFailedEvent
@@ -348,6 +365,7 @@ event_bus = core_events.event_bus
 __all__ = [
     "CompleteEvent",
     "ErrorEvent",
+    "GenerationFailedEvent",
     "PipelineEvent",
     "PipelineEventBus",
     "PipelineStartEvent",

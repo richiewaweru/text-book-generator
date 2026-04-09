@@ -232,7 +232,7 @@ describe('GenerationView', () => {
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
 		expect(screen.getByText('Live')).toBeTruthy();
 		expect(screen.getByText(/printed booklet/i)).toBeTruthy();
-		expect(screen.getByText(/waiting to start/i)).toBeTruthy();
+		expect(screen.getAllByText(/queued/i).length).toBeGreaterThan(0);
 
 		emitEvent('runtime_policy', {
 			type: 'runtime_policy',
