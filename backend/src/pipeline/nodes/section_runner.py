@@ -673,6 +673,19 @@ async def run_section_steps(
             )
         ):
             node_logger = _node_logger(generation_id, section_id, node_name)
+            pending_assets = step_state.section_pending_assets.get(section_id, [])
+            lifecycle = step_state.section_lifecycle.get(section_id)
+            if (
+                node_name == "section_assembler"
+                and pending_assets
+                and lifecycle in {"partial", "awaiting_assets"}
+            ):
+                node_logger.info(
+                    "Deferring final assembly for section %s while assets are still pending: %s",
+                    section_id,
+                    pending_assets,
+                )
+                break
             record = step_state.failed_sections.get(section_id)
             if record is None:
                 record = _synthetic_failed_section(
