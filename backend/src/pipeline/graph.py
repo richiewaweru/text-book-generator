@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import StateGraph
+from langgraph.graph import END, StateGraph
 from langgraph.types import Send
 
 from pipeline.events import (

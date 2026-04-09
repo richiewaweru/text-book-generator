@@ -244,6 +244,125 @@ class TestGraphTopology:
 # ── QC routing ───────────────────────────────────────────────────────────────
 
 
+class TestSectionPhaseRouting:
+
+    def test_route_after_prepare_section_returns_end_without_current_section(self):
+        from pipeline.graph import route_after_prepare_section
+
+        state = _base_state(current_section_id=None)
+
+        assert route_after_prepare_section(state) == END
+
+    def test_route_after_prepare_section_returns_end_for_failed_section(self):
+        from pipeline.graph import route_after_prepare_section
+
+        state = _base_state(
+            current_section_id="s-01",
+            failed_sections={
+                "s-01": {
+                    "section_id": "s-01",
+                    "title": "Test Section s-01",
+                    "position": 1,
+                    "focus": "Test focus",
+                    "failed_at_node": "prepare_section",
+                    "error_type": "test_failure",
+                    "error_summary": "prepare_section failed",
+                    "failure_detail": {
+                        "node": "prepare_section",
+                        "section_id": "s-01",
+                        "timestamp": "2026-04-09T00:00:00+00:00",
+                        "error_type": "test_failure",
+                        "error_message": "prepare_section failed",
+                    },
+                }
+            },
+            generated_sections={"s-01": _section("s-01")},
+        )
+
+        assert route_after_prepare_section(state) == END
+
+    def test_route_after_prepare_section_returns_end_when_generated_section_missing(self):
+        from pipeline.graph import route_after_prepare_section
+
+        state = _base_state(current_section_id="s-01", generated_sections={})
+
+        assert route_after_prepare_section(state) == END
+
+    def test_route_after_prepare_section_routes_to_asset_generation_when_pending(self):
+        from pipeline.graph import route_after_prepare_section
+
+        state = _base_state(
+            current_section_id="s-01",
+            generated_sections={"s-01": _section("s-01")},
+            section_pending_assets={"s-01": ["diagram"]},
+        )
+
+        assert route_after_prepare_section(state) == "generate_section_assets"
+
+    def test_route_after_prepare_section_routes_to_finalize_without_pending_assets(self):
+        from pipeline.graph import route_after_prepare_section
+
+        state = _base_state(
+            current_section_id="s-01",
+            generated_sections={"s-01": _section("s-01")},
+            section_pending_assets={"s-01": []},
+        )
+
+        assert route_after_prepare_section(state) == "finalize_section"
+
+    def test_route_after_generate_section_assets_returns_end_without_current_section(self):
+        from pipeline.graph import route_after_generate_section_assets
+
+        state = _base_state(current_section_id=None)
+
+        assert route_after_generate_section_assets(state) == END
+
+    def test_route_after_generate_section_assets_returns_end_for_failed_section(self):
+        from pipeline.graph import route_after_generate_section_assets
+
+        state = _base_state(
+            current_section_id="s-01",
+            failed_sections={
+                "s-01": {
+                    "section_id": "s-01",
+                    "title": "Test Section s-01",
+                    "position": 1,
+                    "focus": "Test focus",
+                    "failed_at_node": "generate_section_assets",
+                    "error_type": "test_failure",
+                    "error_summary": "generate_section_assets failed",
+                    "failure_detail": {
+                        "node": "generate_section_assets",
+                        "section_id": "s-01",
+                        "timestamp": "2026-04-09T00:00:00+00:00",
+                        "error_type": "test_failure",
+                        "error_message": "generate_section_assets failed",
+                    },
+                }
+            },
+            generated_sections={"s-01": _section("s-01")},
+        )
+
+        assert route_after_generate_section_assets(state) == END
+
+    def test_route_after_generate_section_assets_returns_end_when_generated_section_missing(self):
+        from pipeline.graph import route_after_generate_section_assets
+
+        state = _base_state(current_section_id="s-01", generated_sections={})
+
+        assert route_after_generate_section_assets(state) == END
+
+    def test_route_after_generate_section_assets_routes_to_finalize(self):
+        from pipeline.graph import route_after_generate_section_assets
+
+        state = _base_state(
+            current_section_id="s-01",
+            generated_sections={"s-01": _section("s-01")},
+        )
+
+        assert route_after_generate_section_assets(state) == "finalize_section"
+
+
 class TestQCRouting:
     """Pure state logic — no LLM or contracts mocking needed."""
 
