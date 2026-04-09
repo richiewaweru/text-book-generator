@@ -19,6 +19,7 @@ import sys
 from datetime import datetime, timezone
 
 from pipeline.contracts import validate_section_for_template
+from pipeline.console_diagnostics import force_console_log
 from pipeline.section_assets import pending_visual_fields, required_visual_fields
 from pipeline.state import (
     PartialSectionRecord,
@@ -26,6 +27,7 @@ from pipeline.state import (
     QCReport,
     TextbookPipelineState,
 )
+from pipeline.visual_resolution import resolve_visual_issue
 
 
 def diag(tag: str, **fields) -> None:
@@ -122,9 +124,21 @@ async def _assemble_section(
     typed = TextbookPipelineState.parse(state)
     section_id = typed.current_section_id
     node_name = "partial_section_assembler" if mode == "partial" else "section_assembler"
+    force_console_log(
+        "FINALIZE",
+        "START",
+        section_id=section_id,
+        mode=mode,
+    )
 
     section = typed.generated_sections.get(section_id)
     if not section:
+        force_console_log(
+            "FINALIZE",
+            "MISSING_SECTION",
+            section_id=section_id,
+            mode=mode,
+        )
         return {
             "errors": [
                 PipelineError(
@@ -141,8 +155,36 @@ async def _assemble_section(
         }
 
     section_dict = section.model_dump(exclude_none=True)
+    visual_issue = resolve_visual_issue(typed)
+    if mode == "final" and visual_issue:
+        force_console_log(
+            "FINALIZE",
+            "VISUAL_ISSUE",
+            section_id=section_id,
+            mode=mode,
+            message=visual_issue,
+        )
+        return {
+            "errors": [
+                PipelineError(
+                    node=node_name,
+                    section_id=section_id,
+                    message=visual_issue,
+                    recoverable=True,
+                )
+            ],
+            "completed_nodes": [node_name],
+        }
+
     pending_assets = pending_visual_fields(typed)
     if mode == "final" and pending_assets:
+        force_console_log(
+            "FINALIZE",
+            "AWAITING_ASSETS",
+            section_id=section_id,
+            mode=mode,
+            pending_assets=pending_assets,
+        )
         partials = dict(typed.partial_sections)
         partials[section_id] = PartialSectionRecord(
             section_id=section.section_id,
@@ -180,6 +222,13 @@ async def _assemble_section(
         diag("ASSEMBLER_CONTRACT_VIOLATION", **payload)
         if any("diagram" in violation.lower() for violation in violations):
             diag("ASSEMBLER_MISSING_DIAGRAM", **payload)
+        force_console_log(
+            "FINALIZE",
+            "CONTRACT_VIOLATION",
+            section_id=section_id,
+            mode=mode,
+            violations=violations,
+        )
         return {
             "errors": [
                 PipelineError(
@@ -225,6 +274,12 @@ async def _assemble_section(
     assembled[section_id] = section
     lifecycle = dict(typed.section_lifecycle)
     lifecycle[section_id] = "final"
+    force_console_log(
+        "FINALIZE",
+        "ASSEMBLED",
+        section_id=section_id,
+        mode=mode,
+    )
     return {
         "assembled_sections": assembled,
         "section_pending_assets": {section_id: []},

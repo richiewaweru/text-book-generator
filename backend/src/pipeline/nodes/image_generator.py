@@ -504,44 +504,49 @@ async def image_generator(
     _client=None,
 ) -> dict:
     _ = model_overrides
-    _s = state if isinstance(state, dict) else state.model_dump() if hasattr(state, "model_dump") else {}
-    _sid = _s.get("current_section_id", "UNKNOWN")
-    _plans = _s.get("composition_plans") or {}
-    _plan = _plans.get(_sid)
-    _mode = _plan.get("diagram", {}).get("mode") if isinstance(_plan, dict) else getattr(getattr(_plan, "diagram", None), "mode", None) if _plan else None
-    _enabled = _plan.get("diagram", {}).get("enabled") if isinstance(_plan, dict) else getattr(getattr(_plan, "diagram", None), "enabled", None) if _plan else None
-    _current_section_plan = _s.get("current_section_plan")
-    if isinstance(_current_section_plan, dict):
-        _current_plan_visual_policy = _current_section_plan.get("visual_policy")
-    else:
-        _current_visual_policy = getattr(_current_section_plan, "visual_policy", None)
-        _current_plan_visual_policy = (
-            _current_visual_policy.model_dump()
-            if _current_visual_policy is not None and hasattr(_current_visual_policy, "model_dump")
-            else _current_visual_policy
-        )
-    diag(
-        "IMGGEN_GATE",
-        section_id=_sid,
-        mode=_mode,
-        enabled=_enabled,
-        plan_exists=_plan is not None,
-        current_plan_visual_policy=_current_plan_visual_policy,
-    )
     state = TextbookPipelineState.parse(state)
     sid = state.current_section_id
     section = state.generated_sections.get(sid)
     generation_id = state.request.generation_id or ""
     log_generation_id = generation_id or "unknown"
     started = time.monotonic()
+    visual_mode = resolve_effective_visual_mode(state)
+    visual_targets = resolve_effective_visual_targets(state)
+    image_targets = _image_targets(state)
+    pending_before = pending_visual_targets(state)
 
     composition_plan = (state.composition_plans or {}).get(sid)
-    if not composition_plan or not composition_plan.diagram.enabled:
+    diag(
+        "IMGGEN_GATE",
+        section_id=sid,
+        mode=visual_mode,
+        targets=visual_targets,
+        image_targets=image_targets,
+        pending_before=pending_before,
+        plan_exists=composition_plan is not None,
+        enabled=(composition_plan.diagram.enabled if composition_plan is not None else None),
+    )
+    _imggen_diag(
+        "START",
+        section_id=sid,
+        generation_id=log_generation_id,
+        mode=visual_mode,
+        targets=visual_targets,
+        image_targets=image_targets,
+        pending_before=pending_before,
+    )
+
+    if not image_targets:
         logger.info(
-            "image_generator: SKIP sid=%s reason=diagram_not_enabled plan_exists=%s enabled=%s",
+            "image_generator: SKIP sid=%s reason=no_image_targets targets=%s",
             sid,
-            composition_plan is not None,
-            composition_plan.diagram.enabled if composition_plan is not None else False,
+            visual_targets,
+        )
+        _imggen_diag(
+            "SKIP",
+            section_id=sid,
+            reason="no_image_targets",
+            targets=visual_targets,
         )
         _publish_image_outcome(
             generation_id,
@@ -550,11 +555,17 @@ async def image_generator(
             duration_ms=(time.monotonic() - started) * 1000.0,
         )
         return {"completed_nodes": ["image_generator"]}
-    if composition_plan.diagram.mode != "image":
+    if visual_mode != "image":
         logger.info(
             "image_generator: SKIP sid=%s reason=mode_not_image mode=%s",
             sid,
-            composition_plan.diagram.mode,
+            visual_mode,
+        )
+        _imggen_diag(
+            "SKIP",
+            section_id=sid,
+            reason="mode_not_image",
+            mode=visual_mode,
         )
         _publish_image_outcome(
             generation_id,
@@ -565,16 +576,23 @@ async def image_generator(
         return {"completed_nodes": ["image_generator"]}
 
     if section is None:
+        error_message = f"No section content found for {sid}"
         logger.error(
             "image_generator: FAIL sid=%s reason=no_section_content available_sections=%s",
             sid,
             list(state.generated_sections.keys()),
         )
+        _imggen_diag(
+            "FAIL",
+            section_id=sid,
+            reason="no_section_content",
+            available_sections=list(state.generated_sections.keys()),
+        )
         _publish_image_outcome(
             generation_id,
             sid,
             "error",
-            error_message=f"No section content found for {sid}",
+            error_message=error_message,
             duration_ms=(time.monotonic() - started) * 1000.0,
         )
         return {
@@ -582,7 +600,76 @@ async def image_generator(
                 PipelineError(
                     node="image_generator",
                     section_id=sid,
-                    message=f"No section content found for {sid}",
+                    message=error_message,
+                    recoverable=True,
+                )
+            ],
+            "completed_nodes": ["image_generator"],
+        }
+
+    if composition_plan is None:
+        error_message = (
+            "Image generation cannot run because no composition plan exists for this section."
+        )
+        logger.error(
+            "image_generator: FAIL sid=%s reason=no_composition_plan targets=%s",
+            sid,
+            image_targets,
+        )
+        _imggen_diag(
+            "FAIL",
+            section_id=sid,
+            reason="no_composition_plan",
+            targets=image_targets,
+        )
+        _publish_image_outcome(
+            generation_id,
+            sid,
+            "error",
+            error_message=error_message,
+            duration_ms=(time.monotonic() - started) * 1000.0,
+        )
+        return {
+            "errors": [
+                PipelineError(
+                    node="image_generator",
+                    section_id=sid,
+                    message=error_message,
+                    recoverable=True,
+                )
+            ],
+            "completed_nodes": ["image_generator"],
+        }
+
+    if not composition_plan.diagram.enabled:
+        error_message = (
+            "Image generation was required for this section, but the composition plan "
+            "did not enable diagram generation."
+        )
+        logger.error(
+            "image_generator: FAIL sid=%s reason=diagram_not_enabled targets=%s",
+            sid,
+            image_targets,
+        )
+        _imggen_diag(
+            "FAIL",
+            section_id=sid,
+            reason="diagram_not_enabled",
+            targets=image_targets,
+        )
+        _publish_image_outcome(
+            generation_id,
+            sid,
+            "error",
+            error_message=error_message,
+            duration_ms=(time.monotonic() - started) * 1000.0,
+        )
+        return {
+            "errors": [
+                PipelineError(
+                    node="image_generator",
+                    section_id=sid,
+                    message=error_message,
                     recoverable=True,
                 )
             ],
@@ -590,15 +677,21 @@ async def image_generator(
         }
 
     if state.style_context is None:
+        error_message = "style_context is None -- curriculum_planner may have failed"
         logger.error(
             "image_generator: FAIL sid=%s reason=no_style_context",
             sid,
+        )
+        _imggen_diag(
+            "FAIL",
+            section_id=sid,
+            reason="no_style_context",
         )
         _publish_image_outcome(
             generation_id,
             sid,
             "error",
-            error_message="style_context is None -- curriculum_planner may have failed",
+            error_message=error_message,
             duration_ms=(time.monotonic() - started) * 1000.0,
         )
         return {
@@ -606,21 +699,12 @@ async def image_generator(
                 PipelineError(
                     node="image_generator",
                     section_id=sid,
-                    message="style_context is None -- curriculum_planner may have failed",
+                    message=error_message,
                     recoverable=False,
                 )
             ],
             "completed_nodes": ["image_generator"],
         }
-
-    visual_slot = _get_visual_slot(state)
-    logger.info(
-        "image_generator: START sid=%s generation_id=%s slot=%s intent=%s",
-        sid,
-        log_generation_id,
-        visual_slot,
-        _visual_intent(state),
-    )
 
     try:
         store = _store or get_image_store()
@@ -631,12 +715,26 @@ async def image_generator(
             "injected" if _store is not None else "default",
             store.describe_target(),
         )
+        _imggen_diag(
+            "STORE",
+            section_id=sid,
+            store_type=type(store).__name__,
+            store_source="injected" if _store is not None else "default",
+            store_target=store.describe_target(),
+        )
     except Exception as exc:
         logger.error(
             "image_generator: FAIL sid=%s reason=store_init_failed error_type=%s error=%s",
             sid,
             type(exc).__name__,
             exc,
+        )
+        _imggen_diag(
+            "FAIL",
+            section_id=sid,
+            reason="store_init_failed",
+            error_type=type(exc).__name__,
+            error_message=str(exc),
         )
         _publish_image_outcome(
             generation_id,
@@ -671,6 +769,12 @@ async def image_generator(
             "image_generator: FAIL sid=%s reason=no_api_key",
             sid,
         )
+        _imggen_diag(
+            "FAIL",
+            section_id=sid,
+            reason="no_api_key",
+            provider="gemini",
+        )
         _publish_image_outcome(
             generation_id,
             sid,
@@ -704,12 +808,28 @@ async def image_generator(
             type(client).__name__,
             "injected" if _client is not None else "default",
         )
+        _imggen_diag(
+            "PROVIDER",
+            section_id=sid,
+            provider="gemini",
+            client_type=type(client).__name__,
+            client_source="injected" if _client is not None else "default",
+            target_mode=visual_mode,
+            targets=image_targets,
+        )
     except Exception as exc:
         logger.error(
             "image_generator: FAIL sid=%s reason=client_init_failed error_type=%s error=%s",
             sid,
             type(exc).__name__,
             exc,
+        )
+        _imggen_diag(
+            "FAIL",
+            section_id=sid,
+            reason="client_init_failed",
+            error_type=type(exc).__name__,
+            error_message=str(exc),
         )
         _publish_image_outcome(
             generation_id,
@@ -731,35 +851,61 @@ async def image_generator(
         }
 
     try:
-        if visual_slot == "diagram-series":
-            updated_section, attempts = await _generate_series_images(
-                state=state,
-                section=section,
-                composition_plan=composition_plan,
-                sid=sid,
-                store=store,
-                client=client,
-                generation_id=generation_id,
+        updated_section = section
+        attempts = 1
+        for target in image_targets:
+            if target_is_satisfied(updated_section, target, mode="image"):
+                _imggen_diag(
+                    "SKIP",
+                    section_id=sid,
+                    reason="target_already_satisfied",
+                    target=target,
+                )
+                continue
+
+            _imggen_diag(
+                "WRITEBACK",
+                section_id=sid,
+                target=target,
+                status="starting",
             )
-        elif visual_slot == "diagram-compare":
-            updated_section, attempts = await _generate_compare_images(
-                state=state,
-                section=section,
-                composition_plan=composition_plan,
-                sid=sid,
-                store=store,
-                client=client,
-                generation_id=generation_id,
-            )
-        else:
-            updated_section, attempts = await _generate_single_image(
-                state=state,
-                section=section,
-                composition_plan=composition_plan,
-                sid=sid,
-                store=store,
-                client=client,
-                generation_id=generation_id,
+            if target == "diagram_series":
+                updated_section, target_attempts = await _generate_series_images(
+                    state=state,
+                    section=updated_section,
+                    composition_plan=composition_plan,
+                    sid=sid,
+                    store=store,
+                    client=client,
+                    generation_id=generation_id,
+                )
+            elif target == "diagram_compare":
+                updated_section, target_attempts = await _generate_compare_images(
+                    state=state,
+                    section=updated_section,
+                    composition_plan=composition_plan,
+                    sid=sid,
+                    store=store,
+                    client=client,
+                    generation_id=generation_id,
+                )
+            else:
+                updated_section, target_attempts = await _generate_single_image(
+                    state=state,
+                    section=updated_section,
+                    composition_plan=composition_plan,
+                    sid=sid,
+                    store=store,
+                    client=client,
+                    generation_id=generation_id,
+                )
+            attempts = max(attempts, target_attempts)
+            _imggen_diag(
+                "WRITEBACK",
+                section_id=sid,
+                target=target,
+                status="completed",
+                target_satisfied=target_is_satisfied(updated_section, target, mode="image"),
             )
 
         if _visual_intent(state) == "show_realism":
@@ -772,12 +918,65 @@ async def image_generator(
                 generation_id=generation_id,
             )
 
+        pending_after = [
+            target
+            for target in image_targets
+            if not target_is_satisfied(updated_section, target, mode="image")
+        ]
         generated = dict(state.generated_sections)
         generated[sid] = updated_section
+        if pending_after:
+            error_message = (
+                "Image generation wrote visual content, but the section still has unresolved "
+                f"required targets: {', '.join(pending_after)}"
+            )
+            logger.error(
+                "image_generator: WRITEBACK_PENDING_MISMATCH sid=%s before=%s after=%s targets=%s",
+                sid,
+                pending_before,
+                pending_after,
+                image_targets,
+            )
+            _imggen_diag(
+                "WRITEBACK_PENDING_MISMATCH",
+                section_id=sid,
+                targets=image_targets,
+                pending_before=pending_before,
+                pending_after=pending_after,
+            )
+            _publish_image_outcome(
+                generation_id,
+                sid,
+                "error",
+                attempts=attempts,
+                error_message=error_message,
+                duration_ms=(time.monotonic() - started) * 1000.0,
+            )
+            return {
+                "generated_sections": generated,
+                "errors": [
+                    PipelineError(
+                        node="image_generator",
+                        section_id=sid,
+                        message=error_message,
+                        recoverable=True,
+                    )
+                ],
+                "completed_nodes": ["image_generator"],
+            }
+
         logger.info(
-            "image_generator: SUCCESS sid=%s slot=%s",
+            "image_generator: SUCCESS sid=%s targets=%s",
             sid,
-            visual_slot,
+            image_targets,
+        )
+        _imggen_diag(
+            "SUCCESS",
+            section_id=sid,
+            targets=image_targets,
+            pending_before=pending_before,
+            pending_after=pending_after,
+            attempts=attempts,
         )
         _publish_image_outcome(
             generation_id,
@@ -796,6 +995,14 @@ async def image_generator(
             "image_generator: FAIL sid=%s reason=timeout attempts=%d",
             sid,
             attempts,
+        )
+        _imggen_diag(
+            "FAIL",
+            section_id=sid,
+            reason="timeout",
+            attempts=attempts,
+            error_type=type(exc).__name__,
+            error_message="Image generation timed out",
         )
         _publish_image_outcome(
             generation_id,
@@ -830,6 +1037,14 @@ async def image_generator(
         message = str(exc)
         if not message.startswith(("Image storage failed", "DiagramCompare pair failed")):
             message = f"Image generation failed: {type(exc).__name__}: {exc}"
+        _imggen_diag(
+            "FAIL",
+            section_id=sid,
+            reason="unexpected",
+            attempts=attempts,
+            error_type=type(exc).__name__,
+            error_message=message,
+        )
         _publish_image_outcome(
             generation_id,
             sid,

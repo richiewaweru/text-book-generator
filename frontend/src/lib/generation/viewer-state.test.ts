@@ -135,7 +135,7 @@ describe('viewer-state helpers', () => {
 		expect(result.warning?.message).toMatch(/Invalid section from pipeline/);
 	});
 
-	it('builds ordered ready and pending slots from persisted manifest metadata', () => {
+	it('builds ordered completed and queued slots from persisted manifest metadata', () => {
 		const slots = buildSectionSlots(
 			createDocument({
 				section_manifest: [
@@ -149,9 +149,9 @@ describe('viewer-state helpers', () => {
 		);
 
 		expect(slots.map((slot) => `${slot.position}:${slot.status}:${slot.title}`)).toEqual([
-			'1:pending:First section',
-			'2:ready:Second section',
-			'3:pending:Third section'
+			'1:queued:First section',
+			'2:completed:Second section',
+			'3:queued:Third section'
 		]);
 	});
 
@@ -182,7 +182,7 @@ describe('viewer-state helpers', () => {
 		const slots = buildSectionSlots(failed, 2);
 		expect(failed.failed_sections).toHaveLength(1);
 		expect(slots.map((slot) => `${slot.position}:${slot.status}:${slot.title}`)).toEqual([
-			'1:pending:First section',
+			'1:queued:First section',
 			'2:failed:Second section'
 		]);
 	});

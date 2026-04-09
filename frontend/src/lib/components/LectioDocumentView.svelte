@@ -61,7 +61,7 @@
 
 			<div class="section-stack" data-print-mode={printMode ? 'true' : 'false'}>
 				{#each resolvedSectionSlots as slot (slot.section_id)}
-					{#if slot.status === 'ready' && slot.section}
+					{#if slot.status === 'completed' && slot.section}
 						{@const TemplateRender = template.render}
 						<article class="animate-step-reveal" id={`section-${slot.section_id}`}>
 							<TemplateRender section={slot.section} />

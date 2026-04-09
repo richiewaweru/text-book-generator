@@ -1,4 +1,4 @@
-import adapter from '@sveltejs/adapter-vercel';
+import adapter from './adapter-vercel-safe.js';
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
@@ -10,4 +10,3 @@ const config = {
 };
 
 export default config;
-

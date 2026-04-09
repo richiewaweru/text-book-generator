@@ -9,7 +9,11 @@
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import { buildSectionPreview } from '$lib/generation/preview';
 	import {
+		applySectionAssetPending,
+		applySectionAssetReady,
+		applySectionFinal,
 		applySectionFailed,
+		applySectionPartial,
 		applySectionReady,
 		applySectionStarted,
 		buildSectionSlots,
@@ -21,13 +25,18 @@
 		ErrorEvent,
 		GenerationAccepted,
 		GenerationDetail,
+		GenerationFailedEvent,
 		GenerationDocument,
 		PlanningGenerationSpec,
 		ProgressUpdateEvent,
 		QCCompleteEvent,
 		RuntimePolicyEvent,
 		RuntimeProgressEvent,
+		SectionAssetPendingEvent,
+		SectionAssetReadyEvent,
 		SectionFailedEvent,
+		SectionFinalEvent,
+		SectionPartialEvent,
 		SectionReadyEvent,
 		SectionStartedEvent
 	} from '$lib/types';
@@ -64,7 +73,7 @@
 	const sectionSlots = $derived(buildSectionSlots(document, plannedSections));
 	const failureMap = $derived(new Map((document?.failed_sections ?? []).map((entry) => [entry.section_id, entry])));
 	const readySectionCount = $derived(
-		sectionSlots.filter((slot) => slot.status === 'ready').length
+		sectionSlots.filter((slot) => slot.status === 'completed').length
 	);
 	const failedSectionCount = $derived(
 		sectionSlots.filter((slot) => slot.status === 'failed').length
@@ -73,10 +82,20 @@
 	const lessonFormat = $derived(resolveLessonFormat(detail?.planning_spec ?? null));
 	const templateName = $derived(formatTemplateName(detail));
 	const viewerTitle = $derived(document?.subject || detail?.subject || 'Live lesson');
-	const showFullLesson = $derived(detail?.status === 'completed');
+	const showFullLesson = $derived(detail?.status === 'completed' || detail?.status === 'partial');
 	const runtimeSectionsTotal = $derived(
 		runtimeProgress?.sections_total ?? plannedSections ?? sectionSlots.length
 	);
+	const terminalSummary = $derived.by(() => {
+		if (!detail) return null;
+		if (detail.status === 'partial') {
+			return detail.error ?? 'Some sections were generated, but the lesson did not fully finalize.';
+		}
+		if (detail.status === 'failed') {
+			return detail.error ?? 'The generation failed before the lesson could be completed.';
+		}
+		return null;
+	});
 
 	function isStudioPlanningSpec(value: unknown): value is PlanningGenerationSpec {
 		return Boolean(
@@ -117,25 +136,35 @@
 		return section ? roleLabel(section.role) : null;
 	}
 
-	function sectionStatus(slot: (typeof sectionSlots)[number]): 'complete' | 'active' | 'waiting' | 'failed' {
-		if (slot.status === 'failed') {
-			return 'failed';
+	function displaySectionStatus(slot: (typeof sectionSlots)[number]): (typeof slot)['status'] {
+		if (slot.status === 'queued' && slot.section_id === activeSectionId) {
+			return 'writing';
 		}
-		if (slot.status === 'ready') {
-			return 'complete';
-		}
-		if (slot.section_id === activeSectionId) {
-			return 'active';
-		}
-		return 'waiting';
+		return slot.status;
 	}
 
 	function statusLabel(slot: (typeof sectionSlots)[number]): string {
-		const status = sectionStatus(slot);
-		if (status === 'complete') return 'Complete';
-		if (status === 'active') return progressUpdate?.label ?? 'Generating...';
+		const status = displaySectionStatus(slot);
+		if (status === 'completed') return 'Complete';
 		if (status === 'failed') return 'Failed';
-		return 'Waiting';
+		if (status === 'writing') return progressUpdate?.label ?? 'Writing section...';
+		if (status === 'visual_pending') {
+			const pendingAssets = slot.partial?.pending_assets ?? [];
+			if (pendingAssets.some((asset) => asset === 'diagram_series' || asset === 'diagram_compare')) {
+				return 'Generating image...';
+			}
+			if (pendingAssets.includes('diagram')) {
+				return 'Generating diagram...';
+			}
+			return 'Waiting for visuals...';
+		}
+		if (status === 'finalizing') return 'Finalizing section...';
+		if (status === 'blocked') {
+			return detail?.status === 'failed'
+				? 'Did not start because generation failed'
+				: 'Did not finalize before generation ended';
+		}
+		return 'Queued';
 	}
 
 	function formatSeconds(seconds: number | null | undefined): string {
@@ -248,7 +277,7 @@
 
 		if (token !== connectionToken) return false;
 
-		if (detail?.status === 'completed' || detail?.status === 'failed') {
+		if (detail?.status === 'completed' || detail?.status === 'partial' || detail?.status === 'failed') {
 			streamClosedTerminally = true;
 			streamState = 'complete';
 			activeSectionId = null;
@@ -287,7 +316,7 @@
 		reconnectTimer = window.setTimeout(async () => {
 			try {
 				await refresh(id);
-				if (detail?.status === 'completed' || detail?.status === 'failed') {
+				if (detail?.status === 'completed' || detail?.status === 'partial' || detail?.status === 'failed') {
 					streamState = 'complete';
 					setGenerationBanner(null);
 					return;
@@ -350,6 +379,34 @@
 						syncDocument(applySectionStarted(document, payload));
 						break;
 					}
+					case 'section_partial': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionPartialEvent;
+						activeSectionId = payload.section_id;
+						const result = applySectionPartial(document, payload);
+						syncDocument(result.document);
+						if (result.warning) viewerWarning = result.warning.message;
+						break;
+					}
+					case 'section_asset_pending': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionAssetPendingEvent;
+						activeSectionId = payload.section_id;
+						syncDocument(applySectionAssetPending(document, payload));
+						break;
+					}
+					case 'section_asset_ready': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionAssetReadyEvent;
+						syncDocument(applySectionAssetReady(document, payload));
+						break;
+					}
+					case 'section_final': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionFinalEvent;
+						syncDocument(applySectionFinal(document, payload));
+						break;
+					}
 					case 'section_ready': {
 						if (!document) break;
 						const payload = JSON.parse(data) as SectionReadyEvent;
@@ -365,6 +422,11 @@
 						const payload = JSON.parse(data) as SectionFailedEvent;
 						if (activeSectionId === payload.section_id) activeSectionId = null;
 						syncDocument(applySectionFailed(document, payload));
+						break;
+					}
+					case 'generation_failed': {
+						const payload = JSON.parse(data) as GenerationFailedEvent;
+						error = payload.message;
 						break;
 					}
 					case 'qc_complete': {
@@ -385,7 +447,12 @@
 			},
 			onError(err) {
 				if (myToken !== connectionToken) return;
-				if (streamClosedTerminally || detail?.status === 'completed' || detail?.status === 'failed') {
+				if (
+					streamClosedTerminally ||
+					detail?.status === 'completed' ||
+					detail?.status === 'partial' ||
+					detail?.status === 'failed'
+				) {
 					streamState = 'complete';
 					setGenerationBanner(null);
 					closeStream(myToken);
@@ -491,6 +558,21 @@
 		<p class="notice notice-error">{error}</p>
 	{/if}
 
+	{#if terminalSummary}
+		<div class={`notice ${detail?.status === 'failed' ? 'notice-error' : 'notice-warn'}`} role="status">
+			<div class="terminal-summary">
+				<p>{terminalSummary}</p>
+				<details>
+					<summary>Technical details</summary>
+					<p>Status: {detail?.status}</p>
+					<p>Quality passed: {detail?.quality_passed === null ? 'Unknown' : detail?.quality_passed ? 'Yes' : 'No'}</p>
+					<p>Ready sections: {readySectionCount}</p>
+					<p>Failed sections: {failedSectionCount}</p>
+				</details>
+			</div>
+		</div>
+	{/if}
+
 	{#if loading}
 		<div class="loading-panel" aria-busy="true">
 			<div class="skeleton-sidebar"></div>
@@ -512,7 +594,7 @@
 
 						{#each sectionSlots as slot}
 							<div class="progress-row">
-								<span class={`progress-dot progress-dot-${sectionStatus(slot)}`}></span>
+								<span class={`progress-dot progress-dot-${displaySectionStatus(slot)}`}></span>
 								<div>
 									<strong>Section {slot.position}</strong>
 									<p>{statusLabel(slot)}</p>
@@ -614,14 +696,20 @@
 					{#if isLive}
 						<span class="live-badge">Live</span>
 					{:else}
-						<span class="complete-badge">{detail?.status === 'failed' ? 'Stopped' : 'Complete'}</span>
+						<span class="complete-badge">
+							{detail?.status === 'failed'
+								? 'Failed'
+								: detail?.status === 'partial'
+									? 'Partially generated'
+									: 'Complete'}
+						</span>
 					{/if}
 				</div>
 
 				<div class="viewer-sections">
 					{#if sectionSlots.length}
 						{#each sectionSlots as slot}
-							{@const slotStatus = sectionStatus(slot)}
+							{@const slotStatus = displaySectionStatus(slot)}
 							{@const role = sectionRoleByPosition(slot.position)}
 							<article class={`viewer-section viewer-section-${slotStatus}`}>
 								<div class="viewer-section-label">
@@ -629,13 +717,17 @@
 								</div>
 								<h4>{slot.title}</h4>
 
-								{#if slotStatus === 'complete' && slot.section}
+								{#if slotStatus === 'completed' && slot.section}
 									<p>{buildSectionPreview(slot.section)}</p>
-								{:else if slotStatus === 'active'}
+								{:else if slotStatus === 'writing'}
 									<div class="active-row">
 										<span class="active-dot"></span>
 										<p>{progressUpdate?.label ?? 'Writing section content...'}</p>
 									</div>
+								{:else if slotStatus === 'visual_pending'}
+									<p>{statusLabel(slot)}</p>
+								{:else if slotStatus === 'finalizing'}
+									<p>Finalizing this section and checking it against the template contract.</p>
 								{:else if slotStatus === 'failed'}
 									<p>
 										{failureMap.get(slot.section_id)?.error_summary ??
@@ -644,13 +736,15 @@
 									{#if failureMap.get(slot.section_id)?.can_retry}
 										<small>Retry controls are not in phase 1, but the rest of the lesson stays readable.</small>
 									{/if}
+								{:else if slotStatus === 'blocked'}
+									<p>{statusLabel(slot)}</p>
 								{:else}
-									<p>Waiting to start...</p>
+									<p>{statusLabel(slot)}</p>
 								{/if}
 							</article>
 						{/each}
 					{:else}
-						<article class="viewer-section viewer-section-waiting">
+						<article class="viewer-section viewer-section-queued">
 							<div class="viewer-section-label">Section stream</div>
 							<h4>Waiting for the first section</h4>
 							<p>The generation worker has not published the first section yet.</p>
@@ -833,21 +927,31 @@
 		background: #c8beb0;
 	}
 
-	.progress-dot-complete {
+	.progress-dot-complete,
+	.progress-dot-completed {
 		background: #1d9e75;
 	}
 
-	.progress-dot-active {
+	.progress-dot-writing,
+	.progress-dot-finalizing {
 		background: #1d9e75;
 		animation: pulse 1.2s ease-in-out infinite;
 	}
 
-	.progress-dot-waiting {
+	.progress-dot-queued {
 		background: #d6cdc1;
+	}
+
+	.progress-dot-visual_pending {
+		background: #356582;
 	}
 
 	.progress-dot-failed {
 		background: #c8822a;
+	}
+
+	.progress-dot-blocked {
+		background: #8c8579;
 	}
 
 	.meta-list {
@@ -893,18 +997,25 @@
 		border: 0.5px solid rgba(36, 52, 63, 0.08);
 	}
 
-	.viewer-section-complete {
+	.viewer-section-completed {
 		background: #fffdf9;
 	}
 
-	.viewer-section-active {
+	.viewer-section-writing,
+	.viewer-section-finalizing {
 		background: #eef8f4;
 		border-color: rgba(29, 158, 117, 0.24);
 	}
 
-	.viewer-section-waiting {
+	.viewer-section-queued,
+	.viewer-section-blocked {
 		background: #f6f1e8;
 		opacity: 0.72;
+	}
+
+	.viewer-section-visual_pending {
+		background: #eef4f8;
+		border-color: rgba(53, 101, 130, 0.24);
 	}
 
 	.viewer-section-failed {
@@ -915,6 +1026,11 @@
 	.active-row {
 		justify-content: flex-start;
 		align-items: center;
+	}
+
+	.terminal-summary {
+		display: grid;
+		gap: 0.55rem;
 	}
 
 	.active-dot {
@@ -944,7 +1060,8 @@
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.progress-dot-active,
+		.progress-dot-writing,
+		.progress-dot-finalizing,
 		.active-dot,
 		.skeleton-sidebar,
 		.skeleton-viewer {

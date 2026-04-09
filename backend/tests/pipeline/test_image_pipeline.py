@@ -504,10 +504,9 @@ async def test_image_generator_logs_success_path(tmp_path, monkeypatch) -> None:
     result = await image_generator(state, _store=store, _client=client)
 
     assert result["generated_sections"]["s-01"].diagram is not None
-    assert any("image_generator: START sid=s-01" in message for message in messages)
     assert any("image_generator: CALLING_GEMINI sid=s-01 variant=single" in message for message in messages)
     assert any("image_generator: STORE_SUCCESS sid=s-01 variant=single" in message for message in messages)
-    assert any("image_generator: SUCCESS sid=s-01 slot=diagram-block" in message for message in messages)
+    assert any("image_generator: SUCCESS sid=s-01 targets=['diagram']" in message for message in messages)
 
 
 @pytest.mark.asyncio

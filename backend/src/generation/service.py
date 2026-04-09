@@ -35,6 +35,7 @@ from pipeline.contracts import get_contract, validate_preset_for_template
 from pipeline.events import (
     CompleteEvent,
     ErrorEvent,
+    GenerationFailedEvent,
     RuntimeProgressEvent,
     SectionAssetPendingEvent,
     SectionAssetReadyEvent,
@@ -384,12 +385,18 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
             "label": "Drafting section",
         }]
     if event_type == "section_asset_pending":
+        pending_assets = list(event.get("pending_assets") or [])
+        label = "Waiting for visuals"
+        if any(asset in {"diagram_series", "diagram_compare"} for asset in pending_assets):
+            label = "Generating image"
+        elif "diagram" in pending_assets:
+            label = "Generating diagram"
         return [{
             "type": "progress_update",
             "generation_id": event.get("generation_id", ""),
             "stage": "awaiting_assets",
             "section_id": event.get("section_id"),
-            "label": "Waiting for visuals",
+            "label": label,
         }]
     if event_type == "section_asset_ready":
         return [{
@@ -408,6 +415,14 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
                 "stage": "generating_diagram",
                 "section_id": event.get("section_id"),
                 "label": "Generating diagram",
+            }]
+        if node == "image_generator":
+            return [{
+                "type": "progress_update",
+                "generation_id": event.get("generation_id", ""),
+                "stage": "generating_image",
+                "section_id": event.get("section_id"),
+                "label": "Generating image",
             }]
         if node == "qc_agent":
             return [{
@@ -433,11 +448,19 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
             "label": "Finalizing lesson",
         }]
     if event_type == "complete":
+        final_status = event.get("final_status", "completed")
         return [{
             "type": "progress_update",
             "generation_id": event.get("generation_id", ""),
-            "stage": "complete",
-            "label": "Lesson ready",
+            "stage": "complete" if final_status == "completed" else "finalizing",
+            "label": "Lesson ready" if final_status == "completed" else "Lesson partially generated",
+        }]
+    if event_type == "generation_failed":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "failed",
+            "label": event.get("message", "Generation failed"),
         }]
     if event_type == "error":
         return [{
@@ -847,10 +870,21 @@ async def _heartbeat_loop(
         await _update_generation_heartbeat(gen_repo, generation_id)
 
 
-def _complete_event(generation_id: str) -> CompleteEvent:
+def _complete_event(
+    generation_id: str,
+    *,
+    final_status: str = "completed",
+    quality_passed: bool | None = None,
+    completed_sections: int | None = None,
+    total_sections: int | None = None,
+) -> CompleteEvent:
     _, document_url, report_url = _generation_urls(generation_id)
     return CompleteEvent(
         generation_id=generation_id,
+        final_status="partial" if final_status == "partial" else "completed",
+        quality_passed=quality_passed,
+        completed_sections=completed_sections,
+        total_sections=total_sections,
         document_url=document_url,
         report_url=report_url,
     )
@@ -861,6 +895,23 @@ def _error_event(generation_id: str, message: str) -> ErrorEvent:
     return ErrorEvent(
         generation_id=generation_id,
         message=message,
+        report_url=report_url,
+    )
+
+
+def _generation_failed_event(
+    generation_id: str,
+    *,
+    message: str,
+    error_type: str | None = None,
+    error_code: str | None = None,
+) -> GenerationFailedEvent:
+    _, _, report_url = _generation_urls(generation_id)
+    return GenerationFailedEvent(
+        generation_id=generation_id,
+        message=message,
+        error_type=error_type,
+        error_code=error_code,
         report_url=report_url,
     )
 
@@ -1009,7 +1060,7 @@ async def _run_generation_job(
         error_type: str,
         error_code: str | None,
         generation_time_seconds: float | None,
-    ) -> None:
+        ) -> None:
         nonlocal document
         document = await _persist_failed_generation_state(
             generation=generation,
@@ -1020,6 +1071,15 @@ async def _run_generation_job(
             error_type=error_type,
             error_code=error_code,
             generation_time_seconds=generation_time_seconds,
+        )
+        core_events.event_bus.publish(
+            generation.id,
+            _generation_failed_event(
+                generation.id,
+                message=error_message,
+                error_type=error_type,
+                error_code=error_code,
+            ),
         )
         core_events.event_bus.publish(
             generation.id,
@@ -1052,30 +1112,58 @@ async def _run_generation_job(
             timeout=timeout_seconds,
         )
         completed_at = datetime.now(timezone.utc)
+        final_status = result.document.status
+        terminal_error = result.document.error
         document = result.document.model_copy(
             update={
                 "created_at": initial_document.created_at,
                 "updated_at": completed_at,
                 "completed_at": completed_at,
-                "status": "completed",
+                "status": final_status,
             }
         )
         document_path = await document_repo.save_document(document)
         await gen_repo.update_status(
             generation.id,
-            status="completed",
+            status=final_status,
             document_path=document_path,
+            error=terminal_error,
+            error_type="incomplete_generation" if final_status == "partial" else None,
+            error_code="generation_partial" if final_status == "partial" else None,
             resolved_template_id=document.template_id,
             resolved_preset_id=document.preset_id,
             quality_passed=document.quality_passed,
             generation_time_seconds=result.generation_time_seconds,
         )
-        job_logger.info(
-            "Generation completed in %.1fs quality_passed=%s",
-            result.generation_time_seconds,
-            document.quality_passed,
+        if final_status == "completed":
+            job_logger.info(
+                "Generation completed in %.1fs quality_passed=%s",
+                result.generation_time_seconds,
+                document.quality_passed,
+            )
+        elif final_status == "partial":
+            job_logger.info(
+                "Generation partially generated in %.1fs quality_passed=%s",
+                result.generation_time_seconds,
+                document.quality_passed,
+            )
+        else:
+            job_logger.info(
+                "Generation finished with status=%s in %.1fs quality_passed=%s",
+                final_status,
+                result.generation_time_seconds,
+                document.quality_passed,
+            )
+        core_events.event_bus.publish(
+            generation.id,
+            _complete_event(
+                generation.id,
+                final_status=final_status,
+                quality_passed=document.quality_passed,
+                completed_sections=len(document.sections),
+                total_sections=len(document.section_manifest) or generation.section_count,
+            ),
         )
-        core_events.event_bus.publish(generation.id, _complete_event(generation.id))
     except asyncio.TimeoutError:
         job_logger.error(
             "Generation timed out",
@@ -1427,12 +1515,24 @@ async def get_generation_events(
                 if event.get("type") in {"complete", "error"}:
                     return
 
-            if current is not None and current.status == "completed":
-                terminal = _complete_event(generation_id).model_dump(mode="json", exclude_none=True)
+            if current is not None and current.status in {"completed", "partial"}:
+                terminal = _complete_event(
+                    generation_id,
+                    final_status=current.status,
+                    quality_passed=current.quality_passed,
+                ).model_dump(mode="json", exclude_none=True)
                 async for payload in emit_event_payloads(terminal):
                     yield payload
                 return
             if current is not None and current.status == "failed":
+                failed_payload = _generation_failed_event(
+                    generation_id,
+                    message=current.error or "Generation failed",
+                    error_type=current.error_type,
+                    error_code=current.error_code,
+                ).model_dump(mode="json", exclude_none=True)
+                async for payload in emit_event_payloads(failed_payload):
+                    yield payload
                 terminal = _error_event(
                     generation_id,
                     current.error or "Generation failed",
@@ -1449,12 +1549,24 @@ async def get_generation_events(
                     )
                 except TimeoutError:
                     current = await gen_repo.find_by_id(generation_id)
-                    if current is not None and current.status == "completed":
+                    if current is not None and current.status in {"completed", "partial"}:
                         yield _sse_payload(
-                            _complete_event(generation_id).model_dump(mode="json", exclude_none=True)
+                            _complete_event(
+                                generation_id,
+                                final_status=current.status,
+                                quality_passed=current.quality_passed,
+                            ).model_dump(mode="json", exclude_none=True)
                         )
                         return
                     if current is not None and current.status == "failed":
+                        yield _sse_payload(
+                            _generation_failed_event(
+                                generation_id,
+                                message=current.error or "Generation failed",
+                                error_type=current.error_type,
+                                error_code=current.error_code,
+                            ).model_dump(mode="json", exclude_none=True)
+                        )
                         yield _sse_payload(
                             _error_event(
                                 generation_id,

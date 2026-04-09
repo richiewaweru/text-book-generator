@@ -102,8 +102,10 @@ describe('LectioDocumentView', () => {
 						section_id: 'sec_1',
 						title: 'Why derivatives matter',
 						position: 1,
-						status: 'pending',
-						section: null
+						status: 'queued',
+						section: null,
+						partial: null,
+						failure: null
 					}
 				]
 			}

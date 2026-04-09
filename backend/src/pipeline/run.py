@@ -13,6 +13,7 @@ from typing import Any
 
 import core.events as core_events
 from core.dependencies import get_settings
+from pipeline.console_diagnostics import force_console_log
 from pipeline.api import (
     PipelineCommand,
     PipelineDocument,
@@ -190,8 +191,13 @@ def _build_document(
     error: str | None = None,
 ) -> PipelineDocument:
     reports = _build_reports(state)
+    partial_sections = _build_partial_sections(state)
+    failed_sections = _build_failed_sections(state)
+    final_sections = _sorted_sections(state)
     planned_sections = max(len(state.curriculum_outline or []), command.section_count or 0)
-    if not reports and planned_sections:
+    if status != "completed":
+        quality_passed = False if planned_sections else None
+    elif not reports and planned_sections:
         quality_passed = False
     elif planned_sections and len(reports) < planned_sections:
         quality_passed = False
@@ -199,7 +205,11 @@ def _build_document(
         quality_passed = all(report.passed for report in reports)
     else:
         quality_passed = None
-    completed_at = datetime.now(timezone.utc) if status in {"completed", "failed"} else None
+    completed_at = (
+        datetime.now(timezone.utc)
+        if status in {"completed", "failed", "partial"}
+        else None
+    )
 
     return PipelineDocument(
         generation_id=command.generation_id or "",
@@ -210,9 +220,9 @@ def _build_document(
         preset_id=command.preset_id,
         status=status,
         section_manifest=_build_section_manifest(state),
-        sections=_sorted_sections(state),
-        partial_sections=_build_partial_sections(state),
-        failed_sections=_build_failed_sections(state),
+        sections=final_sections,
+        partial_sections=partial_sections,
+        failed_sections=failed_sections,
         qc_reports=reports,
         quality_passed=quality_passed,
         error=error,
@@ -220,17 +230,69 @@ def _build_document(
         completed_at=completed_at,
     )
 
+
+def _document_error_summary(state: TextbookPipelineState) -> str | None:
+    if state.errors:
+        first = state.errors[0]
+        if first.section_id:
+            return f"Section {first.section_id}: {first.message}"
+        return first.message
+
+    failed_sections = _build_failed_sections(state)
+    if failed_sections:
+        first = failed_sections[0]
+        return f"Section {first.section_id}: {first.error_summary}"
+
+    partial_sections = _build_partial_sections(state)
+    for partial in partial_sections:
+        if partial.pending_assets:
+            pending = ", ".join(partial.pending_assets)
+            return (
+                f"Section {partial.section_id} is still waiting on required assets: {pending}"
+            )
+
+    return None
+
+
+def _resolve_terminal_status(
+    command: PipelineCommand,
+    state: TextbookPipelineState,
+) -> str:
+    planned_sections = max(len(state.curriculum_outline or []), command.section_count or 0)
+    final_count = len(_sorted_sections(state))
+    partial_count = len(_build_partial_sections(state))
+    failed_count = len(_build_failed_sections(state))
+
+    if planned_sections > 0 and final_count == planned_sections and partial_count == 0 and failed_count == 0:
+        status = "completed"
+    else:
+        status = "partial"
+
+    force_console_log(
+        "RUN_STATUS",
+        "RESOLVED",
+        generation_id=command.generation_id or "",
+        planned_sections=planned_sections,
+        final_count=final_count,
+        partial_count=partial_count,
+        failed_count=failed_count,
+        status=status,
+    )
+    return status
+
 def _build_result(
     command: PipelineCommand,
     raw_state: dict[str, Any],
     generation_time_seconds: float,
 ) -> PipelineResult:
     state = TextbookPipelineState.parse(raw_state)
+    status = _resolve_terminal_status(command, state)
     document = _build_document(
         command,
         state,
-        status="completed",
+        status=status,
         generation_time_seconds=generation_time_seconds,
+        error=_document_error_summary(state) if status != "completed" else None,
     )
     return PipelineResult(
         document=document,
@@ -409,7 +471,12 @@ async def run_pipeline_streaming(
                             )
 
                         reports = typed_state.qc_reports
-                        if reports and len(reports) >= total_sections:
+                        if (
+                            reports
+                            and total_sections
+                            and completed_sections >= total_sections
+                            and len(reports) >= total_sections
+                        ):
                             await _emit(
                                 QCCompleteEvent(
                                     generation_id=command.generation_id or "",

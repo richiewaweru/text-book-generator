@@ -9,6 +9,7 @@ class DiagramPlan(BaseModel):
     enabled: bool
     reasoning: str
     mode: Literal["svg", "image"] | None = None
+    required_targets: list[str] = Field(default_factory=list)
     diagram_type: str | None = None
     compare_before_label: str | None = None
     compare_after_label: str | None = None

@@ -4,7 +4,11 @@
 	import '$lib/styles/print.css';
 	import LectioDocumentView from '$lib/components/LectioDocumentView.svelte';
 	import {
+		applySectionAssetPending,
+		applySectionAssetReady,
+		applySectionFinal,
 		applySectionFailed,
+		applySectionPartial,
 		applySectionReady,
 		applySectionStarted,
 		buildSectionSlots,
@@ -22,12 +26,17 @@
 	import type {
 		ErrorEvent,
 		GenerationDetail,
+		GenerationFailedEvent,
 		GenerationDocument,
 		ProgressUpdateEvent,
 		QCCompleteEvent,
 		RuntimePolicyEvent,
 		RuntimeProgressEvent,
+		SectionAssetPendingEvent,
+		SectionAssetReadyEvent,
 		SectionFailedEvent,
+		SectionFinalEvent,
+		SectionPartialEvent,
 		SectionReadyEvent,
 		SectionStartedEvent
 	} from '$lib/types';
@@ -62,7 +71,7 @@
 	let streamErrorRecoveryAttempted = false;
 	const sectionSlots = $derived(buildSectionSlots(document, plannedSections));
 	const readySectionCount = $derived(
-		sectionSlots.filter((slot) => slot.status === 'ready').length
+		sectionSlots.filter((slot) => slot.status === 'completed').length
 	);
 	const failedSectionCount = $derived(
 		sectionSlots.filter((slot) => slot.status === 'failed').length
@@ -72,6 +81,8 @@
 			? detail.quality_passed === false
 				? 'completed with QC issues'
 				: 'complete'
+			: detail?.status === 'partial'
+				? 'partially generated'
 			: detail?.status === 'failed'
 				? 'failed'
 				: progressUpdate?.label ?? streamState
@@ -86,7 +97,7 @@
 		!!document &&
 			!loading &&
 			detail?.status === 'completed' &&
-			(sectionSlots.length === 0 || sectionSlots.every((slot) => slot.status === 'ready'))
+			(sectionSlots.length === 0 || sectionSlots.every((slot) => slot.status === 'completed'))
 	);
 
 	function formatSeconds(seconds: number | null | undefined): string {
@@ -237,7 +248,7 @@
 			return false;
 		}
 		if (token !== connectionToken) return false;
-		if (detail?.status === 'completed' || detail?.status === 'failed') {
+		if (detail?.status === 'completed' || detail?.status === 'partial' || detail?.status === 'failed') {
 			streamClosedTerminally = true;
 			streamState = 'complete';
 			closeStream(token);
@@ -285,6 +296,35 @@
 						document = applySectionStarted(document, payload);
 						break;
 					}
+					case 'section_partial': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionPartialEvent;
+						const result = applySectionPartial(document, payload);
+						document = result.document;
+						if (result.warning) {
+							console.error('[Lectio] Section validation failed:', result.warning.message);
+							viewerWarning = result.warning.message;
+						}
+						break;
+					}
+					case 'section_asset_pending': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionAssetPendingEvent;
+						document = applySectionAssetPending(document, payload);
+						break;
+					}
+					case 'section_asset_ready': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionAssetReadyEvent;
+						document = applySectionAssetReady(document, payload);
+						break;
+					}
+					case 'section_final': {
+						if (!document) break;
+						const payload = JSON.parse(data) as SectionFinalEvent;
+						document = applySectionFinal(document, payload);
+						break;
+					}
 					case 'section_ready': {
 						if (!document) break;
 						const payload = JSON.parse(data) as SectionReadyEvent;
@@ -301,6 +341,11 @@
 						if (!document) break;
 						const payload = JSON.parse(data) as SectionFailedEvent;
 						document = applySectionFailed(document, payload);
+						break;
+					}
+					case 'generation_failed': {
+						const payload = JSON.parse(data) as GenerationFailedEvent;
+						error = payload.message;
 						break;
 					}
 					case 'qc_complete': {
@@ -321,7 +366,12 @@
 			},
 			onError(err) {
 				if (myToken !== connectionToken) return;
-				if (streamClosedTerminally || detail?.status === 'completed' || detail?.status === 'failed') {
+				if (
+					streamClosedTerminally ||
+					detail?.status === 'completed' ||
+					detail?.status === 'partial' ||
+					detail?.status === 'failed'
+				) {
 					streamState = 'complete';
 					closeStream(myToken);
 					return;
@@ -615,6 +665,11 @@
 	.status-completed {
 		background: rgba(61, 120, 73, 0.13);
 		color: #276135;
+	}
+
+	.status-partial {
+		background: rgba(194, 142, 43, 0.14);
+		color: #8a6415;
 	}
 
 	.status-failed {

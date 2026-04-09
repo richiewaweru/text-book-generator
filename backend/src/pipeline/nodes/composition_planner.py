@@ -28,6 +28,7 @@ from pipeline.prompts.composition import (
 from pipeline.providers.registry import get_node_text_model
 from pipeline.state import TextbookPipelineState
 from pipeline.types.composition import CompositionPlan, DiagramPlan, InteractionPlan
+from pipeline.visual_resolution import resolve_visual_mode, resolve_visual_targets
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ def _all_contract_components(contract) -> set[str]:
     )
 
 
+def _has_diagram_slot(contract) -> bool:
+    return bool(_DIAGRAM_COMPONENTS & _all_contract_components(contract))
+
+
 def _has_simulation_slot(contract) -> bool:
     return "simulation-block" in _all_contract_components(contract)
 
@@ -58,16 +63,16 @@ def _has_simulation_slot(contract) -> bool:
 _DIAGRAM_COMPONENTS = {"diagram-block", "diagram-series", "diagram-compare"}
 
 
-def _has_diagram_slot(contract) -> bool:
-    return bool(_DIAGRAM_COMPONENTS & _all_contract_components(contract))
-
-
 def _diagram_allowed(state: TextbookPipelineState) -> bool:
     plan = state.current_section_plan
+    resolved_targets = [
+        target for target in resolve_visual_targets(state) if target != "hook_svg"
+    ]
     diag(
         "DIAGRAM_ALLOWED_INPUT",
         section_id=state.current_section_id,
         plan_exists=plan is not None,
+        resolved_targets=resolved_targets,
         plan_required_components=getattr(plan, "required_components", None),
         plan_diagram_policy=getattr(plan, "diagram_policy", None),
         plan_needs_diagram=getattr(plan, "needs_diagram", None),
@@ -97,23 +102,14 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
         )
         return False
 
-    if not _has_diagram_slot(state.contract):
+    if not resolved_targets:
         diag(
             "DIAGRAM_ALLOWED_DECISION",
             section_id=state.current_section_id,
             decision=False,
-            reason="no_diagram_slot",
+            reason="no_resolved_diagram_targets",
         )
         return False
-
-    if _DIAGRAM_COMPONENTS & set(state.contract.required_components):
-        diag(
-            "DIAGRAM_ALLOWED_DECISION",
-            section_id=state.current_section_id,
-            decision=True,
-            reason="contract_required_components_contains_diagram",
-        )
-        return True
 
     if getattr(plan, "diagram_policy", None) == "required":
         diag(
@@ -134,12 +130,12 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
         return True
 
     section_required = set(getattr(plan, "required_components", []))
-    if _DIAGRAM_COMPONENTS & section_required:
+    if _DIAGRAM_COMPONENTS & section_required or resolved_targets:
         diag(
             "DIAGRAM_ALLOWED_DECISION",
             section_id=state.current_section_id,
             decision=True,
-            reason="required_components_contains_diagram",
+            reason="resolved_visual_targets_present",
         )
         return True
 
@@ -220,6 +216,7 @@ def _heuristic_fallback(
     diagram_enabled: bool,
     interaction_enabled: bool,
     visual_mode: str | None = None,
+    required_targets: list[str] | None = None,
 ) -> CompositionPlan:
     """Build a CompositionPlan using the original heuristic logic."""
     plan = state.current_section_plan
@@ -234,6 +231,7 @@ def _heuristic_fallback(
         diagram=DiagramPlan(
             enabled=diagram_enabled,
             mode=visual_mode if diagram_enabled else None,
+            required_targets=list(required_targets or []),
             reasoning=(
                 "The reviewed section plan requires or strongly prefers a diagram."
                 if diagram_enabled
@@ -309,6 +307,7 @@ def _to_composition_plan(
     diagram_allowed: bool,
     interaction_allowed: bool,
     visual_mode: str | None = None,
+    required_targets: list[str] | None = None,
 ) -> CompositionPlan:
     """Convert LLM decision to CompositionPlan, enforcing guard-rail overrides."""
 
@@ -317,6 +316,7 @@ def _to_composition_plan(
     diagram = DiagramPlan(
         enabled=enabled,
         mode=visual_mode if enabled else None,
+        required_targets=list(required_targets or []),
         reasoning=decision.diagram.reasoning,
         diagram_type=decision.diagram.diagram_type,
         compare_before_label=compare_before_label if enabled else None,
@@ -381,14 +381,10 @@ async def composition_planner(
 
     diagram_ok = _diagram_allowed(state)
     interaction_ok = _interaction_allowed(state)
+    resolved_targets = resolve_visual_targets(state)
+    diagram_targets = [target for target in resolved_targets if target != "hook_svg"]
 
-    plan = state.current_section_plan
-    visual_policy = getattr(plan, "visual_policy", None) if plan is not None else None
-    visual_mode = (
-        visual_policy.mode
-        if visual_policy is not None and getattr(visual_policy, "required", False)
-        else None
-    )
+    visual_mode = resolve_visual_mode(state)
 
     if not diagram_ok and not interaction_ok:
         composition = _heuristic_fallback(
@@ -397,6 +393,7 @@ async def composition_planner(
             diagram_enabled=False,
             interaction_enabled=False,
             visual_mode=visual_mode,
+            required_targets=diagram_targets,
         )
         diag(
             "COMPOSITION_PLAN_DIAGRAM",
@@ -449,6 +446,7 @@ async def composition_planner(
             diagram_allowed=diagram_ok,
             interaction_allowed=interaction_ok,
             visual_mode=visual_mode,
+            required_targets=diagram_targets,
         )
         diag(
             "COMPOSITION_PLAN_DIAGRAM",
@@ -470,6 +468,7 @@ async def composition_planner(
             diagram_enabled=diagram_ok,
             interaction_enabled=interaction_ok,
             visual_mode=visual_mode,
+            required_targets=diagram_targets,
         )
         diag(
             "COMPOSITION_PLAN_DIAGRAM",
