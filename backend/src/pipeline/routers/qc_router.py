@@ -11,9 +11,11 @@ the narrowest possible retry scope:
     - unknown / multi-field  -> prepare_section (full rerun from partial path)
 """
 
+import core.events as core_events
 from langgraph.graph import END
 from langgraph.types import Send
 
+from pipeline.events import InteractionRetryQueuedEvent
 from pipeline.state import TextbookPipelineState
 
 # Diagram component blocks that retry_diagram handles.
@@ -46,6 +48,31 @@ def _classify_retry_scope(blocking_issues: list[dict]) -> str:
     if blocks and blocks <= (_DIAGRAM_FIELDS | _INTERACTION_FIELDS):
         return "diagram"
     return "full"
+
+
+def _publish_interaction_retry_queued(
+    generation_id: str,
+    section_id: str,
+    *,
+    next_attempt: int,
+    blocking_issues: list[dict],
+) -> None:
+    if not generation_id:
+        return
+    reasons = [
+        issue.get("message") or issue.get("block") or ""
+        for issue in blocking_issues
+        if issue.get("message") or issue.get("block")
+    ]
+    core_events.event_bus.publish(
+        generation_id,
+        InteractionRetryQueuedEvent(
+            generation_id=generation_id,
+            section_id=section_id,
+            next_attempt=next_attempt,
+            reason="; ".join(reasons),
+        ),
+    )
 
 
 def route_after_qc(state: TextbookPipelineState | dict) -> list[Send] | str:
@@ -120,6 +147,12 @@ def route_after_qc(state: TextbookPipelineState | dict) -> list[Send] | str:
         elif scope == "interaction":
             if state.interaction_retry_count.get(section_id, 0) >= 1:
                 continue  # interaction budget exhausted, accept section without interaction
+            _publish_interaction_retry_queued(
+                state.request.generation_id or "",
+                section_id,
+                next_attempt=state.interaction_retry_count.get(section_id, 0) + 2,
+                blocking_issues=blocking,
+            )
             sends.append(Send("retry_interaction", base))
         elif scope == "field":
             sends.append(Send("retry_field", base))

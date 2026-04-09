@@ -47,6 +47,12 @@ class GenerationReportRetry(BaseModel):
     queued_at: datetime
 
 
+class GenerationReportFieldRegenAttempt(BaseModel):
+    field: str
+    outcome: Literal["success", "failed"]
+    error: str | None = None
+
+
 class GenerationReportSection(BaseModel):
     section_id: str
     title: str | None = None
@@ -68,6 +74,15 @@ class GenerationReportSection(BaseModel):
     validation_repair_attempts: int = 0
     validation_repair_successes: int = 0
     diagram_outcome: Literal["success", "timeout", "error", "skipped"] | None = None
+    image_outcome: Literal["success", "timeout", "error", "skipped"] | None = None
+    image_error: str | None = None
+    interaction_outcome: Literal["generated", "skipped"] | None = None
+    interaction_skip_reason: str | None = None
+    interaction_count: int = 0
+    interaction_retry_count: int = 0
+    field_regen_attempts: list[GenerationReportFieldRegenAttempt] = Field(
+        default_factory=list
+    )
     failure_detail: NodeFailureDetail | None = None
     final_error: str | None = None
     nodes: list[GenerationReportNode] = Field(default_factory=list)
@@ -87,6 +102,13 @@ class GenerationReportSummary(BaseModel):
     diagram_retries: int = 0
     diagram_timeout_count: int = 0
     diagram_skip_count: int = 0
+    image_success_count: int = 0
+    image_failure_count: int = 0
+    image_skip_count: int = 0
+    interaction_skip_count: int = 0
+    interaction_retry_count: int = 0
+    field_regen_count: int = 0
+    field_regen_success_count: int = 0
     warning_count: int = 0
     blocking_issue_count: int = 0
     total_llm_calls: int = 0

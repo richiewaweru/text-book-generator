@@ -11,6 +11,7 @@ from pipeline.contracts import get_optional_fields, get_required_fields
 import core.events as core_events
 from pipeline.reporting import (
     GenerationReport,
+    GenerationReportFieldRegenAttempt,
     GenerationReportLLMAttempt,
     GenerationReportNode,
     GenerationReportRetry,
@@ -232,6 +233,14 @@ class GenerationReportRecorder:
             self._handle_validation_repair_succeeded(payload)
         elif event_type == "diagram_outcome":
             self._handle_diagram_outcome(payload)
+        elif event_type == "image_outcome":
+            self._handle_image_outcome(payload)
+        elif event_type == "interaction_outcome":
+            self._handle_interaction_outcome(payload)
+        elif event_type == "interaction_retry_queued":
+            self._handle_interaction_retry_queued(payload)
+        elif event_type == "field_regen_outcome":
+            self._handle_field_regen_outcome(payload)
         elif event_type == "section_ready":
             self._handle_section_ready(payload)
         elif event_type == "complete":
@@ -536,6 +545,43 @@ class GenerationReportRecorder:
         section = self._ensure_section(payload["section_id"])
         section.diagram_outcome = payload.get("outcome")
 
+    def _handle_image_outcome(self, payload: dict[str, Any]) -> None:
+        section_id = payload.get("section_id")
+        if not section_id:
+            return
+        section = self._ensure_section(section_id)
+        section.image_outcome = payload.get("outcome")
+        section.image_error = payload.get("error_message")
+
+    def _handle_interaction_outcome(self, payload: dict[str, Any]) -> None:
+        section_id = payload.get("section_id")
+        if not section_id:
+            return
+        section = self._ensure_section(section_id)
+        section.interaction_outcome = payload.get("outcome")
+        section.interaction_skip_reason = payload.get("skip_reason")
+        section.interaction_count = payload.get("interaction_count", 0)
+
+    def _handle_interaction_retry_queued(self, payload: dict[str, Any]) -> None:
+        section_id = payload.get("section_id")
+        if not section_id:
+            return
+        section = self._ensure_section(section_id)
+        section.interaction_retry_count += 1
+
+    def _handle_field_regen_outcome(self, payload: dict[str, Any]) -> None:
+        section_id = payload.get("section_id")
+        if not section_id:
+            return
+        section = self._ensure_section(section_id)
+        section.field_regen_attempts.append(
+            GenerationReportFieldRegenAttempt(
+                field=payload.get("field_name", "unknown"),
+                outcome=payload.get("outcome", "failed"),
+                error=payload.get("error_message"),
+            )
+        )
+
     def _handle_section_ready(self, payload: dict[str, Any]) -> None:
         section = self._ensure_section(payload["section_id"])
         section.status = "ready"
@@ -765,6 +811,34 @@ class GenerationReportRecorder:
             for section in self._sections.values()
             if section.diagram_outcome == "skipped"
         )
+        summary.image_success_count = sum(
+            1 for section in self._sections.values() if section.image_outcome == "success"
+        )
+        summary.image_failure_count = sum(
+            1
+            for section in self._sections.values()
+            if section.image_outcome in {"timeout", "error"}
+        )
+        summary.image_skip_count = sum(
+            1 for section in self._sections.values() if section.image_outcome == "skipped"
+        )
+        summary.interaction_skip_count = sum(
+            1
+            for section in self._sections.values()
+            if section.interaction_outcome == "skipped"
+        )
+        summary.interaction_retry_count = sum(
+            section.interaction_retry_count for section in self._sections.values()
+        )
+        summary.field_regen_count = sum(
+            len(section.field_regen_attempts) for section in self._sections.values()
+        )
+        summary.field_regen_success_count = sum(
+            1
+            for section in self._sections.values()
+            for attempt in section.field_regen_attempts
+            if attempt.outcome == "success"
+        )
 
         all_nodes = list(self._generation_nodes.values()) + list(self._section_nodes.values())
         slowest_node = max(
@@ -925,5 +999,16 @@ class GenerationReportRecorder:
             ),
             self._report.summary.slowest_node or "-",
             self._report.summary.slowest_section or "-",
+        )
+        logger.info(
+            "Generation report image_and_interaction_summary generation=%s image_success=%s image_fail=%s image_skip=%s interaction_skip=%s interaction_retries=%s field_regen=%s field_regen_success=%s",
+            self._report.generation_id,
+            self._report.summary.image_success_count,
+            self._report.summary.image_failure_count,
+            self._report.summary.image_skip_count,
+            self._report.summary.interaction_skip_count,
+            self._report.summary.interaction_retry_count,
+            self._report.summary.field_regen_count,
+            self._report.summary.field_regen_success_count,
         )
 

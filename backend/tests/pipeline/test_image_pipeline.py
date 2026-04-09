@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from pipeline.events import ImageOutcomeEvent
 from pipeline.nodes.image_generator import image_generator
 from pipeline.providers.gemini_image_client import GeminiImageClient, get_gemini_image_client
 from pipeline.providers.image_client import ImageGenerationResult
@@ -240,6 +241,16 @@ def _capture_node_logs(monkeypatch) -> list[str]:
     return messages
 
 
+def _capture_published_events(monkeypatch) -> list[tuple[str, object]]:
+    events: list[tuple[str, object]] = []
+
+    def _publish(generation_id: str, event: object) -> None:
+        events.append((generation_id, event))
+
+    monkeypatch.setattr("pipeline.nodes.image_generator.core_events.event_bus.publish", _publish)
+    return events
+
+
 def _plan(
     *,
     sid: str = "s-01",
@@ -294,6 +305,52 @@ async def test_image_generator_writes_single_image_with_local_store(tmp_path) ->
     assert section.diagram is not None
     assert section.diagram.image_url == "http://test/images/gen-image-test/s-01/diagram.png"
     assert client.prompts
+
+
+@pytest.mark.asyncio
+async def test_image_generator_emits_success_outcome_event(tmp_path, monkeypatch) -> None:
+    store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
+    client = FakeImageClient()
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    )
+    events = _capture_published_events(monkeypatch)
+
+    result = await image_generator(state, _store=store, _client=client)
+
+    assert result["generated_sections"]["s-01"].diagram is not None
+    assert len(events) == 1
+    generation_id, event = events[0]
+    assert generation_id == "gen-image-test"
+    assert isinstance(event, ImageOutcomeEvent)
+    assert event.outcome == "success"
+    assert event.section_id == "s-01"
+    assert event.error_message is None
+
+
+@pytest.mark.asyncio
+async def test_image_generator_emits_skipped_outcome_for_non_image_mode(tmp_path, monkeypatch) -> None:
+    store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
+    client = FakeImageClient()
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    )
+    state.composition_plans["s-01"].diagram.mode = "svg"
+    events = _capture_published_events(monkeypatch)
+
+    result = await image_generator(state, _store=store, _client=client)
+
+    assert result == {"completed_nodes": ["image_generator"]}
+    assert len(events) == 1
+    generation_id, event = events[0]
+    assert generation_id == "gen-image-test"
+    assert isinstance(event, ImageOutcomeEvent)
+    assert event.outcome == "skipped"
+    assert event.section_id == "s-01"
 
 
 @pytest.mark.asyncio
@@ -468,6 +525,7 @@ async def test_image_generator_returns_recoverable_error_when_api_key_missing(
     monkeypatch.setattr("pipeline.nodes.image_generator.get_image_store", lambda: store)
     monkeypatch.setattr("pipeline.nodes.image_generator.resolve_gemini_image_api_key", lambda: None)
     messages = _capture_node_logs(monkeypatch)
+    events = _capture_published_events(monkeypatch)
 
     result = await image_generator(state)
 
@@ -475,6 +533,15 @@ async def test_image_generator_returns_recoverable_error_when_api_key_missing(
     assert result["errors"][0].recoverable is True
     assert "No Gemini API key found for image generation." in result["errors"][0].message
     assert any("image_generator: FAIL sid=s-01 reason=no_api_key" in message for message in messages)
+    assert len(events) == 1
+    generation_id, event = events[0]
+    assert generation_id == "gen-image-test"
+    assert isinstance(event, ImageOutcomeEvent)
+    assert event.outcome == "error"
+    assert event.error_message == (
+        "No Gemini API key found for image generation. "
+        "Set GOOGLE_CLOUD_NANO_API_KEY, GOOGLE_API_KEY, or GEMINI_API_KEY."
+    )
 
 
 @pytest.mark.asyncio
