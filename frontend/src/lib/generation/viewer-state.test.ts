@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	applySectionAssetPending,
 	applySectionFailed,
+	applySectionPartial,
 	applySectionReady,
 	applySectionStarted,
 	buildSectionSlots,
@@ -185,5 +187,68 @@ describe('viewer-state helpers', () => {
 			'1:queued:First section',
 			'2:failed:Second section'
 		]);
+	});
+
+	it('marks untouched queued sections as blocked once the generation fails', () => {
+		const document = createDocument({
+			status: 'failed',
+			section_manifest: [
+				{ section_id: 's-01', title: 'First section', position: 1 },
+				{ section_id: 's-02', title: 'Second section', position: 2 }
+			],
+			failed_sections: [
+				{
+					section_id: 's-01',
+					title: 'First section',
+					position: 1,
+					focus: null,
+					bridges_from: null,
+					bridges_to: null,
+					needs_diagram: false,
+					needs_worked_example: false,
+					failed_at_node: 'content_generator',
+					error_type: 'validation',
+					error_summary: 'Schema validation failed.',
+					attempt_count: 1,
+					can_retry: true,
+					missing_components: ['section-header'],
+					failure_detail: null
+				}
+			]
+		});
+
+		const slots = buildSectionSlots(document, 2);
+
+		expect(slots.map((slot) => `${slot.position}:${slot.status}:${slot.title}`)).toEqual([
+			'1:failed:First section',
+			'2:blocked:Second section'
+		]);
+	});
+
+	it('preserves visual mode on partial asset updates', () => {
+		const partial = applySectionPartial(createDocument(), {
+			type: 'section_partial',
+			generation_id: 'gen-123',
+			section_id: 's-01',
+			template_id: 'guided-concept-path',
+			section: firstSection as any,
+			status: 'awaiting_assets',
+			visual_mode: 'image',
+			pending_assets: ['diagram'],
+			updated_at: '2026-03-19T00:00:01Z'
+		}).document;
+
+		const updated = applySectionAssetPending(partial, {
+			type: 'section_asset_pending',
+			generation_id: 'gen-123',
+			section_id: 's-01',
+			status: 'awaiting_assets',
+			visual_mode: 'image',
+			pending_assets: ['diagram'],
+			updated_at: '2026-03-19T00:00:02Z'
+		});
+
+		expect(updated.partial_sections?.[0]?.visual_mode).toBe('image');
+		expect(buildSectionSlots(updated, 1)[0]?.status).toBe('visual_pending');
 	});
 });

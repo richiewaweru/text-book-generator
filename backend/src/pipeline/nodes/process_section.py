@@ -32,6 +32,7 @@ from pipeline.nodes.section_runner import _run_parallel_phase, run_section_steps
 from pipeline.runtime_context import get_runtime_context
 from pipeline.section_assets import pending_visual_fields
 from pipeline.state import PartialSectionRecord, TextbookPipelineState, merge_state_updates
+from pipeline.visual_resolution import resolve_effective_visual_mode
 
 
 async def _run_interaction_path(
@@ -109,6 +110,7 @@ def _upsert_partial_record(
         template_id=section.template_id,
         content=section,
         status="awaiting_assets" if pending_assets else "partial",
+        visual_mode=resolve_effective_visual_mode(state),
         pending_assets=list(pending_assets),
         updated_at=datetime.now(timezone.utc).isoformat(),
     )
@@ -223,6 +225,15 @@ async def generate_section_assets(
             }
         }
 
+    if final_pending_assets:
+        runtime_context = get_runtime_context(config)
+        is_retry = section_id is not None and updated.pending_rerender_for(section_id) is not None
+        await _finish_section_flow(
+            runtime_context,
+            section_id=section_id,
+            is_retry=is_retry,
+        )
+
     return output
 
 
@@ -285,12 +296,13 @@ async def process_section(
         merge_state_updates(raw_state, phase2)
         typed = TextbookPipelineState.parse(raw_state)
 
-    phase3 = await finalize_section(
-        typed,
-        model_overrides=model_overrides,
-        config=config,
-    )
-    phases.append(phase3)
+    if not typed.section_pending_assets.get(typed.current_section_id):
+        phase3 = await finalize_section(
+            typed,
+            model_overrides=model_overrides,
+            config=config,
+        )
+        phases.append(phase3)
 
     return _merge_phase_outputs(*phases)
 

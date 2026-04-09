@@ -54,6 +54,7 @@ class SectionPartialEvent(BaseModel):
     section: SectionContent
     template_id: str
     status: str
+    visual_mode: Literal["svg", "image"] | None = None
     pending_assets: list[str] = Field(default_factory=list)
     updated_at: str
 
@@ -64,6 +65,7 @@ class SectionAssetPendingEvent(BaseModel):
     section_id: str
     pending_assets: list[str] = Field(default_factory=list)
     status: str
+    visual_mode: Literal["svg", "image"] | None = None
     updated_at: str
 
 
@@ -73,6 +75,7 @@ class SectionAssetReadyEvent(BaseModel):
     section_id: str
     ready_assets: list[str] = Field(default_factory=list)
     pending_assets: list[str] = Field(default_factory=list)
+    visual_mode: Literal["svg", "image"] | None = None
     updated_at: str
 
 
@@ -119,7 +122,7 @@ class RuntimeProgressEvent(BaseModel):
 class CompleteEvent(BaseModel):
     type: Literal["complete"] = "complete"
     generation_id: str
-    final_status: Literal["completed", "partial"] = "completed"
+    final_status: Literal["completed", "partial", "failed"] = "completed"
     quality_passed: bool | None = None
     completed_sections: int | None = None
     total_sections: int | None = None

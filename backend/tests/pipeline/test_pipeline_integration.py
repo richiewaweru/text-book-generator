@@ -24,7 +24,7 @@ from pipeline.state import (
     StyleContext,
     TextbookPipelineState,
 )
-from pipeline.types.requests import PipelineRequest, SectionPlan
+from pipeline.types.requests import PipelineRequest, SectionPlan, SectionVisualPolicy
 from pipeline.types.section_content import (
     ExplanationContent,
     HookHeroContent,
@@ -352,12 +352,24 @@ class TestSectionPhaseRouting:
 
         assert route_after_generate_section_assets(state) == END
 
-    def test_route_after_generate_section_assets_routes_to_finalize(self):
+    def test_route_after_generate_section_assets_returns_end_when_pending_assets_remain(self):
         from pipeline.graph import route_after_generate_section_assets
 
         state = _base_state(
             current_section_id="s-01",
             generated_sections={"s-01": _section("s-01")},
+            section_pending_assets={"s-01": ["diagram"]},
+        )
+
+        assert route_after_generate_section_assets(state) == END
+
+    def test_route_after_generate_section_assets_routes_to_finalize_only_when_pending_assets_clear(self):
+        from pipeline.graph import route_after_generate_section_assets
+
+        state = _base_state(
+            current_section_id="s-01",
+            generated_sections={"s-01": _section("s-01")},
+            section_pending_assets={"s-01": []},
         )
 
         assert route_after_generate_section_assets(state) == "finalize_section"
@@ -1372,6 +1384,77 @@ class TestRunPipelineStreamingEvents:
             SectionFinalEvent,
         ]
 
+    async def test_streaming_partial_run_does_not_emit_qc_complete(self, monkeypatch):
+        from pipeline import run as run_mod
+        from pipeline.events import QCCompleteEvent
+
+        partial_section = _section("s-01")
+
+        class _Graph:
+            async def astream(self, initial_state, config=None):
+                _ = initial_state, config
+                yield {
+                    "curriculum_planner": {
+                        "curriculum_outline": [_plan("s-01", 1)]
+                    }
+                }
+                yield {
+                    "prepare_section": {
+                        "partial_sections": {
+                            "s-01": PartialSectionRecord(
+                                section_id="s-01",
+                                template_id=partial_section.template_id,
+                                content=partial_section,
+                                status="awaiting_assets",
+                                pending_assets=["diagram"],
+                                updated_at="2026-04-09T00:00:00+00:00",
+                            )
+                        },
+                        "section_pending_assets": {"s-01": ["diagram"]},
+                        "section_lifecycle": {"s-01": "awaiting_assets"},
+                        "_asset_pending": {"s-01": ["diagram"]},
+                    }
+                }
+                yield {
+                    "generate_section_assets": {
+                        "partial_sections": {
+                            "s-01": PartialSectionRecord(
+                                section_id="s-01",
+                                template_id=partial_section.template_id,
+                                content=partial_section,
+                                status="awaiting_assets",
+                                pending_assets=["diagram"],
+                                updated_at="2026-04-09T00:00:01+00:00",
+                            )
+                        },
+                        "section_pending_assets": {"s-01": ["diagram"]},
+                        "section_lifecycle": {"s-01": "awaiting_assets"},
+                    }
+                }
+
+        monkeypatch.setattr(run_mod, "build_graph", lambda: _Graph())
+
+        events = []
+
+        async def on_event(event):
+            events.append(event)
+
+        command = run_mod.PipelineCommand(
+            generation_id="gen-stream-partial",
+            subject="Mathematics",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=1,
+        )
+
+        result = await run_mod.run_pipeline_streaming(command, on_event=on_event)
+
+        assert result.document.status == "partial"
+        assert not any(isinstance(event, QCCompleteEvent) for event in events)
+
 
 # ── Process section composite (forwards qc_reports) ─────────────────────────
 
@@ -1619,6 +1702,9 @@ class TestProcessSectionComposite:
         async def fake_interaction_generator(state, *, model_overrides=None):
             return {"completed_nodes": ["interaction_generator"]}
 
+        async def fake_image_generator(state, *, model_overrides=None):
+            return {"completed_nodes": ["image_generator"]}
+
         async def fake_partial_assembler(state, *, model_overrides=None):
             typed = TextbookPipelineState.parse(state)
             return {
@@ -1657,6 +1743,7 @@ class TestProcessSectionComposite:
 
         monkeypatch.setattr(ps_mod, "content_generator", fake_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
+        monkeypatch.setattr(ps_mod, "image_generator", fake_image_generator)
         monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
         monkeypatch.setattr(ps_mod, "partial_section_assembler", fake_partial_assembler)
@@ -1668,23 +1755,43 @@ class TestProcessSectionComposite:
             lambda generation_id, event: events.append(event),
         )
 
+        visual_plan = _plan(sid).model_copy(
+            update={
+                "required_components": ["diagram-block"],
+                "visual_policy": SectionVisualPolicy(
+                    required=True,
+                    intent="explain_structure",
+                    mode="svg",
+                ),
+                "needs_diagram": True,
+            }
+        )
         state = _base_state(
             request=_request(generation_id="gen-regression"),
             current_section_id=sid,
-            current_section_plan=_plan(sid),
+            current_section_plan=visual_plan,
         )
         result = await ps_mod.process_section(state)
 
         assert any(error.node == "diagram_generator" for error in result["errors"])
         report_events = [event for event in events if isinstance(event, SectionReportUpdatedEvent)]
-        assert len(report_events) == 1
-        assert report_events[0].source == "assembler"
+        assert report_events == []
+        assert result["completed_nodes"] == [
+            "content_generator",
+            "composition_planner",
+            "partial_section_assembler",
+            "diagram_generator",
+            "image_generator",
+            "interaction_decider",
+            "interaction_generator",
+        ]
 
-    async def test_process_section_short_circuits_when_assembler_produces_no_section(self, monkeypatch):
+    async def test_process_section_stops_after_asset_phase_when_pending_assets_remain(self, monkeypatch):
         from pipeline.nodes import process_section as ps_mod
 
         sid = "s-01"
         qc_called = False
+        assembler_called = False
 
         async def fake_content(state, *, model_overrides=None):
             return {
@@ -1720,6 +1827,8 @@ class TestProcessSectionComposite:
             }
 
         async def fake_assembler(state, *, model_overrides=None):
+            nonlocal assembler_called
+            assembler_called = True
             return {
                 "errors": [
                     PipelineError(
@@ -1749,13 +1858,25 @@ class TestProcessSectionComposite:
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
 
+        visual_plan = _plan(sid).model_copy(
+            update={
+                "required_components": ["diagram-block"],
+                "visual_policy": SectionVisualPolicy(
+                    required=True,
+                    intent="explain_structure",
+                    mode="svg",
+                ),
+                "needs_diagram": True,
+            }
+        )
         state = _base_state(
             current_section_id=sid,
-            current_section_plan=_plan(sid),
+            current_section_plan=visual_plan,
         )
         result = await ps_mod.process_section(state)
 
         assert qc_called is False
+        assert assembler_called is False
         assert result["completed_nodes"] == [
             "content_generator",
             "composition_planner",
@@ -1764,7 +1885,6 @@ class TestProcessSectionComposite:
             "image_generator",
             "interaction_decider",
             "interaction_generator",
-            "section_assembler",
         ]
 
 

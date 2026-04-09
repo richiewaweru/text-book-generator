@@ -28,6 +28,7 @@ from pipeline.state import (
     TextbookPipelineState,
 )
 from pipeline.visual_resolution import resolve_visual_issue
+from pipeline.visual_resolution import resolve_effective_visual_mode
 
 
 def diag(tag: str, **fields) -> None:
@@ -191,6 +192,7 @@ async def _assemble_section(
             template_id=section.template_id,
             content=section,
             status="awaiting_assets",
+            visual_mode=resolve_effective_visual_mode(typed),
             pending_assets=pending_assets,
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -209,6 +211,10 @@ async def _assemble_section(
         mode=mode,
         allow_missing_fields=set(pending_assets),
         additional_required_fields=set(required_visual_fields(typed)),
+        required_components_override=list(
+            getattr(typed.current_section_plan, "required_components", []) or []
+        )
+        or None,
     )
     if not is_valid:
         payload = {
@@ -257,6 +263,7 @@ async def _assemble_section(
             template_id=section.template_id,
             content=section,
             status="awaiting_assets" if pending_assets else "partial",
+            visual_mode=resolve_effective_visual_mode(typed),
             pending_assets=pending_assets,
             updated_at=datetime.now(timezone.utc).isoformat(),
         )

@@ -51,8 +51,9 @@ def merge_state_updates(state: dict[str, Any], output: dict[str, Any]) -> None:
 class PipelineStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
-    COMPLETE = "complete"
-    ERROR = "error"
+    PARTIAL = "partial"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class StyleContext(BaseModel):
@@ -129,6 +130,7 @@ class PartialSectionRecord(BaseModel):
     template_id: str
     content: SectionContent
     status: str = "partial"
+    visual_mode: str | None = None
     pending_assets: list[str] = Field(default_factory=list)
     updated_at: str
 

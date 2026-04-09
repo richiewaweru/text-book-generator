@@ -185,6 +185,7 @@ function buildDocument(overrides: Record<string, unknown> = {}) {
 				}
 			}
 		],
+		partial_sections: [],
 		failed_sections: [],
 		qc_reports: [],
 		quality_passed: null,
@@ -317,6 +318,132 @@ describe('GenerationView', () => {
 
 		await waitFor(() =>
 			expect(screen.getByText(/timed out while writing this section/i)).toBeTruthy()
+		);
+	});
+
+	it('shows image-specific visual pending copy when the canonical visual mode is image', async () => {
+		getGenerationDetail.mockResolvedValue(buildDetail());
+		getGenerationDocument.mockResolvedValue(
+			buildDocument({
+				sections: [],
+				partial_sections: [
+					{
+						section_id: 's-02',
+						template_id: 'guided-concept-path',
+						content: {
+							section_id: 's-02',
+							template_id: 'guided-concept-path',
+							header: {
+								title: 'Try the parts',
+								subject: 'Math',
+								grade_band: 'secondary'
+							},
+							hook: {
+								headline: 'Split the whole',
+								body: 'Fractions divide a whole into equal parts.',
+								anchor: 'fractions'
+							},
+							explanation: {
+								body: 'A fraction names how many equal parts we are focusing on.',
+								emphasis: ['equal parts']
+							},
+							practice: {
+								problems: [
+									{
+										difficulty: 'warm',
+										question: 'Shade one half of a square.',
+										hints: [{ level: 1, text: 'Split the square into two equal parts.' }]
+									}
+								]
+							},
+							what_next: {
+								body: 'Next we connect this to equivalent fractions.',
+								next: 'Equivalent fractions'
+							}
+						},
+						status: 'awaiting_assets',
+						visual_mode: 'image',
+						pending_assets: ['diagram'],
+						updated_at: '2026-03-23T00:00:01Z'
+					}
+				]
+			})
+		);
+
+		render(GenerationView, {
+			props: {
+				accepted: {
+					generation_id: 'gen-123',
+					status: 'running',
+					events_url: '/api/v1/generations/gen-123/events',
+					document_url: '/api/v1/generations/gen-123/document'
+				},
+				onReset: vi.fn()
+			}
+		});
+
+		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
+
+		expect(screen.getAllByText(/generating image/i).length).toBeGreaterThan(0);
+	});
+
+	it('marks untouched queued sections as blocked after a failed generation', async () => {
+		getGenerationDetail.mockResolvedValue(
+			buildDetail({
+				status: 'failed',
+				error: 'The generation failed before the lesson could be completed.',
+				error_type: 'pipeline_failed',
+				error_code: 'generation_failed',
+				quality_passed: false,
+				completed_at: '2026-03-23T00:00:01Z'
+			})
+		);
+		getGenerationDocument.mockResolvedValue(
+			buildDocument({
+				status: 'failed',
+				sections: [],
+				failed_sections: [
+					{
+						section_id: 's-01',
+						title: 'What fractions mean',
+						position: 1,
+						focus: null,
+						bridges_from: null,
+						bridges_to: null,
+						needs_diagram: false,
+						needs_worked_example: false,
+						failed_at_node: 'content_generator',
+						error_type: 'validation',
+						error_summary: 'This section could not be generated.',
+						attempt_count: 1,
+						can_retry: true,
+						missing_components: ['section-header'],
+						failure_detail: null
+					}
+				],
+				partial_sections: []
+			})
+		);
+
+		render(GenerationView, {
+			props: {
+				accepted: {
+					generation_id: 'gen-123',
+					status: 'failed',
+					events_url: '/api/v1/generations/gen-123/events',
+					document_url: '/api/v1/generations/gen-123/document'
+				},
+				onReset: vi.fn()
+			}
+		});
+
+		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
+
+		expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
+		expect(screen.getAllByText(/did not start because generation failed/i).length).toBeGreaterThan(
+			0
 		);
 	});
 });

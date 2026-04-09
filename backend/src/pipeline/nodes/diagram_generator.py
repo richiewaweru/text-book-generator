@@ -1,15 +1,16 @@
 """
-diagram_generator node -- generates structured diagram specs.
+diagram_generator node -- generates structured diagram specs and SVG surfaces.
 
 Reads:
     current_section_id, generated_sections, style_context, contract, composition_plans
 Writes:
-    generated_sections[current_section_id].diagram, diagram_outcomes, completed_nodes, errors
+    generated_sections[current_section_id], diagram_outcomes, completed_nodes, errors
 """
 
 from __future__ import annotations
 
 import asyncio
+from html import escape
 
 from core.config import settings as app_settings
 from core.llm.logging import NodeLogger
@@ -29,17 +30,35 @@ from pipeline.runtime_context import retry_policy_for_node, timeout_policy_from_
 from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, TextbookPipelineState
-from pipeline.types.section_content import DiagramContent, DiagramSpec
+from pipeline.types.section_content import (
+    DiagramCompareContent,
+    DiagramContent,
+    DiagramElement,
+    DiagramSeriesContent,
+    DiagramSeriesStep,
+    DiagramSpec,
+)
 from pipeline.visual_resolution import (
     resolve_effective_visual_mode,
     resolve_effective_visual_targets,
+    target_is_satisfied,
 )
+
+_SVG_WIDTH = 600
+_SVG_HEIGHT = 400
+_SVG_BG = "#f8fbff"
+_SVG_STROKE = "#1e3a5f"
+_SVG_MUTED = "#64748b"
+_SVG_FILL = "#ffffff"
+_SVG_EMPHASIS_FILL = "#e6f0ff"
+_SVG_LABEL = "#12263a"
 
 
 class DiagramOutput(BaseModel):
     spec: DiagramSpec
     caption: str
     alt_text: str
+
 
 def _get_supported_targets(state: TextbookPipelineState) -> list[str]:
     return [
@@ -66,15 +85,137 @@ def _publish_outcome(generation_id: str, section_id: str | None, outcome: str) -
     )
 
 
-async def _generate_spec_diagram(
+def _wrap_label(label: str, *, max_chars: int = 18) -> list[str]:
+    words = label.split()
+    if not words:
+        return [label]
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if len(candidate) <= max_chars:
+            current = candidate
+            continue
+        lines.append(current)
+        current = word
+    lines.append(current)
+    return lines[:3]
+
+
+def _element_center(element: DiagramElement) -> tuple[float, float]:
+    return (element.x + (element.width / 2), element.y + (element.height / 2))
+
+
+def _render_connection(connection, elements_by_id: dict[str, DiagramElement], index: int) -> str:
+    source = elements_by_id.get(connection.from_id)
+    target = elements_by_id.get(connection.to_id)
+    if source is None or target is None:
+        return ""
+    x1, y1 = _element_center(source)
+    x2, y2 = _element_center(target)
+    dasharray = ' stroke-dasharray="8 6"' if connection.style == "dashed" else ""
+    marker = ' marker-end="url(#arrowhead)"' if connection.style == "arrow" else ""
+    label_markup = ""
+    if connection.label:
+        label_markup = (
+            f'<text x="{(x1 + x2) / 2:.1f}" y="{((y1 + y2) / 2) - 6:.1f}" '
+            f'font-size="12" fill="{_SVG_MUTED}" text-anchor="middle" '
+            f'font-family="Arial, Helvetica, sans-serif">{escape(connection.label)}</text>'
+        )
+    return (
+        f'<line id="connection-{index}" x1="{x1:.1f}" y1="{y1:.1f}" '
+        f'x2="{x2:.1f}" y2="{y2:.1f}" stroke="{_SVG_MUTED}" stroke-width="2"{dasharray}{marker}/>'
+        f"{label_markup}"
+    )
+
+
+def _render_element_shape(element: DiagramElement) -> str:
+    stroke_width = 3 if element.emphasis else 2
+    fill = _SVG_EMPHASIS_FILL if element.emphasis else _SVG_FILL
+    if element.shape == "circle":
+        cx, cy = _element_center(element)
+        radius = min(element.width, element.height) / 2
+        return (
+            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{radius:.1f}" '
+            f'fill="{fill}" stroke="{_SVG_STROKE}" stroke-width="{stroke_width}"/>'
+        )
+    if element.shape == "diamond":
+        cx, cy = _element_center(element)
+        points = " ".join(
+            [
+                f"{cx:.1f},{element.y:.1f}",
+                f"{element.x + element.width:.1f},{cy:.1f}",
+                f"{cx:.1f},{element.y + element.height:.1f}",
+                f"{element.x:.1f},{cy:.1f}",
+            ]
+        )
+        return (
+            f'<polygon points="{points}" fill="{fill}" stroke="{_SVG_STROKE}" '
+            f'stroke-width="{stroke_width}"/>'
+        )
+    rx = 12 if element.shape == "rounded-rect" else 0
+    return (
+        f'<rect x="{element.x:.1f}" y="{element.y:.1f}" width="{element.width:.1f}" '
+        f'height="{element.height:.1f}" rx="{rx}" fill="{fill}" '
+        f'stroke="{_SVG_STROKE}" stroke-width="{stroke_width}"/>'
+    )
+
+
+def _render_element_label(element: DiagramElement) -> str:
+    lines = _wrap_label(element.label)
+    cx, cy = _element_center(element)
+    first_y = cy - ((len(lines) - 1) * 9)
+    tspans = []
+    for index, line in enumerate(lines):
+        dy = "0" if index == 0 else "18"
+        tspans.append(
+            f'<tspan x="{cx:.1f}" dy="{dy}">{escape(line)}</tspan>'
+        )
+    return (
+        f'<text x="{cx:.1f}" y="{first_y:.1f}" text-anchor="middle" '
+        f'font-size="14" font-weight="600" fill="{_SVG_LABEL}" '
+        'font-family="Arial, Helvetica, sans-serif">'
+        f'{"".join(tspans)}</text>'
+    )
+
+
+def _render_spec_svg(spec: DiagramSpec) -> str:
+    elements_by_id = {element.id: element for element in spec.elements}
+    connections = "".join(
+        _render_connection(connection, elements_by_id, index)
+        for index, connection in enumerate(spec.connections)
+    )
+    elements = "".join(
+        f"{_render_element_shape(element)}{_render_element_label(element)}"
+        for element in spec.elements
+    )
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {_SVG_WIDTH} {_SVG_HEIGHT}" '
+        f'role="img" aria-label="{escape(spec.title)}">'
+        "<defs>"
+        '<marker id="arrowhead" markerWidth="10" markerHeight="7" refX="8" refY="3.5" orient="auto">'
+        f'<polygon points="0 0, 10 3.5, 0 7" fill="{_SVG_MUTED}"/>'
+        "</marker>"
+        "</defs>"
+        f'<rect x="0" y="0" width="{_SVG_WIDTH}" height="{_SVG_HEIGHT}" rx="18" fill="{_SVG_BG}"/>'
+        f'<text x="{_SVG_WIDTH / 2:.1f}" y="28" text-anchor="middle" font-size="18" font-weight="700" '
+        f'fill="{_SVG_LABEL}" font-family="Arial, Helvetica, sans-serif">{escape(spec.title)}</text>'
+        f"{connections}{elements}"
+        "</svg>"
+    )
+
+
+async def _generate_diagram_output(
     state: TextbookPipelineState,
     section,
-    section_id: str,
-    plan: object | None,
     *,
+    diagram_slot: str,
+    diagram_type: str | None,
+    key_concepts: list[str] | None,
+    visual_guidance: str | None,
     model_overrides: dict | None = None,
     config: RunnableConfig | None = None,
-) -> dict:
+) -> DiagramOutput:
     model = get_node_text_model(
         "diagram_generator",
         model_overrides=model_overrides,
@@ -102,24 +243,203 @@ async def _generate_spec_diagram(
                 section_title=section.header.title,
                 hook_body=section.hook.body,
                 explanation_excerpt=section.explanation.body,
-                diagram_slot="diagram-block",
-                diagram_type=plan.diagram.diagram_type if plan is not None else None,
-                key_concepts=plan.diagram.key_concepts if plan is not None else None,
-                visual_guidance=plan.diagram.visual_guidance if plan is not None else None,
+                diagram_slot=diagram_slot,
+                diagram_type=diagram_type,
+                key_concepts=key_concepts,
+                visual_guidance=visual_guidance,
             ),
             generation_mode=state.request.mode,
             retry_policy=retry_policy,
         ),
         timeout=timeout_policy.diagram_node_budget_seconds,
     )
+    return result.output
 
-    diagram = DiagramContent(
-        spec=result.output.spec,
-        caption=result.output.caption,
-        alt_text=result.output.alt_text,
+
+def _diagram_defaults(section, output: DiagramOutput) -> DiagramContent:
+    existing = section.diagram
+    if existing is not None:
+        return existing.model_copy(
+            update={
+                "spec": output.spec,
+                "svg_content": _render_spec_svg(output.spec),
+                "caption": output.caption,
+                "alt_text": output.alt_text,
+            }
+        )
+    return DiagramContent(
+        spec=output.spec,
+        svg_content=_render_spec_svg(output.spec),
+        caption=output.caption,
+        alt_text=output.alt_text,
     )
-    updated = section.model_copy(update={"diagram": diagram})
-    return {"generated_sections": {section_id: updated}}
+
+
+def _series_seed_steps(section, composition_plan) -> list[DiagramSeriesStep]:
+    existing_series = section.diagram_series
+    if existing_series is not None and existing_series.diagrams:
+        return [
+            step if isinstance(step, DiagramSeriesStep) else DiagramSeriesStep.model_validate(step)
+            for step in existing_series.diagrams
+        ]
+
+    labels = composition_plan.diagram.key_concepts[:] or [section.header.title]
+    step_count = max(len(labels), 3)
+    steps: list[DiagramSeriesStep] = []
+    for index in range(step_count):
+        label = labels[index] if index < len(labels) else f"Stage {index + 1}"
+        steps.append(
+            DiagramSeriesStep(
+                step_label=label,
+                caption=f"{section.header.title} - {label}",
+            )
+        )
+    return steps
+
+
+def _seed_compare_content(section, composition_plan) -> DiagramCompareContent:
+    if section.diagram_compare is not None:
+        return section.diagram_compare
+    before_label = composition_plan.diagram.compare_before_label or "Before"
+    after_label = composition_plan.diagram.compare_after_label or "After"
+    return DiagramCompareContent(
+        before_label=before_label,
+        after_label=after_label,
+        caption=f"Before and after comparison for {section.header.title}",
+        alt_text=f"Before and after comparison illustrating changes in {section.header.title}.",
+    )
+
+
+async def _write_single_diagram(
+    state: TextbookPipelineState,
+    section,
+    plan,
+    *,
+    model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
+):
+    output = await _generate_diagram_output(
+        state,
+        section,
+        diagram_slot="diagram-block",
+        diagram_type=plan.diagram.diagram_type if plan is not None else None,
+        key_concepts=plan.diagram.key_concepts if plan is not None else None,
+        visual_guidance=plan.diagram.visual_guidance if plan is not None else None,
+        model_overrides=model_overrides,
+        config=config,
+    )
+    return section.model_copy(update={"diagram": _diagram_defaults(section, output)})
+
+
+async def _write_series_diagrams(
+    state: TextbookPipelineState,
+    section,
+    plan,
+    *,
+    model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
+):
+    seed_steps = _series_seed_steps(section, plan)
+    key_concepts = plan.diagram.key_concepts or []
+    rendered_steps: list[DiagramSeriesStep] = []
+
+    for index, step in enumerate(seed_steps):
+        if (step.svg_content or "").strip():
+            rendered_steps.append(step)
+            continue
+
+        key_concept = key_concepts[index] if index < len(key_concepts) else step.step_label
+        visual_guidance = plan.diagram.visual_guidance or ""
+        if visual_guidance:
+            visual_guidance = f"{visual_guidance} Focus on the stage labelled '{step.step_label}'."
+        else:
+            visual_guidance = f"Focus on the stage labelled '{step.step_label}'."
+
+        output = await _generate_diagram_output(
+            state,
+            section,
+            diagram_slot=f"diagram-series step {index + 1}",
+            diagram_type=plan.diagram.diagram_type or "process-flow",
+            key_concepts=[key_concept],
+            visual_guidance=visual_guidance,
+            model_overrides=model_overrides,
+            config=config,
+        )
+        rendered_steps.append(
+            step.model_copy(
+                update={
+                    "caption": step.caption or output.caption,
+                    "svg_content": _render_spec_svg(output.spec),
+                }
+            )
+        )
+
+    title = section.diagram_series.title if section.diagram_series is not None else section.header.title
+    return section.model_copy(
+        update={"diagram_series": DiagramSeriesContent(title=title, diagrams=rendered_steps)}
+    )
+
+
+async def _write_compare_diagrams(
+    state: TextbookPipelineState,
+    section,
+    plan,
+    *,
+    model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
+):
+    compare_content = _seed_compare_content(section, plan)
+    before_svg = compare_content.before_svg
+    after_svg = compare_content.after_svg
+
+    if not (before_svg or "").strip():
+        before_guidance = (
+            f"{plan.diagram.visual_guidance} Render the BEFORE state labelled "
+            f"'{compare_content.before_label}'."
+            if plan.diagram.visual_guidance
+            else f"Render the BEFORE state labelled '{compare_content.before_label}'."
+        )
+        before_output = await _generate_diagram_output(
+            state,
+            section,
+            diagram_slot="diagram-compare before",
+            diagram_type=plan.diagram.diagram_type or "compare",
+            key_concepts=plan.diagram.key_concepts if plan is not None else None,
+            visual_guidance=before_guidance,
+            model_overrides=model_overrides,
+            config=config,
+        )
+        before_svg = _render_spec_svg(before_output.spec)
+
+    if not (after_svg or "").strip():
+        after_guidance = (
+            f"{plan.diagram.visual_guidance} Render the AFTER state labelled "
+            f"'{compare_content.after_label}'."
+            if plan.diagram.visual_guidance
+            else f"Render the AFTER state labelled '{compare_content.after_label}'."
+        )
+        after_output = await _generate_diagram_output(
+            state,
+            section,
+            diagram_slot="diagram-compare after",
+            diagram_type=plan.diagram.diagram_type or "compare",
+            key_concepts=plan.diagram.key_concepts if plan is not None else None,
+            visual_guidance=after_guidance,
+            model_overrides=model_overrides,
+            config=config,
+        )
+        after_svg = _render_spec_svg(after_output.spec)
+
+    return section.model_copy(
+        update={
+            "diagram_compare": compare_content.model_copy(
+                update={
+                    "before_svg": before_svg,
+                    "after_svg": after_svg,
+                }
+            )
+        }
+    )
 
 
 async def diagram_generator(
@@ -173,36 +493,6 @@ async def diagram_generator(
         _publish_outcome(state.request.generation_id or "", sid, "skipped")
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
 
-    unsupported_targets = [target for target in targets if target != "diagram"]
-    if unsupported_targets:
-        message = (
-            "SVG diagram generation does not support the resolved visual target(s): "
-            f"{', '.join(unsupported_targets)}. "
-            "Switch this section to image mode or provide an inline SVG surface."
-        )
-        force_console_log(
-            "VISUAL_RESOLVE",
-            "UNSUPPORTED_SVG_TARGETS",
-            section_id=sid,
-            mode=mode,
-            targets=targets,
-            message=message,
-        )
-        outcomes[sid] = "error"
-        _publish_outcome(state.request.generation_id or "", sid, "error")
-        return {
-            "errors": [
-                PipelineError(
-                    node="diagram_generator",
-                    section_id=sid,
-                    message=message,
-                    recoverable=True,
-                )
-            ],
-            "diagram_outcomes": outcomes,
-            "completed_nodes": ["diagram_generator"],
-        }
-
     if state.style_context is None:
         outcomes[sid] = "error"
         _publish_outcome(state.request.generation_id or "", sid, "error")
@@ -220,18 +510,62 @@ async def diagram_generator(
         }
 
     try:
-        spec_result = await _generate_spec_diagram(
-            state,
-            section,
-            sid,
-            plan,
-            model_overrides=model_overrides,
-            config=config,
-        )
+        updated_section = section
+        for target in targets:
+            if target_is_satisfied(updated_section, target, mode="svg"):
+                force_console_log(
+                    "VISUAL_RESOLVE",
+                    "SVG_TARGET_SKIPPED",
+                    section_id=sid,
+                    target=target,
+                    reason="already_satisfied",
+                )
+                continue
+
+            force_console_log(
+                "VISUAL_RESOLVE",
+                "SVG_WRITEBACK",
+                section_id=sid,
+                target=target,
+                status="starting",
+            )
+            if target == "diagram":
+                updated_section = await _write_single_diagram(
+                    state,
+                    updated_section,
+                    plan,
+                    model_overrides=model_overrides,
+                    config=config,
+                )
+            elif target == "diagram_series":
+                updated_section = await _write_series_diagrams(
+                    state,
+                    updated_section,
+                    plan,
+                    model_overrides=model_overrides,
+                    config=config,
+                )
+            elif target == "diagram_compare":
+                updated_section = await _write_compare_diagrams(
+                    state,
+                    updated_section,
+                    plan,
+                    model_overrides=model_overrides,
+                    config=config,
+                )
+            force_console_log(
+                "VISUAL_RESOLVE",
+                "SVG_WRITEBACK",
+                section_id=sid,
+                target=target,
+                status="completed",
+                satisfied=target_is_satisfied(updated_section, target, mode="svg"),
+            )
+
         outcomes[sid] = "spec_success"
         _publish_outcome(state.request.generation_id or "", sid, "spec_success")
         return {
-            **spec_result,
+            "generated_sections": {sid: updated_section},
             "diagram_outcomes": outcomes,
             "completed_nodes": ["diagram_generator"],
         }

@@ -223,6 +223,7 @@ export interface PipelinePartialSectionEntry {
 	template_id: string;
 	content: SectionContent;
 	status: string;
+	visual_mode?: 'svg' | 'image' | null;
 	pending_assets: string[];
 	updated_at: string;
 }
@@ -280,6 +281,7 @@ export interface SectionPartialEvent {
 	section: SectionContent;
 	template_id: string;
 	status: string;
+	visual_mode?: 'svg' | 'image' | null;
 	pending_assets: string[];
 	updated_at: string;
 }
@@ -290,6 +292,7 @@ export interface SectionAssetPendingEvent {
 	section_id: string;
 	pending_assets: string[];
 	status: string;
+	visual_mode?: 'svg' | 'image' | null;
 	updated_at: string;
 }
 
@@ -299,6 +302,7 @@ export interface SectionAssetReadyEvent {
 	section_id: string;
 	ready_assets: string[];
 	pending_assets: string[];
+	visual_mode?: 'svg' | 'image' | null;
 	updated_at: string;
 }
 
@@ -426,7 +430,7 @@ export interface ProgressUpdateEvent {
 export interface CompleteEvent {
 	type: 'complete';
 	generation_id: string;
-	final_status?: 'completed' | 'partial';
+	final_status?: 'completed' | 'partial' | 'failed';
 	quality_passed?: boolean | null;
 	completed_sections?: number | null;
 	total_sections?: number | null;

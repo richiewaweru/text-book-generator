@@ -386,8 +386,9 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
         }]
     if event_type == "section_asset_pending":
         pending_assets = list(event.get("pending_assets") or [])
+        visual_mode = event.get("visual_mode")
         label = "Waiting for visuals"
-        if any(asset in {"diagram_series", "diagram_compare"} for asset in pending_assets):
+        if visual_mode == "image":
             label = "Generating image"
         elif "diagram" in pending_assets:
             label = "Generating diagram"
@@ -452,8 +453,18 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
         return [{
             "type": "progress_update",
             "generation_id": event.get("generation_id", ""),
-            "stage": "complete" if final_status == "completed" else "finalizing",
-            "label": "Lesson ready" if final_status == "completed" else "Lesson partially generated",
+            "stage": (
+                "complete"
+                if final_status == "completed"
+                else "failed" if final_status == "failed" else "finalizing"
+            ),
+            "label": (
+                "Lesson ready"
+                if final_status == "completed"
+                else "Generation failed"
+                if final_status == "failed"
+                else "Lesson partially generated"
+            ),
         }]
     if event_type == "generation_failed":
         return [{
@@ -633,6 +644,7 @@ def _update_partial_section_assets(
     *,
     section_id: str,
     pending_assets: list[str],
+    visual_mode: str | None = None,
     status_value: str | None = None,
 ) -> PipelineDocument:
     partial_sections = list(document.partial_sections)
@@ -643,6 +655,7 @@ def _update_partial_section_assets(
         partial_sections[index] = existing.model_copy(
             update={
                 "pending_assets": list(pending_assets),
+                "visual_mode": visual_mode or existing.visual_mode,
                 "status": status_value or ("awaiting_assets" if pending_assets else "partial"),
                 "updated_at": datetime.now(timezone.utc),
             }
@@ -881,7 +894,11 @@ def _complete_event(
     _, document_url, report_url = _generation_urls(generation_id)
     return CompleteEvent(
         generation_id=generation_id,
-        final_status="partial" if final_status == "partial" else "completed",
+        final_status=(
+            "failed"
+            if final_status == "failed"
+            else "partial" if final_status == "partial" else "completed"
+        ),
         quality_passed=quality_passed,
         completed_sections=completed_sections,
         total_sections=total_sections,
@@ -1002,6 +1019,7 @@ async def _run_generation_job(
                     template_id=event.template_id,
                     content=event.section,
                     status=event.status,
+                    visual_mode=event.visual_mode,
                     pending_assets=list(event.pending_assets),
                     updated_at=event.updated_at,
                 ),
@@ -1012,6 +1030,7 @@ async def _run_generation_job(
                 document,
                 section_id=event.section_id,
                 pending_assets=list(event.pending_assets),
+                visual_mode=event.visual_mode,
                 status_value=event.status,
             )
             await document_repo.save_document(document)
@@ -1020,6 +1039,7 @@ async def _run_generation_job(
                 document,
                 section_id=event.section_id,
                 pending_assets=list(event.pending_assets),
+                visual_mode=event.visual_mode,
             )
             await document_repo.save_document(document)
         if isinstance(event, SectionFinalEvent):
@@ -1128,8 +1148,16 @@ async def _run_generation_job(
             status=final_status,
             document_path=document_path,
             error=terminal_error,
-            error_type="incomplete_generation" if final_status == "partial" else None,
-            error_code="generation_partial" if final_status == "partial" else None,
+            error_type=(
+                "incomplete_generation"
+                if final_status == "partial"
+                else "pipeline_failed" if final_status == "failed" else None
+            ),
+            error_code=(
+                "generation_partial"
+                if final_status == "partial"
+                else "generation_failed" if final_status == "failed" else None
+            ),
             resolved_template_id=document.template_id,
             resolved_preset_id=document.preset_id,
             quality_passed=document.quality_passed,
@@ -1147,6 +1175,12 @@ async def _run_generation_job(
                 result.generation_time_seconds,
                 document.quality_passed,
             )
+        elif final_status == "failed":
+            job_logger.error(
+                "Generation failed in %.1fs quality_passed=%s",
+                result.generation_time_seconds,
+                document.quality_passed,
+            )
         else:
             job_logger.info(
                 "Generation finished with status=%s in %.1fs quality_passed=%s",
@@ -1154,16 +1188,34 @@ async def _run_generation_job(
                 result.generation_time_seconds,
                 document.quality_passed,
             )
-        core_events.event_bus.publish(
-            generation.id,
-            _complete_event(
+        if final_status == "failed":
+            core_events.event_bus.publish(
                 generation.id,
-                final_status=final_status,
-                quality_passed=document.quality_passed,
-                completed_sections=len(document.sections),
-                total_sections=len(document.section_manifest) or generation.section_count,
-            ),
-        )
+                _generation_failed_event(
+                    generation.id,
+                    message=terminal_error or "Generation failed",
+                    error_type="pipeline_failed",
+                    error_code="generation_failed",
+                ),
+            )
+            core_events.event_bus.publish(
+                generation.id,
+                _error_event(
+                    generation.id,
+                    terminal_error or "Generation failed",
+                ),
+            )
+        else:
+            core_events.event_bus.publish(
+                generation.id,
+                _complete_event(
+                    generation.id,
+                    final_status=final_status,
+                    quality_passed=document.quality_passed,
+                    completed_sections=len(document.sections),
+                    total_sections=len(document.section_manifest) or generation.section_count,
+                ),
+            )
     except asyncio.TimeoutError:
         job_logger.error(
             "Generation timed out",

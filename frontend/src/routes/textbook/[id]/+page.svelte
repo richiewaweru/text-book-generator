@@ -345,7 +345,7 @@
 					}
 					case 'generation_failed': {
 						const payload = JSON.parse(data) as GenerationFailedEvent;
-						error = payload.message;
+						void finalizeStream(myToken, id, payload.message);
 						break;
 					}
 					case 'qc_complete': {

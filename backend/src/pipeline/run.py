@@ -165,6 +165,7 @@ def _build_partial_sections(state: TextbookPipelineState) -> list[PipelinePartia
             template_id=record.template_id,
             content=record.content,
             status=state.section_lifecycle.get(record.section_id, record.status),
+            visual_mode=record.visual_mode,
             pending_assets=list(
                 state.section_pending_assets.get(record.section_id, record.pending_assets)
             ),
@@ -262,9 +263,12 @@ def _resolve_terminal_status(
     final_count = len(_sorted_sections(state))
     partial_count = len(_build_partial_sections(state))
     failed_count = len(_build_failed_sections(state))
+    has_terminal_error = bool(state.errors or state.failed_sections)
 
     if planned_sections > 0 and final_count == planned_sections and partial_count == 0 and failed_count == 0:
         status = "completed"
+    elif final_count == 0 and partial_count == 0 and (failed_count > 0 or has_terminal_error):
+        status = "failed"
     else:
         status = "partial"
 
@@ -402,6 +406,7 @@ async def run_pipeline_streaming(
                                     section=entry.content,
                                     template_id=entry.template_id,
                                     status=entry.status,
+                                    visual_mode=entry.visual_mode,
                                     pending_assets=list(entry.pending_assets),
                                     updated_at=entry.updated_at.isoformat(),
                                 ),
@@ -422,6 +427,7 @@ async def run_pipeline_streaming(
                                     section_id=section_id,
                                     pending_assets=list(pending_assets),
                                     status=typed_state.section_lifecycle.get(section_id, "awaiting_assets"),
+                                    visual_mode=getattr(partial, "visual_mode", None),
                                     updated_at=updated_at,
                                 ),
                                 on_event,
@@ -436,6 +442,11 @@ async def run_pipeline_streaming(
                                     section_id=section_id,
                                     ready_assets=list(payload.get("ready_assets", [])),
                                     pending_assets=list(payload.get("pending_assets", [])),
+                                    visual_mode=getattr(
+                                        typed_state.partial_sections.get(section_id),
+                                        "visual_mode",
+                                        None,
+                                    ),
                                     updated_at=datetime.now(timezone.utc).isoformat(),
                                 ),
                                 on_event,
@@ -476,6 +487,8 @@ async def run_pipeline_streaming(
                             and total_sections
                             and completed_sections >= total_sections
                             and len(reports) >= total_sections
+                            and not _build_partial_sections(typed_state)
+                            and not _build_failed_sections(typed_state)
                         ):
                             await _emit(
                                 QCCompleteEvent(

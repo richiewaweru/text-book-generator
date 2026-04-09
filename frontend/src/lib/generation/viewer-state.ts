@@ -119,6 +119,7 @@ function updatePartialSectionAssets(
 	sectionId: string,
 	partialStatus: string,
 	pendingAssets: string[],
+	visualMode: 'svg' | 'image' | null | undefined,
 	updatedAt: string
 ): GenerationDocument {
 	const partialSections = [...(document.partial_sections ?? [])];
@@ -130,6 +131,7 @@ function updatePartialSectionAssets(
 	partialSections[existingIndex] = {
 		...partialSections[existingIndex],
 		status: partialStatus,
+		visual_mode: visualMode ?? partialSections[existingIndex].visual_mode ?? null,
 		pending_assets: [...pendingAssets],
 		updated_at: updatedAt
 	};
@@ -193,6 +195,7 @@ export function applySectionPartial(
 			template_id: payload.template_id,
 			content: section,
 			status: payload.status,
+			visual_mode: payload.visual_mode ?? null,
 			pending_assets: [...payload.pending_assets],
 			updated_at: payload.updated_at
 		};
@@ -221,6 +224,7 @@ export function applySectionAssetPending(
 		payload.section_id,
 		payload.status,
 		payload.pending_assets,
+		payload.visual_mode,
 		payload.updated_at
 	);
 }
@@ -234,6 +238,7 @@ export function applySectionAssetReady(
 		payload.section_id,
 		payload.pending_assets.length > 0 ? 'awaiting_assets' : 'finalizing',
 		payload.pending_assets,
+		payload.visual_mode,
 		payload.updated_at
 	);
 }

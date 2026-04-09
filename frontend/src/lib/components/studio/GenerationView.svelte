@@ -150,10 +150,10 @@
 		if (status === 'writing') return progressUpdate?.label ?? 'Writing section...';
 		if (status === 'visual_pending') {
 			const pendingAssets = slot.partial?.pending_assets ?? [];
-			if (pendingAssets.some((asset) => asset === 'diagram_series' || asset === 'diagram_compare')) {
+			if (slot.partial?.visual_mode === 'image') {
 				return 'Generating image...';
 			}
-			if (pendingAssets.includes('diagram')) {
+			if (pendingAssets.length > 0) {
 				return 'Generating diagram...';
 			}
 			return 'Waiting for visuals...';
@@ -426,7 +426,7 @@
 					}
 					case 'generation_failed': {
 						const payload = JSON.parse(data) as GenerationFailedEvent;
-						error = payload.message;
+						void finalizeStream(myToken, id, payload.message);
 						break;
 					}
 					case 'qc_complete': {

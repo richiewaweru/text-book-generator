@@ -324,6 +324,8 @@ def route_after_generate_section_assets(state: TextbookPipelineState | dict) -> 
         return END
     if section_id not in typed.generated_sections:
         return END
+    if typed.section_pending_assets.get(section_id):
+        return END
     return "finalize_section"
 
 

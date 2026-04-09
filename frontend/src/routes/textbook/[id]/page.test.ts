@@ -108,6 +108,7 @@ function buildDocument(overrides: Record<string, unknown> = {}) {
 			{ section_id: 's-04', title: 'Section 4', position: 4 }
 		],
 		sections: [],
+		partial_sections: [],
 		failed_sections: [],
 		qc_reports: [],
 		quality_passed: null,
@@ -286,6 +287,50 @@ describe('textbook page stream lifecycle', () => {
 		expect(
 			screen.getByText(/Failed at content_generator: Schema validation failed after one repair attempt\./i)
 		).toBeTruthy();
+	});
+
+	it('finalizes the stream when generation_failed arrives without waiting for the legacy error event', async () => {
+		getGenerationDetail
+			.mockResolvedValueOnce(buildDetail())
+			.mockResolvedValueOnce(
+				buildDetail({
+					status: 'failed',
+					error: 'The generation failed before the lesson could be completed.',
+					error_type: 'pipeline_failed',
+					error_code: 'generation_failed',
+					quality_passed: false,
+					completed_at: '2026-03-23T00:01:00Z'
+				})
+			);
+		getGenerationDocument
+			.mockResolvedValueOnce(buildDocument())
+			.mockResolvedValueOnce(
+				buildDocument({
+					status: 'failed',
+					quality_passed: false,
+					error: 'The generation failed before the lesson could be completed.',
+					completed_at: '2026-03-23T00:01:00Z'
+				})
+			);
+
+		render(TextbookPage);
+
+		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
+		expect(connectGenerationEvents).toHaveBeenCalledTimes(1);
+
+		emitEvent('generation_failed', {
+			type: 'generation_failed',
+			generation_id: 'gen-123',
+			message: 'The generation failed before the lesson could be completed.',
+			error_type: 'pipeline_failed',
+			error_code: 'generation_failed'
+		});
+
+		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(2));
+		expect(screen.getByText(/The generation failed before the lesson could be completed\./i)).toBeTruthy();
+		expect(screen.getByText(/Stream: failed/i)).toBeTruthy();
 	});
 
 	it('shows progress updates from the stream and keeps section panels informational', async () => {

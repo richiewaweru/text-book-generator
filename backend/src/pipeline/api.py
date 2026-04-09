@@ -84,6 +84,7 @@ class PipelinePartialSectionEntry(BaseModel):
     template_id: str
     content: SectionContent
     status: str = "partial"
+    visual_mode: Literal["svg", "image"] | None = None
     pending_assets: list[str] = Field(default_factory=list)
     updated_at: datetime
 

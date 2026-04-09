@@ -214,11 +214,16 @@ def validate_section_for_template(
     mode: str = "final",
     allow_missing_fields: set[str] | None = None,
     additional_required_fields: set[str] | None = None,
+    required_components_override: list[str] | set[str] | None = None,
 ) -> tuple[bool, list[str]]:
     violations = []
     field_map = _load_field_map()
     contract = _load_contract_raw(template_id)
-    resolved_required_components = _required_components(contract)
+    resolved_required_components = (
+        list(required_components_override)
+        if required_components_override is not None
+        else _required_components(contract)
+    )
     allowed_missing_fields = allow_missing_fields or set()
     extra_required_fields = additional_required_fields or set()
     diag(
@@ -229,6 +234,9 @@ def validate_section_for_template(
         section_keys=sorted(section.keys()),
         allow_missing_fields=sorted(allowed_missing_fields),
         additional_required_fields=sorted(extra_required_fields),
+        required_components_override=sorted(required_components_override)
+        if required_components_override is not None
+        else None,
     )
 
     for component_id in resolved_required_components:
