@@ -7,6 +7,7 @@ import pytest
 from pipeline.graph import retry_diagram
 from pipeline.nodes import content_generator as content_generator_module
 from pipeline.nodes import process_section as process_section_module
+from pipeline.nodes import section_assembler as section_assembler_module
 from pipeline.state import QCReport, RerenderRequest, StyleContext, TextbookPipelineState
 from pipeline.types.composition import CompositionPlan, DiagramPlan, InteractionPlan
 from pipeline.types.requests import PipelineRequest, SectionPlan
@@ -462,6 +463,58 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
         "section_assembler",
         "qc_agent",
     ]
+
+
+@pytest.mark.asyncio
+async def test_section_assembler_accepts_singular_simulation_for_simulation_block() -> None:
+    section = _section("s-01").model_copy(
+        update={
+            "simulation": SimulationContent(
+                spec=InteractionSpec(
+                    type="graph_slider",
+                    goal="Understand the idea",
+                    anchor_content={"headline": "Hook", "body": "Explain"},
+                    context={"subject": "Math"},
+                    dimensions={"difficulty": "balanced"},
+                    print_translation="static_diagram",
+                ),
+                explanation="Interactive view",
+            )
+        }
+    )
+
+    state = _state(
+        generated_sections={"s-01": section},
+        current_section_plan=_plan(
+            "s-01",
+            required_components=[
+                "section-header",
+                "hook-hero",
+                "explanation-block",
+                "practice-stack",
+                "what-next-bridge",
+                "simulation-block",
+            ],
+        ).model_copy(update={"needs_diagram": False}),
+        curriculum_outline=[
+            _plan(
+                "s-01",
+                required_components=[
+                    "section-header",
+                    "hook-hero",
+                    "explanation-block",
+                    "practice-stack",
+                    "what-next-bridge",
+                    "simulation-block",
+                ],
+            ).model_copy(update={"needs_diagram": False})
+        ],
+    )
+
+    result = await section_assembler_module.section_assembler(state)
+
+    assert "errors" not in result
+    assert result["assembled_sections"]["s-01"].simulation is not None
 
 
 @pytest.mark.asyncio

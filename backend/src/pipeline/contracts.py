@@ -207,6 +207,16 @@ def get_lesson_flow(template_id: str) -> list[str]:
     return _load_contract_raw(template_id).get("lesson_flow", [])
 
 
+def _section_field_has_content(section: dict, field: str) -> bool:
+    if field == "simulations":
+        simulations = section.get("simulations") or []
+        if simulations:
+            return True
+        return bool(section.get("simulation"))
+
+    return bool(section.get(field))
+
+
 def validate_section_for_template(
     section: dict,
     template_id: str,
@@ -241,7 +251,9 @@ def validate_section_for_template(
 
     for component_id in resolved_required_components:
         field = field_map.get(component_id)
-        content_present = bool(section.get(field)) if field is not None else False
+        content_present = (
+            _section_field_has_content(section, field) if field is not None else False
+        )
         diag(
             "CONTRACT_REQUIRED_CHECK",
             template_id=template_id,
@@ -253,7 +265,7 @@ def validate_section_for_template(
             continue
         if mode == "partial" and field in allowed_missing_fields:
             continue
-        if not section.get(field):
+        if not _section_field_has_content(section, field):
             violations.append(
                 f"Required component '{component_id}' has no content "
                 f"(missing field: '{field}')"
@@ -262,7 +274,7 @@ def validate_section_for_template(
     for field in sorted(extra_required_fields):
         if mode == "partial" and field in allowed_missing_fields:
             continue
-        if not section.get(field):
+        if not _section_field_has_content(section, field):
             violations.append(
                 f"Required field '{field}' has no content for template '{template_id}'"
             )
