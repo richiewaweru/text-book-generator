@@ -169,6 +169,8 @@ Match the SectionContent schema exactly.
 CORE_FIELDS = {"header", "hook", "explanation"}
 PRACTICE_FIELDS = {"practice", "what_next", "pitfall", "pitfalls", "prerequisites"}
 ENRICHMENT_FIELDS = {
+    "callout",
+    "summary",
     "worked_example",
     "worked_examples",
     "process",
@@ -265,13 +267,14 @@ def build_enrichment_system_prompt(
     template_id: str,
     template_name: str,
     template_family: str,
+    active_enrichment_fields: list[str] | None = None,
 ) -> str:
     return _phase_system_prompt(
         template_id=template_id,
         template_name=template_name,
         template_family=template_family,
         phase_name="enrichment",
-        phase_fields=ENRICHMENT_FIELDS,
+        phase_fields=set(active_enrichment_fields or ENRICHMENT_FIELDS),
     )
 
 

@@ -5,7 +5,7 @@ import pytest
 from pipeline.contracts import get_contract
 from pipeline.nodes.diagram_generator import DiagramOutput, diagram_generator
 from pipeline.nodes.image_generator import image_generator
-from pipeline.nodes.section_assembler import section_assembler
+from pipeline.nodes.section_assembler import partial_section_assembler, section_assembler
 from pipeline.run import _build_result
 from pipeline.state import PartialSectionRecord, PipelineError, StyleContext, TextbookPipelineState
 from pipeline.storage.image_store import LocalImageStore
@@ -17,6 +17,7 @@ from pipeline.types.requests import (
 	SectionVisualPolicy,
 )
 from pipeline.types.section_content import (
+	CalloutBlockContent,
 	DiagramCompareContent,
 	DiagramContent,
 	DiagramElement,
@@ -29,6 +30,8 @@ from pipeline.types.section_content import (
 	PracticeProblem,
 	SectionContent,
 	SectionHeaderContent,
+	SummaryBlockContent,
+	SummaryItem,
 	WhatNextContent,
 )
 from pipeline.types.template_contract import GenerationGuidance, TemplateContractSummary
@@ -69,9 +72,11 @@ def _section(
 	*,
 	template_id: str,
 	hook_svg: str | None = None,
+	callout: CalloutBlockContent | None = None,
 	diagram: DiagramContent | None = None,
 	diagram_series: DiagramSeriesContent | None = None,
 	diagram_compare: DiagramCompareContent | None = None,
+	summary: SummaryBlockContent | None = None,
 ) -> SectionContent:
 	return SectionContent(
 		section_id=sid,
@@ -106,9 +111,11 @@ def _section(
 			]
 		),
 		what_next=WhatNextContent(body="Next we connect slope to equations.", next="y = mx + c"),
+		callout=callout,
 		diagram=diagram,
 		diagram_series=diagram_series,
 		diagram_compare=diagram_compare,
+		summary=summary,
 	)
 
 
@@ -213,6 +220,77 @@ def test_diagram_led_resolves_expected_visual_targets() -> None:
 	assert resolve_visual_targets(intro_state) == ["diagram"]
 	assert resolve_visual_targets(visual_state) == ["diagram", "diagram_series"]
 	assert resolve_visual_targets(summary_state) == ["diagram"]
+
+
+@pytest.mark.asyncio
+async def test_partial_assembler_keeps_callout_sections_pending_when_only_visuals_are_missing() -> None:
+	contract = get_contract("diagram-led")
+	sid = "visual"
+	state = TextbookPipelineState(
+		request=_request(template_id="diagram-led"),
+		contract=contract,
+		current_section_id=sid,
+		current_section_plan=_diagram_led_plan(
+			sid=sid,
+			role="visual",
+			targets=["diagram-block", "diagram-series", "callout-block"],
+			mode="svg",
+		),
+		generated_sections={
+			sid: _section(
+				sid,
+				template_id="diagram-led",
+				callout=CalloutBlockContent(
+					variant="remember",
+					heading="Watch the sign",
+					body="A negative slope can still be steep.",
+				),
+			)
+		},
+	)
+
+	result = await partial_section_assembler(state)
+
+	assert "errors" not in result
+	assert result["partial_sections"][sid].status == "awaiting_assets"
+	assert result["partial_sections"][sid].pending_assets == ["diagram", "diagram_series"]
+
+
+@pytest.mark.asyncio
+async def test_partial_assembler_keeps_summary_sections_pending_when_only_visuals_are_missing() -> None:
+	contract = get_contract("diagram-led")
+	sid = "summary"
+	state = TextbookPipelineState(
+		request=_request(template_id="diagram-led"),
+		contract=contract,
+		current_section_id=sid,
+		current_section_plan=_diagram_led_plan(
+			sid=sid,
+			role="summary",
+			targets=["diagram-block", "summary-block"],
+			mode="svg",
+		),
+		generated_sections={
+			sid: _section(
+				sid,
+				template_id="diagram-led",
+				summary=SummaryBlockContent(
+					heading="In summary",
+					items=[
+						SummaryItem(text="Slope measures steepness."),
+						SummaryItem(text="The sign tells you direction."),
+					],
+					closing="Next we connect slope to straight-line equations.",
+				),
+			)
+		},
+	)
+
+	result = await partial_section_assembler(state)
+
+	assert "errors" not in result
+	assert result["partial_sections"][sid].status == "awaiting_assets"
+	assert result["partial_sections"][sid].pending_assets == ["diagram"]
 
 
 @pytest.mark.asyncio

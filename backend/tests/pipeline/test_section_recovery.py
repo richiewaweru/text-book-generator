@@ -11,16 +11,22 @@ from pipeline.state import QCReport, RerenderRequest, StyleContext, TextbookPipe
 from pipeline.types.composition import CompositionPlan, DiagramPlan, InteractionPlan
 from pipeline.types.requests import PipelineRequest, SectionPlan
 from pipeline.types.section_content import (
+    CalloutBlockContent,
+    CoreContent,
     DiagramContent,
+    EnrichmentPhaseContent,
     ExplanationContent,
     HookHeroContent,
     InteractionSpec,
     PracticeContent,
     PracticeHint,
     PracticeProblem,
+    PracticePhaseContent,
     SectionContent,
     SectionHeaderContent,
     SimulationContent,
+    SummaryBlockContent,
+    SummaryItem,
     WhatNextContent,
 )
 from pipeline.types.template_contract import (
@@ -59,7 +65,13 @@ def _contract(**overrides) -> TemplateContractSummary:
             "practice-stack",
             "what-next-bridge",
         ],
-        optional_components=["definition-card", "diagram-block", "simulation-block"],
+        optional_components=[
+            "callout-block",
+            "definition-card",
+            "diagram-block",
+            "simulation-block",
+            "summary-block",
+        ],
         default_behaviours={},
         generation_guidance=_guidance(),
         best_for=[],
@@ -88,13 +100,14 @@ def _request(**overrides) -> PipelineRequest:
     return PipelineRequest(**defaults)
 
 
-def _plan(sid: str = "s-01") -> SectionPlan:
+def _plan(sid: str = "s-01", *, required_components: list[str] | None = None) -> SectionPlan:
     return SectionPlan(
         section_id=sid,
         title=f"Section {sid}",
         position=1,
         focus="Teach the core idea clearly.",
         needs_diagram=True,
+        required_components=required_components or [],
     )
 
 
@@ -222,6 +235,111 @@ async def test_content_generator_persists_failed_section_after_repair_failure(mo
         "validation_repair_attempted",
         "section_failed",
     ]
+
+
+@pytest.mark.asyncio
+async def test_content_generator_phased_generates_selected_callout_and_summary(monkeypatch) -> None:
+    prompts_by_node: dict[str, str] = {}
+
+    async def fake_run_llm(*, node: str, user_prompt: str, **kwargs):
+        _ = kwargs
+        prompts_by_node[node] = user_prompt
+        if node == "content_generator_core":
+            return SimpleNamespace(
+                output=CoreContent(
+                    section_id="s-01",
+                    template_id="guided-concept-path",
+                    header=SectionHeaderContent(
+                        title="Section s-01",
+                        subject="Mathematics",
+                        grade_band="secondary",
+                    ),
+                    hook=HookHeroContent(
+                        headline="Why this matters",
+                        body="A compelling hook body",
+                        anchor="derivatives",
+                    ),
+                    explanation=ExplanationContent(
+                        body="The explanation of the concept",
+                        emphasis=["key point 1", "key point 2"],
+                    ),
+                )
+            )
+        if node == "content_generator_practice":
+            return SimpleNamespace(
+                output=PracticePhaseContent(
+                    practice=PracticeContent(
+                        problems=[
+                            PracticeProblem(
+                                difficulty="warm",
+                                question="What is 2+2?",
+                                hints=[PracticeHint(level=1, text="Think about it")],
+                            )
+                        ]
+                    ),
+                    what_next=WhatNextContent(body="Next we cover integrals", next="Integrals"),
+                )
+            )
+        if node == "content_generator_enrichment":
+            return SimpleNamespace(
+                output=EnrichmentPhaseContent(
+                    callout=CalloutBlockContent(
+                        variant="tip",
+                        heading="Exam tip",
+                        body="Check the sign before you compare steepness.",
+                    ),
+                    summary=SummaryBlockContent(
+                        heading="In summary",
+                        items=[
+                            SummaryItem(text="Slope is rise over run."),
+                            SummaryItem(text="The sign tells you direction."),
+                        ],
+                        closing="Next we connect this to straight-line equations.",
+                    ),
+                )
+            )
+        raise AssertionError(f"Unexpected node {node}")
+
+    monkeypatch.setattr(content_generator_module, "Agent", DummyAgent)
+    monkeypatch.setattr(content_generator_module, "get_node_text_model", lambda *args, **kwargs: object())
+    monkeypatch.setattr(content_generator_module, "run_llm", fake_run_llm)
+
+    state = _state(
+        contract=_contract(),
+        current_section_plan=_plan(
+            "s-01",
+            required_components=[
+                "section-header",
+                "hook-hero",
+                "explanation-block",
+                "practice-stack",
+                "what-next-bridge",
+                "callout-block",
+                "summary-block",
+            ],
+        ),
+        curriculum_outline=[
+            _plan(
+                "s-01",
+                required_components=[
+                    "section-header",
+                    "hook-hero",
+                    "explanation-block",
+                    "practice-stack",
+                    "what-next-bridge",
+                    "callout-block",
+                    "summary-block",
+                ],
+            )
+        ],
+    )
+
+    result = await content_generator_module.content_generator(state)
+    section = result["generated_sections"]["s-01"]
+
+    assert section.callout is not None
+    assert section.summary is not None
+    assert "Generate these enrichment fields: callout, summary" in prompts_by_node["content_generator_enrichment"]
 
 
 @pytest.mark.asyncio

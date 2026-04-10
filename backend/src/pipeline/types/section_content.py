@@ -117,6 +117,25 @@ class InterviewContent(BaseModel):
     follow_up: Optional[str] = None
 
 
+CalloutVariant = Literal['info', 'tip', 'warning', 'exam-tip', 'remember']
+
+
+class CalloutBlockContent(BaseModel):
+    variant: CalloutVariant
+    heading: Optional[str] = None
+    body: str
+
+
+class SummaryItem(BaseModel):
+    text: str
+
+
+class SummaryBlockContent(BaseModel):
+    heading: Optional[str] = None
+    items: list[SummaryItem]
+    closing: Optional[str] = None
+
+
 # ── GROUP 2 — DEFINITION AND KNOWLEDGE ──────────────────────────────────────
 
 class DefinitionContent(BaseModel):
@@ -445,6 +464,8 @@ class PracticePhaseContent(BaseModel):
 class EnrichmentPhaseContent(BaseModel):
     """Phase 3: Optional enrichment components."""
 
+    callout: Optional[CalloutBlockContent] = None
+    summary: Optional[SummaryBlockContent] = None
     worked_example: Optional[WorkedExampleContent] = None
     worked_examples: Optional[list[WorkedExampleContent]] = None
     process: Optional[ProcessContent] = None
@@ -473,6 +494,8 @@ class SectionContent(BaseModel):
     what_next: WhatNextContent
 
     # Optional
+    callout: Optional[CalloutBlockContent] = None
+    summary: Optional[SummaryBlockContent] = None
     prerequisites: Optional[PrerequisiteContent] = None
     definition: Optional[DefinitionContent] = None
     definition_family: Optional[DefinitionFamilyContent] = None

@@ -18,6 +18,8 @@ from pipeline.types.section_content import SectionContent
 RETRYABLE_FIELDS = {
     "hook",
     "explanation",
+    "callout",
+    "summary",
     "practice",
     "worked_example",
     "definition",
