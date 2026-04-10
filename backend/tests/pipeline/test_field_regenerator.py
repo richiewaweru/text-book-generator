@@ -10,6 +10,7 @@ from pipeline.nodes.field_regenerator import field_regenerator
 from pipeline.state import RerenderRequest, TextbookPipelineState
 from pipeline.types.requests import GenerationMode, PipelineRequest
 from pipeline.types.section_content import (
+    CalloutBlockContent,
     ExplanationContent,
     HookHeroContent,
     PracticeContent,
@@ -17,6 +18,8 @@ from pipeline.types.section_content import (
     PracticeProblem,
     SectionContent,
     SectionHeaderContent,
+    SummaryBlockContent,
+    SummaryItem,
     WhatNextContent,
 )
 from pipeline.types.template_contract import GenerationGuidance, TemplateContractSummary
@@ -73,7 +76,11 @@ def _request() -> PipelineRequest:
     )
 
 
-def _section() -> SectionContent:
+def _section(
+    *,
+    callout: CalloutBlockContent | None = None,
+    summary: SummaryBlockContent | None = None,
+) -> SectionContent:
     return SectionContent(
         section_id="s-01",
         template_id="guided-concept-path",
@@ -101,11 +108,17 @@ def _section() -> SectionContent:
             ]
         ),
         what_next=WhatNextContent(body="Next we cover integrals", next="Integrals"),
+        callout=callout,
+        summary=summary,
     )
 
 
-def _state() -> TextbookPipelineState:
-    section = _section()
+def _state(
+    *,
+    block_type: str = "explanation",
+    section: SectionContent | None = None,
+) -> TextbookPipelineState:
+    section = section or _section()
     return TextbookPipelineState(
         request=_request(),
         contract=_contract(),
@@ -115,8 +128,8 @@ def _state() -> TextbookPipelineState:
         rerender_requests={
             section.section_id: RerenderRequest(
                 section_id=section.section_id,
-                block_type="explanation",
-                reason="Explanation needs clearer wording",
+                block_type=block_type,
+                reason=f"{block_type} needs clearer wording",
             )
         },
     )
@@ -203,3 +216,77 @@ async def test_field_regenerator_emits_failure_outcome(monkeypatch: pytest.Monke
     assert event.field_name == "explanation"
     assert event.outcome == "failed"
     assert event.error_message == "Field regeneration failed: model unavailable"
+
+
+def test_section_content_accepts_callout_and_summary_blocks() -> None:
+    section = _section(
+        callout=CalloutBlockContent(
+            variant="remember",
+            heading="Key reminder",
+            body="Slope compares rise to run.",
+        ),
+        summary=SummaryBlockContent(
+            heading="In summary",
+            items=[
+                SummaryItem(text="Slope measures steepness."),
+                SummaryItem(text="Positive slopes rise to the right."),
+            ],
+            closing="You can now compare lines with confidence.",
+        ),
+    )
+
+    assert section.callout is not None
+    assert section.callout.variant == "remember"
+    assert section.summary is not None
+    assert len(section.summary.items) == 2
+
+
+@pytest.mark.parametrize(
+    ("field_name", "payload"),
+    [
+        (
+            "callout",
+            {
+                "variant": "tip",
+                "heading": "Exam tip",
+                "body": "Check the sign of the slope before you compare steepness.",
+            },
+        ),
+        (
+            "summary",
+            {
+                "heading": "In summary",
+                "items": [
+                    {"text": "Slope is rise over run."},
+                    {"text": "The sign tells you direction."},
+                ],
+                "closing": "Next we connect this to straight-line equations.",
+            },
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_field_regenerator_supports_callout_and_summary_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    field_name: str,
+    payload: dict,
+) -> None:
+    state = _state(block_type=field_name)
+    _capture_events(monkeypatch)
+    _stub_agent_dependencies(monkeypatch)
+
+    async def _run_llm(**kwargs):
+        _ = kwargs
+        return SimpleNamespace(output=json.dumps(payload))
+
+    monkeypatch.setattr("pipeline.nodes.field_regenerator.run_llm", _run_llm)
+
+    result = await field_regenerator(state)
+    updated = result["generated_sections"]["s-01"]
+
+    if field_name == "callout":
+        assert updated.callout is not None
+        assert updated.callout.body == payload["body"]
+    else:
+        assert updated.summary is not None
+        assert updated.summary.items[0].text == payload["items"][0]["text"]

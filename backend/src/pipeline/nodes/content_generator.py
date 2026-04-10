@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from pydantic_ai import Agent
 
 from core.config import settings as app_settings
-from pipeline.contracts import get_optional_fields
+from pipeline.contracts import get_optional_fields, get_section_field_for_component
 from pipeline.events import (
     SectionFailedEvent,
     ValidationRepairAttemptedEvent,
@@ -236,8 +236,27 @@ def _core_summary(core: CoreContent) -> str:
     )
 
 
-def _active_enrichment_fields(template_id: str) -> list[str]:
-    """Return enrichment fields that the template actually uses."""
+def _active_enrichment_fields(template_id: str, plan) -> list[str]:
+    """Return enrichment fields selected for this section, with a template fallback."""
+    selected_fields: list[str] = []
+    seen_fields: set[str] = set()
+    component_ids = [
+        *(getattr(plan, "required_components", []) or []),
+        *(getattr(plan, "optional_components", []) or []),
+    ]
+    for component_id in component_ids:
+        field_name = get_section_field_for_component(component_id)
+        if (
+            field_name
+            and field_name in ENRICHMENT_FIELDS
+            and field_name not in _EXTERNAL_FIELDS
+            and field_name not in seen_fields
+        ):
+            selected_fields.append(field_name)
+            seen_fields.add(field_name)
+    if selected_fields:
+        return selected_fields
+
     optional = get_optional_fields(template_id)
     return [f for f in optional if f in ENRICHMENT_FIELDS and f not in _EXTERNAL_FIELDS]
 
@@ -566,7 +585,7 @@ async def _generate_phased(
         )
         return
 
-    enrichment_fields = _active_enrichment_fields(template_id)
+    enrichment_fields = _active_enrichment_fields(template_id, plan)
     enrichment = None
 
     if enrichment_fields:
@@ -577,6 +596,7 @@ async def _generate_phased(
                 template_id=template_id,
                 template_name=state.contract.name,
                 template_family=state.contract.family,
+                active_enrichment_fields=enrichment_fields,
             ),
         )
         try:
