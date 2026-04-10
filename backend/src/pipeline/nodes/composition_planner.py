@@ -12,6 +12,7 @@ Slot: FAST
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 from core.llm.logging import NodeLogger
@@ -85,6 +86,41 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
         return True
 
     return False
+
+
+def _diagram_requirement_source(state: TextbookPipelineState) -> str | None:
+    plan = state.current_section_plan
+    if plan is None:
+        return None
+
+    if getattr(plan, "diagram_policy", None) == "disabled":
+        return None
+
+    if not _has_diagram_slot(state.contract):
+        return None
+
+    if _DIAGRAM_COMPONENTS & set(state.contract.required_components):
+        return "contract_required_component"
+
+    if getattr(plan, "diagram_policy", None) == "required":
+        return "section_plan_diagram_policy"
+
+    if getattr(plan, "needs_diagram", False):
+        return "section_plan_needs_diagram"
+
+    section_required = set(getattr(plan, "required_components", []))
+    if _DIAGRAM_COMPONENTS & section_required:
+        return "section_plan_required_component"
+
+    vp = getattr(plan, "visual_policy", None)
+    if vp is not None and getattr(vp, "required", False):
+        return "section_visual_policy"
+
+    return None
+
+
+def _diagram_allowed(state: TextbookPipelineState) -> bool:
+    return _diagram_requirement_source(state) is not None
 
 
 def _interaction_allowed(state: TextbookPipelineState) -> bool:
@@ -243,23 +279,41 @@ def _to_composition_plan(
     diagram_allowed: bool,
     interaction_allowed: bool,
     visual_mode: str | None = None,
+    section_id: str | None = None,
+    requirement_source: str | None = None,
 ) -> CompositionPlan:
     """Convert LLM decision to CompositionPlan, enforcing guard-rail overrides."""
 
-    enabled = decision.diagram.enabled and diagram_allowed
+    enabled = diagram_allowed
+    logger.info(
+        "DIAG::ENABLEMENT_RESOLVED::%s",
+        json.dumps(
+            {
+                "section_id": section_id,
+                "diagram_allowed": diagram_allowed,
+                "planning_required": diagram_allowed,
+                "requirement_source": requirement_source,
+                "llm_enabled": decision.diagram.enabled,
+                "final_enabled": enabled,
+                "visual_mode": visual_mode,
+                "diagram_type": decision.diagram.diagram_type,
+            },
+            sort_keys=True,
+        ),
+    )
     compare_before_label, compare_after_label = _compare_labels(section)
     diagram = DiagramPlan(
         enabled=enabled,
         mode=visual_mode if enabled else None,
         reasoning=decision.diagram.reasoning,
-        diagram_type=decision.diagram.diagram_type,
+        diagram_type=decision.diagram.diagram_type if enabled else None,
         compare_before_label=compare_before_label if enabled else None,
         compare_after_label=compare_after_label if enabled else None,
-        key_concepts=decision.diagram.key_concepts,
-        visual_guidance=decision.diagram.visual_guidance,
-        fallback_from_interaction=decision.diagram.fallback_from_interaction,
-        interaction_intent=decision.diagram.interaction_intent,
-        interaction_elements=decision.diagram.interaction_elements,
+        key_concepts=decision.diagram.key_concepts if enabled else [],
+        visual_guidance=decision.diagram.visual_guidance if enabled else None,
+        fallback_from_interaction=decision.diagram.fallback_from_interaction if enabled else False,
+        interaction_intent=decision.diagram.interaction_intent if enabled else None,
+        interaction_elements=decision.diagram.interaction_elements if enabled else [],
     )
 
     interactions: list[InteractionPlan] = []
@@ -314,7 +368,8 @@ async def composition_planner(
         node_name="composition_planner",
     )
 
-    diagram_ok = _diagram_allowed(state)
+    diagram_requirement_source = _diagram_requirement_source(state)
+    diagram_ok = diagram_requirement_source is not None
     interaction_ok = _interaction_allowed(state)
 
     # Extract visual_policy.mode from the section plan (None if not set)
@@ -380,6 +435,8 @@ async def composition_planner(
             diagram_allowed=diagram_ok,
             interaction_allowed=interaction_ok,
             visual_mode=visual_mode,
+            section_id=sid,
+            requirement_source=diagram_requirement_source,
         )
 
     except Exception:

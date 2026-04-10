@@ -327,3 +327,82 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
         "section_assembler",
         "qc_agent",
     ]
+
+
+@pytest.mark.asyncio
+async def test_process_section_prefers_image_outcome_over_svg_skip(monkeypatch) -> None:
+    sid = "s-01"
+    section = _section(sid)
+    section_with_image = section.model_copy(
+        update={
+            "diagram": DiagramContent(
+                caption="diagram",
+                alt_text="diagram",
+                image_url="http://test/images/gen-test/s-01/diagram.png",
+            )
+        }
+    )
+    composition = CompositionPlan(
+        diagram=DiagramPlan(
+            enabled=True,
+            reasoning="Needs an image",
+            mode="image",
+            diagram_type="concept_map",
+        ),
+        interaction=InteractionPlan(enabled=False, reasoning="No interaction"),
+    )
+
+    async def fake_run_section_steps(state, *, steps, **kwargs):
+        _ = kwargs
+        first = steps[0][0]
+        if first == "content_generator":
+            return {
+                "generated_sections": {sid: section},
+                "completed_nodes": ["content_generator"],
+            }
+        if first == "composition_planner":
+            return {
+                "composition_plans": {sid: composition},
+                "completed_nodes": ["composition_planner"],
+            }
+
+        typed = TextbookPipelineState.parse(state)
+        return {
+            "assembled_sections": {sid: typed.generated_sections[sid]},
+            "qc_reports": {
+                sid: QCReport(section_id=sid, passed=True, issues=[], warnings=[])
+            },
+            "completed_nodes": ["section_assembler", "qc_agent"],
+        }
+
+    async def fake_diagram_generator(state, *, model_overrides=None, config=None):
+        _ = (state, model_overrides, config)
+        return {
+            "diagram_outcomes": {sid: "skipped"},
+            "completed_nodes": ["diagram_generator"],
+        }
+
+    async def fake_image_generator(state, *, model_overrides=None, config=None):
+        _ = (state, model_overrides, config)
+        return {
+            "generated_sections": {sid: section_with_image},
+            "diagram_outcomes": {sid: "success"},
+            "completed_nodes": ["image_generator"],
+        }
+
+    async def fake_interaction_path(state, *, model_overrides=None, config=None):
+        _ = (state, model_overrides, config)
+        return {"completed_nodes": ["interaction_decider", "interaction_generator"]}
+
+    monkeypatch.setattr(process_section_module, "run_section_steps", fake_run_section_steps)
+    monkeypatch.setattr(process_section_module, "diagram_generator", fake_diagram_generator)
+    monkeypatch.setattr(process_section_module, "image_generator", fake_image_generator)
+    monkeypatch.setattr(process_section_module, "_run_interaction_path", fake_interaction_path)
+
+    result = await process_section_module.process_section(_state())
+
+    assert result["diagram_outcomes"]["s-01"] == "success"
+    assert result["generated_sections"]["s-01"].diagram is not None
+    assert result["generated_sections"]["s-01"].diagram.image_url == (
+        "http://test/images/gen-test/s-01/diagram.png"
+    )

@@ -169,6 +169,8 @@ def _state(
     key_concepts: list[str] | None = None,
     compare_before_label: str | None = None,
     compare_after_label: str | None = None,
+    diagram_enabled: bool = True,
+    diagram_mode: str = "image",
 ) -> TextbookPipelineState:
     sid = section.section_id
     return TextbookPipelineState(
@@ -182,9 +184,9 @@ def _state(
         composition_plans={
             sid: CompositionPlan(
                 diagram=DiagramPlan(
-                    enabled=True,
+                    enabled=diagram_enabled,
                     reasoning="needs an image",
-                    mode="image",
+                    mode=diagram_mode,
                     compare_before_label=compare_before_label,
                     compare_after_label=compare_after_label,
                     key_concepts=key_concepts or ["derivative", "slope"],
@@ -234,6 +236,11 @@ def _capture_node_logs(monkeypatch) -> list[str]:
         _ = kwargs
         messages.append(message % args if args else message)
 
+    def _record_log(level: int, message: str, *args, **kwargs) -> None:
+        _ = (level, kwargs)
+        messages.append(message % args if args else message)
+
+    monkeypatch.setattr("pipeline.nodes.image_generator.logger.log", _record_log)
     monkeypatch.setattr("pipeline.nodes.image_generator.logger.info", _record)
     monkeypatch.setattr("pipeline.nodes.image_generator.logger.error", _record)
     monkeypatch.setattr("pipeline.nodes.image_generator.logger.warning", _record)
@@ -293,6 +300,7 @@ async def test_image_generator_writes_single_image_with_local_store(tmp_path) ->
     section = result["generated_sections"]["s-01"]
     assert section.diagram is not None
     assert section.diagram.image_url == "http://test/images/gen-image-test/s-01/diagram.png"
+    assert result["diagram_outcomes"]["s-01"] == "success"
     assert client.prompts
 
 
@@ -428,8 +436,49 @@ async def test_image_generator_returns_recoverable_error_when_compare_pair_fails
     result = await image_generator(state, _store=store, _client=client)
 
     assert result["completed_nodes"] == ["image_generator"]
+    assert result["diagram_outcomes"]["s-01"] == "error"
     assert result["errors"][0].recoverable is True
     assert "DiagramCompare pair failed" in result["errors"][0].message
+
+
+@pytest.mark.asyncio
+async def test_image_generator_skips_disabled_image_mode_and_records_skipped_outcome(
+    monkeypatch,
+) -> None:
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+        diagram_enabled=False,
+    )
+
+    messages = _capture_node_logs(monkeypatch)
+
+    result = await image_generator(state)
+
+    assert result["completed_nodes"] == ["image_generator"]
+    assert result["diagram_outcomes"]["s-01"] == "skipped"
+    assert any("IMG::SKIP_NOT_ENABLED::" in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_image_generator_skips_svg_mode_without_overwriting_diagram_outcome(
+    monkeypatch,
+) -> None:
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+        diagram_mode="svg",
+    )
+
+    messages = _capture_node_logs(monkeypatch)
+
+    result = await image_generator(state)
+
+    assert result["completed_nodes"] == ["image_generator"]
+    assert "diagram_outcomes" not in result
+    assert any("IMG::SKIP_MODE::" in message for message in messages)
 
 
 @pytest.mark.asyncio
@@ -447,10 +496,12 @@ async def test_image_generator_logs_success_path(tmp_path, monkeypatch) -> None:
     result = await image_generator(state, _store=store, _client=client)
 
     assert result["generated_sections"]["s-01"].diagram is not None
-    assert any("image_generator: START sid=s-01" in message for message in messages)
-    assert any("image_generator: CALLING_GEMINI sid=s-01 variant=single" in message for message in messages)
-    assert any("image_generator: STORE_SUCCESS sid=s-01 variant=single" in message for message in messages)
-    assert any("image_generator: SUCCESS sid=s-01 slot=diagram-block" in message for message in messages)
+    assert result["diagram_outcomes"]["s-01"] == "success"
+    assert any("IMG::START::" in message for message in messages)
+    assert any("IMG::STORE_STATUS::" in message for message in messages)
+    assert any("IMG::API_REQUEST::" in message for message in messages)
+    assert any("IMG::STORE_SUCCESS::" in message for message in messages)
+    assert any("IMG::SUCCESS::" in message for message in messages)
 
 
 @pytest.mark.asyncio
@@ -472,9 +523,10 @@ async def test_image_generator_returns_recoverable_error_when_api_key_missing(
     result = await image_generator(state)
 
     assert result["completed_nodes"] == ["image_generator"]
+    assert result["diagram_outcomes"]["s-01"] == "error"
     assert result["errors"][0].recoverable is True
     assert "No Gemini API key found for image generation." in result["errors"][0].message
-    assert any("image_generator: FAIL sid=s-01 reason=no_api_key" in message for message in messages)
+    assert any("IMG::API_KEY_FAILURE::" in message for message in messages)
 
 
 @pytest.mark.asyncio
@@ -496,9 +548,10 @@ async def test_image_generator_returns_recoverable_error_when_store_init_fails(
     result = await image_generator(state, _client=FakeImageClient())
 
     assert result["completed_nodes"] == ["image_generator"]
+    assert result["diagram_outcomes"]["s-01"] == "error"
     assert result["errors"][0].recoverable is True
     assert "Image store init failed: RuntimeError: bucket unavailable" == result["errors"][0].message
-    assert any("image_generator: FAIL sid=s-01 reason=store_init_failed" in message for message in messages)
+    assert any("IMG::STORE_INIT_FAILURE::" in message for message in messages)
 
 
 @pytest.mark.asyncio
@@ -525,9 +578,10 @@ async def test_image_generator_returns_recoverable_error_when_client_init_fails(
     result = await image_generator(state)
 
     assert result["completed_nodes"] == ["image_generator"]
+    assert result["diagram_outcomes"]["s-01"] == "error"
     assert result["errors"][0].recoverable is True
     assert result["errors"][0].message == "Gemini image client init failed: RuntimeError: auth rejected"
-    assert any("image_generator: FAIL sid=s-01 reason=client_init_failed" in message for message in messages)
+    assert any("IMG::CLIENT_INIT_FAILURE::" in message for message in messages)
 
 
 @pytest.mark.asyncio
@@ -548,9 +602,7 @@ async def test_image_generator_returns_recoverable_error_when_store_upload_fails
     result = await image_generator(state, _store=store, _client=client)
 
     assert result["completed_nodes"] == ["image_generator"]
+    assert result["diagram_outcomes"]["s-01"] == "error"
     assert result["errors"][0].recoverable is True
     assert "Image storage failed for single: RuntimeError: upload denied" in result["errors"][0].message
-    assert any(
-        "image_generator: FAIL sid=s-01 reason=store_failed variant=single" in message
-        for message in messages
-    )
+    assert any("IMG::STORE_WRITE_FAILURE::" in message for message in messages)
