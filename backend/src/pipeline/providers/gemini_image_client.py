@@ -23,6 +23,14 @@ _MIME_TO_FORMAT: dict[str, ImageFormat] = {
 }
 
 
+def _provider_image_config(size: ImageSize) -> types.ImageConfig:
+    _ = size
+    return types.ImageConfig(
+        aspect_ratio="1:1",
+        image_size="1K",
+    )
+
+
 class GeminiImageClient:
     """
     Concrete ImageModelClient using gemini-3.1-flash-image-preview.
@@ -73,6 +81,7 @@ class GeminiImageClient:
         format: ImageFormat = "png",
         seed: int | None = None,
     ) -> ImageGenerationResult:
+        _ = seed
         config = types.GenerateContentConfig(
             temperature=1,
             top_p=0.95,
@@ -96,10 +105,7 @@ class GeminiImageClient:
                     threshold="OFF",
                 ),
             ],
-            image_config=types.ImageConfig(
-                aspect_ratio="auto",
-                image_size="1K",
-            ),
+            image_config=_provider_image_config(size),
             thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
         )
 

@@ -9,7 +9,11 @@ import pytest
 
 from pipeline.events import ImageOutcomeEvent
 from pipeline.nodes.image_generator import image_generator
-from pipeline.providers.gemini_image_client import GeminiImageClient, get_gemini_image_client
+from pipeline.providers.gemini_image_client import (
+    GeminiImageClient,
+    _provider_image_config,
+    get_gemini_image_client,
+)
 from pipeline.providers.image_client import ImageGenerationResult
 from pipeline.state import StyleContext, TextbookPipelineState
 from pipeline.storage.image_store import LocalImageStore
@@ -342,6 +346,14 @@ def test_get_gemini_image_client_prefers_nano_key() -> None:
     get_gemini_image_client.cache_clear()
 
 
+@pytest.mark.parametrize("size", ["256x256", "512x512", "1024x1024"])
+def test_provider_image_config_maps_current_pipeline_sizes_to_square_1k(size: str) -> None:
+    config = _provider_image_config(size)  # type: ignore[arg-type]
+
+    assert config.aspect_ratio == "1:1"
+    assert config.image_size == "1K"
+
+
 @pytest.mark.asyncio
 async def test_gemini_image_client_omits_output_mime_type_and_uses_provider_mime() -> None:
     fake_chunk = SimpleNamespace(
@@ -365,6 +377,8 @@ async def test_gemini_image_client_omits_output_mime_type_and_uses_provider_mime
         result = await client.generate_image(prompt="draw a dot", format="jpeg")
 
     config = mock_client.return_value.models.generate_content_stream.call_args.kwargs["config"]
+    assert config.image_config.aspect_ratio == "1:1"
+    assert config.image_config.image_size == "1K"
     assert config.image_config.output_mime_type is None
     assert result.format == "png"
     assert result.mime_type == "image/png"
