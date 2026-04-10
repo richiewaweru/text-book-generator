@@ -22,6 +22,7 @@ from pipeline.providers.gemini_image_client import (
     get_gemini_image_client,
     resolve_gemini_image_api_key,
 )
+from pipeline.providers.image_client import ImageGenerationResult
 from pipeline.events import ImageOutcomeEvent
 from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.state import PipelineError, TextbookPipelineState
@@ -127,7 +128,11 @@ def _is_retryable(exc: Exception) -> bool:
     )
 
 
-async def _generate_with_retry(client, prompt: str, timeout: float) -> tuple[bytes, int]:
+async def _generate_with_retry(
+    client,
+    prompt: str,
+    timeout: float,
+) -> tuple[ImageGenerationResult, int]:
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
             _imggen_diag(
@@ -141,7 +146,7 @@ async def _generate_with_retry(client, prompt: str, timeout: float) -> tuple[byt
                 client.generate_image(prompt=prompt, size="1024x1024", format="png"),
                 timeout=timeout,
             )
-            return result.bytes, attempt
+            return result, attempt
         except Exception as exc:
             is_timeout = isinstance(exc, asyncio.TimeoutError)
             retryable = is_timeout or _is_retryable(exc)
@@ -179,7 +184,7 @@ async def _request_image_bytes(
     variant: str,
     api_key_present: bool,
     prompt_details: dict | None = None,
-) -> tuple[bytes, int]:
+) -> tuple[ImageGenerationResult, int]:
     payload = {
         "section_id": section_id,
         "variant": variant,
@@ -192,7 +197,7 @@ async def _request_image_bytes(
 
     _log_image_event(logging.INFO, "API_REQUEST", **payload)
     try:
-        image_bytes, attempts = await _generate_with_retry(client, prompt, _IMAGE_TIMEOUT_SECONDS)
+        image_result, attempts = await _generate_with_retry(client, prompt, _IMAGE_TIMEOUT_SECONDS)
     except Exception as exc:
         _log_image_event(
             logging.ERROR,
@@ -209,10 +214,12 @@ async def _request_image_bytes(
         "API_SUCCESS",
         section_id=section_id,
         variant=variant,
-        bytes=len(image_bytes),
+        bytes=len(image_result.bytes),
         attempts=attempts,
+        format=image_result.format,
+        mime_type=image_result.mime_type,
     )
-    return image_bytes, attempts
+    return image_result, attempts
 
 
 def _visual_intent(state: TextbookPipelineState) -> str:
@@ -299,8 +306,13 @@ async def _store_image_with_logging(
         section_id=section_id,
         variant=variant,
         asset_url_present=bool(image_url),
+        format=format,
     )
     return image_url
+
+
+def _filename_for_variant(stem: str, image_result: ImageGenerationResult) -> str:
+    return f"{stem}.{image_result.format}"
 
 
 async def _generate_single_image(
@@ -319,7 +331,7 @@ async def _generate_single_image(
         diagram_plan=composition_plan.diagram,
         style_context=state.style_context,
     )
-    image_bytes, attempts = await _request_image_bytes(
+    image_result, attempts = await _request_image_bytes(
         client=client,
         prompt=prompt,
         section_id=sid,
@@ -328,11 +340,11 @@ async def _generate_single_image(
     )
     image_url = await _store_image_with_logging(
         store,
-        image_bytes=image_bytes,
+        image_bytes=image_result.bytes,
         generation_id=generation_id,
         section_id=sid,
-        filename="diagram.png",
-        format="png",
+        filename=_filename_for_variant("diagram", image_result),
+        format=image_result.format,
         variant="single",
     )
 
@@ -399,7 +411,7 @@ async def _generate_series_images(
         )
 
         try:
-            image_bytes, attempts = await _request_image_bytes(
+            image_result, attempts = await _request_image_bytes(
                 client=client,
                 prompt=prompt,
                 section_id=sid,
@@ -413,11 +425,11 @@ async def _generate_series_images(
             max_attempts = max(max_attempts, attempts)
             image_url = await _store_image_with_logging(
                 store,
-                image_bytes=image_bytes,
+                image_bytes=image_result.bytes,
                 generation_id=generation_id,
                 section_id=sid,
-                filename=f"series-step-{index + 1}.png",
-                format="png",
+                filename=_filename_for_variant(f"series-step-{index + 1}", image_result),
+                format=image_result.format,
                 variant=f"series-step-{index + 1}",
             )
             rendered_steps.append(step.model_copy(update={"image_url": image_url}))
@@ -474,7 +486,7 @@ async def _maybe_generate_hook_image(
     )
 
     try:
-        image_bytes, _attempts = await _request_image_bytes(
+        image_result, _attempts = await _request_image_bytes(
             client=client,
             prompt=prompt,
             section_id=sid,
@@ -483,11 +495,11 @@ async def _maybe_generate_hook_image(
         )
         image_url = await _store_image_with_logging(
             store,
-            image_bytes=image_bytes,
+            image_bytes=image_result.bytes,
             generation_id=generation_id,
             section_id=sid,
-            filename="hook.png",
-            format="png",
+            filename=_filename_for_variant("hook", image_result),
+            format=image_result.format,
             variant="hook",
         )
         return section.model_copy(
@@ -553,7 +565,7 @@ async def _generate_compare_images(
     )
 
     try:
-        (before_bytes, before_attempts), (after_bytes, after_attempts) = await asyncio.gather(
+        (before_result, before_attempts), (after_result, after_attempts) = await asyncio.gather(
             _request_image_bytes(
                 client=client,
                 prompt=before_prompt,
@@ -572,20 +584,20 @@ async def _generate_compare_images(
         before_url, after_url = await asyncio.gather(
             _store_image_with_logging(
                 store,
-                image_bytes=before_bytes,
+                image_bytes=before_result.bytes,
                 generation_id=generation_id,
                 section_id=sid,
-                filename="compare-before.png",
-                format="png",
+                filename=_filename_for_variant("compare-before", before_result),
+                format=before_result.format,
                 variant="compare-before",
             ),
             _store_image_with_logging(
                 store,
-                image_bytes=after_bytes,
+                image_bytes=after_result.bytes,
                 generation_id=generation_id,
                 section_id=sid,
-                filename="compare-after.png",
-                format="png",
+                filename=_filename_for_variant("compare-after", after_result),
+                format=after_result.format,
                 variant="compare-after",
             ),
         )

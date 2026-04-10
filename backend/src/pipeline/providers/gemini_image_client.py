@@ -16,6 +16,11 @@ _API_KEY_ENV_NAMES = (
     "GOOGLE_API_KEY",
     "GEMINI_API_KEY",
 )
+_MIME_TO_FORMAT: dict[str, ImageFormat] = {
+    "image/png": "png",
+    "image/jpeg": "jpeg",
+    "image/webp": "webp",
+}
 
 
 class GeminiImageClient:
@@ -23,7 +28,7 @@ class GeminiImageClient:
     Concrete ImageModelClient using gemini-3.1-flash-image-preview.
 
     The model returns mixed TEXT + IMAGE parts. We extract the first
-    inline_data part (raw PNG bytes) and return it.
+    inline_data part and return the bytes plus reported MIME type.
     """
 
     MODEL = "gemini-3.1-flash-image-preview"
@@ -34,6 +39,31 @@ class GeminiImageClient:
             "GeminiImageClient: initialised model=%s vertexai=False",
             self.MODEL,
         )
+
+    def _resolve_result_format(
+        self,
+        *,
+        requested_format: ImageFormat,
+        provider_mime_type: str | None,
+    ) -> tuple[ImageFormat, str]:
+        if provider_mime_type:
+            normalized_mime = provider_mime_type.strip().lower()
+            resolved_format = _MIME_TO_FORMAT.get(normalized_mime)
+            if resolved_format is not None:
+                return resolved_format, normalized_mime
+
+            logger.warning(
+                "GeminiImageClient: unsupported provider mime_type=%s; falling back to %s",
+                provider_mime_type,
+                requested_format,
+            )
+        else:
+            logger.warning(
+                "GeminiImageClient: provider returned no mime_type; falling back to %s",
+                requested_format,
+            )
+
+        return requested_format, f"image/{requested_format}"
 
     async def generate_image(
         self,
@@ -69,7 +99,6 @@ class GeminiImageClient:
             image_config=types.ImageConfig(
                 aspect_ratio="auto",
                 image_size="1K",
-                output_mime_type=f"image/{format}",
             ),
             thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
         )
@@ -81,8 +110,9 @@ class GeminiImageClient:
             )
         ]
 
-        def _call() -> bytes:
+        def _call() -> tuple[bytes, str | None]:
             image_bytes: bytes | None = None
+            image_mime_type: str | None = None
             for chunk in self._client.models.generate_content_stream(
                 model=self.MODEL,
                 contents=contents,
@@ -93,20 +123,25 @@ class GeminiImageClient:
                 for part in chunk.candidates[0].content.parts:
                     if part.inline_data is not None:
                         image_bytes = part.inline_data.data
+                        image_mime_type = part.inline_data.mime_type
                         break
                 if image_bytes is not None:
                     break
 
             if image_bytes is None:
                 raise RuntimeError("Gemini returned no image data in response")
-            return image_bytes
+            return image_bytes, image_mime_type
 
-        image_bytes = await asyncio.to_thread(_call)
+        image_bytes, provider_mime_type = await asyncio.to_thread(_call)
+        result_format, result_mime_type = self._resolve_result_format(
+            requested_format=format,
+            provider_mime_type=provider_mime_type,
+        )
 
         return ImageGenerationResult(
             bytes=image_bytes,
-            format=format,
-            mime_type=f"image/{format}",
+            format=result_format,
+            mime_type=result_mime_type,
         )
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -216,6 +217,12 @@ class FailAfterFirstImageClient(FakeImageClient):
         return ImageGenerationResult(bytes=b"PNG", format="png", mime_type="image/png")
 
 
+class FakeJpegImageClient(FakeImageClient):
+    async def generate_image(self, *, prompt, size="1024x1024", format="png", seed=None):
+        self.prompts.append(prompt)
+        return ImageGenerationResult(bytes=b"JPEG", format="jpeg", mime_type="image/jpeg")
+
+
 class FailingStore(LocalImageStore):
     async def store_image(
         self,
@@ -228,6 +235,37 @@ class FailingStore(LocalImageStore):
     ) -> str:
         _ = (image_bytes, generation_id, section_id, filename, format)
         raise RuntimeError("upload denied")
+
+
+class RecordingStore(LocalImageStore):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.calls: list[dict[str, str]] = []
+
+    async def store_image(
+        self,
+        image_bytes: bytes,
+        *,
+        generation_id: str,
+        section_id: str,
+        filename: str,
+        format: str = "png",
+    ) -> str:
+        self.calls.append(
+            {
+                "generation_id": generation_id,
+                "section_id": section_id,
+                "filename": filename,
+                "format": format,
+            }
+        )
+        return await super().store_image(
+            image_bytes,
+            generation_id=generation_id,
+            section_id=section_id,
+            filename=filename,
+            format=format,
+        )
 
 
 def _capture_node_logs(monkeypatch) -> list[str]:
@@ -305,6 +343,64 @@ def test_get_gemini_image_client_prefers_nano_key() -> None:
 
 
 @pytest.mark.asyncio
+async def test_gemini_image_client_omits_output_mime_type_and_uses_provider_mime() -> None:
+    fake_chunk = SimpleNamespace(
+        candidates=[
+            SimpleNamespace(
+                content=SimpleNamespace(
+                    parts=[
+                        SimpleNamespace(
+                            inline_data=SimpleNamespace(data=b"PNG", mime_type="image/png")
+                        )
+                    ]
+                )
+            )
+        ]
+    )
+
+    with patch("pipeline.providers.gemini_image_client.genai.Client") as mock_client:
+        mock_client.return_value.models.generate_content_stream.return_value = [fake_chunk]
+        client = GeminiImageClient(api_key="test-key")
+
+        result = await client.generate_image(prompt="draw a dot", format="jpeg")
+
+    config = mock_client.return_value.models.generate_content_stream.call_args.kwargs["config"]
+    assert config.image_config.output_mime_type is None
+    assert result.format == "png"
+    assert result.mime_type == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_gemini_image_client_falls_back_to_requested_format_when_provider_mime_missing(
+    caplog,
+) -> None:
+    fake_chunk = SimpleNamespace(
+        candidates=[
+            SimpleNamespace(
+                content=SimpleNamespace(
+                    parts=[
+                        SimpleNamespace(
+                            inline_data=SimpleNamespace(data=b"JPEG", mime_type=None)
+                        )
+                    ]
+                )
+            )
+        ]
+    )
+
+    with patch("pipeline.providers.gemini_image_client.genai.Client") as mock_client:
+        mock_client.return_value.models.generate_content_stream.return_value = [fake_chunk]
+        client = GeminiImageClient(api_key="test-key")
+
+        with caplog.at_level("WARNING"):
+            result = await client.generate_image(prompt="draw a dot", format="jpeg")
+
+    assert result.format == "jpeg"
+    assert result.mime_type == "image/jpeg"
+    assert "provider returned no mime_type" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_image_generator_writes_single_image_with_local_store(tmp_path) -> None:
     store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
     client = FakeImageClient()
@@ -321,6 +417,31 @@ async def test_image_generator_writes_single_image_with_local_store(tmp_path) ->
     assert section.diagram.image_url == "http://test/images/gen-image-test/s-01/diagram.png"
     assert result["diagram_outcomes"]["s-01"] == "success"
     assert client.prompts
+
+
+@pytest.mark.asyncio
+async def test_image_generator_uses_provider_returned_format_for_store_and_url(tmp_path) -> None:
+    store = RecordingStore(base_path=tmp_path, base_url="http://test/images")
+    client = FakeJpegImageClient()
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    )
+
+    result = await image_generator(state, _store=store, _client=client)
+
+    section = result["generated_sections"]["s-01"]
+    assert section.diagram is not None
+    assert section.diagram.image_url == "http://test/images/gen-image-test/s-01/diagram.jpeg"
+    assert store.calls == [
+        {
+            "generation_id": "gen-image-test",
+            "section_id": "s-01",
+            "filename": "diagram.jpeg",
+            "format": "jpeg",
+        }
+    ]
 
 
 @pytest.mark.asyncio
