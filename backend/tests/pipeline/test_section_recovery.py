@@ -411,21 +411,6 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
                 "composition_plans": {"s-01": composition},
                 "completed_nodes": ["composition_planner"],
             }
-        if first == "partial_section_assembler":
-            return {
-                "partial_sections": {
-                    "s-01": {
-                        "section_id": "s-01",
-                        "template_id": section.template_id,
-                        "content": section,
-                        "status": "awaiting_assets",
-                        "pending_assets": ["diagram"],
-                        "updated_at": "2026-04-08T00:00:00+00:00",
-                    }
-                },
-                "section_pending_assets": {"s-01": ["diagram"]},
-                "completed_nodes": ["partial_section_assembler"],
-            }
         return {
             "assembled_sections": {"s-01": section_with_simulation},
             "qc_reports": {
@@ -457,7 +442,6 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
     assert result["completed_nodes"] == [
         "content_generator",
         "composition_planner",
-        "partial_section_assembler",
         "diagram_generator",
         "interaction_generator",
         "section_assembler",
@@ -552,21 +536,6 @@ async def test_process_section_prefers_image_outcome_over_svg_skip(monkeypatch) 
             return {
                 "composition_plans": {sid: composition},
                 "completed_nodes": ["composition_planner"],
-            }
-        if first == "partial_section_assembler":
-            return {
-                "partial_sections": {
-                    sid: {
-                        "section_id": sid,
-                        "template_id": section.template_id,
-                        "content": section,
-                        "status": "awaiting_assets",
-                        "pending_assets": ["diagram"],
-                        "updated_at": "2026-04-10T00:00:00+00:00",
-                    }
-                },
-                "section_pending_assets": {sid: ["diagram"]},
-                "completed_nodes": ["partial_section_assembler"],
             }
 
         typed = TextbookPipelineState.parse(state)

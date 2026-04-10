@@ -711,6 +711,7 @@
 						{#each sectionSlots as slot}
 							{@const slotStatus = displaySectionStatus(slot)}
 							{@const role = sectionRoleByPosition(slot.position)}
+							{@const contentSection = slot.section ?? slot.partial?.content ?? null}
 							<article class={`viewer-section viewer-section-${slotStatus}`}>
 								<div class="viewer-section-label">
 									Section {slot.position}{role ? ` · ${role}` : ''}
@@ -719,6 +720,9 @@
 
 								{#if slotStatus === 'completed' && slot.section}
 									<p>{buildSectionPreview(slot.section)}</p>
+								{:else if contentSection}
+									<p>{buildSectionPreview(contentSection)}</p>
+									<small>{statusLabel(slot)}</small>
 								{:else if slotStatus === 'writing'}
 									<div class="active-row">
 										<span class="active-dot"></span>

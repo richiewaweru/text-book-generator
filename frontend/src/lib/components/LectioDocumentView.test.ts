@@ -115,6 +115,80 @@ describe('LectioDocumentView', () => {
 		expect(screen.getByText(/Why derivatives matter/i)).toBeTruthy();
 	});
 
+	it('renders readable partial section content before completion', () => {
+		render(LectioDocumentView, {
+			props: {
+				document: {
+					generation_id: 'gen_123',
+					subject: 'Derivatives',
+					context: 'A first pass through rates of change',
+					template_id: 'guided-concept-path',
+					preset_id: 'blue-classroom',
+					status: 'running',
+					section_manifest: [
+						{ section_id: 'sec_1', title: 'Why derivatives matter', position: 1 },
+						{ section_id: 'sec_2', title: 'Instantaneous change', position: 2 }
+					],
+					sections: [],
+					partial_sections: [
+						{
+							section_id: 'sec_1',
+							template_id: 'guided-concept-path',
+							content: {
+								section_id: 'sec_1',
+								template_id: 'guided-concept-path',
+								header: { title: 'Why derivatives matter', subject: 'Math', grade_band: 'secondary' },
+								hook: {
+									headline: 'How do we measure change at an instant?',
+									body: 'A derivative tracks how a quantity changes right away.',
+									anchor: 'change'
+								},
+								explanation: {
+									body: 'We are looking at the rate of change at one exact point.',
+									emphasis: ['rate of change']
+								},
+								practice: {
+									problems: [
+										{
+											difficulty: 'warm',
+											question: 'Describe the slope at x = 2.',
+											hints: [{ level: 1, text: 'Look at the tangent line.' }]
+										},
+										{
+											difficulty: 'medium',
+											question: 'Estimate the derivative from a graph.',
+											hints: [{ level: 1, text: 'Use nearby points.' }]
+										}
+									]
+								},
+								what_next: {
+									body: 'Next we compare this to average rate of change.',
+									next: 'Average rate of change'
+								}
+							},
+							status: 'writing',
+							visual_mode: null,
+							pending_assets: [],
+							updated_at: '2026-03-19T00:00:01Z'
+						}
+					],
+					failed_sections: [],
+					qc_reports: [],
+					quality_passed: null,
+					error: null,
+					created_at: '2026-03-19T00:00:00Z',
+					updated_at: '2026-03-19T00:00:00Z',
+					completed_at: null
+				} as any
+			}
+		});
+
+		expect(screen.getByText(/Section 1 in progress/i)).toBeTruthy();
+		expect(screen.getByText(/Why derivatives matter/i)).toBeTruthy();
+		expect(screen.getByText(/How do we measure change at an instant\?/i)).toBeTruthy();
+		expect(screen.queryByText(/Generating section 1/i)).toBeNull();
+	});
+
 	it('shows Export for Builder when completed and handler is provided', async () => {
 		const onExportForBuilder = vi.fn();
 		render(LectioDocumentView, {

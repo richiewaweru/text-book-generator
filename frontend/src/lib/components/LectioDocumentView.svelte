@@ -24,6 +24,10 @@
 	);
 	const getPrintMode = usePrintMode();
 	const printMode = $derived(getPrintMode());
+
+	function sectionForSlot(slot: ViewerSectionSlot) {
+		return slot.section ?? slot.partial?.content ?? null;
+	}
 </script>
 
 {#if template}
@@ -61,6 +65,7 @@
 
 			<div class="section-stack" data-print-mode={printMode ? 'true' : 'false'}>
 				{#each resolvedSectionSlots as slot (slot.section_id)}
+					{@const renderableSection = sectionForSlot(slot)}
 					{#if slot.status === 'completed' && slot.section}
 						{@const TemplateRender = template.render}
 						<article class="animate-step-reveal" id={`section-${slot.section_id}`}>
@@ -69,6 +74,12 @@
 						{#if printMode}
 							<PrintSectionLink generationId={document.generation_id} section={slot.section} />
 						{/if}
+					{:else if renderableSection}
+						{@const TemplateRender = template.render}
+						<article class="animate-step-reveal section-partial" id={`section-${slot.section_id}`} data-section-status={slot.status}>
+							<div class="section-partial-badge">Section {slot.position} in progress</div>
+							<TemplateRender section={renderableSection} />
+						</article>
 					{:else}
 						<article class="glass-panel section-skeleton" aria-busy="true">
 							<p class="skeleton-kicker">Generating section {slot.position}</p>
@@ -148,6 +159,25 @@
 		gap: 0.8rem;
 		padding: 1.25rem;
 		border-radius: 1.5rem;
+	}
+
+	.section-partial {
+		display: grid;
+		gap: 0.85rem;
+	}
+
+	.section-partial-badge {
+		display: inline-flex;
+		align-items: center;
+		width: fit-content;
+		padding: 0.28rem 0.65rem;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--secondary) 76%, white 24%);
+		color: color-mix(in srgb, var(--foreground) 82%, white 18%);
+		font-size: 0.74rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
 	}
 
 	.skeleton-kicker {

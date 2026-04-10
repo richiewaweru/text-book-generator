@@ -197,6 +197,62 @@ function buildDocument(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function buildPartialSection(overrides: Record<string, unknown> = {}) {
+	const section = {
+		section_id: 's-02',
+		template_id: 'guided-concept-path',
+		header: {
+			title: 'Try the parts',
+			subject: 'Math',
+			grade_band: 'secondary'
+		},
+		hook: {
+			headline: 'Split the whole',
+			body: 'Fractions divide a whole into equal parts.',
+			anchor: 'fractions'
+		},
+		explanation: {
+			body: 'A fraction names how many equal parts we are focusing on.',
+			emphasis: ['equal parts']
+		},
+		practice: {
+			problems: [
+				{
+					difficulty: 'warm',
+					question: 'Shade one half of a square.',
+					hints: [{ level: 1, text: 'Split the square into two equal parts.' }]
+				},
+				{
+					difficulty: 'medium',
+					question: 'Estimate the fraction shown by the shaded region.',
+					hints: [{ level: 1, text: 'Count the equal parts.' }]
+				}
+			]
+		},
+		what_next: {
+			body: 'Next we connect this to equivalent fractions.',
+			next: 'Equivalent fractions'
+		}
+	};
+	const { section: sectionOverride, content: _contentOverride, ...rest } = overrides as {
+		section?: Record<string, unknown>;
+		content?: unknown;
+	};
+	const nextSection = sectionOverride ?? section;
+
+	return {
+		...rest,
+		section_id: 's-02',
+		template_id: 'guided-concept-path',
+		section: nextSection,
+		content: nextSection,
+		status: 'awaiting_assets',
+		visual_mode: 'image',
+		pending_assets: ['diagram'],
+		updated_at: '2026-03-23T00:00:01Z',
+	};
+}
+
 describe('GenerationView', () => {
 	beforeEach(() => {
 		generationState.set({
@@ -326,47 +382,7 @@ describe('GenerationView', () => {
 		getGenerationDocument.mockResolvedValue(
 			buildDocument({
 				sections: [],
-				partial_sections: [
-					{
-						section_id: 's-02',
-						template_id: 'guided-concept-path',
-						content: {
-							section_id: 's-02',
-							template_id: 'guided-concept-path',
-							header: {
-								title: 'Try the parts',
-								subject: 'Math',
-								grade_band: 'secondary'
-							},
-							hook: {
-								headline: 'Split the whole',
-								body: 'Fractions divide a whole into equal parts.',
-								anchor: 'fractions'
-							},
-							explanation: {
-								body: 'A fraction names how many equal parts we are focusing on.',
-								emphasis: ['equal parts']
-							},
-							practice: {
-								problems: [
-									{
-										difficulty: 'warm',
-										question: 'Shade one half of a square.',
-										hints: [{ level: 1, text: 'Split the square into two equal parts.' }]
-									}
-								]
-							},
-							what_next: {
-								body: 'Next we connect this to equivalent fractions.',
-								next: 'Equivalent fractions'
-							}
-						},
-						status: 'awaiting_assets',
-						visual_mode: 'image',
-						pending_assets: ['diagram'],
-						updated_at: '2026-03-23T00:00:01Z'
-					}
-				]
+				partial_sections: [buildPartialSection()]
 			})
 		);
 
@@ -386,6 +402,83 @@ describe('GenerationView', () => {
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
 
 		expect(screen.getAllByText(/generating image/i).length).toBeGreaterThan(0);
+		expect(screen.getByText(/Fractions divide a whole into equal parts\./i)).toBeTruthy();
+	});
+
+	it('updates the partial lesson preview when repeated partial events arrive', async () => {
+		getGenerationDetail.mockResolvedValue(buildDetail());
+		getGenerationDocument.mockResolvedValue(buildDocument({ sections: [], partial_sections: [] }));
+
+		render(GenerationView, {
+			props: {
+				accepted: {
+					generation_id: 'gen-123',
+					status: 'running',
+					events_url: '/api/v1/generations/gen-123/events',
+					document_url: '/api/v1/generations/gen-123/document'
+				},
+				onReset: vi.fn()
+			}
+		});
+
+		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
+
+		emitEvent('section_partial', {
+			type: 'section_partial',
+			generation_id: 'gen-123',
+			...buildPartialSection()
+		});
+
+		await waitFor(() => expect(screen.getByText(/Fractions divide a whole into equal parts\./i)).toBeTruthy());
+
+		emitEvent('section_partial', {
+			type: 'section_partial',
+			generation_id: 'gen-123',
+			...buildPartialSection({
+				section: {
+					section_id: 's-02',
+					template_id: 'guided-concept-path',
+					header: {
+						title: 'Try the parts, revised',
+						subject: 'Math',
+						grade_band: 'secondary'
+					},
+					hook: {
+						headline: 'Split the whole',
+						body: 'A revised draft now explains equal parts in a new way.',
+						anchor: 'fractions'
+					},
+					explanation: {
+						body: 'A fraction names how many equal parts we are focusing on.',
+						emphasis: ['equal parts']
+					},
+					practice: {
+						problems: [
+							{
+								difficulty: 'warm',
+								question: 'Shade one half of a square.',
+								hints: [{ level: 1, text: 'Split the square into two equal parts.' }]
+							},
+							{
+								difficulty: 'medium',
+								question: 'Estimate the fraction shown by the shaded region.',
+								hints: [{ level: 1, text: 'Count the equal parts.' }]
+							}
+						]
+					},
+					what_next: {
+						body: 'Next we connect this to equivalent fractions.',
+						next: 'Equivalent fractions'
+					}
+				},
+				updated_at: '2026-03-23T00:00:02Z'
+			})
+		});
+
+		await waitFor(() =>
+			expect(screen.getByText(/revised draft now explains equal parts/i)).toBeTruthy()
+		);
 	});
 
 	it('marks untouched queued sections as blocked after a failed generation', async () => {

@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import inspect
 import uuid
 from typing import Any
 
 import core.events as core_events
 from langchain_core.runnables.config import RunnableConfig
 from core.config import Settings
-from pipeline.events import RuntimePolicyEvent, RuntimeProgressEvent
+from pipeline.events import PipelineEvent, RuntimePolicyEvent, RuntimeProgressEvent
 from core.llm import RetryPolicy
 from pipeline.runtime_policy import (
     RuntimePolicyBundle,
@@ -36,6 +37,14 @@ class PipelineRuntimeContext:
     generation_timeout_seconds: float
     limiters: PipelineLimiters
     progress: RuntimeProgressTracker
+    emit_event_callback: Any = None
+
+    async def emit_event(self, event: PipelineEvent) -> None:
+        if self.emit_event_callback is None:
+            return
+        maybe_awaitable = self.emit_event_callback(event)
+        if inspect.isawaitable(maybe_awaitable):
+            await maybe_awaitable
 
 
 _CONTEXTS_BY_ID: dict[str, PipelineRuntimeContext] = {}
@@ -63,6 +72,7 @@ def build_runtime_context(
     *,
     request: PipelineRequest,
     settings: Settings,
+    emit_event_callback: Any = None,
 ) -> PipelineRuntimeContext:
     policy = resolve_runtime_policy_bundle(settings, request.mode)
     generation_id = request.generation_id or ""
@@ -84,6 +94,7 @@ def build_runtime_context(
             qc=asyncio.Semaphore(policy.concurrency.max_qc_concurrency),
         ),
         progress=progress,
+        emit_event_callback=emit_event_callback,
     )
     return context
 

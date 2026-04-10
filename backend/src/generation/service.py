@@ -377,12 +377,27 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
             "label": f"Generating {event.get('title', 'section')}",
         }]
     if event_type == "section_partial":
+        pending_assets = list(event.get("pending_assets") or [])
+        status = event.get("status")
+        visual_mode = event.get("visual_mode")
+        if status == "finalizing":
+            label = "Finalizing section"
+            stage = "finalizing_section"
+        elif visual_mode == "image" and pending_assets:
+            label = "Generating image"
+            stage = "awaiting_assets"
+        elif "diagram" in pending_assets:
+            label = "Generating diagram"
+            stage = "awaiting_assets"
+        else:
+            label = "Drafting section"
+            stage = "drafting_partial"
         return [{
             "type": "progress_update",
             "generation_id": event.get("generation_id", ""),
-            "stage": "drafting_partial",
+            "stage": stage,
             "section_id": event.get("section_id"),
-            "label": "Drafting section",
+            "label": label,
         }]
     if event_type == "section_asset_pending":
         pending_assets = list(event.get("pending_assets") or [])
@@ -1040,6 +1055,7 @@ async def _run_generation_job(
                 section_id=event.section_id,
                 pending_assets=list(event.pending_assets),
                 visual_mode=event.visual_mode,
+                status_value="finalizing" if not event.pending_assets else "awaiting_assets",
             )
             await document_repo.save_document(document)
         if isinstance(event, SectionFinalEvent):

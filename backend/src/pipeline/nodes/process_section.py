@@ -1,17 +1,14 @@
 """
-Graph-visible per-section flow helpers.
+Graph-visible per-section orchestration.
 
-prepare_section
-    content_generator -> composition_planner -> partial_section_assembler
+process_section is now the canonical 4-phase section flow:
+    1. content_generator
+    2. composition_planner
+    3. diagram_generator || image_generator || interaction_generator
+    4. section_assembler -> qc_agent
 
-generate_section_assets
-    diagram_generator || image_generator || interaction_generator
-
-finalize_section
-    section_assembler -> qc_agent
-
-process_section remains as a compatibility wrapper that runs the three phases
-sequentially for tests and any narrow callers that still expect the old API.
+Partial section emission is an inline side effect between phases, not a
+separate graph node.
 """
 
 from __future__ import annotations
@@ -20,6 +17,13 @@ from datetime import datetime, timezone
 
 from langchain_core.runnables.config import RunnableConfig
 
+from pipeline.events import (
+    SectionAssetPendingEvent,
+    SectionAssetReadyEvent,
+    SectionFinalEvent,
+    SectionPartialEvent,
+    SectionReadyEvent,
+)
 from pipeline.nodes.composition_planner import composition_planner
 from pipeline.nodes.content_generator import content_generator
 from pipeline.nodes.diagram_generator import diagram_generator
@@ -27,7 +31,7 @@ from pipeline.nodes.image_generator import image_generator
 from pipeline.nodes.interaction_decider import interaction_decider
 from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.nodes.qc_agent import qc_agent
-from pipeline.nodes.section_assembler import partial_section_assembler, section_assembler
+from pipeline.nodes.section_assembler import section_assembler
 from pipeline.nodes.section_runner import _run_parallel_phase, run_section_steps
 from pipeline.runtime_context import get_runtime_context
 from pipeline.section_assets import pending_visual_fields
@@ -91,42 +95,167 @@ def _merge_phase_outputs(*phases: dict) -> dict:
     return output
 
 
-def _upsert_partial_record(
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _build_partial_snapshot(
     state: TextbookPipelineState,
     *,
-    pending_assets: list[str],
-) -> dict[str, PartialSectionRecord]:
+    status: str,
+    pending_assets: list[str] | None = None,
+    updated_at: str | None = None,
+) -> dict:
     section_id = state.current_section_id
     if section_id is None:
-        return dict(state.partial_sections)
+        return {}
 
     section = state.generated_sections.get(section_id)
-    partials = dict(state.partial_sections)
     if section is None:
-        return partials
+        return {}
 
-    partials[section_id] = PartialSectionRecord(
-        section_id=section.section_id,
-        template_id=section.template_id,
-        content=section,
-        status="awaiting_assets" if pending_assets else "partial",
-        visual_mode=resolve_effective_visual_mode(state),
-        pending_assets=list(pending_assets),
-        updated_at=datetime.now(timezone.utc).isoformat(),
+    next_pending_assets = list(
+        pending_visual_fields(state) if pending_assets is None else pending_assets
     )
-    return partials
+    lifecycle = "awaiting_assets" if next_pending_assets else status
+    timestamp = updated_at or _utc_now_iso()
+
+    return {
+        "partial_sections": {
+            section_id: PartialSectionRecord(
+                section_id=section.section_id,
+                template_id=section.template_id,
+                content=section,
+                status=lifecycle,
+                visual_mode=resolve_effective_visual_mode(state),
+                pending_assets=next_pending_assets,
+                updated_at=timestamp,
+            )
+        },
+        "section_pending_assets": {section_id: next_pending_assets},
+        "section_lifecycle": {section_id: lifecycle},
+    }
 
 
-async def prepare_section(
+async def _emit_partial_snapshot(
+    state: TextbookPipelineState,
+    *,
+    runtime_context,
+    status: str,
+) -> None:
+    section_id = state.current_section_id
+    section = state.generated_sections.get(section_id) if section_id is not None else None
+    partial = state.partial_sections.get(section_id) if section_id is not None else None
+    if runtime_context is None or section_id is None or section is None or partial is None:
+        return
+
+    await runtime_context.emit_event(
+        SectionPartialEvent(
+            generation_id=state.request.generation_id or "",
+            section_id=section_id,
+            section=section,
+            template_id=partial.template_id,
+            status=status,
+            visual_mode=partial.visual_mode,
+            pending_assets=list(partial.pending_assets),
+            updated_at=partial.updated_at,
+        )
+    )
+
+
+async def _emit_asset_pending(
+    state: TextbookPipelineState,
+    *,
+    runtime_context,
+) -> None:
+    section_id = state.current_section_id
+    partial = state.partial_sections.get(section_id) if section_id is not None else None
+    if runtime_context is None or section_id is None or partial is None:
+        return
+    if not partial.pending_assets:
+        return
+
+    await runtime_context.emit_event(
+        SectionAssetPendingEvent(
+            generation_id=state.request.generation_id or "",
+            section_id=section_id,
+            pending_assets=list(partial.pending_assets),
+            status=partial.status,
+            visual_mode=partial.visual_mode,
+            updated_at=partial.updated_at,
+        )
+    )
+
+
+async def _emit_asset_ready(
+    state: TextbookPipelineState,
+    *,
+    runtime_context,
+    ready_assets: list[str],
+) -> None:
+    section_id = state.current_section_id
+    partial = state.partial_sections.get(section_id) if section_id is not None else None
+    if runtime_context is None or section_id is None or partial is None:
+        return
+    if not ready_assets:
+        return
+
+    await runtime_context.emit_event(
+        SectionAssetReadyEvent(
+            generation_id=state.request.generation_id or "",
+            section_id=section_id,
+            ready_assets=list(ready_assets),
+            pending_assets=list(partial.pending_assets),
+            visual_mode=partial.visual_mode,
+            updated_at=partial.updated_at,
+        )
+    )
+
+
+async def _emit_final_section_events(
+    state: TextbookPipelineState,
+    *,
+    runtime_context,
+) -> None:
+    section_id = state.current_section_id
+    section = state.assembled_sections.get(section_id) if section_id is not None else None
+    if runtime_context is None or section_id is None or section is None:
+        return
+
+    await runtime_context.progress.mark_section_ready(section_id)
+    total_sections = len(state.curriculum_outline or []) or state.request.section_count
+    completed_sections = len(state.assembled_sections)
+
+    await runtime_context.emit_event(
+        SectionFinalEvent(
+            generation_id=state.request.generation_id or "",
+            section_id=section_id,
+            section=section,
+            completed_sections=completed_sections,
+            total_sections=total_sections,
+        )
+    )
+    await runtime_context.emit_event(
+        SectionReadyEvent(
+            generation_id=state.request.generation_id or "",
+            section_id=section_id,
+            section=section,
+            completed_sections=completed_sections,
+            total_sections=total_sections,
+        )
+    )
+
+
+async def process_section(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
     typed = TextbookPipelineState.parse(state)
+    raw_state = typed.model_dump()
     section_id = typed.current_section_id
     runtime_context, is_retry = await _start_section_flow(typed, config=config)
-    continue_flow = False
 
     try:
         phase1 = await run_section_steps(
@@ -135,7 +264,6 @@ async def prepare_section(
             model_overrides=model_overrides,
             config=config,
         )
-        raw_state = typed.model_dump()
         merge_state_updates(raw_state, phase1)
         typed = TextbookPipelineState.parse(raw_state)
         if typed.current_section_id not in typed.generated_sections:
@@ -150,106 +278,57 @@ async def prepare_section(
         merge_state_updates(raw_state, phase2)
         typed = TextbookPipelineState.parse(raw_state)
 
-        phase3 = await run_section_steps(
+        phase2_partial = _build_partial_snapshot(
             typed,
-            steps=[("partial_section_assembler", partial_section_assembler)],
+            status="partial",
+            updated_at=_utc_now_iso(),
+        )
+        merge_state_updates(raw_state, phase2_partial)
+        typed = TextbookPipelineState.parse(raw_state)
+        await _emit_partial_snapshot(typed, runtime_context=runtime_context, status=typed.section_lifecycle.get(section_id, "partial"))
+        await _emit_asset_pending(typed, runtime_context=runtime_context)
+
+        initial_pending_assets = list(typed.section_pending_assets.get(section_id, []))
+
+        phase3 = await _run_parallel_phase(
+            typed,
+            steps=[
+                ("diagram_generator", diagram_generator),
+                ("image_generator", image_generator),
+                ("interaction_path", _run_interaction_path),
+            ],
+            pre_instrumented=frozenset({"interaction_path"}),
             model_overrides=model_overrides,
             config=config,
         )
         merge_state_updates(raw_state, phase3)
         typed = TextbookPipelineState.parse(raw_state)
 
-        output = _merge_phase_outputs(phase1, phase2, phase3)
-        pending_assets = phase3.get("section_pending_assets", {}).get(section_id, [])
-        if pending_assets:
-            output["_asset_pending"] = {section_id: list(pending_assets)}
-
-        continue_flow = True
-        return output
-    finally:
-        if not continue_flow:
-            await _finish_section_flow(
-                runtime_context,
-                section_id=section_id,
-                is_retry=is_retry,
-            )
-
-
-async def generate_section_assets(
-    state: TextbookPipelineState | dict,
-    *,
-    model_overrides: dict | None = None,
-    config: RunnableConfig | None = None,
-) -> dict:
-    typed = TextbookPipelineState.parse(state)
-    section_id = typed.current_section_id
-    initial_pending_assets = list(typed.section_pending_assets.get(section_id, []))
-
-    phase = await _run_parallel_phase(
-        typed,
-        steps=[
-            ("diagram_generator", diagram_generator),
-            ("image_generator", image_generator),
-            ("interaction_path", _run_interaction_path),
-        ],
-        pre_instrumented=frozenset({"interaction_path"}),
-        model_overrides=model_overrides,
-        config=config,
-    )
-
-    raw_state = typed.model_dump()
-    merge_state_updates(raw_state, phase)
-    updated = TextbookPipelineState.parse(raw_state)
-    final_pending_assets = pending_visual_fields(updated)
-
-    output = dict(phase)
-    output["section_pending_assets"] = {section_id: list(final_pending_assets)}
-    output["section_lifecycle"] = {
-        section_id: "awaiting_assets" if final_pending_assets else "partial"
-    }
-    output["partial_sections"] = _upsert_partial_record(
-        updated,
-        pending_assets=final_pending_assets,
-    )
-
-    ready_assets = [
-        asset
-        for asset in initial_pending_assets
-        if asset not in set(final_pending_assets)
-    ]
-    if ready_assets:
-        output["_asset_ready"] = {
-            section_id: {
-                "ready_assets": ready_assets,
-                "pending_assets": list(final_pending_assets),
-            }
-        }
-
-    if final_pending_assets:
-        runtime_context = get_runtime_context(config)
-        is_retry = section_id is not None and updated.pending_rerender_for(section_id) is not None
-        await _finish_section_flow(
-            runtime_context,
-            section_id=section_id,
-            is_retry=is_retry,
+        final_pending_assets = list(pending_visual_fields(typed))
+        phase3_partial = _build_partial_snapshot(
+            typed,
+            status="finalizing",
+            pending_assets=final_pending_assets,
+            updated_at=_utc_now_iso(),
+        )
+        merge_state_updates(raw_state, phase3_partial)
+        typed = TextbookPipelineState.parse(raw_state)
+        await _emit_partial_snapshot(
+            typed,
+            runtime_context=runtime_context,
+            status=typed.section_lifecycle.get(section_id, "finalizing"),
         )
 
-    return output
+        ready_assets = [
+            asset for asset in initial_pending_assets if asset not in set(final_pending_assets)
+        ]
+        await _emit_asset_ready(
+            typed,
+            runtime_context=runtime_context,
+            ready_assets=ready_assets,
+        )
 
-
-async def finalize_section(
-    state: TextbookPipelineState | dict,
-    *,
-    model_overrides: dict | None = None,
-    config: RunnableConfig | None = None,
-) -> dict:
-    typed = TextbookPipelineState.parse(state)
-    section_id = typed.current_section_id
-    runtime_context = get_runtime_context(config)
-    is_retry = section_id is not None and typed.pending_rerender_for(section_id) is not None
-
-    try:
-        return await run_section_steps(
+        phase4 = await run_section_steps(
             typed,
             steps=[
                 ("section_assembler", section_assembler),
@@ -258,6 +337,13 @@ async def finalize_section(
             model_overrides=model_overrides,
             config=config,
         )
+        merge_state_updates(raw_state, phase4)
+        typed = TextbookPipelineState.parse(raw_state)
+
+        if section_id in typed.assembled_sections:
+            await _emit_final_section_events(typed, runtime_context=runtime_context)
+
+        return _merge_phase_outputs(phase1, phase2, phase2_partial, phase3, phase3_partial, phase4)
     finally:
         await _finish_section_flow(
             runtime_context,
@@ -266,50 +352,4 @@ async def finalize_section(
         )
 
 
-async def process_section(
-    state: TextbookPipelineState | dict,
-    *,
-    model_overrides: dict | None = None,
-    config: RunnableConfig | None = None,
-) -> dict:
-    typed = TextbookPipelineState.parse(state)
-    raw_state = typed.model_dump()
-
-    phase1 = await prepare_section(
-        typed,
-        model_overrides=model_overrides,
-        config=config,
-    )
-    merge_state_updates(raw_state, phase1)
-    typed = TextbookPipelineState.parse(raw_state)
-    if typed.current_section_id not in typed.generated_sections:
-        return phase1
-
-    phases = [phase1]
-    if typed.section_pending_assets.get(typed.current_section_id):
-        phase2 = await generate_section_assets(
-            typed,
-            model_overrides=model_overrides,
-            config=config,
-        )
-        phases.append(phase2)
-        merge_state_updates(raw_state, phase2)
-        typed = TextbookPipelineState.parse(raw_state)
-
-    if not typed.section_pending_assets.get(typed.current_section_id):
-        phase3 = await finalize_section(
-            typed,
-            model_overrides=model_overrides,
-            config=config,
-        )
-        phases.append(phase3)
-
-    return _merge_phase_outputs(*phases)
-
-
-__all__ = [
-    "finalize_section",
-    "generate_section_assets",
-    "prepare_section",
-    "process_section",
-]
+__all__ = ["process_section"]

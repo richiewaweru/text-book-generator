@@ -2,10 +2,9 @@
 pipeline.graph
 
 The LangGraph generation graph. Curriculum planner fans out into
-per-section mini-pipelines:
-    prepare_section -> generate_section_assets? -> finalize_section
+per-section execution through process_section.
 
-After finalize/retry nodes, route_after_qc decides whether to rerender or finish.
+After process_section/retry nodes, route_after_qc decides whether to rerender or finish.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from typing import Any, Callable
 
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, StateGraph
+from langgraph.graph import StateGraph
 from langgraph.types import Send
 
 from pipeline.events import (
@@ -27,11 +26,7 @@ from pipeline.nodes.curriculum_planner import curriculum_planner
 from pipeline.nodes.diagram_generator import diagram_generator
 from pipeline.nodes.field_regenerator import field_regenerator
 from pipeline.nodes.interaction_generator import interaction_generator
-from pipeline.nodes.process_section import (
-    finalize_section,
-    generate_section_assets,
-    prepare_section,
-)
+from pipeline.nodes.process_section import process_section
 from pipeline.nodes.qc_agent import qc_agent
 from pipeline.nodes.section_assembler import section_assembler
 from pipeline.nodes.section_runner import run_section_steps
@@ -87,7 +82,7 @@ def fan_out_sections(state: TextbookPipelineState | dict) -> list[Send]:
 
     base = state.model_dump()
     return [
-        Send("prepare_section", {
+        Send("process_section", {
             **base,
             "current_section_id": plan.section_id,
             "current_section_plan": plan.model_dump(),
@@ -301,34 +296,6 @@ async def retry_interaction(
             await runtime_context.progress.finish_retry(sid)
 
 
-def route_after_prepare_section(state: TextbookPipelineState | dict) -> str:
-    typed = TextbookPipelineState.parse(state)
-    section_id = typed.current_section_id
-    if section_id is None:
-        return END
-    if section_id in typed.failed_sections:
-        return END
-    if section_id not in typed.generated_sections:
-        return END
-    if typed.section_pending_assets.get(section_id):
-        return "generate_section_assets"
-    return "finalize_section"
-
-
-def route_after_generate_section_assets(state: TextbookPipelineState | dict) -> str:
-    typed = TextbookPipelineState.parse(state)
-    section_id = typed.current_section_id
-    if section_id is None:
-        return END
-    if section_id in typed.failed_sections:
-        return END
-    if section_id not in typed.generated_sections:
-        return END
-    if typed.section_pending_assets.get(section_id):
-        return END
-    return "finalize_section"
-
-
 def build_graph(checkpointer=None) -> StateGraph:
     workflow = StateGraph(TextbookPipelineState)
 
@@ -338,16 +305,8 @@ def build_graph(checkpointer=None) -> StateGraph:
         _normalize_langgraph_config_signature(_instrumented_curriculum_planner),
     )
     workflow.add_node(
-        "prepare_section",
-        _normalize_langgraph_config_signature(prepare_section),
-    )
-    workflow.add_node(
-        "generate_section_assets",
-        _normalize_langgraph_config_signature(generate_section_assets),
-    )
-    workflow.add_node(
-        "finalize_section",
-        _normalize_langgraph_config_signature(finalize_section),
+        "process_section",
+        _normalize_langgraph_config_signature(process_section),
     )
     workflow.add_node(
         "retry_diagram",
@@ -368,12 +327,7 @@ def build_graph(checkpointer=None) -> StateGraph:
         fan_out_sections,
     )
 
-    workflow.add_conditional_edges("prepare_section", route_after_prepare_section)
-    workflow.add_conditional_edges(
-        "generate_section_assets",
-        route_after_generate_section_assets,
-    )
-    workflow.add_conditional_edges("finalize_section", route_after_qc)
+    workflow.add_conditional_edges("process_section", route_after_qc)
 
     # Diagram-only retry: re-run diagram + assembler + QC, then re-evaluate.
     workflow.add_conditional_edges("retry_diagram", route_after_qc)

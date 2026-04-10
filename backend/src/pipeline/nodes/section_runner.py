@@ -659,27 +659,14 @@ async def run_section_steps(
             break
 
         if (
-            node_name in {"partial_section_assembler", "section_assembler"}
+            node_name == "section_assembler"
             and section_id
-            and (
-                (
-                    node_name == "partial_section_assembler"
-                    and section_id not in step_state.partial_sections
-                )
-                or (
-                    node_name == "section_assembler"
-                    and section_id not in step_state.assembled_sections
-                )
-            )
+            and section_id not in step_state.assembled_sections
         ):
             node_logger = _node_logger(generation_id, section_id, node_name)
             pending_assets = step_state.section_pending_assets.get(section_id, [])
             lifecycle = step_state.section_lifecycle.get(section_id)
-            if (
-                node_name == "section_assembler"
-                and pending_assets
-                and lifecycle in {"partial", "awaiting_assets"}
-            ):
+            if pending_assets and lifecycle in {"partial", "awaiting_assets", "finalizing"}:
                 node_logger.info(
                     "Deferring final assembly for section %s while assets are still pending: %s",
                     section_id,

@@ -104,32 +104,23 @@ async def section_assembler(
     *,
     model_overrides: dict | None = None,
 ) -> dict:
-    return await _assemble_section(state, mode="final", model_overrides=model_overrides)
-
-
-async def partial_section_assembler(
-    state: TextbookPipelineState | dict,
-    *,
-    model_overrides: dict | None = None,
-) -> dict:
-    return await _assemble_section(state, mode="partial", model_overrides=model_overrides)
+    return await _assemble_section(state, model_overrides=model_overrides)
 
 
 async def _assemble_section(
     state: TextbookPipelineState | dict,
     *,
-    mode: str,
     model_overrides: dict | None = None,
 ) -> dict:
     _ = model_overrides
     typed = TextbookPipelineState.parse(state)
     section_id = typed.current_section_id
-    node_name = "partial_section_assembler" if mode == "partial" else "section_assembler"
+    node_name = "section_assembler"
     force_console_log(
         "FINALIZE",
         "START",
         section_id=section_id,
-        mode=mode,
+        mode="final",
     )
 
     section = typed.generated_sections.get(section_id)
@@ -138,7 +129,7 @@ async def _assemble_section(
             "FINALIZE",
             "MISSING_SECTION",
             section_id=section_id,
-            mode=mode,
+            mode="final",
         )
         return {
             "errors": [
@@ -157,12 +148,12 @@ async def _assemble_section(
 
     section_dict = section.model_dump(exclude_none=True)
     visual_issue = resolve_visual_issue(typed)
-    if mode == "final" and visual_issue:
+    if visual_issue:
         force_console_log(
             "FINALIZE",
             "VISUAL_ISSUE",
             section_id=section_id,
-            mode=mode,
+            mode="final",
             message=visual_issue,
         )
         return {
@@ -178,12 +169,12 @@ async def _assemble_section(
         }
 
     pending_assets = pending_visual_fields(typed)
-    if mode == "final" and pending_assets:
+    if pending_assets:
         force_console_log(
             "FINALIZE",
             "AWAITING_ASSETS",
             section_id=section_id,
-            mode=mode,
+            mode="final",
             pending_assets=pending_assets,
         )
         partials = dict(typed.partial_sections)
@@ -208,7 +199,7 @@ async def _assemble_section(
     is_valid, violations = validate_section_for_template(
         section_dict,
         typed.contract.id,
-        mode=mode,
+        mode="final",
         allow_missing_fields=set(pending_assets),
         additional_required_fields=set(required_visual_fields(typed)),
         required_components_override=list(
@@ -232,7 +223,7 @@ async def _assemble_section(
             "FINALIZE",
             "CONTRACT_VIOLATION",
             section_id=section_id,
-            mode=mode,
+            mode="final",
             violations=violations,
         )
         return {
@@ -256,27 +247,6 @@ async def _assemble_section(
     reports = dict(typed.qc_reports)
     reports[section_id] = qc_report
 
-    if mode == "partial":
-        partials = dict(typed.partial_sections)
-        partials[section_id] = PartialSectionRecord(
-            section_id=section.section_id,
-            template_id=section.template_id,
-            content=section,
-            status="awaiting_assets" if pending_assets else "partial",
-            visual_mode=resolve_effective_visual_mode(typed),
-            pending_assets=pending_assets,
-            updated_at=datetime.now(timezone.utc).isoformat(),
-        )
-        lifecycle = dict(typed.section_lifecycle)
-        lifecycle[section_id] = "awaiting_assets" if pending_assets else "partial"
-        return {
-            "partial_sections": partials,
-            "section_pending_assets": {section_id: pending_assets},
-            "section_lifecycle": lifecycle,
-            "qc_reports": reports,
-            "completed_nodes": [node_name],
-        }
-
     assembled = dict(typed.assembled_sections)
     assembled[section_id] = section
     lifecycle = dict(typed.section_lifecycle)
@@ -285,7 +255,7 @@ async def _assemble_section(
         "FINALIZE",
         "ASSEMBLED",
         section_id=section_id,
-        mode=mode,
+        mode="final",
     )
     return {
         "assembled_sections": assembled,

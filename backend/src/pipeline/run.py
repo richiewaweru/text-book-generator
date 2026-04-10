@@ -30,10 +30,7 @@ from pipeline.events import (
     PipelineStartEvent,
     QCCompleteEvent,
     RuntimeProgressEvent,
-    SectionAssetPendingEvent,
-    SectionAssetReadyEvent,
     SectionFinalEvent,
-    SectionPartialEvent,
     SectionReadyEvent,
     SectionStartedEvent,
 )
@@ -324,7 +321,11 @@ async def run_pipeline_streaming(
     command: PipelineCommand,
     on_event: Callable[[PipelineEvent], Awaitable[None] | None] | None = None,
 ) -> PipelineResult:
-    runtime_context = build_runtime_context(request=command, settings=get_settings())
+    runtime_context = build_runtime_context(
+        request=command,
+        settings=get_settings(),
+        emit_event_callback=on_event,
+    )
     register_runtime_context(runtime_context)
     contract = get_contract(command.template_id)
     graph = build_graph()
@@ -390,114 +391,55 @@ async def run_pipeline_streaming(
                         )
                     emitted_started_sections = True
 
-                if node_name in {"prepare_section", "generate_section_assets", "finalize_section", "retry_diagram", "retry_field", "retry_interaction"}:
-                    partials = output.get("partial_sections", {}) if isinstance(output, dict) else {}
-                    if node_name == "prepare_section":
-                        for section_id, partial in partials.items():
-                            entry = PipelinePartialSectionEntry.model_validate(
-                                _normalize_partial_entry_payload(partial)
-                            )
-                            if section_id in typed_state.assembled_sections or section_id in typed_state.failed_sections:
-                                continue
-                            await _emit(
-                                SectionPartialEvent(
-                                    generation_id=command.generation_id or "",
-                                    section_id=section_id,
-                                    section=entry.content,
-                                    template_id=entry.template_id,
-                                    status=entry.status,
-                                    visual_mode=entry.visual_mode,
-                                    pending_assets=list(entry.pending_assets),
-                                    updated_at=entry.updated_at.isoformat(),
-                                ),
-                                on_event,
-                            )
+                if node_name in {"retry_diagram", "retry_field", "retry_interaction"}:
+                    assembled = output.get("assembled_sections", {}) if isinstance(output, dict) else {}
+                    total_sections = len(typed_state.curriculum_outline or []) or command.section_count
+                    completed_sections = len(typed_state.assembled_sections)
+                    for section_id, section in assembled.items():
+                        await runtime_context.progress.mark_section_ready(section_id)
+                        final_event = SectionFinalEvent(
+                            generation_id=command.generation_id or "",
+                            section_id=section_id,
+                            section=(
+                                section
+                                if isinstance(section, SectionContent)
+                                else SectionContent.model_validate(section)
+                            ),
+                            completed_sections=completed_sections,
+                            total_sections=total_sections,
+                        )
+                        await _emit(final_event, on_event)
+                        await _emit(
+                            SectionReadyEvent(
+                                generation_id=final_event.generation_id,
+                                section_id=final_event.section_id,
+                                section=final_event.section,
+                                completed_sections=final_event.completed_sections,
+                                total_sections=final_event.total_sections,
+                            ),
+                            on_event,
+                        )
 
-                        asset_pending = output.get("_asset_pending", {}) if isinstance(output, dict) else {}
-                        for section_id, pending_assets in asset_pending.items():
-                            partial = typed_state.partial_sections.get(section_id)
-                            updated_at = (
-                                partial.updated_at
-                                if partial is not None
-                                else datetime.now(timezone.utc).isoformat()
-                            )
-                            await _emit(
-                                SectionAssetPendingEvent(
-                                    generation_id=command.generation_id or "",
-                                    section_id=section_id,
-                                    pending_assets=list(pending_assets),
-                                    status=typed_state.section_lifecycle.get(section_id, "awaiting_assets"),
-                                    visual_mode=getattr(partial, "visual_mode", None),
-                                    updated_at=updated_at,
-                                ),
-                                on_event,
-                            )
-
-                    if node_name == "generate_section_assets":
-                        asset_ready = output.get("_asset_ready", {}) if isinstance(output, dict) else {}
-                        for section_id, payload in asset_ready.items():
-                            await _emit(
-                                SectionAssetReadyEvent(
-                                    generation_id=command.generation_id or "",
-                                    section_id=section_id,
-                                    ready_assets=list(payload.get("ready_assets", [])),
-                                    pending_assets=list(payload.get("pending_assets", [])),
-                                    visual_mode=getattr(
-                                        typed_state.partial_sections.get(section_id),
-                                        "visual_mode",
-                                        None,
-                                    ),
-                                    updated_at=datetime.now(timezone.utc).isoformat(),
-                                ),
-                                on_event,
-                            )
-
-                    if node_name in {"finalize_section", "retry_diagram", "retry_field", "retry_interaction"}:
-                        assembled = output.get("assembled_sections", {}) if isinstance(output, dict) else {}
-                        total_sections = len(typed_state.curriculum_outline or []) or command.section_count
-                        completed_sections = len(typed_state.assembled_sections)
-                        for section_id, section in assembled.items():
-                            await runtime_context.progress.mark_section_ready(section_id)
-                            final_event = SectionFinalEvent(
+                if node_name in {"process_section", "retry_diagram", "retry_field", "retry_interaction"}:
+                    total_sections = len(typed_state.curriculum_outline or []) or command.section_count
+                    completed_sections = len(typed_state.assembled_sections)
+                    reports = typed_state.qc_reports
+                    if (
+                        reports
+                        and total_sections
+                        and completed_sections >= total_sections
+                        and len(reports) >= total_sections
+                        and not _build_partial_sections(typed_state)
+                        and not _build_failed_sections(typed_state)
+                    ):
+                        await _emit(
+                            QCCompleteEvent(
                                 generation_id=command.generation_id or "",
-                                section_id=section_id,
-                                section=(
-                                    section
-                                    if isinstance(section, SectionContent)
-                                    else SectionContent.model_validate(section)
-                                ),
-                                completed_sections=completed_sections,
-                                total_sections=total_sections,
-                            )
-                            await _emit(final_event, on_event)
-                            await _emit(
-                                SectionReadyEvent(
-                                    generation_id=final_event.generation_id,
-                                    section_id=final_event.section_id,
-                                    section=final_event.section,
-                                    completed_sections=final_event.completed_sections,
-                                    total_sections=final_event.total_sections,
-                                ),
-                                on_event,
-                            )
-
-                        reports = typed_state.qc_reports
-                        if (
-                            reports
-                            and total_sections
-                            and completed_sections >= total_sections
-                            and len(reports) >= total_sections
-                            and not _build_partial_sections(typed_state)
-                            and not _build_failed_sections(typed_state)
-                        ):
-                            await _emit(
-                                QCCompleteEvent(
-                                    generation_id=command.generation_id or "",
-                                    passed=sum(1 for report in reports.values() if report.passed),
-                                    total=len(reports),
-                                ),
-                                on_event,
-                            )
+                                passed=sum(1 for report in reports.values() if report.passed),
+                                total=len(reports),
+                            ),
+                            on_event,
+                        )
 
         return _build_result(command, final_state, perf_counter() - started)
     finally:

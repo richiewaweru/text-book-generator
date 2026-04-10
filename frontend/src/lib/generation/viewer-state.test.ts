@@ -251,4 +251,77 @@ describe('viewer-state helpers', () => {
 		expect(updated.partial_sections?.[0]?.visual_mode).toBe('image');
 		expect(buildSectionSlots(updated, 1)[0]?.status).toBe('visual_pending');
 	});
+
+	it('replaces repeated partial updates for the same section with the latest content', () => {
+		const initial = applySectionPartial(createDocument(), {
+			type: 'section_partial',
+			generation_id: 'gen-123',
+			section_id: 's-01',
+			template_id: 'guided-concept-path',
+			section: firstSection as any,
+			status: 'writing',
+			visual_mode: null,
+			pending_assets: [],
+			updated_at: '2026-03-19T00:00:01Z'
+		}).document;
+		const updated = applySectionPartial(initial, {
+			type: 'section_partial',
+			generation_id: 'gen-123',
+			section_id: 's-01',
+			template_id: 'guided-concept-path',
+			section: {
+				...firstSection,
+				header: {
+					...firstSection.header,
+					title: 'Updated first section'
+				},
+				hook: {
+					...firstSection.hook,
+					body: 'Revised opening copy.'
+				}
+			} as any,
+			status: 'finalizing',
+			visual_mode: 'svg',
+			pending_assets: ['diagram'],
+			updated_at: '2026-03-19T00:00:02Z'
+		}).document;
+
+		expect(updated.partial_sections).toHaveLength(1);
+		expect(updated.partial_sections?.[0]?.content.header.title).toBe('Updated first section');
+		expect(updated.partial_sections?.[0]?.status).toBe('finalizing');
+		expect(updated.partial_sections?.[0]?.visual_mode).toBe('svg');
+		expect(updated.partial_sections?.[0]?.pending_assets).toEqual(['diagram']);
+		expect(updated.partial_sections?.[0]?.updated_at).toBe('2026-03-19T00:00:02Z');
+	});
+
+	it('keeps completed sections ahead of stale partials when building slots', () => {
+		const slots = buildSectionSlots(
+			createDocument({
+				section_manifest: [{ section_id: 's-01', title: 'First section', position: 1 }],
+				sections: [firstSection as any],
+				partial_sections: [
+					{
+						section_id: 's-01',
+						template_id: 'guided-concept-path',
+						content: {
+							...firstSection,
+							header: {
+								...firstSection.header,
+								title: 'Stale partial title'
+							}
+						} as any,
+						status: 'writing',
+						visual_mode: null,
+						pending_assets: [],
+						updated_at: '2026-03-19T00:00:01Z'
+					}
+				]
+			}),
+			1
+		);
+
+		expect(slots[0]?.status).toBe('completed');
+		expect(slots[0]?.section?.header.title).toBe('First section');
+		expect(slots[0]?.partial?.content.header.title).toBe('Stale partial title');
+	});
 });

@@ -5,7 +5,7 @@ import pytest
 from pipeline.contracts import get_contract
 from pipeline.nodes.diagram_generator import DiagramOutput, diagram_generator
 from pipeline.nodes.image_generator import image_generator
-from pipeline.nodes.section_assembler import partial_section_assembler, section_assembler
+from pipeline.nodes.section_assembler import section_assembler
 from pipeline.run import _build_result
 from pipeline.state import PartialSectionRecord, PipelineError, StyleContext, TextbookPipelineState
 from pipeline.storage.image_store import LocalImageStore
@@ -223,7 +223,7 @@ def test_diagram_led_resolves_expected_visual_targets() -> None:
 
 
 @pytest.mark.asyncio
-async def test_partial_assembler_keeps_callout_sections_pending_when_only_visuals_are_missing() -> None:
+async def test_section_assembler_keeps_callout_sections_pending_when_only_visuals_are_missing() -> None:
 	contract = get_contract("diagram-led")
 	sid = "visual"
 	state = TextbookPipelineState(
@@ -249,7 +249,7 @@ async def test_partial_assembler_keeps_callout_sections_pending_when_only_visual
 		},
 	)
 
-	result = await partial_section_assembler(state)
+	result = await section_assembler(state)
 
 	assert "errors" not in result
 	assert result["partial_sections"][sid].status == "awaiting_assets"
@@ -257,7 +257,7 @@ async def test_partial_assembler_keeps_callout_sections_pending_when_only_visual
 
 
 @pytest.mark.asyncio
-async def test_partial_assembler_keeps_summary_sections_pending_when_only_visuals_are_missing() -> None:
+async def test_section_assembler_keeps_summary_sections_pending_when_only_visuals_are_missing() -> None:
 	contract = get_contract("diagram-led")
 	sid = "summary"
 	state = TextbookPipelineState(
@@ -286,7 +286,7 @@ async def test_partial_assembler_keeps_summary_sections_pending_when_only_visual
 		},
 	)
 
-	result = await partial_section_assembler(state)
+	result = await section_assembler(state)
 
 	assert "errors" not in result
 	assert result["partial_sections"][sid].status == "awaiting_assets"
