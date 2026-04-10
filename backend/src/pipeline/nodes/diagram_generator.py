@@ -10,6 +10,8 @@ Writes:
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from html import escape
 
 from core.config import settings as app_settings
@@ -44,6 +46,8 @@ from pipeline.visual_resolution import (
     target_is_satisfied,
 )
 
+logger = logging.getLogger(__name__)
+
 _SVG_WIDTH = 600
 _SVG_HEIGHT = 400
 _SVG_BG = "#f8fbff"
@@ -60,6 +64,15 @@ class DiagramOutput(BaseModel):
     alt_text: str
 
 
+def _log_diagram_event(level: int, event: str, **payload) -> None:
+    logger.log(
+        level,
+        "DIAG::%s::%s",
+        event,
+        json.dumps(payload, sort_keys=True, default=str),
+    )
+
+
 def _get_supported_targets(state: TextbookPipelineState) -> list[str]:
     return [
         target
@@ -71,18 +84,30 @@ def _get_supported_targets(state: TextbookPipelineState) -> list[str]:
 def _publish_outcome(generation_id: str, section_id: str | None, outcome: str) -> None:
     if section_id is None:
         return
-    normalized = {
-        "spec_success": "success",
-        "skipped_image_mode": "skipped",
-    }.get(outcome, outcome)
     publish_runtime_event(
         generation_id,
         DiagramOutcomeEvent(
             generation_id=generation_id,
             section_id=section_id,
-            outcome=normalized,
+            outcome=outcome,
         ),
     )
+
+
+def _with_outcome(
+    outcomes: dict[str, str],
+    *,
+    generation_id: str,
+    section_id: str | None,
+    outcome: str,
+) -> dict[str, str]:
+    if section_id is None:
+        return outcomes
+
+    updated = dict(outcomes)
+    updated[section_id] = outcome
+    _publish_outcome(generation_id, section_id, outcome)
+    return updated
 
 
 def _wrap_label(label: str, *, max_chars: int = 18) -> list[str]:
@@ -466,36 +491,84 @@ async def diagram_generator(
         mode=mode,
         targets=targets,
     )
+    _log_diagram_event(
+        logging.INFO,
+        "GENERATOR_START",
+        section_id=sid,
+        mode=mode,
+        targets=targets,
+        plan_exists=plan is not None,
+        enabled=plan.diagram.enabled if plan is not None else None,
+    )
 
     if not targets:
-        if sid:
-            outcomes[sid] = "skipped"
-            _publish_outcome(state.request.generation_id or "", sid, "skipped")
+        _log_diagram_event(logging.INFO, "GENERATOR_SKIP_NO_SLOT", section_id=sid)
+        outcomes = _with_outcome(
+            outcomes,
+            generation_id=state.request.generation_id or "",
+            section_id=sid,
+            outcome="skipped",
+        )
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
 
     if mode == "image":
-        if sid:
-            outcomes[sid] = "skipped_image_mode"
-            _publish_outcome(state.request.generation_id or "", sid, "skipped_image_mode")
+        _log_diagram_event(
+            logging.INFO,
+            "GENERATOR_SKIP_MODE",
+            section_id=sid,
+            mode=mode,
+        )
+        outcomes = _with_outcome(
+            outcomes,
+            generation_id=state.request.generation_id or "",
+            section_id=sid,
+            outcome="skipped",
+        )
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
 
     section = state.generated_sections.get(sid)
     if sid is None or section is None:
+        _log_diagram_event(
+            logging.INFO,
+            "GENERATOR_SKIP_NO_SECTION",
+            section_id=sid,
+            available_sections=list(state.generated_sections.keys()),
+        )
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
 
     if plan is not None and not plan.diagram.enabled:
-        outcomes[sid] = "skipped"
-        _publish_outcome(state.request.generation_id or "", sid, "skipped")
+        _log_diagram_event(logging.INFO, "GENERATOR_SKIP_NOT_ENABLED", section_id=sid)
+        outcomes = _with_outcome(
+            outcomes,
+            generation_id=state.request.generation_id or "",
+            section_id=sid,
+            outcome="skipped",
+        )
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
 
     if plan is None and state.current_section_plan and not state.current_section_plan.needs_diagram:
-        outcomes[sid] = "skipped"
-        _publish_outcome(state.request.generation_id or "", sid, "skipped")
+        _log_diagram_event(logging.INFO, "GENERATOR_SKIP_PLAN", section_id=sid)
+        outcomes = _with_outcome(
+            outcomes,
+            generation_id=state.request.generation_id or "",
+            section_id=sid,
+            outcome="skipped",
+        )
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
 
     if state.style_context is None:
-        outcomes[sid] = "error"
-        _publish_outcome(state.request.generation_id or "", sid, "error")
+        _log_diagram_event(
+            logging.ERROR,
+            "GENERATOR_FAILURE",
+            section_id=sid,
+            reason="no_style_context",
+        )
+        outcomes = _with_outcome(
+            outcomes,
+            generation_id=state.request.generation_id or "",
+            section_id=sid,
+            outcome="error",
+        )
         return {
             "errors": [
                 PipelineError(
@@ -562,8 +635,13 @@ async def diagram_generator(
                 satisfied=target_is_satisfied(updated_section, target, mode="svg"),
             )
 
-        outcomes[sid] = "spec_success"
-        _publish_outcome(state.request.generation_id or "", sid, "spec_success")
+        outcomes = _with_outcome(
+            outcomes,
+            generation_id=state.request.generation_id or "",
+            section_id=sid,
+            outcome="success",
+        )
+        _log_diagram_event(logging.INFO, "GENERATOR_SUCCESS", section_id=sid, targets=targets)
         return {
             "generated_sections": {sid: updated_section},
             "diagram_outcomes": outcomes,
@@ -573,8 +651,18 @@ async def diagram_generator(
         timeout_policy = timeout_policy_from_config(config)
         if timeout_policy is None:
             timeout_policy = resolve_runtime_policy_bundle(app_settings, state.request.mode).timeouts
-        outcomes[sid] = "timeout"
-        _publish_outcome(state.request.generation_id or "", sid, "timeout")
+        outcomes = _with_outcome(
+            outcomes,
+            generation_id=state.request.generation_id or "",
+            section_id=sid,
+            outcome="timeout",
+        )
+        _log_diagram_event(
+            logging.ERROR,
+            "GENERATOR_TIMEOUT",
+            section_id=sid,
+            timeout_seconds=int(timeout_policy.diagram_node_budget_seconds),
+        )
         return {
             "errors": [
                 PipelineError(
@@ -591,8 +679,19 @@ async def diagram_generator(
             "completed_nodes": ["diagram_generator"],
         }
     except Exception as exc:
-        outcomes[sid] = "error"
-        _publish_outcome(state.request.generation_id or "", sid, "error")
+        outcomes = _with_outcome(
+            outcomes,
+            generation_id=state.request.generation_id or "",
+            section_id=sid,
+            outcome="error",
+        )
+        _log_diagram_event(
+            logging.ERROR,
+            "GENERATOR_FAILURE",
+            section_id=sid,
+            error_type=type(exc).__name__,
+            error_message=str(exc)[:500],
+        )
         return {
             "errors": [
                 PipelineError(

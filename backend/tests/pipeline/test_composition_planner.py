@@ -420,6 +420,21 @@ def test_to_composition_plan_enforces_guard_rails() -> None:
     assert all(not i.enabled for i in plan.interactions)
 
 
+def test_to_composition_plan_keeps_required_diagram_when_llm_disables_it() -> None:
+    decision = _mock_llm_decision(diagram_enabled=False)
+
+    plan = _to_composition_plan(
+        decision,
+        section=_section("s-01"),
+        diagram_allowed=True,
+        interaction_allowed=False,
+    )
+
+    assert plan.diagram.enabled is True
+    assert plan.diagram.diagram_type is None
+    assert plan.diagram.key_concepts == ["derivative", "slope"]
+
+
 def test_to_composition_plan_populates_interactions_list() -> None:
     """LLM decision with multiple interactions is correctly converted."""
     decision = _mock_llm_decision(

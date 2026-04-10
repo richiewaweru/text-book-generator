@@ -64,6 +64,10 @@ _DIAGRAM_COMPONENTS = {"diagram-block", "diagram-series", "diagram-compare"}
 
 
 def _diagram_allowed(state: TextbookPipelineState) -> bool:
+    return _diagram_requirement_source(state) is not None
+
+
+def _diagram_requirement_source(state: TextbookPipelineState) -> str | None:
     plan = state.current_section_plan
     resolved_targets = [
         target for target in resolve_visual_targets(state) if target != "hook_svg"
@@ -91,7 +95,7 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
             decision=False,
             reason="plan_none",
         )
-        return False
+        return None
 
     if getattr(plan, "diagram_policy", None) == "disabled":
         diag(
@@ -100,7 +104,7 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
             decision=False,
             reason="diagram_policy_disabled",
         )
-        return False
+        return None
 
     if not resolved_targets:
         diag(
@@ -109,7 +113,7 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
             decision=False,
             reason="no_resolved_diagram_targets",
         )
-        return False
+        return None
 
     if getattr(plan, "diagram_policy", None) == "required":
         diag(
@@ -118,7 +122,7 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
             decision=True,
             reason="diagram_policy_required",
         )
-        return True
+        return "diagram_policy_required"
 
     if getattr(plan, "needs_diagram", False):
         diag(
@@ -127,7 +131,7 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
             decision=True,
             reason="needs_diagram",
         )
-        return True
+        return "needs_diagram"
 
     section_required = set(getattr(plan, "required_components", []))
     if _DIAGRAM_COMPONENTS & section_required or resolved_targets:
@@ -137,7 +141,7 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
             decision=True,
             reason="resolved_visual_targets_present",
         )
-        return True
+        return "resolved_visual_targets_present"
 
     vp = getattr(plan, "visual_policy", None)
     if vp is not None and getattr(vp, "required", False):
@@ -147,7 +151,7 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
             decision=True,
             reason="visual_policy_required",
         )
-        return True
+        return "visual_policy_required"
 
     diag(
         "DIAGRAM_ALLOWED_DECISION",
@@ -155,7 +159,7 @@ def _diagram_allowed(state: TextbookPipelineState) -> bool:
         decision=False,
         reason="fell_through_false",
     )
-    return False
+    return None
 
 
 def _interaction_allowed(state: TextbookPipelineState) -> bool:
@@ -307,25 +311,43 @@ def _to_composition_plan(
     diagram_allowed: bool,
     interaction_allowed: bool,
     visual_mode: str | None = None,
+    section_id: str | None = None,
+    requirement_source: str | None = None,
     required_targets: list[str] | None = None,
 ) -> CompositionPlan:
     """Convert LLM decision to CompositionPlan, enforcing guard-rail overrides."""
 
-    enabled = decision.diagram.enabled and diagram_allowed
+    enabled = diagram_allowed
+    logger.info(
+        "DIAG::ENABLEMENT_RESOLVED::%s",
+        json.dumps(
+            {
+                "section_id": section_id,
+                "diagram_allowed": diagram_allowed,
+                "planning_required": diagram_allowed,
+                "requirement_source": requirement_source,
+                "llm_enabled": decision.diagram.enabled,
+                "final_enabled": enabled,
+                "visual_mode": visual_mode,
+                "diagram_type": decision.diagram.diagram_type,
+            },
+            sort_keys=True,
+        ),
+    )
     compare_before_label, compare_after_label = _compare_labels(section)
     diagram = DiagramPlan(
         enabled=enabled,
         mode=visual_mode if enabled else None,
         required_targets=list(required_targets or []),
         reasoning=decision.diagram.reasoning,
-        diagram_type=decision.diagram.diagram_type,
+        diagram_type=decision.diagram.diagram_type if enabled else None,
         compare_before_label=compare_before_label if enabled else None,
         compare_after_label=compare_after_label if enabled else None,
-        key_concepts=decision.diagram.key_concepts,
-        visual_guidance=decision.diagram.visual_guidance,
-        fallback_from_interaction=decision.diagram.fallback_from_interaction,
-        interaction_intent=decision.diagram.interaction_intent,
-        interaction_elements=decision.diagram.interaction_elements,
+        key_concepts=decision.diagram.key_concepts if enabled else [],
+        visual_guidance=decision.diagram.visual_guidance if enabled else None,
+        fallback_from_interaction=decision.diagram.fallback_from_interaction if enabled else False,
+        interaction_intent=decision.diagram.interaction_intent if enabled else None,
+        interaction_elements=decision.diagram.interaction_elements if enabled else [],
     )
 
     interactions: list[InteractionPlan] = []
@@ -379,7 +401,8 @@ async def composition_planner(
         node_name="composition_planner",
     )
 
-    diagram_ok = _diagram_allowed(state)
+    diagram_requirement_source = _diagram_requirement_source(state)
+    diagram_ok = diagram_requirement_source is not None
     interaction_ok = _interaction_allowed(state)
     resolved_targets = resolve_visual_targets(state)
     diagram_targets = [target for target in resolved_targets if target != "hook_svg"]
@@ -446,6 +469,8 @@ async def composition_planner(
             diagram_allowed=diagram_ok,
             interaction_allowed=interaction_ok,
             visual_mode=visual_mode,
+            section_id=sid,
+            requirement_source=diagram_requirement_source,
             required_targets=diagram_targets,
         )
         diag(
