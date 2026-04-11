@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
-from collections.abc import Callable
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.database.models import GenerationModel
 from pipeline.reporting import GenerationReport
@@ -15,7 +13,7 @@ from telemetry.ports.generation_report_repository import GenerationReportReposit
 class SqlGenerationReportRepository(GenerationReportRepository):
     def __init__(
         self,
-        session_factory: Callable[[], AsyncSession] | AsyncSession,
+        session_factory: async_sessionmaker[AsyncSession],
         *,
         legacy_output_dir: str | None = None,
     ) -> None:
@@ -26,17 +24,8 @@ class SqlGenerationReportRepository(GenerationReportRepository):
     def _locator_for(generation_id: str) -> str:
         return f"generation:{generation_id}:report"
 
-    @asynccontextmanager
-    async def _session_scope(self):
-        if isinstance(self._session_factory, AsyncSession):
-            yield self._session_factory
-            return
-
-        async with self._session_factory() as session:
-            yield session
-
     async def save_report(self, report: GenerationReport) -> str:
-        async with self._session_scope() as session:
+        async with self._session_factory() as session:
             stmt = select(GenerationModel).where(GenerationModel.id == report.generation_id)
             result = await session.execute(stmt)
             model = result.scalar_one_or_none()
@@ -48,7 +37,7 @@ class SqlGenerationReportRepository(GenerationReportRepository):
             return self._locator_for(report.generation_id)
 
     async def load_report(self, generation_id: str) -> GenerationReport:
-        async with self._session_scope() as session:
+        async with self._session_factory() as session:
             stmt = select(GenerationModel.report_json).where(GenerationModel.id == generation_id)
             result = await session.execute(stmt)
             row = result.first()

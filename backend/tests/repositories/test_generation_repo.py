@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.database.models import UserModel
 from generation.entities.generation import Generation
@@ -25,8 +25,8 @@ async def session(db_session: AsyncSession):
 
 
 @pytest.fixture
-def repo(session: AsyncSession) -> SqlGenerationRepository:
-    return SqlGenerationRepository(session)
+def repo(db_session_factory: async_sessionmaker[AsyncSession]) -> SqlGenerationRepository:
+    return SqlGenerationRepository(db_session_factory)
 
 
 class TestSqlGenerationRepository:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.database.models import GenerationModel, UserModel
 from generation.entities.generation import Generation
@@ -30,13 +30,17 @@ async def session(db_session: AsyncSession):
 
 
 @pytest.fixture
-def generation_repo(session: AsyncSession) -> SqlGenerationRepository:
-    return SqlGenerationRepository(session)
+def generation_repo(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> SqlGenerationRepository:
+    return SqlGenerationRepository(db_session_factory)
 
 
 @pytest.fixture
-def report_repo(session: AsyncSession) -> SqlGenerationReportRepository:
-    return SqlGenerationReportRepository(session)
+def report_repo(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> SqlGenerationReportRepository:
+    return SqlGenerationReportRepository(db_session_factory)
 
 
 def _generation(generation_id: str = "gen-report") -> Generation:

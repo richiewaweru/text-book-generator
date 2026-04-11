@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.database.models import LLMCallModel
 from telemetry.dtos.usage import LLMUsageBreakdownItem, LLMUsageResponse
 
 
 class SqlLLMCallRepository:
-    def __init__(self, session_factory: Callable[[], AsyncSession]) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
     async def save_call(

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import create_app
 from core.auth.middleware import get_current_user
@@ -139,18 +139,24 @@ async def session(db_session: AsyncSession):
 
 
 @pytest.fixture
-def generation_repo(session: AsyncSession) -> SqlGenerationRepository:
-    return SqlGenerationRepository(session)
+def generation_repo(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> SqlGenerationRepository:
+    return SqlGenerationRepository(db_session_factory)
 
 
 @pytest.fixture
-def document_repo(session: AsyncSession) -> SqlDocumentRepository:
-    return SqlDocumentRepository(session)
+def document_repo(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> SqlDocumentRepository:
+    return SqlDocumentRepository(db_session_factory)
 
 
 @pytest.fixture
-def report_repo(session: AsyncSession) -> SqlGenerationReportRepository:
-    return SqlGenerationReportRepository(session)
+def report_repo(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> SqlGenerationReportRepository:
+    return SqlGenerationReportRepository(db_session_factory)
 
 
 @pytest.mark.asyncio

@@ -127,13 +127,13 @@ async def _mark_stale_generations_failed() -> int:
         if not models:
             return 0
 
-        generation_repository = SqlGenerationRepository(session)
-        return await mark_stale_generations_failed(
-            [SqlGenerationRepository._to_entity(model) for model in models],
-            generation_repository=generation_repository,
-            document_repository=SqlDocumentRepository(session),
-            report_repository=None,
-        )
+    generation_repository = SqlGenerationRepository(async_session_factory)
+    return await mark_stale_generations_failed(
+        [SqlGenerationRepository._to_entity(model) for model in models],
+        generation_repository=generation_repository,
+        document_repository=SqlDocumentRepository(async_session_factory),
+        report_repository=None,
+    )
 
 
 async def _resolve_override(app: FastAPI, dependency):

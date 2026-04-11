@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.database.models import UserModel
 from generation.entities.generation import Generation
@@ -38,13 +39,17 @@ async def session(db_session: AsyncSession):
 
 
 @pytest.fixture
-def generation_repo(session: AsyncSession) -> SqlGenerationRepository:
-    return SqlGenerationRepository(session)
+def generation_repo(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> SqlGenerationRepository:
+    return SqlGenerationRepository(db_session_factory)
 
 
 @pytest.fixture
-def document_repo(session: AsyncSession) -> SqlDocumentRepository:
-    return SqlDocumentRepository(session)
+def document_repo(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> SqlDocumentRepository:
+    return SqlDocumentRepository(db_session_factory)
 
 
 def _section(section_id: str = "s-01") -> SectionContent:
@@ -168,3 +173,31 @@ class TestSqlDocumentRepository:
     ) -> None:
         with pytest.raises(FileNotFoundError):
             await document_repo.load_document("generation:missing:document")
+
+    async def test_save_document_supports_concurrent_calls_on_one_repository(
+        self,
+        generation_repo: SqlGenerationRepository,
+        document_repo: SqlDocumentRepository,
+    ) -> None:
+        generation_id = "gen-doc-concurrent"
+        await generation_repo.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER_ID,
+                subject="Calculus",
+                context="Explain limits",
+                requested_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+            )
+        )
+
+        document = _document(generation_id)
+        locators = await asyncio.gather(
+            document_repo.save_document(document),
+            document_repo.save_document(document),
+        )
+        loaded = await document_repo.load_document(generation_id)
+
+        assert locators == [generation_id, generation_id]
+        assert loaded.generation_id == generation_id
+        assert loaded.sections[0].section_id == "s-01"

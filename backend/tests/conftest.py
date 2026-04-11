@@ -38,12 +38,20 @@ async def db_engine(tmp_path):
 
 
 @pytest.fixture
-async def db_session(db_engine):
-    session_factory = async_sessionmaker(
+async def db_session_factory(db_engine):
+    yield async_sessionmaker(
         db_engine,
         class_=AsyncSession,
         expire_on_commit=False,
     )
-    async with session_factory() as session:
+
+
+@pytest.fixture
+async def db_session(db_engine):
+    async with async_sessionmaker(
+        db_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )() as session:
         yield session
         await session.rollback()

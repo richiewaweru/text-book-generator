@@ -2,12 +2,12 @@ from collections.abc import AsyncGenerator
 from functools import lru_cache
 
 from core.dependencies import (
-    get_async_session,
     get_jwt_handler,
     get_settings,
     get_student_profile_repository,
     get_user_repository,
 )
+from core.database.session import async_session_factory
 from core.ports.generation_engine import GenerationEngine
 from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_repository import GenerationRepository
@@ -17,13 +17,11 @@ from telemetry.dependencies import get_report_repository
 
 
 async def get_generation_repository() -> AsyncGenerator[GenerationRepository, None]:
-    async for session in get_async_session():
-        yield SqlGenerationRepository(session)
+    yield SqlGenerationRepository(async_session_factory)
 
 
 async def get_document_repository() -> AsyncGenerator[DocumentRepository, None]:
-    async for session in get_async_session():
-        yield SqlDocumentRepository(session)
+    yield SqlDocumentRepository(async_session_factory)
 
 
 @lru_cache

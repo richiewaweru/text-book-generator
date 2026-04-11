@@ -21,7 +21,6 @@ from core.events import (
     TraceRegisteredEvent,
 )
 from core.auth.jwt_handler import JWTHandler
-from core.database.session import async_session_factory
 from core.dependencies import get_jwt_handler, get_settings
 from core.ports.generation_engine import GenerationEngine
 from pipeline.api import (
@@ -78,8 +77,6 @@ from generation.dependencies import (
     get_generation_repository,
     get_report_repository,
 )
-from generation.repositories.sql_document_repo import SqlDocumentRepository
-from generation.repositories.sql_generation_repo import SqlGenerationRepository
 from core.dependencies import (
     get_student_profile_repository,
     get_user_repository,
@@ -882,10 +879,6 @@ async def _update_generation_heartbeat(
     gen_repo: GenerationRepository,
     generation_id: str,
 ) -> None:
-    if isinstance(gen_repo, SqlGenerationRepository):
-        async with async_session_factory() as heartbeat_session:
-            await SqlGenerationRepository(heartbeat_session).update_heartbeat(generation_id)
-        return
     await gen_repo.update_heartbeat(generation_id)
 
 
@@ -1397,23 +1390,6 @@ async def enqueue_generation(
     )
 
     async def run_generation_job() -> None:
-        if (
-            isinstance(gen_repo, SqlGenerationRepository)
-            and isinstance(document_repo, SqlDocumentRepository)
-        ):
-            async with async_session_factory() as gen_session:
-                async with async_session_factory() as document_session:
-                    await _run_generation_job(
-                        generation,
-                        command,
-                        engine,
-                        SqlGenerationRepository(gen_session),
-                        SqlDocumentRepository(document_session),
-                        report_repo,
-                        initial_document,
-                    )
-            return
-
         await _run_generation_job(
             generation,
             command,
