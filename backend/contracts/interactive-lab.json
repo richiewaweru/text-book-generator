@@ -34,8 +34,10 @@
   "interaction_level": "high",
   "always_present": [
     "section-header",
-    "simulation-block",
     "what-next-bridge"
+  ],
+  "contextually_present": [
+    "simulation-block"
   ],
   "available_components": [
     "hook-hero",

@@ -196,7 +196,7 @@ async def test_interaction_generator_emits_skip_reasons(
 
 
 @pytest.mark.asyncio
-async def test_interaction_generator_emits_generated_count_for_multiple_simulations(
+async def test_interaction_generator_emits_single_simulation_when_multiple_plans_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events = _capture_events(monkeypatch)
@@ -205,8 +205,9 @@ async def test_interaction_generator_emits_generated_count_for_multiple_simulati
     result = await interaction_generator(state)
 
     section = result["generated_sections"]["s-01"]
-    assert len(section.simulations) == 2
+    assert not hasattr(section, "simulations")
     assert section.simulation is not None
+    assert section.simulation.explanation == "Interaction 1"
     assert result["interaction_specs"]["s-01"].type == "graph_slider"
     assert len(events) == 1
     generation_id, event = events[0]
@@ -214,4 +215,4 @@ async def test_interaction_generator_emits_generated_count_for_multiple_simulati
     assert isinstance(event, InteractionOutcomeEvent)
     assert event.outcome == "generated"
     assert event.skip_reason is None
-    assert event.interaction_count == 2
+    assert event.interaction_count == 1

@@ -30,11 +30,9 @@
 		SimulationBlock,
 		WhatNextBridge
 	} from '../../components/lectio';
-	import { getSectionSimulations } from '../../section-content';
 	import type { SectionContent } from '../../types';
 
 	let { section }: { section: SectionContent } = $props();
-	const simulations = $derived(getSectionSimulations(section));
 </script>
 
 <article class="mx-auto max-w-3xl space-y-6 px-4 py-8">
@@ -104,9 +102,9 @@
 		<TimelineBlock content={section.timeline} />
 	{/if}
 
-	{#each simulations as simulation}
-		<SimulationBlock content={simulation} />
-	{/each}
+	{#if section.simulation}
+		<SimulationBlock content={section.simulation} />
+	{/if}
 
 	{#if section.worked_example}
 		<WorkedExampleCard content={section.worked_example} />

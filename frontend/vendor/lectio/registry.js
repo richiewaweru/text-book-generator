@@ -492,7 +492,7 @@ export const componentRegistry = {
     SimulationBlock: {
         id: 'simulation-block',
         ...teacherFor('simulation-block'),
-        sectionField: 'simulations',
+        sectionField: 'simulation',
         name: 'SimulationBlock',
         group: 7,
         purpose: 'Manipulate a variable and discover the concept through observation',

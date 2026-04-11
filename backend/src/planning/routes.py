@@ -156,6 +156,10 @@ def _pipeline_section_from_planning(
         diagram_policy=computed_diagram_policy,
         visual_policy=pipeline_visual_policy,
         continuity_notes=section.rationale,
+        terms_to_define=list(section.terms_to_define),
+        terms_assumed=list(section.terms_assumed),
+        practice_target=section.practice_target,
+        visual_commitment=section.visual_commitment,
     )
 
 
@@ -414,4 +418,3 @@ async def commit_brief(
         section_plans=_pipeline_sections_from_planning_spec(committed),
         planning_spec_json=committed.model_dump_json(),
     )
-

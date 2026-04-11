@@ -536,10 +536,9 @@ export const physicsSection = {
         type: 'open',
         space: 4,
     },
-    simulations: [
-        {
-            explanation: 'Drag the force slider to see how acceleration changes for a fixed mass. A simple, direct test of F = ma.',
-            html_content: `<!DOCTYPE html>
+    simulation: {
+        explanation: 'Drag the force slider to see how acceleration changes for a fixed mass. A simple, direct test of F = ma.',
+        html_content: `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -573,28 +572,27 @@ const bar=document.getElementById('bar'),av=document.getElementById('av');
 function upd(){const f=+fs.value,a=f/5;fv.textContent=f+' N';av.textContent=a.toFixed(2);bar.style.height=Math.min(a/8*100,100)+'%'}
 fs.addEventListener('input',upd);upd();
 </script></body></html>`,
-            spec: {
-                type: 'graph_slider',
-                goal: 'Discover how changing force and mass affects acceleration in Newton\'s Second Law.',
-                anchor_content: { equation: 'F = ma', starting_mass: 5, starting_force: 15 },
-                context: {
-                    learner_level: 'secondary',
-                    template_id: 'enriched_learning_path_v1',
-                    color_mode: 'light',
-                    accent_color: '#f97316',
-                    surface_color: '#fff7ed',
-                    font_mono: 'ui-monospace'
-                },
-                dimensions: { width: '100%', height: 280, resizable: false },
-                print_translation: 'static_diagram'
+        spec: {
+            type: 'graph_slider',
+            goal: 'Discover how changing force and mass affects acceleration in Newton\'s Second Law.',
+            anchor_content: { equation: 'F = ma', starting_mass: 5, starting_force: 15 },
+            context: {
+                learner_level: 'secondary',
+                template_id: 'enriched_learning_path_v1',
+                color_mode: 'light',
+                accent_color: '#f97316',
+                surface_color: '#fff7ed',
+                font_mono: 'ui-monospace'
             },
-            fallback_diagram: {
-                svg_content: forceArrowSvg,
-                caption: 'Fallback view of the free-body setup while the interactive simulation is unavailable.',
-                alt_text: 'Fallback diagram showing a 5 kilogram block with applied force and friction arrows.'
-            }
+            dimensions: { width: '100%', height: 280, resizable: false },
+            print_translation: 'static_diagram'
+        },
+        fallback_diagram: {
+            svg_content: forceArrowSvg,
+            caption: 'Fallback view of the free-body setup while the interactive simulation is unavailable.',
+            alt_text: 'Fallback diagram showing a 5 kilogram block with applied force and friction arrows.'
         }
-    ],
+    },
     callout: {
         variant: 'exam-tip',
         heading: 'Exam technique',

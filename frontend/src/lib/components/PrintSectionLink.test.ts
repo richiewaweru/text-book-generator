@@ -37,8 +37,7 @@ const baseSection: SectionContent = {
 	what_next: {
 		body: 'Next',
 		next: 'Continuity'
-	},
-		simulations: []
+	}
 };
 
 describe('PrintSectionLink', () => {
@@ -46,30 +45,28 @@ describe('PrintSectionLink', () => {
 		cleanup();
 	});
 
-	it('renders a QR block for sections with simulations', () => {
+	it('renders a QR block for sections with a simulation', () => {
 		render(PrintSectionLink, {
 			generationId: 'gen-123',
 			section: {
 				...baseSection,
-				simulations: [
-					{
-						spec: {
-							type: 'graph_slider',
-							goal: 'Explore slope',
-							anchor_content: {},
-							context: {
-								learner_level: 'secondary',
-								template_id: 'guided-concept-path',
-								color_mode: 'light',
-								accent_color: '#2563eb',
-								surface_color: '#ffffff',
-								font_mono: 'ui-monospace'
-							},
-							print_translation: 'static_midstate',
-							dimensions: { width: '100%', height: 400, resizable: false }
-						}
+				simulation: {
+					spec: {
+						type: 'graph_slider',
+						goal: 'Explore slope',
+						anchor_content: {},
+						context: {
+							learner_level: 'secondary',
+							template_id: 'guided-concept-path',
+							color_mode: 'light',
+							accent_color: '#2563eb',
+							surface_color: '#ffffff',
+							font_mono: 'ui-monospace'
+						},
+						print_translation: 'static_midstate',
+						dimensions: { width: '100%', height: 400, resizable: false }
 					}
-				]
+				}
 			}
 		});
 

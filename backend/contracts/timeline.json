@@ -32,8 +32,10 @@
   "interaction_level": "medium",
   "always_present": [
     "section-header",
-    "timeline-block",
     "what-next-bridge"
+  ],
+  "contextually_present": [
+    "timeline-block"
   ],
   "available_components": [
     "hook-hero",

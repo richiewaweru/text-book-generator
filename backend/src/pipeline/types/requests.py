@@ -88,3 +88,7 @@ class SectionPlan(BaseModel):
     visual_policy: SectionVisualPolicy | None = None
     enrichment_enabled: bool = True
     continuity_notes: str | None = None
+    terms_to_define: list[str] = Field(default_factory=list)
+    terms_assumed: list[str] = Field(default_factory=list)
+    practice_target: str | None = None
+    visual_commitment: Literal["diagram", "interaction", "none"] | None = None

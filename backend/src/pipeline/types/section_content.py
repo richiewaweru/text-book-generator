@@ -514,7 +514,6 @@ class SectionContent(BaseModel):
     reflection: Optional[ReflectionContent] = None
     glossary: Optional[GlossaryContent] = None
     simulation: Optional[SimulationContent] = None
-    simulations: list[SimulationContent] = Field(default_factory=list)
     interview: Optional[InterviewContent] = None
 
     def to_json(self) -> str:

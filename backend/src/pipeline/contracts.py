@@ -208,12 +208,6 @@ def get_lesson_flow(template_id: str) -> list[str]:
 
 
 def _section_field_has_content(section: dict, field: str) -> bool:
-    if field == "simulations":
-        simulations = section.get("simulations") or []
-        if simulations:
-            return True
-        return bool(section.get("simulation"))
-
     return bool(section.get(field))
 
 

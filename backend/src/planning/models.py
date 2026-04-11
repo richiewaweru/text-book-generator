@@ -219,6 +219,10 @@ class PlanningSectionPlan(BaseModel):
     visual_policy: VisualPolicy | None = None
     generation_notes: SectionGenerationNotes | None = None
     rationale: str
+    terms_to_define: list[str] = Field(default_factory=list)
+    terms_assumed: list[str] = Field(default_factory=list)
+    practice_target: str | None = None
+    visual_commitment: Literal["diagram", "interaction", "none"] | None = None
 
     @field_validator("title", "objective", "focus_note", "rationale")
     @classmethod

@@ -38,6 +38,10 @@ def _section_plan_policy_block(section_plan: SectionPlan) -> str:
     continuity = section_plan.continuity_notes or "none"
     required_components = ", ".join(section_plan.required_components) or "none"
     optional_components = ", ".join(section_plan.optional_components) or "none"
+    terms_to_define = ", ".join(section_plan.terms_to_define) or "none"
+    terms_assumed = ", ".join(section_plan.terms_assumed) or "none"
+    practice_target = section_plan.practice_target or "not specified"
+    visual_commitment = section_plan.visual_commitment or "not specified"
     return f"""Planning policy:
   role: {section_plan.role}
   required_components: {required_components}
@@ -45,7 +49,34 @@ def _section_plan_policy_block(section_plan: SectionPlan) -> str:
   interaction_policy: {section_plan.interaction_policy}
   diagram_policy: {section_plan.diagram_policy}
   enrichment_enabled: {section_plan.enrichment_enabled}
-  continuity_notes: {continuity}"""
+  continuity_notes: {continuity}
+  terms_to_define: {terms_to_define}
+  terms_assumed: {terms_assumed}
+  practice_target: {practice_target}
+  visual_commitment: {visual_commitment}"""
+
+
+def _visual_context_block(section_plan: SectionPlan) -> str:
+    commitment = section_plan.visual_commitment
+    if commitment is None:
+        return ""
+    if commitment == "diagram":
+        return (
+            "Visual context:\n"
+            "This section WILL include a diagram. You may reference it as "
+            "'the diagram below' in explanations or practice."
+        )
+    if commitment == "interaction":
+        return (
+            "Visual context:\n"
+            "This section WILL include an interactive element. You may reference "
+            "it as 'the interactive above' in explanations or practice."
+        )
+    return (
+        "Visual context:\n"
+        "This section has NO diagram or interactive. Do not reference any visual "
+        "element in explanations or practice."
+    )
 
 
 def build_content_system_prompt(
@@ -112,6 +143,10 @@ Grade level: {grade_band}
 Learner type: {learner_fit}
 
 {_section_plan_policy_block(section_plan)}"""
+
+    visual_context = _visual_context_block(section_plan)
+    if visual_context:
+        base += f"\n\n{visual_context}"
 
     if rerender_reason:
         base += f"""
@@ -306,6 +341,10 @@ Learner type: {learner_fit}
 
 {_section_plan_policy_block(section_plan)}"""
 
+    visual_context = _visual_context_block(section_plan)
+    if visual_context:
+        base += f"\n\n{visual_context}"
+
     if rerender_reason:
         base += f"\n\nRERENDER - fix this problem: {rerender_reason}"
 
@@ -332,6 +371,8 @@ Context: {context}
 Grade level: {grade_band}
 Learner type: {learner_fit}
 {_section_plan_policy_block(section_plan)}
+
+{_visual_context_block(section_plan)}
 
 Core content already generated:
 {core_summary}
@@ -362,6 +403,8 @@ Context: {context}
 Grade level: {grade_band}
 Learner type: {learner_fit}
 {_section_plan_policy_block(section_plan)}
+
+{_visual_context_block(section_plan)}
 
 Core content already generated:
 {core_summary}
