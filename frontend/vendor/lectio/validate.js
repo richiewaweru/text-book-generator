@@ -1,6 +1,5 @@
 // Capacity warnings — not hard errors, just console warnings
 // Prevents content from quietly overflowing components
-import { getSectionSimulations } from './section-content';
 function words(text) {
     return text.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -310,9 +309,9 @@ export function validateSection(section) {
     if (section.image_block) {
         validateImageBlock(section.image_block, w);
     }
-    getSectionSimulations(section).forEach((simulation) => {
-        validateSimulation(simulation, w);
-    });
+    if (section.simulation) {
+        validateSimulation(section.simulation, w);
+    }
     return w;
 }
 // Call this in dev — shows warnings in console

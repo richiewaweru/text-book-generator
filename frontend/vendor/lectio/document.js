@@ -1,6 +1,5 @@
 import { getComponentById, getComponentFieldMap } from './registry';
 import { getEmptyContent } from './content-factories';
-import { getSectionSimulations } from './section-content';
 import { validateSection } from './validate';
 /**
  * Field name → component registry id. Inverse of getComponentFieldMap().
@@ -36,7 +35,7 @@ const BLOCK_FIELD_ORDER = [
     'worked_example',
     'worked_examples',
     'process',
-    'simulations',
+    'simulation',
     'pitfall',
     'pitfalls',
     'practice',
@@ -72,12 +71,6 @@ function extractBlocksFromSection(section) {
         if (field === 'pitfalls') {
             for (const p of section.pitfalls ?? []) {
                 out.push({ componentId: 'pitfall-alert', content: p });
-            }
-            continue;
-        }
-        if (field === 'simulations') {
-            for (const simulation of getSectionSimulations(section)) {
-                out.push({ componentId: 'simulation-block', content: simulation });
             }
             continue;
         }
@@ -177,9 +170,9 @@ function applyBlockToSection(section, componentId, content) {
         return;
     }
     if (componentId === 'simulation-block') {
-        if (!section.simulations)
-            section.simulations = [];
-        section.simulations.push(deepClone(content));
+        if (!section.simulation) {
+            section.simulation = deepClone(content);
+        }
         return;
     }
     const field = fieldMap[componentId];
@@ -221,10 +214,17 @@ export function validateDocument(document) {
         errors.push('Missing required field: media');
     }
     for (const sec of document.sections) {
+        let simulationBlockCount = 0;
         for (const bid of sec.block_ids) {
             if (!document.blocks[bid]) {
                 errors.push(`Section "${sec.id}" references missing block id "${bid}".`);
             }
+            else if (document.blocks[bid].component_id === 'simulation-block') {
+                simulationBlockCount++;
+            }
+        }
+        if (simulationBlockCount > 1) {
+            warnings.push(`Section "${sec.id}" contains ${simulationBlockCount} simulation-block entries; only the first is loaded.`);
         }
     }
     for (const block of Object.values(document.blocks)) {

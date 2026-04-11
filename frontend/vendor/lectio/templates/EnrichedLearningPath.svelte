@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { getSectionSimulations } from '../section-content';
 	import type { SectionContent } from '../types';
 	import { validateSection, warnIfInvalid } from '../validate';
 	import {
@@ -32,7 +31,6 @@
 
 	let warnings = $state<string[]>([]);
 	const inlineTerm = $derived(section.glossary?.terms[0] ?? null);
-	const simulations = $derived(getSectionSimulations(section));
 
 	$effect(() => {
 		warnings = validateSection(section);
@@ -140,9 +138,9 @@
 				<ReflectionPrompt content={section.reflection} />
 			{/if}
 
-			{#each simulations as simulation}
-				<SimulationBlock content={simulation} />
-			{/each}
+			{#if section.simulation}
+				<SimulationBlock content={section.simulation} />
+			{/if}
 
 			{#if section.interview}
 				<InterviewAnchor content={section.interview} />

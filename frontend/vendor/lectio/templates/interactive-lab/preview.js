@@ -24,10 +24,9 @@ const labPhysicsSection = {
         body: 'You can hit both with the same force. The tennis ball rockets across the room. The bowling ball barely budges. Same push, wildly different results. Before we explain why — try it yourself below.',
         anchor: 'the relationship between force, mass, and acceleration',
     },
-    simulations: [
-        {
-            explanation: 'Drag the sliders to change net force and mass. Watch how acceleration responds in real time.',
-            html_content: `<!DOCTYPE html>
+    simulation: {
+        explanation: 'Drag the sliders to change net force and mass. Watch how acceleration responds in real time.',
+        html_content: `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -95,28 +94,27 @@ function update(){
 fs.addEventListener('input',update);ms.addEventListener('input',update);
 update();
 </script></body></html>`,
-            spec: {
-                type: 'graph_slider',
-                goal: "Discover how changing force and mass affects acceleration in Newton's Second Law.",
-                anchor_content: { equation: 'F = ma', starting_mass: 5, starting_force: 15 },
-                context: {
-                    learner_level: 'secondary',
-                    template_id: 'interactive-lab',
-                    color_mode: 'light',
-                    accent_color: '#f97316',
-                    surface_color: '#fff7ed',
-                    font_mono: 'ui-monospace',
-                },
-                dimensions: { width: '100%', height: 320, resizable: false },
-                print_translation: 'static_diagram',
+        spec: {
+            type: 'graph_slider',
+            goal: "Discover how changing force and mass affects acceleration in Newton's Second Law.",
+            anchor_content: { equation: 'F = ma', starting_mass: 5, starting_force: 15 },
+            context: {
+                learner_level: 'secondary',
+                template_id: 'interactive-lab',
+                color_mode: 'light',
+                accent_color: '#f97316',
+                surface_color: '#fff7ed',
+                font_mono: 'ui-monospace',
             },
-            fallback_diagram: {
-                svg_content: forceArrowSvg,
-                caption: 'A 5 kg block with 20 N applied force and 5 N friction, producing 15 N net force and 3 m/s² acceleration.',
-                alt_text: 'Free body diagram showing a 5 kg block with force arrows for applied force and friction.',
-            },
-        }
-    ],
+            dimensions: { width: '100%', height: 320, resizable: false },
+            print_translation: 'static_diagram',
+        },
+        fallback_diagram: {
+            svg_content: forceArrowSvg,
+            caption: 'A 5 kg block with 20 N applied force and 5 N friction, producing 15 N net force and 3 m/s² acceleration.',
+            alt_text: 'Free body diagram showing a 5 kg block with force arrows for applied force and friction.',
+        },
+    },
     explanation: {
         body: "What you just saw is Newton's Second Law in action. The acceleration of an object is directly proportional to the net force acting on it and inversely proportional to its mass. Written as F = ma, this equation links three quantities: force (Newtons), mass (kilograms), and acceleration (metres per second squared). When you doubled the force in the simulation, acceleration doubled. When you doubled the mass, acceleration halved. This is exactly what the equation predicts — and what you discovered by experimenting first.",
         emphasis: ['F = ma', 'directly proportional', 'inversely proportional'],

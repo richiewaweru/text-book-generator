@@ -370,7 +370,6 @@ export interface SectionContent {
     quiz?: QuizContent;
     reflection?: ReflectionContent;
     glossary?: GlossaryContent;
-    simulations?: SimulationContent[];
     simulation?: SimulationContent;
     interview?: InterviewContent;
     callout?: CalloutBlockContent;

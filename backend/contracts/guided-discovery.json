@@ -38,6 +38,7 @@
     "explanation-block",
     "what-next-bridge"
   ],
+  "contextually_present": [],
   "available_components": [
     "simulation-block",
     "definition-card",

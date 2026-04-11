@@ -631,7 +631,7 @@
     "teacher_label": "Interactive Simulation",
     "teacher_description": "Manipulable widget where learners discover by experimenting.",
     "cognitive_job": "Manipulate and discover",
-    "section_field": "simulations",
+    "section_field": "simulation",
     "group": 7,
     "status": "beta",
     "capacity": {

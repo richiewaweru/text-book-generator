@@ -9,12 +9,7 @@
 
 	let { generationId, section }: Props = $props();
 
-	const isInteractive = $derived(
-		!!(
-			section.simulation ||
-			(section.simulations?.length ?? 0) > 0
-		)
-	);
+	const isInteractive = $derived(!!section.simulation);
 	const sectionUrl = $derived.by(() => {
 		if (typeof window === 'undefined') {
 			return '';

@@ -1,16 +1,18 @@
 """
 interaction_generator node.
 
-Generates 0-N SimulationContent blocks from the composition plan's
+Generates at most one SimulationContent from the composition plan's
 interactions list. Deterministic (no LLM call).
 
 STATE CONTRACT:
     Reads:  current_section_id, composition_plans, generated_sections, request, contract
-    Writes: generated_sections[id].simulation, generated_sections[id].simulations,
+    Writes: generated_sections[id].simulation,
             interaction_specs, completed_nodes
 """
 
 from __future__ import annotations
+
+import logging
 
 import core.events as core_events
 
@@ -19,6 +21,8 @@ from pipeline.nodes.composition_planner import pick_interaction_type
 from pipeline.state import TextbookPipelineState
 from pipeline.types.composition import InteractionPlan
 from pipeline.types.section_content import InteractionSpec, SimulationContent
+
+logger = logging.getLogger(__name__)
 
 
 def _has_simulation_slot(contract) -> bool:
@@ -102,10 +106,11 @@ async def interaction_generator(
     *,
     model_overrides: dict | None = None,
 ) -> dict:
-    """Generate simulation content for enabled interactions.
+    """Generate at most one simulation when the template has a simulation slot.
 
-    Supports multiple interactions per section from the composition plan.
-    Falls back to the singular `interaction` field if `interactions` list is empty.
+    Uses the first enabled interaction plan (in plan order) that yields a spec.
+    Additional enabled plans are ignored; a warning is logged when more than one
+    plan was enabled.
     """
 
     _ = model_overrides
@@ -170,31 +175,17 @@ async def interaction_generator(
         )
         return {"completed_nodes": ["interaction_generator"]}
 
-    # Build SimulationContent for each enabled plan
-    simulations: list[SimulationContent] = []
-    first_spec: InteractionSpec | None = None
-
+    selected_plan: InteractionPlan | None = None
+    selected_spec: InteractionSpec | None = None
     for plan in enabled_plans:
         spec = _build_interaction_spec(state, section, plan)
         if spec is None:
             continue
+        selected_plan = plan
+        selected_spec = spec
+        break
 
-        if first_spec is None:
-            first_spec = spec
-
-        simulation = SimulationContent(
-            spec=spec,
-            fallback_diagram=section.diagram,
-            explanation=(
-                plan.reasoning
-                if plan.reasoning
-                else f"Interactive view for {section.header.title}. "
-                     f"Use it to test the key idea from this section step by step."
-            ),
-        )
-        simulations.append(simulation)
-
-    if not simulations:
+    if selected_plan is None or selected_spec is None:
         _publish_interaction_outcome(
             generation_id,
             sid,
@@ -203,11 +194,26 @@ async def interaction_generator(
         )
         return {"completed_nodes": ["interaction_generator"]}
 
-    # Update section with both singular (backward compat) and plural fields
-    updated = section.model_copy(update={
-        "simulation": simulations[0],
-        "simulations": simulations,
-    })
+    if len(enabled_plans) > 1:
+        logger.warning(
+            "interaction_generator: section %s has %d enabled interaction plans; "
+            "emitting one simulation (first plan with a valid spec).",
+            sid,
+            len(enabled_plans),
+        )
+
+    simulation = SimulationContent(
+        spec=selected_spec,
+        fallback_diagram=section.diagram,
+        explanation=(
+            selected_plan.reasoning
+            if selected_plan.reasoning
+            else f"Interactive view for {section.header.title}. "
+                 f"Use it to test the key idea from this section step by step."
+        ),
+    )
+
+    updated = section.model_copy(update={"simulation": simulation})
     generated = dict(state.generated_sections)
     generated[sid] = updated
 
@@ -217,14 +223,13 @@ async def interaction_generator(
     }
 
     # Backward compat: populate interaction_specs for retry path
-    if first_spec is not None:
-        result["interaction_specs"] = {sid: first_spec}
+    result["interaction_specs"] = {sid: selected_spec}
 
     _publish_interaction_outcome(
         generation_id,
         sid,
         "generated",
-        interaction_count=len(simulations),
+        interaction_count=1,
     )
 
     return result

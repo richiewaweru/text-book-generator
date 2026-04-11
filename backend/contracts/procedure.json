@@ -32,8 +32,10 @@
   "interaction_level": "light",
   "always_present": [
     "section-header",
-    "process-steps",
     "what-next-bridge"
+  ],
+  "contextually_present": [
+    "process-steps"
   ],
   "available_components": [
     "hook-hero",
