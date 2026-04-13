@@ -157,11 +157,16 @@ async def get_generation_detail(
     generation_id: str,
     current_user: User = Depends(get_current_user),
     gen_repo: GenerationRepository = Depends(get_generation_repository),
+    report_repo: GenerationReportRepository = Depends(get_report_repository),
 ):
     generation = await gen_repo.find_by_id(generation_id)
     if generation is None or generation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
-    return generation_service._detail_item(generation)
+    try:
+        report = await report_repo.load_report(generation_id)
+    except (FileNotFoundError, KeyError):
+        report = None
+    return generation_service._detail_item(generation, report=report)
 
 
 @router.get("/generations/{generation_id}/document")

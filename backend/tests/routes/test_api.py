@@ -1,4 +1,5 @@
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -765,9 +766,102 @@ class TestGenerationApi:
         assert detail_response.json()["section_count"] == 5
         assert detail_response.json()["mode"] == "balanced"
         assert detail_response.json()["report_url"].endswith("/report")
+        assert detail_response.json()["runtime_curriculum_outline"] == []
+        assert detail_response.json()["planner_trace"] is None
         assert any(
             item["section_count"] == 5 and item["mode"] == "balanced"
             for item in history_response.json()
+        )
+
+    async def test_generation_detail_returns_runtime_planner_peek_from_report(self):
+        generation_id = "gen-detail-planner"
+        await GEN_REPO.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER.id,
+                subject="Graphs",
+                context="Teach slope",
+                mode="draft",
+                status="completed",
+                document_path="memory://gen-detail-planner",
+                requested_template_id="guided-concept-path",
+                resolved_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                resolved_preset_id="blue-classroom",
+                section_count=3,
+                quality_passed=True,
+                planning_spec_json=json.dumps(
+                    {
+                        "id": "spec-1",
+                        "template_id": "guided-concept-path",
+                        "preset_id": "blue-classroom",
+                        "mode": "draft",
+                        "sections": [
+                            {
+                                "id": "section-1",
+                                "order": 1,
+                                "role": "intro",
+                                "title": "Start with the central idea",
+                            }
+                        ],
+                        "status": "committed",
+                    }
+                ),
+            )
+        )
+        await REPORT_REPO.save_report(
+            GenerationReport(
+                generation_id=generation_id,
+                subject="Graphs",
+                context="Teach slope",
+                mode="draft",
+                template_id="guided-concept-path",
+                preset_id="blue-classroom",
+                status="completed",
+                runtime_curriculum_outline=[
+                    {
+                        "section_id": "s-01",
+                        "title": "Start with the central idea",
+                        "position": 1,
+                        "role": "intro",
+                        "focus": "Introduce slope as steepness on a graph.",
+                        "terms_to_define": ["slope"],
+                        "terms_assumed": [],
+                        "practice_target": "identify slope as steepness from a graph",
+                        "visual_commitment": "diagram",
+                    }
+                ],
+                planner_trace={
+                    "path": "seeded_enrichment",
+                    "result": "enriched",
+                    "duplicate_term_warnings": [],
+                    "sections": [
+                        {
+                            "section_id": "s-01",
+                            "title": "Start with the central idea",
+                            "position": 1,
+                            "role": "intro",
+                            "rationale_summary": "Introduce slope as steepness on a graph.",
+                        }
+                    ],
+                },
+            )
+        )
+
+        async with _client() as client:
+            detail_response = await client.get(
+                f"/api/v1/generations/{generation_id}",
+                headers=AUTH_HEADERS,
+            )
+
+        assert detail_response.status_code == 200
+        payload = detail_response.json()
+        assert payload["planning_spec"]["status"] == "committed"
+        assert payload["runtime_curriculum_outline"][0]["terms_to_define"] == ["slope"]
+        assert payload["runtime_curriculum_outline"][0]["visual_commitment"] == "diagram"
+        assert payload["planner_trace"]["path"] == "seeded_enrichment"
+        assert payload["planner_trace"]["sections"][0]["rationale_summary"] == (
+            "Introduce slope as steepness on a graph."
         )
 
     async def test_generation_report_endpoint_returns_saved_report(self, db_session: AsyncSession):

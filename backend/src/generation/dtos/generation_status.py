@@ -1,7 +1,11 @@
 from pydantic import BaseModel, Field
 
 from pipeline.api import PipelineDocument
-from telemetry.dtos.generation_report import GenerationReport
+from telemetry.dtos.generation_report import (
+    GenerationPlannerTrace,
+    GenerationReport,
+    GenerationReportOutlineSection,
+)
 
 
 class GenerationHistoryItem(BaseModel):
@@ -42,6 +46,10 @@ class GenerationDetail(BaseModel):
     completed_at: str | None = None
     document_path: str | None = None
     report_url: str | None = None
+    runtime_curriculum_outline: list[GenerationReportOutlineSection] = Field(
+        default_factory=list
+    )
+    planner_trace: GenerationPlannerTrace | None = None
 
 
 class GenerationListResponse(BaseModel):
