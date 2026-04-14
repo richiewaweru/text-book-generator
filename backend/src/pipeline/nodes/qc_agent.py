@@ -25,10 +25,12 @@ from pydantic import BaseModel
 from pydantic_ai import Agent
 
 from core.config import settings as app_settings
-from pipeline.section_assets import is_required_visual_block
+from pipeline.events import SectionMediaBlockedEvent
+from pipeline.media.retry import is_media_block, next_retry_request
 from pipeline.prompts.qc import build_qc_system_prompt, build_qc_user_prompt
 from pipeline.providers.registry import get_node_text_model
 from pipeline.runtime_context import retry_policy_for_node
+from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import (
     FailedSectionRecord,
@@ -164,21 +166,33 @@ async def qc_agent(
         if blocking:
             block_type = blocking[0].get("block", "unknown")
             reason = blocking[0].get("message", "QC failed")
-            diagram_budget_exhausted = (
-                block_type in {"diagram", "diagram_compare", "diagram_series"}
-                and state.diagram_retry_count.get(section_id, 0) >= 1
-            )
-            if diagram_budget_exhausted and is_required_visual_block(state, block_type):
-                failed_sections[section_id] = _terminal_qc_failure_record(
-                    state=state,
+            media_related = any(is_media_block(issue.get("block")) for issue in blocking)
+            if media_related:
+                media_retry = next_retry_request(
+                    state,
                     section_id=section_id,
-                    block_type=block_type,
-                    reason=reason,
+                    blocking_issues=blocking,
                 )
-                lifecycle_updates[section_id] = "failed"
-                pending_asset_updates[section_id] = []
                 rerender_updates[section_id] = None
-            elif not diagram_budget_exhausted and state.can_rerender(section_id):
+                if media_retry is None:
+                    failed_sections[section_id] = _terminal_qc_failure_record(
+                        state=state,
+                        section_id=section_id,
+                        block_type=block_type,
+                        reason=reason,
+                    )
+                    lifecycle_updates[section_id] = "failed"
+                    pending_asset_updates[section_id] = []
+                    publish_runtime_event(
+                        state.request.generation_id or "",
+                        SectionMediaBlockedEvent(
+                            generation_id=state.request.generation_id or "",
+                            section_id=section_id,
+                            slot_ids=[block_type],
+                            reason=reason,
+                        ),
+                    )
+            elif len({issue.get("block") for issue in blocking}) == 1 and state.can_rerender(section_id):
                 rerender_updates[section_id] = RerenderRequest(
                     section_id=section_id,
                     block_type=block_type,

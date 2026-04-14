@@ -12,16 +12,16 @@ import core.events as core_events
 
 from pipeline.console_diagnostics import force_console_log
 from pipeline.events import DiagramOutcomeEvent
-from pipeline.prompts.diagram import (
+from pipeline.media.planner.media_planner import find_slot
+from pipeline.media.prompts.image_prompts import (
     build_compare_image_prompts,
     build_hook_image_prompt,
     build_image_generation_prompt,
     build_series_step_image_prompt,
 )
-from pipeline.providers.gemini_image_client import (
-    get_gemini_image_client,
-    resolve_gemini_image_api_key,
-)
+from pipeline.media.providers.registry import get_image_client, load_image_provider_spec
+from pipeline.media.types import SlotType, VisualFrame, VisualSlot
+from pipeline.providers.gemini_image_client import resolve_gemini_image_api_key
 from pipeline.providers.image_client import ImageGenerationResult
 from pipeline.events import ImageOutcomeEvent
 from pipeline.runtime_diagnostics import publish_runtime_event
@@ -65,6 +65,7 @@ def _publish_image_outcome(
     section_id: str | None,
     outcome: str,
     *,
+    provider: str | None = None,
     attempts: int = 1,
     error_message: str | None = None,
     duration_ms: float | None = None,
@@ -77,6 +78,7 @@ def _publish_image_outcome(
             generation_id=generation_id,
             section_id=section_id,
             outcome=outcome,
+            provider=provider,
             attempts=attempts,
             error_message=error_message,
             duration_ms=duration_ms,
@@ -320,15 +322,40 @@ async def _generate_single_image(
     state: TextbookPipelineState,
     section,
     composition_plan,
+    media_slot: VisualSlot | None,
     sid: str,
     store,
     client,
     generation_id: str,
     api_key_present: bool,
 ):
+    slot = media_slot or VisualSlot(
+        slot_id="diagram",
+        slot_type=SlotType.DIAGRAM,
+        required=True,
+        preferred_render="image",
+        fallback_render="svg",
+        pedagogical_intent=composition_plan.diagram.visual_guidance or section.header.title,
+        caption=(
+            section.diagram.caption
+            if section.diagram is not None
+            else f"Visual illustration for {section.header.title}"
+        ),
+        frames=[
+            VisualFrame(
+                slot_id="diagram",
+                index=0,
+                label=section.header.title,
+                generation_goal=f"Show the core idea of {section.header.title}.",
+                must_include=composition_plan.diagram.key_concepts or [],
+                avoid=["text overlays"],
+            )
+        ],
+    )
     prompt = build_image_generation_prompt(
-        section=section,
-        diagram_plan=composition_plan.diagram,
+        section_title=section.header.title,
+        slot=slot,
+        frame=slot.frames[0],
         style_context=state.style_context,
     )
     image_result, attempts = await _request_image_bytes(
@@ -387,6 +414,7 @@ async def _generate_series_images(
     state: TextbookPipelineState,
     section,
     composition_plan,
+    media_slot: VisualSlot | None,
     sid: str,
     store,
     client,
@@ -398,15 +426,40 @@ async def _generate_series_images(
     rendered_steps: list[DiagramSeriesStep] = []
     failures: list[str] = []
     max_attempts = 1
+    slot = media_slot or VisualSlot(
+        slot_id="diagram_series",
+        slot_type=SlotType.DIAGRAM_SERIES,
+        required=True,
+        preferred_render="image",
+        fallback_render="svg",
+        pedagogical_intent=composition_plan.diagram.visual_guidance or section.header.title,
+        caption=section.header.title,
+        frames=[
+            VisualFrame(
+                slot_id="diagram_series",
+                index=index,
+                label=step.step_label,
+                generation_goal=f"Show sequence step {index + 1} for {section.header.title}.",
+                must_include=[step.step_label],
+                avoid=["text overlays"],
+            )
+            for index, step in enumerate(seed_steps)
+        ],
+    )
 
     for index, step in enumerate(seed_steps):
-        key_concept = key_concepts[index] if index < len(key_concepts) else step.step_label
+        frame = slot.frames[index] if index < len(slot.frames) else VisualFrame(
+            slot_id="diagram_series",
+            index=index,
+            label=step.step_label,
+            generation_goal=f"Show sequence step {index + 1} for {section.header.title}.",
+            must_include=[key_concepts[index] if index < len(key_concepts) else step.step_label],
+            avoid=["text overlays"],
+        )
         prompt = build_series_step_image_prompt(
             section_title=section.header.title,
-            step_label=step.step_label,
-            step_index=index,
-            total_steps=len(seed_steps),
-            key_concept=key_concept,
+            slot=slot,
+            frame=frame,
             style_context=state.style_context,
         )
 
@@ -543,6 +596,7 @@ async def _generate_compare_images(
     state: TextbookPipelineState,
     section,
     composition_plan,
+    media_slot: VisualSlot | None,
     sid: str,
     store,
     client,
@@ -550,18 +604,43 @@ async def _generate_compare_images(
     api_key_present: bool,
 ):
     compare_content = _seed_compare_content(section, composition_plan)
-    prompt_before_label = (
-        composition_plan.diagram.compare_before_label or compare_content.before_label or "Before"
-    )
-    prompt_after_label = (
-        composition_plan.diagram.compare_after_label or compare_content.after_label or "After"
+    slot = media_slot or VisualSlot(
+        slot_id="diagram_compare",
+        slot_type=SlotType.DIAGRAM_COMPARE,
+        required=True,
+        preferred_render="image",
+        fallback_render="svg",
+        pedagogical_intent=composition_plan.diagram.visual_guidance or section.header.title,
+        caption=compare_content.caption,
+        frames=[
+            VisualFrame(
+                slot_id="diagram_compare",
+                index=0,
+                label=composition_plan.diagram.compare_before_label
+                or compare_content.before_label
+                or "Before",
+                generation_goal=f"Render the before state for {section.header.title}.",
+                must_include=[compare_content.before_label],
+                avoid=["text overlays"],
+            ),
+            VisualFrame(
+                slot_id="diagram_compare",
+                index=1,
+                label=composition_plan.diagram.compare_after_label
+                or compare_content.after_label
+                or "After",
+                generation_goal=f"Render the after state for {section.header.title}.",
+                must_include=[compare_content.after_label],
+                avoid=["text overlays"],
+            ),
+        ],
     )
     before_prompt, after_prompt = build_compare_image_prompts(
-        section=section,
-        diagram_plan=composition_plan.diagram,
+        section_title=section.header.title,
+        slot=slot,
+        before_frame=slot.frames[0],
+        after_frame=slot.frames[1],
         style_context=state.style_context,
-        before_label=prompt_before_label,
-        after_label=prompt_after_label,
     )
 
     try:
@@ -616,7 +695,7 @@ async def _generate_compare_images(
     ), max(before_attempts, after_attempts)
 
 
-async def image_generator(
+async def _run_image_generation(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
@@ -733,7 +812,6 @@ async def image_generator(
             "completed_nodes": ["image_generator"],
             **_with_outcome(state, sid, "error"),
         }
-
     if composition_plan is None:
         error_message = (
             "Image generation cannot run because no composition plan exists for this section."
@@ -899,40 +977,51 @@ async def image_generator(
         probe_ok=probe_ok,
     )
 
-    api_key = resolve_gemini_image_api_key()
-    api_key_present = bool(api_key)
+    provider_spec = load_image_provider_spec()
+    checked_vars = (
+        ["GOOGLE_CLOUD_NANO_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"]
+        if provider_spec.provider == "gemini"
+        else [provider_spec.api_key_env] if provider_spec.api_key_env else []
+    )
+    api_key_present = (
+        bool(resolve_gemini_image_api_key())
+        if provider_spec.provider == "gemini"
+        else bool(os.getenv(provider_spec.api_key_env or ""))
+    )
     _log_image_event(
         logging.INFO,
         "API_KEY_STATUS",
         section_id=sid,
         api_key_present=api_key_present,
-        checked_vars=[
-            "GOOGLE_CLOUD_NANO_API_KEY",
-            "GOOGLE_API_KEY",
-            "GEMINI_API_KEY",
-        ],
+        checked_vars=checked_vars,
+        provider=provider_spec.provider,
     )
-    if _client is None and not api_key:
+    if _client is None and not api_key_present:
+        missing_message = (
+            "No Gemini API key found for image generation. "
+            "Set GOOGLE_CLOUD_NANO_API_KEY, GOOGLE_API_KEY, or GEMINI_API_KEY."
+            if provider_spec.provider == "gemini"
+            else f"No API key found for image generation provider '{provider_spec.provider}'. "
+            f"Set {provider_spec.api_key_env}."
+        )
         _log_image_event(
             logging.ERROR,
             "API_KEY_FAILURE",
             section_id=sid,
             reason="missing_api_key",
+            provider=provider_spec.provider,
         )
         _imggen_diag(
             "FAIL",
             section_id=sid,
             reason="no_api_key",
-            provider="gemini",
+            provider=provider_spec.provider,
         )
         _publish_image_outcome(
             generation_id,
             sid,
             "error",
-            error_message=(
-                "No Gemini API key found for image generation. "
-                "Set GOOGLE_CLOUD_NANO_API_KEY, GOOGLE_API_KEY, or GEMINI_API_KEY."
-            ),
+            error_message=missing_message,
             duration_ms=(time.monotonic() - started) * 1000.0,
         )
         return {
@@ -940,10 +1029,7 @@ async def image_generator(
                 PipelineError(
                     node="image_generator",
                     section_id=sid,
-                    message=(
-                        "No Gemini API key found for image generation. "
-                        "Set GOOGLE_CLOUD_NANO_API_KEY, GOOGLE_API_KEY, or GEMINI_API_KEY."
-                    ),
+                    message=missing_message,
                     recoverable=True,
                 )
             ],
@@ -952,7 +1038,7 @@ async def image_generator(
         }
 
     try:
-        client = _client or get_gemini_image_client()
+        client = _client or get_image_client()
         _log_image_event(
             logging.INFO,
             "CLIENT_STATUS",
@@ -960,11 +1046,12 @@ async def image_generator(
             client_class=type(client).__name__,
             source="injected" if _client is not None else "default",
             api_key_present=api_key_present,
+            provider=provider_spec.provider,
         )
         _imggen_diag(
             "PROVIDER",
             section_id=sid,
-            provider="gemini",
+            provider=provider_spec.provider,
             client_type=type(client).__name__,
             client_source="injected" if _client is not None else "default",
             target_mode=visual_mode,
@@ -989,7 +1076,11 @@ async def image_generator(
             generation_id,
             sid,
             "error",
-            error_message=f"Gemini image client init failed: {type(exc).__name__}: {exc}",
+            provider=provider_spec.provider,
+            error_message=(
+                f"{provider_spec.provider.capitalize()} image client init failed: "
+                f"{type(exc).__name__}: {exc}"
+            ),
             duration_ms=(time.monotonic() - started) * 1000.0,
         )
         return {
@@ -997,7 +1088,10 @@ async def image_generator(
                 PipelineError(
                     node="image_generator",
                     section_id=sid,
-                    message=f"Gemini image client init failed: {type(exc).__name__}: {exc}",
+                    message=(
+                        f"{provider_spec.provider.capitalize()} image client init failed: "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
                     recoverable=True,
                 )
             ],
@@ -1008,6 +1102,7 @@ async def image_generator(
     try:
         updated_section = section
         attempts = 1
+        media_plan = state.media_plans.get(sid) if sid is not None else None
         for target in image_targets:
             if target_is_satisfied(updated_section, target, mode="image"):
                 _imggen_diag(
@@ -1029,6 +1124,7 @@ async def image_generator(
                     state=state,
                     section=updated_section,
                     composition_plan=composition_plan,
+                    media_slot=find_slot(media_plan, SlotType.DIAGRAM_SERIES),
                     sid=sid,
                     store=store,
                     client=client,
@@ -1040,6 +1136,7 @@ async def image_generator(
                     state=state,
                     section=updated_section,
                     composition_plan=composition_plan,
+                    media_slot=find_slot(media_plan, SlotType.DIAGRAM_COMPARE),
                     sid=sid,
                     store=store,
                     client=client,
@@ -1051,6 +1148,7 @@ async def image_generator(
                     state=state,
                     section=updated_section,
                     composition_plan=composition_plan,
+                    media_slot=find_slot(media_plan, SlotType.DIAGRAM),
                     sid=sid,
                     store=store,
                     client=client,
@@ -1108,6 +1206,7 @@ async def image_generator(
                 generation_id,
                 sid,
                 "error",
+                provider=provider_spec.provider,
                 attempts=attempts,
                 error_message=error_message,
                 duration_ms=(time.monotonic() - started) * 1000.0,
@@ -1148,6 +1247,7 @@ async def image_generator(
             generation_id,
             sid,
             "success",
+            provider=provider_spec.provider,
             attempts=attempts,
             duration_ms=(time.monotonic() - started) * 1000.0,
         )
@@ -1176,6 +1276,7 @@ async def image_generator(
             generation_id,
             sid,
             "timeout",
+            provider=provider_spec.provider,
             attempts=attempts,
             error_message="Image generation timed out",
             duration_ms=(time.monotonic() - started) * 1000.0,
@@ -1220,6 +1321,7 @@ async def image_generator(
             generation_id,
             sid,
             "error",
+            provider=provider_spec.provider,
             attempts=attempts,
             error_message=message,
             duration_ms=(time.monotonic() - started) * 1000.0,
@@ -1236,3 +1338,20 @@ async def image_generator(
             "completed_nodes": ["image_generator"],
             **_with_outcome(state, sid, "error"),
         }
+
+
+async def image_generator(
+    state: TextbookPipelineState | dict,
+    *,
+    model_overrides: dict | None = None,
+    _store=None,
+    _client=None,
+) -> dict:
+    from pipeline.media.executors.image_generator import image_generator as execute_image_generator
+
+    return await execute_image_generator(
+        state,
+        model_overrides=model_overrides,
+        _store=_store,
+        _client=_client,
+    )

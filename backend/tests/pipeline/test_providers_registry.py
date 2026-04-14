@@ -5,6 +5,7 @@ from contextlib import contextmanager
 
 from pydantic_ai.models.test import TestModel
 
+from pipeline.media.providers.registry import get_image_client, load_image_provider_spec
 from pipeline.providers.registry import (
     ModelFamily,
     ModelSlot,
@@ -152,3 +153,57 @@ def test_google_family_uses_google_model():
     assert spec is not None
     assert spec.family == ModelFamily.GOOGLE
     assert spec.model_name == "gemini-2.5-flash"
+
+
+def test_image_provider_defaults_to_gemini():
+    with _env(
+        PIPELINE_IMAGE_PROVIDER=None,
+        PIPELINE_IMAGE_MODEL_NAME=None,
+        PIPELINE_IMAGE_BASE_URL=None,
+        PIPELINE_IMAGE_API_KEY_ENV=None,
+    ):
+        spec = load_image_provider_spec()
+
+    assert spec.provider == "gemini"
+
+
+def test_image_provider_selects_openai():
+    with _env(
+        PIPELINE_IMAGE_PROVIDER="openai",
+        PIPELINE_IMAGE_MODEL_NAME="gpt-image-1",
+        OPENAI_API_KEY="sk-test",
+    ):
+        client = get_image_client()
+
+    assert client.__class__.__name__ == "OpenAIImageClient"
+
+
+def test_image_provider_selects_xai_with_explicit_base_url():
+    with _env(
+        PIPELINE_IMAGE_PROVIDER="xai",
+        PIPELINE_IMAGE_MODEL_NAME="grok-image",
+        PIPELINE_IMAGE_BASE_URL="https://api.x.ai/v1",
+        PIPELINE_IMAGE_API_KEY_ENV="XAI_API_KEY",
+        XAI_API_KEY="sk-test",
+    ):
+        spec = load_image_provider_spec()
+        client = get_image_client()
+
+    assert spec.provider == "xai"
+    assert spec.base_url == "https://api.x.ai/v1"
+    assert client.__class__.__name__ == "XAIImageClient"
+
+
+def test_xai_requires_explicit_base_url():
+    with _env(
+        PIPELINE_IMAGE_PROVIDER="xai",
+        PIPELINE_IMAGE_BASE_URL=None,
+        PIPELINE_IMAGE_API_KEY_ENV="XAI_API_KEY",
+        XAI_API_KEY="sk-test",
+    ):
+        try:
+            load_image_provider_spec()
+        except RuntimeError as exc:
+            assert "PIPELINE_IMAGE_BASE_URL is required" in str(exc)
+        else:
+            raise AssertionError("Expected RuntimeError for missing xAI base URL")

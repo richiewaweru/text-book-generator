@@ -27,9 +27,16 @@ def current_section_attempt(
     if section_id is None:
         return None, "initial"
 
-    is_rerender = typed.pending_rerender_for(section_id) is not None
+    is_rerender = (
+        typed.pending_rerender_for(section_id) is not None
+        or typed.pending_media_retry_for(section_id) is not None
+    )
     trigger = "rerender" if is_rerender else "initial"
-    attempt = typed.rerender_count.get(section_id, 0) + 1
+    media_attempts = sum(
+        sum(frame_counts.values())
+        for frame_counts in typed.media_frame_retry_count.get(section_id, {}).values()
+    )
+    attempt = typed.rerender_count.get(section_id, 0) + media_attempts + 1
     if is_rerender:
         attempt += 1
     return attempt, trigger

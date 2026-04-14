@@ -144,6 +144,7 @@ def test_runtime_policy_settings_defaults() -> None:
 
     assert settings.generation_max_concurrent_per_user == 2
     assert bundle.concurrency.max_section_concurrency == 4
+    assert bundle.concurrency.max_media_concurrency == 2
     assert bundle.concurrency.max_diagram_concurrency == 2
     assert bundle.concurrency.max_qc_concurrency == 4
     assert bundle.max_section_rerenders == 2
@@ -154,7 +155,7 @@ def test_runtime_policy_settings_defaults() -> None:
 
 def test_runtime_policy_settings_read_env_overrides(monkeypatch) -> None:
     monkeypatch.setenv("GENERATION_MAX_CONCURRENT_PER_USER", "5")
-    monkeypatch.setenv("PIPELINE_CONCURRENCY_STRICT_DIAGRAM_MAX", "2")
+    monkeypatch.setenv("PIPELINE_CONCURRENCY_STRICT_MEDIA_MAX", "2")
     monkeypatch.setenv("PIPELINE_TIMEOUT_GENERATION_BASE_SECONDS", "150")
     monkeypatch.setenv("PIPELINE_TIMEOUT_GENERATION_PER_SECTION_SECONDS", "75")
     monkeypatch.setenv("PIPELINE_TIMEOUT_GENERATION_CAP_SECONDS", "600")
@@ -165,10 +166,23 @@ def test_runtime_policy_settings_read_env_overrides(monkeypatch) -> None:
     bundle = resolve_runtime_policy_bundle(settings, GenerationMode.STRICT)
 
     assert settings.generation_max_concurrent_per_user == 5
+    assert bundle.concurrency.max_media_concurrency == 2
     assert bundle.concurrency.max_diagram_concurrency == 2
     assert bundle.max_section_rerenders == 6
     assert bundle.retries.qc_agent.max_attempts == 4
     assert resolve_generation_timeout_seconds(settings, 4, mode=GenerationMode.STRICT) == 450.0
+
+
+def test_runtime_policy_settings_accept_legacy_diagram_aliases(monkeypatch) -> None:
+    monkeypatch.setenv("PIPELINE_CONCURRENCY_BALANCED_DIAGRAM_MAX", "3")
+    monkeypatch.setenv("PIPELINE_RETRY_DIAGRAM_MAX_ATTEMPTS", "5")
+
+    settings = Settings(_env_file=None)
+    bundle = resolve_runtime_policy_bundle(settings, GenerationMode.BALANCED)
+
+    assert bundle.concurrency.max_media_concurrency == 3
+    assert bundle.concurrency.max_diagram_concurrency == 3
+    assert bundle.retries.diagram_generator.max_attempts == 5
 
 
 def test_runtime_policy_settings_reject_invalid_values(monkeypatch) -> None:

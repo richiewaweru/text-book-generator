@@ -310,7 +310,12 @@ async def test_curriculum_planner_enriches_seeded_outline_without_changing_struc
     monkeypatch.setattr(curriculum_planner_mod, "Agent", FakeAgent)
     monkeypatch.setattr(curriculum_planner_mod, "run_llm", fake_run_llm)
     monkeypatch.setattr(curriculum_planner_mod, "get_node_text_model", lambda *args, **kwargs: "fast-model")
-    monkeypatch.setattr(curriculum_planner_mod, "publish_runtime_event", lambda *args, **kwargs: None)
+    published_events: list[object] = []
+    monkeypatch.setattr(
+        curriculum_planner_mod,
+        "publish_runtime_event",
+        lambda generation_id, event: published_events.append(event),
+    )
 
     result = await curriculum_planner_mod.curriculum_planner(state)
 
@@ -320,6 +325,11 @@ async def test_curriculum_planner_enriches_seeded_outline_without_changing_struc
     assert enriched[0].terms_to_define == ["chlorophyll"]
     assert enriched[1].terms_assumed == ["chlorophyll"]
     assert enriched[1].visual_commitment == "none"
+    planner_event = next(event for event in published_events if event.type == "curriculum_planned")
+    assert planner_event.path == "seeded_enrichment"
+    assert planner_event.result == "enriched"
+    assert planner_event.runtime_curriculum_outline[0].terms_to_define == ["chlorophyll"]
+    assert planner_event.planner_trace_sections[0].rationale_summary == "Introduce the core idea."
 
 
 @pytest.mark.asyncio
@@ -337,7 +347,12 @@ async def test_curriculum_planner_seeded_enrichment_failure_falls_back_to_outlin
     monkeypatch.setattr(curriculum_planner_mod, "Agent", FakeAgent)
     monkeypatch.setattr(curriculum_planner_mod, "run_llm", failing_run_llm)
     monkeypatch.setattr(curriculum_planner_mod, "get_node_text_model", lambda *args, **kwargs: "fast-model")
-    monkeypatch.setattr(curriculum_planner_mod, "publish_runtime_event", lambda *args, **kwargs: None)
+    published_events: list[object] = []
+    monkeypatch.setattr(
+        curriculum_planner_mod,
+        "publish_runtime_event",
+        lambda generation_id, event: published_events.append(event),
+    )
 
     result = await curriculum_planner_mod.curriculum_planner(state)
 
@@ -345,6 +360,10 @@ async def test_curriculum_planner_seeded_enrichment_failure_falls_back_to_outlin
     assert restored[0].title == "Intro plants"
     assert restored[0].terms_to_define == []
     assert restored[0].visual_commitment is None
+    planner_event = next(event for event in published_events if event.type == "curriculum_planned")
+    assert planner_event.path == "seeded_enrichment"
+    assert planner_event.result == "fallback"
+    assert planner_event.runtime_curriculum_outline[0].visual_commitment is None
 
 
 @pytest.mark.asyncio
@@ -366,6 +385,15 @@ async def test_curriculum_planner_fresh_path_preserves_policy_fields(monkeypatch
                         terms_assumed=[],
                         practice_target="name the role of chlorophyll",
                         visual_commitment="diagram",
+                    ),
+                    _section_plan(
+                        section_id="s-02",
+                        position=2,
+                        title="Repeat chlorophyll",
+                        terms_to_define=["Chlorophyll"],
+                        terms_assumed=[],
+                        practice_target="spot the repeated term",
+                        visual_commitment="none",
                     )
                 ]
             )
@@ -374,7 +402,12 @@ async def test_curriculum_planner_fresh_path_preserves_policy_fields(monkeypatch
     monkeypatch.setattr(curriculum_planner_mod, "Agent", FakeAgent)
     monkeypatch.setattr(curriculum_planner_mod, "run_llm", fake_run_llm)
     monkeypatch.setattr(curriculum_planner_mod, "get_node_text_model", lambda *args, **kwargs: "fast-model")
-    monkeypatch.setattr(curriculum_planner_mod, "publish_runtime_event", lambda *args, **kwargs: None)
+    published_events: list[object] = []
+    monkeypatch.setattr(
+        curriculum_planner_mod,
+        "publish_runtime_event",
+        lambda generation_id, event: published_events.append(event),
+    )
 
     result = await curriculum_planner_mod.curriculum_planner(state)
 
@@ -382,6 +415,11 @@ async def test_curriculum_planner_fresh_path_preserves_policy_fields(monkeypatch
     assert section.terms_to_define == ["chlorophyll"]
     assert section.practice_target == "name the role of chlorophyll"
     assert section.visual_commitment == "diagram"
+    planner_event = next(event for event in published_events if event.type == "curriculum_planned")
+    assert planner_event.path == "fresh"
+    assert planner_event.result == "planned"
+    assert len(planner_event.duplicate_term_warnings) == 1
+    assert "Duplicate term assignment in curriculum plan" in planner_event.duplicate_term_warnings[0]
 
 
 def test_warn_duplicate_terms_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
@@ -391,9 +429,10 @@ def test_warn_duplicate_terms_logs_warning(caplog: pytest.LogCaptureFixture) -> 
     ]
 
     with caplog.at_level(logging.WARNING):
-        curriculum_planner_mod._warn_duplicate_terms(sections, "gen-dup")
+        warnings = curriculum_planner_mod._warn_duplicate_terms(sections, "gen-dup")
 
     assert "Duplicate term assignment in curriculum plan" in caplog.text
+    assert len(warnings) == 1
 
 
 @pytest.mark.asyncio

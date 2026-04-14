@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from pipeline.api import PipelineDocument, PipelineResult
 from pipeline.events import (
+    CurriculumPlannedEvent,
     InteractionOutcomeEvent,
     LLMCallStartedEvent,
     LLMCallSucceededEvent,
@@ -325,6 +326,37 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
         )
         event_bus.publish(
             generation_id,
+            CurriculumPlannedEvent(
+                generation_id=generation_id,
+                path="seeded_enrichment",
+                result="enriched",
+                duplicate_term_warnings=["Duplicate term assignment in curriculum plan term='slope' first_section='s-01' duplicate_section='s-02'"],
+                runtime_curriculum_outline=[
+                    {
+                        "section_id": "s-01",
+                        "title": "Intro section",
+                        "position": 1,
+                        "role": "intro",
+                        "focus": "Introduce slope as steepness on a graph.",
+                        "terms_to_define": ["slope"],
+                        "terms_assumed": [],
+                        "practice_target": "identify slope as a measure of steepness",
+                        "visual_commitment": "diagram",
+                    }
+                ],
+                planner_trace_sections=[
+                    {
+                        "section_id": "s-01",
+                        "title": "Intro section",
+                        "position": 1,
+                        "role": "intro",
+                        "rationale_summary": "Introduce slope as steepness on a graph.",
+                    }
+                ],
+            ),
+        )
+        event_bus.publish(
+            generation_id,
             LLMCallStartedEvent(
                 generation_id=generation_id,
                 node="curriculum_planner",
@@ -409,7 +441,16 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
     assert "llm_call_started" in timeline_types
     assert "llm_call_succeeded" in timeline_types
     assert "interaction_outcome" in timeline_types
+    assert "curriculum_planned" in timeline_types
     assert report_response.status_code == 200
+    assert report.runtime_curriculum_outline[0].section_id == "s-01"
+    assert report.planner_trace is not None
+    assert report.planner_trace.path == "seeded_enrichment"
+    assert report.planner_trace.duplicate_term_warnings[0].startswith(
+        "Duplicate term assignment in curriculum plan"
+    )
     assert report_response.json()["sections"][0]["interaction_outcome"] == "skipped"
     assert report_response.json()["sections"][0]["interaction_skip_reason"] == "no_plan"
+    assert report_response.json()["runtime_curriculum_outline"][0]["visual_commitment"] == "diagram"
+    assert report_response.json()["planner_trace"]["result"] == "enriched"
 

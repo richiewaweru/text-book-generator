@@ -12,11 +12,11 @@ import os
 
 from core.llm import ModelFamily, ModelSlot, ModelSpec, build_model
 from core.llm.transport import describe_text_model, effective_text_spec, endpoint_host
+from pipeline.media.providers.registry import get_image_client as resolve_image_client
 from pipeline.types.requests import GenerationMode
 
 NODE_MODEL_SLOTS: dict[str, ModelSlot] = {
     "curriculum_planner": ModelSlot.FAST,
-    "composition_planner": ModelSlot.FAST,
     "brief_planner": ModelSlot.FAST,
     "block_generator": ModelSlot.FAST,
     "content_generator": ModelSlot.STANDARD,
@@ -167,20 +167,7 @@ def get_node_text_spec(
 
 
 def get_image_client():
-    """Resolve image generation client, or None if not configured.
-
-    Returns a GeminiImageClient if GOOGLE_API_KEY is set, else None.
-    Lazy-imports to avoid errors when the Gemini SDK is not installed.
-    """
-    api_key = _first_env("GOOGLE_CLOUD_NANO_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY")
-    if not api_key:
-        return None
-    try:
-        from pipeline.providers.gemini_image_client import GeminiImageClient
-
-        return GeminiImageClient(api_key=api_key)
-    except ImportError:
-        return None
+    return resolve_image_client()
 
 
 __all__ = [
@@ -194,6 +181,7 @@ __all__ = [
     "get_node_text_model",
     "get_node_text_spec",
     "resolve_text_model",
+    "get_image_client",
     "describe_text_model",
     "effective_text_spec",
     "endpoint_host",

@@ -357,6 +357,7 @@ describe('textbook page stream lifecycle', () => {
 			max_section_rerenders: 2,
 			concurrency: {
 				max_section_concurrency: 4,
+				max_media_concurrency: 2,
 				max_diagram_concurrency: 2,
 				max_qc_concurrency: 4
 			},
@@ -386,6 +387,8 @@ describe('textbook page stream lifecycle', () => {
 				sections_completed: 1,
 				sections_running: 1,
 				sections_queued: 2,
+				media_running: 1,
+				media_queued: 0,
 				diagram_running: 1,
 				diagram_queued: 0,
 				qc_running: 0,
@@ -405,7 +408,7 @@ describe('textbook page stream lifecycle', () => {
 		await waitFor(() => expect(screen.getByText(/Progress: Planning lesson structure/i)).toBeTruthy());
 		expect(screen.getByText(/Stage: planning/i)).toBeTruthy();
 		expect(screen.getByText(/Runtime sections: 1 complete \/ 1 running \/ 2 queued/i)).toBeTruthy();
-		expect(screen.getByText(/Policy: 4 section \/ 2 diagram \/ 4 QC workers/i)).toBeTruthy();
+		expect(screen.getByText(/Policy: 4 section \/ 2 media \/ 4 QC workers/i)).toBeTruthy();
 		expect(screen.getByText(/Budget: 390s total, rerenders 2 max/i)).toBeTruthy();
 	});
 

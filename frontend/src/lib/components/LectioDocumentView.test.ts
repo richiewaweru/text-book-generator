@@ -102,10 +102,11 @@ describe('LectioDocumentView', () => {
 						section_id: 'sec_1',
 						title: 'Why derivatives matter',
 						position: 1,
-						status: 'queued',
+						status: 'planned',
 						section: null,
 						partial: null,
-						failure: null
+						failure: null,
+						signal: null
 					}
 				]
 			}
@@ -183,7 +184,7 @@ describe('LectioDocumentView', () => {
 			}
 		});
 
-		expect(screen.getByText(/Section 1 in progress/i)).toBeTruthy();
+		expect(screen.getByText(/Section 1 generating/i)).toBeTruthy();
 		expect(screen.getByText(/Why derivatives matter/i)).toBeTruthy();
 		expect(screen.getByText(/How do we measure change at an instant\?/i)).toBeTruthy();
 		expect(screen.queryByText(/Generating section 1/i)).toBeNull();

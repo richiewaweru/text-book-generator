@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Literal
 
 from pipeline.console_diagnostics import force_console_log
+from pipeline.media.assembly import slot_is_ready
+from pipeline.media.planner.media_planner import slot_render, slot_targets
 from pipeline.state import TextbookPipelineState
 
 VisualTarget = Literal["diagram", "diagram_series", "diagram_compare", "hook_svg"]
@@ -222,6 +224,22 @@ def resolve_effective_visual_targets(state: TextbookPipelineState | dict) -> lis
     typed = TextbookPipelineState.parse(state)
     section_id = typed.current_section_id
     if section_id is not None:
+        media_plan = typed.media_plans.get(section_id)
+        media_targets = [
+            target
+            for target in slot_targets(media_plan)
+            if target in {"diagram", "diagram_series", "diagram_compare"}
+        ]
+        if media_targets:
+            force_console_log(
+                "VISUAL_RESOLVE",
+                "TARGETS",
+                section_id=section_id,
+                source="media_plan",
+                targets=media_targets,
+            )
+            return media_targets  # type: ignore[return-value]
+    if section_id is not None:
         plan = typed.composition_plans.get(section_id)
         required_targets = getattr(getattr(plan, "diagram", None), "required_targets", []) or []
         if required_targets:
@@ -241,6 +259,17 @@ def resolve_effective_visual_mode(state: TextbookPipelineState | dict) -> Visual
     typed = TextbookPipelineState.parse(state)
     section_id = typed.current_section_id
     if section_id is not None:
+        media_plan = typed.media_plans.get(section_id)
+        render = slot_render(media_plan)
+        if render in {"svg", "image"}:
+            force_console_log(
+                "VISUAL_RESOLVE",
+                "MODE",
+                section_id=section_id,
+                source="media_plan",
+                mode=render,
+            )
+            return render  # type: ignore[return-value]
         plan = typed.composition_plans.get(section_id)
         mode = getattr(getattr(plan, "diagram", None), "mode", None)
         if mode in {"svg", "image"}:
@@ -289,17 +318,45 @@ def target_is_satisfied(
     return False
 
 
+def _media_target_ready(
+    state: TextbookPipelineState,
+    target: VisualTarget,
+) -> bool | None:
+    section_id = state.current_section_id
+    if section_id is None:
+        return None
+    media_plan = state.media_plans.get(section_id)
+    if media_plan is None:
+        return None
+    slot = next((candidate for candidate in media_plan.slots if candidate.slot_type.value == target), None)
+    if slot is None:
+        return None
+    slot_result = state.media_slot_results.get(section_id, {}).get(slot.slot_id)
+    if slot_result is not None:
+        return slot_result.ready
+    return slot_is_ready(slot, state.media_frame_results.get(section_id, {}).get(slot.slot_id))
+
+
 def pending_visual_targets(state: TextbookPipelineState | dict) -> list[VisualTarget]:
     typed = TextbookPipelineState.parse(state)
     section_id = typed.current_section_id
     if section_id is None:
         return []
     section = typed.generated_sections.get(section_id)
-    if section is None:
-        return []
     targets = resolve_effective_visual_targets(typed)
     mode = resolve_effective_visual_mode(typed)
-    pending = [target for target in targets if not target_is_satisfied(section, target, mode=mode)]
+    pending: list[VisualTarget] = []
+    for target in targets:
+        media_ready = _media_target_ready(typed, target)
+        if media_ready is not None:
+            if not media_ready:
+                pending.append(target)
+            continue
+        if section is None:
+            pending.append(target)
+            continue
+        if not target_is_satisfied(section, target, mode=mode):
+            pending.append(target)
     force_console_log(
         "VISUAL_RESOLVE",
         "PENDING",

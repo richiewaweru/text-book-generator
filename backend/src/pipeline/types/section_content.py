@@ -422,12 +422,27 @@ SimulationType = Literal[
 ]
 
 
+class InteractionContext(BaseModel):
+    learner_level: str
+    template_id: str
+    color_mode: Literal['light', 'dark']
+    accent_color: str
+    surface_color: str
+    font_mono: str
+
+
+class InteractionDimensions(BaseModel):
+    width: str
+    height: int
+    resizable: bool
+
+
 class InteractionSpec(BaseModel):
     type: SimulationType
     goal: str
     anchor_content: dict
-    context: dict
-    dimensions: dict
+    context: InteractionContext
+    dimensions: InteractionDimensions
     print_translation: Literal['static_midstate', 'static_diagram', 'hide']
 
 

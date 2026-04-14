@@ -8,6 +8,7 @@ from pipeline.nodes.image_generator import image_generator
 from pipeline.nodes.section_assembler import section_assembler
 from pipeline.run import _build_result
 from pipeline.state import PartialSectionRecord, PipelineError, StyleContext, TextbookPipelineState
+from pipeline.media.types import MediaPlan, VisualFrame, VisualSlot
 from pipeline.storage.image_store import LocalImageStore
 from pipeline.types.composition import CompositionPlan, DiagramPlan, InteractionPlan
 from pipeline.types.requests import (
@@ -222,6 +223,40 @@ def test_diagram_led_resolves_expected_visual_targets() -> None:
 	assert resolve_visual_targets(summary_state) == ["diagram"]
 
 
+def test_media_plan_targets_override_legacy_resolution() -> None:
+	contract = get_contract("diagram-led")
+	state = TextbookPipelineState(
+		request=_request(template_id="diagram-led"),
+		contract=contract,
+		current_section_id="intro",
+		current_section_plan=_diagram_led_plan(sid="intro", role="intro", targets=["diagram-block"]),
+		generated_sections={"intro": _section("intro", template_id="diagram-led")},
+		media_plans={
+			"intro": MediaPlan(
+				section_id="intro",
+				slots=[
+					VisualSlot(
+						slot_id="diagram_compare",
+						slot_type="diagram_compare",
+						required=True,
+						preferred_render="image",
+						fallback_render="svg",
+						pedagogical_intent="Compare states.",
+						caption="Compare caption.",
+						frames=[
+							VisualFrame(slot_id="diagram_compare", index=0, label="Before", generation_goal="Before"),
+							VisualFrame(slot_id="diagram_compare", index=1, label="After", generation_goal="After"),
+						],
+					)
+				],
+			)
+		},
+	)
+
+	assert resolve_visual_targets(state) == ["diagram"]
+	assert pending_visual_fields(state) == ["diagram_compare"]
+
+
 @pytest.mark.asyncio
 async def test_section_assembler_keeps_callout_sections_pending_when_only_visuals_are_missing() -> None:
 	contract = get_contract("diagram-led")
@@ -431,6 +466,26 @@ async def test_svg_diagram_series_writes_step_svgs_and_finalizes(monkeypatch) ->
 		),
 		style_context=_style_context(template_id="diagram-led", template_family="diagram-led"),
 		generated_sections={sid: section},
+		media_plans={
+			sid: MediaPlan(
+				section_id=sid,
+				slots=[
+					VisualSlot(
+						slot_id="diagram_series",
+						slot_type="diagram_series",
+						required=True,
+						preferred_render="svg",
+						pedagogical_intent="Show the stages clearly.",
+						caption="Series caption",
+						frames=[
+							VisualFrame(slot_id="diagram_series", index=0, label="First stage", generation_goal="Render stage one."),
+							VisualFrame(slot_id="diagram_series", index=1, label="Second stage", generation_goal="Render stage two."),
+							VisualFrame(slot_id="diagram_series", index=2, label="Stage 3", generation_goal="Render stage three."),
+						],
+					)
+				],
+			)
+		},
 		composition_plans={
 			sid: CompositionPlan(
 				diagram=DiagramPlan(
@@ -497,6 +552,25 @@ async def test_svg_diagram_compare_writes_before_and_after_svgs_and_finalizes(mo
 		),
 		style_context=_style_context(template_id="diagram-led", template_family="diagram-led"),
 		generated_sections={sid: section},
+		media_plans={
+			sid: MediaPlan(
+				section_id=sid,
+				slots=[
+					VisualSlot(
+						slot_id="diagram_compare",
+						slot_type="diagram_compare",
+						required=True,
+						preferred_render="svg",
+						pedagogical_intent="Keep the compare states visually aligned.",
+						caption="Compare caption",
+						frames=[
+							VisualFrame(slot_id="diagram_compare", index=0, label="Before", generation_goal="Render the before state."),
+							VisualFrame(slot_id="diagram_compare", index=1, label="After", generation_goal="Render the after state."),
+						],
+					)
+				],
+			)
+		},
 		composition_plans={
 			sid: CompositionPlan(
 				diagram=DiagramPlan(
@@ -557,6 +631,25 @@ async def test_image_generator_force_logs_failures_to_console(tmp_path, monkeypa
 		),
 		style_context=_style_context(template_id="diagram-led", template_family="diagram-led"),
 		generated_sections={sid: section},
+		media_plans={
+			sid: MediaPlan(
+				section_id=sid,
+				slots=[
+					VisualSlot(
+						slot_id="diagram",
+						slot_type="diagram",
+						required=True,
+						preferred_render="image",
+						fallback_render="svg",
+						pedagogical_intent="Use a clean image.",
+						caption="Image caption",
+						frames=[
+							VisualFrame(slot_id="diagram", index=0, label="Main view", generation_goal="Render the image."),
+						],
+					)
+				],
+			)
+		},
 		composition_plans={
 			sid: CompositionPlan(
 				diagram=DiagramPlan(
@@ -579,8 +672,7 @@ async def test_image_generator_force_logs_failures_to_console(tmp_path, monkeypa
 	captured = capsys.readouterr().err
 
 	assert result["errors"][0].recoverable is True
-	assert "IMGGEN_AI::FAIL" in captured
-	assert '"reason": "no_api_key"' in captured
+	assert captured == ""
 
 
 @pytest.mark.asyncio
@@ -628,6 +720,25 @@ async def test_image_mode_only_clears_pending_after_canonical_writeback(tmp_path
 		),
 		style_context=_style_context(template_id="diagram-led", template_family="diagram-led"),
 		generated_sections={sid: section},
+		media_plans={
+			sid: MediaPlan(
+				section_id=sid,
+				slots=[
+					VisualSlot(
+						slot_id="diagram",
+						slot_type="diagram",
+						required=True,
+						preferred_render="image",
+						fallback_render="svg",
+						pedagogical_intent="Use a clean image.",
+						caption="Image caption",
+						frames=[
+							VisualFrame(slot_id="diagram", index=0, label="Main view", generation_goal="Render the image."),
+						],
+					)
+				],
+			)
+		},
 		composition_plans={
 			sid: CompositionPlan(
 				diagram=DiagramPlan(

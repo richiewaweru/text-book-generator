@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, Field
 
+
 class GenerationMode(str, Enum):
     DRAFT = "draft"
     BALANCED = "balanced"
@@ -46,6 +47,10 @@ class PipelineRequest(BaseModel):
 
 class SectionVisualPolicy(BaseModel):
     required: bool = False
+    target: Literal["diagram", "diagram_compare", "diagram_series", "simulation"] | None = None
+    fallback_target: (
+        Literal["diagram", "diagram_compare", "diagram_series", "simulation"] | None
+    ) = None
     intent: Literal[
         "explain_structure",
         "show_realism",
@@ -53,8 +58,11 @@ class SectionVisualPolicy(BaseModel):
         "compare_variants",
     ] | None = None
     mode: Literal["image", "svg"] | None = None
+    preferred_render: Literal["image", "svg", "html_simulation"] | None = None
+    fallback_render: Literal["image", "svg", "html_simulation"] | None = None
     goal: str | None = None
     style_notes: str | None = None
+    simulation_intent: str | None = None
 
 
 class SectionPlan(BaseModel):

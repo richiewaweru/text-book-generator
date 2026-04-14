@@ -66,7 +66,7 @@
 			<div class="section-stack" data-print-mode={printMode ? 'true' : 'false'}>
 				{#each resolvedSectionSlots as slot (slot.section_id)}
 					{@const renderableSection = sectionForSlot(slot)}
-					{#if slot.status === 'completed' && slot.section}
+					{#if slot.status === 'ready' && slot.section}
 						{@const TemplateRender = template.render}
 						<article class="animate-step-reveal" id={`section-${slot.section_id}`}>
 							<TemplateRender section={slot.section} />
@@ -77,7 +77,7 @@
 					{:else if renderableSection}
 						{@const TemplateRender = template.render}
 						<article class="animate-step-reveal section-partial" id={`section-${slot.section_id}`} data-section-status={slot.status}>
-							<div class="section-partial-badge">Section {slot.position} in progress</div>
+							<div class="section-partial-badge">Section {slot.position} {slot.status.replaceAll('_', ' ')}</div>
 							<TemplateRender section={renderableSection} />
 						</article>
 					{:else}

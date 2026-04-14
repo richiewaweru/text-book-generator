@@ -4,13 +4,10 @@
 	import '$lib/styles/print.css';
 	import LectioDocumentView from '$lib/components/LectioDocumentView.svelte';
 	import {
-		applySectionAssetPending,
-		applySectionAssetReady,
-		applySectionFinal,
-		applySectionFailed,
-		applySectionPartial,
-		applySectionReady,
-		applySectionStarted,
+		applyGenerationStreamEvent,
+		type GenerationStreamContext
+	} from '$lib/generation/live-stream';
+	import {
 		buildSectionSlots,
 		normalizeDocument
 	} from '$lib/generation/viewer-state';
@@ -24,21 +21,11 @@
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import type { PDFExportRequest } from '$lib/types';
 	import type {
-		ErrorEvent,
 		GenerationDetail,
-		GenerationFailedEvent,
 		GenerationDocument,
 		ProgressUpdateEvent,
-		QCCompleteEvent,
 		RuntimePolicyEvent,
-		RuntimeProgressEvent,
-		SectionAssetPendingEvent,
-		SectionAssetReadyEvent,
-		SectionFailedEvent,
-		SectionFinalEvent,
-		SectionPartialEvent,
-		SectionReadyEvent,
-		SectionStartedEvent
+		RuntimeProgressEvent
 	} from '$lib/types';
 
 	const generationId = $derived(page.params.id);
@@ -56,6 +43,7 @@
 	let runtimePolicy = $state<RuntimePolicyEvent | null>(null);
 	let runtimeProgress = $state<RuntimeProgressEvent['snapshot'] | null>(null);
 	let viewerWarning = $state<string | null>(null);
+	let sectionSignals = $state<GenerationStreamContext['sectionSignals']>({});
 	let exportPdfOpen = $state(false);
 	let exportPdfLoading = $state(false);
 	let exportPdfError = $state<string | null>(null);
@@ -69,9 +57,9 @@
 	let cancelStream: (() => void) | null = null;
 	let streamClosedTerminally = false;
 	let streamErrorRecoveryAttempted = false;
-	const sectionSlots = $derived(buildSectionSlots(document, plannedSections));
+	const sectionSlots = $derived(buildSectionSlots(document, plannedSections, sectionSignals));
 	const readySectionCount = $derived(
-		sectionSlots.filter((slot) => slot.status === 'completed').length
+		sectionSlots.filter((slot) => slot.status === 'ready').length
 	);
 	const failedSectionCount = $derived(
 		sectionSlots.filter((slot) => slot.status === 'failed').length
@@ -97,7 +85,7 @@
 		!!document &&
 			!loading &&
 			detail?.status === 'completed' &&
-			(sectionSlots.length === 0 || sectionSlots.every((slot) => slot.status === 'completed'))
+			(sectionSlots.length === 0 || sectionSlots.every((slot) => slot.status === 'ready'))
 	);
 
 	function formatSeconds(seconds: number | null | undefined): string {
@@ -117,6 +105,36 @@
 		if (token !== undefined && token !== connectionToken) return;
 		cancelStream?.();
 		cancelStream = null;
+	}
+
+	function applyStreamResult(
+		type: string,
+		data: string
+	): { terminal: { kind: 'complete' | 'generation_failed' | 'error'; message?: string | null } | null } {
+		const result = applyGenerationStreamEvent(
+			{
+				document,
+				plannedSections,
+				qcSummary,
+				progressUpdate,
+				runtimePolicy,
+				runtimeProgress,
+				viewerWarning,
+				activeSectionId: null,
+				sectionSignals
+			},
+			type,
+			data
+		);
+		document = result.next.document ? normalizeDocument(result.next.document) : result.next.document;
+		plannedSections = result.next.plannedSections;
+		qcSummary = result.next.qcSummary;
+		progressUpdate = result.next.progressUpdate;
+		runtimePolicy = result.next.runtimePolicy;
+		runtimeProgress = result.next.runtimeProgress;
+		viewerWarning = result.next.viewerWarning;
+		sectionSignals = result.next.sectionSignals;
+		return { terminal: result.terminal };
 	}
 
 	async function handlePdfExport() {
@@ -270,98 +288,11 @@
 		cancelStream = connectGenerationEvents(id, {
 			onEvent(type, data) {
 				if (myToken !== connectionToken) return;
-				switch (type) {
-					case 'pipeline_start': {
-						const payload = JSON.parse(data) as { section_count: number };
-						plannedSections = payload.section_count;
-						break;
-					}
-					case 'progress_update': {
-						progressUpdate = JSON.parse(data) as ProgressUpdateEvent;
-						break;
-					}
-					case 'runtime_policy': {
-						runtimePolicy = JSON.parse(data) as RuntimePolicyEvent;
-						break;
-					}
-					case 'runtime_progress': {
-						const payload = JSON.parse(data) as RuntimeProgressEvent;
-						runtimeProgress = payload.snapshot;
-						plannedSections ??= payload.snapshot.sections_total;
-						break;
-					}
-					case 'section_started': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionStartedEvent;
-						document = applySectionStarted(document, payload);
-						break;
-					}
-					case 'section_partial': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionPartialEvent;
-						const result = applySectionPartial(document, payload);
-						document = result.document;
-						if (result.warning) {
-							console.error('[Lectio] Section validation failed:', result.warning.message);
-							viewerWarning = result.warning.message;
-						}
-						break;
-					}
-					case 'section_asset_pending': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionAssetPendingEvent;
-						document = applySectionAssetPending(document, payload);
-						break;
-					}
-					case 'section_asset_ready': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionAssetReadyEvent;
-						document = applySectionAssetReady(document, payload);
-						break;
-					}
-					case 'section_final': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionFinalEvent;
-						document = applySectionFinal(document, payload);
-						break;
-					}
-					case 'section_ready': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionReadyEvent;
-						plannedSections = payload.total_sections;
-						const result = applySectionReady(document, payload);
-						document = result.document;
-						if (result.warning) {
-							console.error('[Lectio] Section validation failed:', result.warning.message);
-							viewerWarning = result.warning.message;
-						}
-						break;
-					}
-					case 'section_failed': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionFailedEvent;
-						document = applySectionFailed(document, payload);
-						break;
-					}
-					case 'generation_failed': {
-						const payload = JSON.parse(data) as GenerationFailedEvent;
-						void finalizeStream(myToken, id, payload.message);
-						break;
-					}
-					case 'qc_complete': {
-						const payload = JSON.parse(data) as QCCompleteEvent;
-						qcSummary = { passed: payload.passed, total: payload.total };
-						break;
-					}
-					case 'complete': {
-						void finalizeStream(myToken, id);
-						break;
-					}
-					case 'error': {
-						const payload = JSON.parse(data) as ErrorEvent;
-						void finalizeStream(myToken, id, payload.message);
-						break;
-					}
+				const { terminal } = applyStreamResult(type, data);
+				if (terminal?.kind === 'complete') {
+					void finalizeStream(myToken, id);
+				} else if (terminal?.kind === 'generation_failed' || terminal?.kind === 'error') {
+					void finalizeStream(myToken, id, terminal.message ?? null);
 				}
 			},
 			onError(err) {
@@ -392,6 +323,7 @@
 		runtimePolicy = null;
 		runtimeProgress = null;
 		viewerWarning = null;
+		sectionSignals = {};
 		streamClosedTerminally = false;
 		streamErrorRecoveryAttempted = false;
 		closeStream();
@@ -527,9 +459,9 @@
 						running / {runtimeProgress.sections_queued} queued
 					</p>
 					<p>
-						Diagram workers: {runningQueuedLabel(
-							runtimeProgress.diagram_running,
-							runtimeProgress.diagram_queued
+						Media workers: {runningQueuedLabel(
+							runtimeProgress.media_running,
+							runtimeProgress.media_queued
 						)}
 					</p>
 					<p>
@@ -541,8 +473,8 @@
 				{/if}
 				{#if runtimePolicy}
 					<p>
-						Policy: {runtimePolicy.concurrency.max_section_concurrency} section / {runtimePolicy.concurrency.max_diagram_concurrency}
-						diagram / {runtimePolicy.concurrency.max_qc_concurrency} QC workers
+						Policy: {runtimePolicy.concurrency.max_section_concurrency} section / {runtimePolicy.concurrency.max_media_concurrency}
+						media / {runtimePolicy.concurrency.max_qc_concurrency} QC workers
 					</p>
 					<p>
 						Budget: {formatSeconds(runtimePolicy.generation_timeout_seconds)} total, rerenders {runtimePolicy.max_section_rerenders} max

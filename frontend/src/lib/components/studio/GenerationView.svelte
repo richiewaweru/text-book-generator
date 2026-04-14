@@ -7,38 +7,25 @@
 		getGenerationDocument
 	} from '$lib/api/client';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
+	import {
+		applyGenerationStreamEvent,
+		type GenerationStreamContext
+	} from '$lib/generation/live-stream';
 	import { buildSectionPreview } from '$lib/generation/preview';
 	import {
-		applySectionAssetPending,
-		applySectionAssetReady,
-		applySectionFinal,
-		applySectionFailed,
-		applySectionPartial,
-		applySectionReady,
-		applySectionStarted,
 		buildSectionSlots,
 		normalizeDocument
 	} from '$lib/generation/viewer-state';
 	import { generationState, setGenerationBanner, setGenerationDocument } from '$lib/stores/studio';
 	import { roleLabel } from '$lib/studio/presentation';
 	import type {
-		ErrorEvent,
 		GenerationAccepted,
 		GenerationDetail,
-		GenerationFailedEvent,
 		GenerationDocument,
 		PlanningGenerationSpec,
 		ProgressUpdateEvent,
-		QCCompleteEvent,
 		RuntimePolicyEvent,
-		RuntimeProgressEvent,
-		SectionAssetPendingEvent,
-		SectionAssetReadyEvent,
-		SectionFailedEvent,
-		SectionFinalEvent,
-		SectionPartialEvent,
-		SectionReadyEvent,
-		SectionStartedEvent
+		RuntimeProgressEvent
 	} from '$lib/types';
 
 	interface Props {
@@ -62,6 +49,7 @@
 	let runtimeProgress = $state<RuntimeProgressEvent['snapshot'] | null>(null);
 	let viewerWarning = $state<string | null>(null);
 	let activeSectionId = $state<string | null>(null);
+	let sectionSignals = $state<GenerationStreamContext['sectionSignals']>({});
 	let reconnectAttempts = $state(0);
 	let connectionToken = 0;
 	let cancelStream: (() => void) | null = null;
@@ -70,10 +58,10 @@
 	let streamErrorRecoveryAttempted = false;
 
 	const generationId = $derived(accepted.generation_id);
-	const sectionSlots = $derived(buildSectionSlots(document, plannedSections));
+	const sectionSlots = $derived(buildSectionSlots(document, plannedSections, sectionSignals));
 	const failureMap = $derived(new Map((document?.failed_sections ?? []).map((entry) => [entry.section_id, entry])));
 	const readySectionCount = $derived(
-		sectionSlots.filter((slot) => slot.status === 'completed').length
+		sectionSlots.filter((slot) => slot.status === 'ready').length
 	);
 	const failedSectionCount = $derived(
 		sectionSlots.filter((slot) => slot.status === 'failed').length
@@ -137,34 +125,29 @@
 	}
 
 	function displaySectionStatus(slot: (typeof sectionSlots)[number]): (typeof slot)['status'] {
-		if (slot.status === 'queued' && slot.section_id === activeSectionId) {
-			return 'writing';
-		}
 		return slot.status;
 	}
 
 	function statusLabel(slot: (typeof sectionSlots)[number]): string {
 		const status = displaySectionStatus(slot);
-		if (status === 'completed') return 'Complete';
+		if (status === 'ready') return 'Ready';
 		if (status === 'failed') return 'Failed';
-		if (status === 'writing') return progressUpdate?.label ?? 'Writing section...';
-		if (status === 'visual_pending') {
+		if (status === 'planned') return 'Planned';
+		if (status === 'generating') return progressUpdate?.label ?? 'Generating section...';
+		if (status === 'partially_ready') {
 			const pendingAssets = slot.partial?.pending_assets ?? [];
 			if (slot.partial?.visual_mode === 'image') {
-				return 'Generating image...';
+				return 'Generating media...';
 			}
 			if (pendingAssets.length > 0) {
-				return 'Generating diagram...';
+				return 'Generating media...';
 			}
-			return 'Waiting for visuals...';
+			return slot.signal?.reason ?? 'Partially ready';
 		}
-		if (status === 'finalizing') return 'Finalizing section...';
-		if (status === 'blocked') {
-			return detail?.status === 'failed'
-				? 'Did not start because generation failed'
-				: 'Did not finalize before generation ended';
+		if (status === 'blocked_by_required_media') {
+			return slot.signal?.reason ?? 'Blocked by required media';
 		}
-		return 'Queued';
+		return 'Planned';
 	}
 
 	function formatSeconds(seconds: number | null | undefined): string {
@@ -195,7 +178,41 @@
 		if (!runtimePolicy) {
 			return 'Pending';
 		}
-		return `${runtimePolicy.concurrency.max_section_concurrency} sections / ${runtimePolicy.concurrency.max_diagram_concurrency} diagrams / ${runtimePolicy.concurrency.max_qc_concurrency} QC`;
+		return `${runtimePolicy.concurrency.max_section_concurrency} sections / ${runtimePolicy.concurrency.max_media_concurrency} media / ${runtimePolicy.concurrency.max_qc_concurrency} QC`;
+	}
+
+	function applyStreamResult(
+		type: string,
+		data: string
+	): { terminal: { kind: 'complete' | 'generation_failed' | 'error'; message?: string | null } | null } {
+		const result = applyGenerationStreamEvent(
+			{
+				document,
+				plannedSections,
+				qcSummary,
+				progressUpdate,
+				runtimePolicy,
+				runtimeProgress,
+				viewerWarning,
+				activeSectionId,
+				sectionSignals
+			},
+			type,
+			data
+		);
+		document = result.next.document;
+		plannedSections = result.next.plannedSections;
+		qcSummary = result.next.qcSummary;
+		progressUpdate = result.next.progressUpdate;
+		runtimePolicy = result.next.runtimePolicy;
+		runtimeProgress = result.next.runtimeProgress;
+		viewerWarning = result.next.viewerWarning;
+		activeSectionId = result.next.activeSectionId;
+		sectionSignals = result.next.sectionSignals;
+		if (document) {
+			syncDocument(document);
+		}
+		return { terminal: result.terminal };
 	}
 
 	function clearReconnectTimer() {
@@ -351,98 +368,11 @@
 			},
 			onEvent(type, data) {
 				if (myToken !== connectionToken) return;
-				switch (type) {
-					case 'pipeline_start': {
-						const payload = JSON.parse(data) as { section_count: number };
-						plannedSections = payload.section_count;
-						break;
-					}
-					case 'progress_update': {
-						progressUpdate = JSON.parse(data) as ProgressUpdateEvent;
-						if (progressUpdate.section_id) activeSectionId = progressUpdate.section_id;
-						break;
-					}
-					case 'runtime_policy': {
-						runtimePolicy = JSON.parse(data) as RuntimePolicyEvent;
-						break;
-					}
-					case 'runtime_progress': {
-						const payload = JSON.parse(data) as RuntimeProgressEvent;
-						runtimeProgress = payload.snapshot;
-						plannedSections ??= payload.snapshot.sections_total;
-						break;
-					}
-					case 'section_started': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionStartedEvent;
-						activeSectionId = payload.section_id;
-						syncDocument(applySectionStarted(document, payload));
-						break;
-					}
-					case 'section_partial': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionPartialEvent;
-						activeSectionId = payload.section_id;
-						const result = applySectionPartial(document, payload);
-						syncDocument(result.document);
-						if (result.warning) viewerWarning = result.warning.message;
-						break;
-					}
-					case 'section_asset_pending': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionAssetPendingEvent;
-						activeSectionId = payload.section_id;
-						syncDocument(applySectionAssetPending(document, payload));
-						break;
-					}
-					case 'section_asset_ready': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionAssetReadyEvent;
-						syncDocument(applySectionAssetReady(document, payload));
-						break;
-					}
-					case 'section_final': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionFinalEvent;
-						syncDocument(applySectionFinal(document, payload));
-						break;
-					}
-					case 'section_ready': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionReadyEvent;
-						plannedSections = payload.total_sections;
-						if (activeSectionId === payload.section_id) activeSectionId = null;
-						const result = applySectionReady(document, payload);
-						syncDocument(result.document);
-						if (result.warning) viewerWarning = result.warning.message;
-						break;
-					}
-					case 'section_failed': {
-						if (!document) break;
-						const payload = JSON.parse(data) as SectionFailedEvent;
-						if (activeSectionId === payload.section_id) activeSectionId = null;
-						syncDocument(applySectionFailed(document, payload));
-						break;
-					}
-					case 'generation_failed': {
-						const payload = JSON.parse(data) as GenerationFailedEvent;
-						void finalizeStream(myToken, id, payload.message);
-						break;
-					}
-					case 'qc_complete': {
-						const payload = JSON.parse(data) as QCCompleteEvent;
-						qcSummary = { passed: payload.passed, total: payload.total };
-						break;
-					}
-					case 'complete': {
-						void finalizeStream(myToken, id);
-						break;
-					}
-					case 'error': {
-						const payload = JSON.parse(data) as ErrorEvent;
-						void finalizeStream(myToken, id, payload.message);
-						break;
-					}
+				const { terminal } = applyStreamResult(type, data);
+				if (terminal?.kind === 'complete') {
+					void finalizeStream(myToken, id);
+				} else if (terminal?.kind === 'generation_failed' || terminal?.kind === 'error') {
+					void finalizeStream(myToken, id, terminal.message ?? null);
 				}
 			},
 			onError(err) {
@@ -475,6 +405,7 @@
 		runtimeProgress = null;
 		viewerWarning = null;
 		activeSectionId = null;
+		sectionSignals = {};
 		reconnectAttempts = 0;
 		streamClosedTerminally = false;
 		streamErrorRecoveryAttempted = false;
@@ -529,7 +460,7 @@
 			<p class="eyebrow">Generating</p>
 			<h2>Generation stays inside the studio</h2>
 			<p class="lede">
-				Read completed sections while the remaining ones are still writing. Failures stay local to
+				Read ready sections while the remaining ones are still generating. Failures stay local to
 				the section that hit trouble.
 			</p>
 		</div>
@@ -612,11 +543,11 @@
 							<strong>{sectionRuntimeLabel()}</strong>
 						</div>
 						<div>
-							<span>Diagrams</span>
+							<span>Media</span>
 							<strong
 								>{runtimeCounterLabel(
-									runtimeProgress?.diagram_running,
-									runtimeProgress?.diagram_queued
+									runtimeProgress?.media_running,
+									runtimeProgress?.media_queued
 								)}</strong
 							>
 						</div>
@@ -714,33 +645,33 @@
 							{@const contentSection = slot.section ?? slot.partial?.content ?? null}
 							<article class={`viewer-section viewer-section-${slotStatus}`}>
 								<div class="viewer-section-label">
-									Section {slot.position}{role ? ` · ${role}` : ''}
+									Section {slot.position}{role ? ` - ${role}` : ''}
 								</div>
 								<h4>{slot.title}</h4>
 
-								{#if slotStatus === 'completed' && slot.section}
+								{#if slotStatus === 'ready' && slot.section}
 									<p>{buildSectionPreview(slot.section)}</p>
 								{:else if contentSection}
 									<p>{buildSectionPreview(contentSection)}</p>
 									<small>{statusLabel(slot)}</small>
-								{:else if slotStatus === 'writing'}
+								{:else if slotStatus === 'generating'}
 									<div class="active-row">
 										<span class="active-dot"></span>
-										<p>{progressUpdate?.label ?? 'Writing section content...'}</p>
+										<p>{progressUpdate?.label ?? 'Generating section...'}</p>
 									</div>
-								{:else if slotStatus === 'visual_pending'}
+								{:else if slotStatus === 'partially_ready'}
 									<p>{statusLabel(slot)}</p>
-								{:else if slotStatus === 'finalizing'}
-									<p>Finalizing this section and checking it against the template contract.</p>
+								{:else if slotStatus === 'planned'}
+									<p>{statusLabel(slot)}</p>
 								{:else if slotStatus === 'failed'}
 									<p>
 										{failureMap.get(slot.section_id)?.error_summary ??
 											'This section could not be generated.'}
 									</p>
 									{#if failureMap.get(slot.section_id)?.can_retry}
-										<small>Retry controls are not in phase 1, but the rest of the lesson stays readable.</small>
+										<small>Retries are tracked in the run report while the rest of the lesson stays readable.</small>
 									{/if}
-								{:else if slotStatus === 'blocked'}
+								{:else if slotStatus === 'blocked_by_required_media'}
 									<p>{statusLabel(slot)}</p>
 								{:else}
 									<p>{statusLabel(slot)}</p>
@@ -748,7 +679,7 @@
 							</article>
 						{/each}
 					{:else}
-						<article class="viewer-section viewer-section-queued">
+						<article class="viewer-section viewer-section-planned">
 							<div class="viewer-section-label">Section stream</div>
 							<h4>Waiting for the first section</h4>
 							<p>The generation worker has not published the first section yet.</p>
@@ -932,21 +863,20 @@
 	}
 
 	.progress-dot-complete,
-	.progress-dot-completed {
+	.progress-dot-ready {
 		background: #1d9e75;
 	}
 
-	.progress-dot-writing,
-	.progress-dot-finalizing {
+	.progress-dot-generating {
 		background: #1d9e75;
 		animation: pulse 1.2s ease-in-out infinite;
 	}
 
-	.progress-dot-queued {
+	.progress-dot-planned {
 		background: #d6cdc1;
 	}
 
-	.progress-dot-visual_pending {
+	.progress-dot-partially_ready {
 		background: #356582;
 	}
 
@@ -954,7 +884,7 @@
 		background: #c8822a;
 	}
 
-	.progress-dot-blocked {
+	.progress-dot-blocked_by_required_media {
 		background: #8c8579;
 	}
 
@@ -1001,23 +931,22 @@
 		border: 0.5px solid rgba(36, 52, 63, 0.08);
 	}
 
-	.viewer-section-completed {
+	.viewer-section-ready {
 		background: #fffdf9;
 	}
 
-	.viewer-section-writing,
-	.viewer-section-finalizing {
+	.viewer-section-generating {
 		background: #eef8f4;
 		border-color: rgba(29, 158, 117, 0.24);
 	}
 
-	.viewer-section-queued,
-	.viewer-section-blocked {
+	.viewer-section-planned,
+	.viewer-section-blocked_by_required_media {
 		background: #f6f1e8;
 		opacity: 0.72;
 	}
 
-	.viewer-section-visual_pending {
+	.viewer-section-partially_ready {
 		background: #eef4f8;
 		border-color: rgba(53, 101, 130, 0.24);
 	}
@@ -1064,8 +993,7 @@
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.progress-dot-writing,
-		.progress-dot-finalizing,
+		.progress-dot-generating,
 		.active-dot,
 		.skeleton-sidebar,
 		.skeleton-viewer {

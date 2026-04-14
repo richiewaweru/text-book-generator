@@ -13,6 +13,10 @@ from pydantic import BaseModel, Field
 
 import core.events as core_events
 from pipeline.api import PipelineSectionReport
+from pipeline.reporting import (
+    GenerationPlannerTraceSection,
+    GenerationReportOutlineSection,
+)
 from pipeline.runtime_progress import RuntimeProgressSnapshot
 from pipeline.state import NodeFailureDetail
 from pipeline.types.section_content import SectionContent
@@ -36,6 +40,23 @@ class SectionStartedEvent(BaseModel):
     section_id: str
     title: str
     position: int
+
+
+class CurriculumPlannedEvent(BaseModel):
+    type: Literal["curriculum_planned"] = "curriculum_planned"
+    generation_id: str
+    path: Literal["fresh", "seeded_enrichment"]
+    result: Literal["planned", "enriched", "fallback"]
+    duplicate_term_warnings: list[str] = Field(default_factory=list)
+    runtime_curriculum_outline: list[GenerationReportOutlineSection] = Field(
+        default_factory=list
+    )
+    planner_trace_sections: list[GenerationPlannerTraceSection] = Field(
+        default_factory=list
+    )
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
 
 class SectionReadyEvent(BaseModel):
@@ -215,6 +236,100 @@ class SectionRetryQueuedEvent(BaseModel):
     )
 
 
+class MediaPlanReadyEvent(BaseModel):
+    type: Literal["media_plan_ready"] = "media_plan_ready"
+    generation_id: str
+    section_id: str
+    slot_count: int
+    planned_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class MediaFrameStartedEvent(BaseModel):
+    type: Literal["media_frame_started"] = "media_frame_started"
+    generation_id: str
+    section_id: str
+    slot_id: str
+    slot_type: str
+    frame_key: str
+    frame_index: int
+    render: str | None = None
+    label: str | None = None
+    started_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class MediaFrameReadyEvent(BaseModel):
+    type: Literal["media_frame_ready"] = "media_frame_ready"
+    generation_id: str
+    section_id: str
+    slot_id: str
+    slot_type: str
+    frame_key: str
+    frame_index: int
+    render: str | None = None
+    label: str | None = None
+    ready_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class MediaFrameFailedEvent(BaseModel):
+    type: Literal["media_frame_failed"] = "media_frame_failed"
+    generation_id: str
+    section_id: str
+    slot_id: str
+    slot_type: str
+    frame_key: str
+    frame_index: int
+    render: str | None = None
+    label: str | None = None
+    error: str | None = None
+    failed_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class MediaSlotReadyEvent(BaseModel):
+    type: Literal["media_slot_ready"] = "media_slot_ready"
+    generation_id: str
+    section_id: str
+    slot_id: str
+    slot_type: str
+    ready_frames: int
+    total_frames: int
+    ready_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class MediaSlotFailedEvent(BaseModel):
+    type: Literal["media_slot_failed"] = "media_slot_failed"
+    generation_id: str
+    section_id: str
+    slot_id: str
+    slot_type: str
+    ready_frames: int
+    total_frames: int
+    error: str | None = None
+    failed_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class SectionMediaBlockedEvent(BaseModel):
+    type: Literal["section_media_blocked"] = "section_media_blocked"
+    generation_id: str
+    section_id: str
+    slot_ids: list[str] = Field(default_factory=list)
+    reason: str
+    blocked_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
 class SectionFailedEvent(BaseModel):
     type: Literal["section_failed"] = "section_failed"
     generation_id: str
@@ -276,6 +391,7 @@ class ImageOutcomeEvent(BaseModel):
     generation_id: str
     section_id: str
     outcome: Literal["success", "timeout", "error", "skipped"]
+    provider: str | None = None
     attempts: int = 1
     error_message: str | None = None
     duration_ms: float | None = None
@@ -330,6 +446,7 @@ LLMCallFailedEvent = core_events.LLMCallFailedEvent
 
 PipelineEvent = (
     PipelineStartEvent
+    | CurriculumPlannedEvent
     | SectionStartedEvent
     | SectionPartialEvent
     | SectionAssetPendingEvent
@@ -350,6 +467,13 @@ PipelineEvent = (
     | NodeFinishedEvent
     | SectionReportUpdatedEvent
     | SectionRetryQueuedEvent
+    | MediaPlanReadyEvent
+    | MediaFrameStartedEvent
+    | MediaFrameReadyEvent
+    | MediaFrameFailedEvent
+    | MediaSlotReadyEvent
+    | MediaSlotFailedEvent
+    | SectionMediaBlockedEvent
     | SectionFailedEvent
     | ValidationRepairAttemptedEvent
     | ValidationRepairSucceededEvent
@@ -367,6 +491,7 @@ event_bus = core_events.event_bus
 
 __all__ = [
     "CompleteEvent",
+    "CurriculumPlannedEvent",
     "ErrorEvent",
     "GenerationFailedEvent",
     "PipelineEvent",
@@ -387,6 +512,13 @@ __all__ = [
     "NodeFinishedEvent",
     "SectionReportUpdatedEvent",
     "SectionRetryQueuedEvent",
+    "MediaPlanReadyEvent",
+    "MediaFrameStartedEvent",
+    "MediaFrameReadyEvent",
+    "MediaFrameFailedEvent",
+    "MediaSlotReadyEvent",
+    "MediaSlotFailedEvent",
+    "SectionMediaBlockedEvent",
     "ValidationRepairAttemptedEvent",
     "ValidationRepairSucceededEvent",
     "DiagramOutcomeEvent",

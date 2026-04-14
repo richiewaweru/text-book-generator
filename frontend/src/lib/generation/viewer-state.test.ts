@@ -137,7 +137,7 @@ describe('viewer-state helpers', () => {
 		expect(result.warning?.message).toMatch(/Invalid section from pipeline/);
 	});
 
-	it('builds ordered completed and queued slots from persisted manifest metadata', () => {
+	it('builds ordered ready and planned slots from persisted manifest metadata', () => {
 		const slots = buildSectionSlots(
 			createDocument({
 				section_manifest: [
@@ -151,9 +151,9 @@ describe('viewer-state helpers', () => {
 		);
 
 		expect(slots.map((slot) => `${slot.position}:${slot.status}:${slot.title}`)).toEqual([
-			'1:queued:First section',
-			'2:completed:Second section',
-			'3:queued:Third section'
+			'1:planned:First section',
+			'2:ready:Second section',
+			'3:planned:Third section'
 		]);
 	});
 
@@ -184,12 +184,12 @@ describe('viewer-state helpers', () => {
 		const slots = buildSectionSlots(failed, 2);
 		expect(failed.failed_sections).toHaveLength(1);
 		expect(slots.map((slot) => `${slot.position}:${slot.status}:${slot.title}`)).toEqual([
-			'1:queued:First section',
+			'1:planned:First section',
 			'2:failed:Second section'
 		]);
 	});
 
-	it('marks untouched queued sections as blocked once the generation fails', () => {
+	it('marks untouched planned sections as failed once the generation fails', () => {
 		const document = createDocument({
 			status: 'failed',
 			section_manifest: [
@@ -221,7 +221,7 @@ describe('viewer-state helpers', () => {
 
 		expect(slots.map((slot) => `${slot.position}:${slot.status}:${slot.title}`)).toEqual([
 			'1:failed:First section',
-			'2:blocked:Second section'
+			'2:failed:Second section'
 		]);
 	});
 
@@ -249,7 +249,7 @@ describe('viewer-state helpers', () => {
 		});
 
 		expect(updated.partial_sections?.[0]?.visual_mode).toBe('image');
-		expect(buildSectionSlots(updated, 1)[0]?.status).toBe('visual_pending');
+		expect(buildSectionSlots(updated, 1)[0]?.status).toBe('partially_ready');
 	});
 
 	it('replaces repeated partial updates for the same section with the latest content', () => {
@@ -320,7 +320,7 @@ describe('viewer-state helpers', () => {
 			1
 		);
 
-		expect(slots[0]?.status).toBe('completed');
+		expect(slots[0]?.status).toBe('ready');
 		expect(slots[0]?.section?.header.title).toBe('First section');
 		expect(slots[0]?.partial?.content.header.title).toBe('Stale partial title');
 	});

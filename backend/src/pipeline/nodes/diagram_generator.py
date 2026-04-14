@@ -23,10 +23,12 @@ from pydantic_ai import Agent
 from pipeline.console_diagnostics import force_console_log
 from pipeline.events import DiagramOutcomeEvent
 from pipeline.llm_runner import run_llm
-from pipeline.prompts.diagram import (
+from pipeline.media.planner.media_planner import find_slot
+from pipeline.media.prompts.diagram_prompts import (
     build_diagram_system_prompt,
     build_diagram_user_prompt,
 )
+from pipeline.media.types import SlotType, VisualFrame, VisualSlot
 from pipeline.providers.registry import get_node_text_model
 from pipeline.runtime_context import retry_policy_for_node, timeout_policy_from_config
 from pipeline.runtime_diagnostics import publish_runtime_event
@@ -232,12 +234,10 @@ def _render_spec_svg(spec: DiagramSpec) -> str:
 
 async def _generate_diagram_output(
     state: TextbookPipelineState,
-    section,
     *,
-    diagram_slot: str,
-    diagram_type: str | None,
-    key_concepts: list[str] | None,
-    visual_guidance: str | None,
+    slot: VisualSlot,
+    frame: VisualFrame,
+    section_title: str,
     model_overrides: dict | None = None,
     config: RunnableConfig | None = None,
 ) -> DiagramOutput:
@@ -265,13 +265,9 @@ async def _generate_diagram_output(
             agent=agent,
             model=model,
             user_prompt=build_diagram_user_prompt(
-                section_title=section.header.title,
-                hook_body=section.hook.body,
-                explanation_excerpt=section.explanation.body,
-                diagram_slot=diagram_slot,
-                diagram_type=diagram_type,
-                key_concepts=key_concepts,
-                visual_guidance=visual_guidance,
+                section_title=section_title,
+                slot=slot,
+                frame=frame,
             ),
             generation_mode=state.request.mode,
             retry_policy=retry_policy,
@@ -339,17 +335,35 @@ async def _write_single_diagram(
     state: TextbookPipelineState,
     section,
     plan,
+    media_slot: VisualSlot | None,
     *,
     model_overrides: dict | None = None,
     config: RunnableConfig | None = None,
 ):
+    slot = media_slot or VisualSlot(
+        slot_id="diagram",
+        slot_type=SlotType.DIAGRAM,
+        required=True,
+        preferred_render="svg",
+        pedagogical_intent=plan.diagram.visual_guidance or section.header.title,
+        caption=section.diagram.caption if section.diagram is not None else f"Visual explanation for {section.header.title}.",
+        frames=[
+            VisualFrame(
+                slot_id="diagram",
+                index=0,
+                label=section.header.title,
+                generation_goal=f"Show the core idea of {section.header.title}.",
+                must_include=plan.diagram.key_concepts or [],
+                avoid=["text overlays"],
+            )
+        ],
+    )
+    frame = slot.frames[0]
     output = await _generate_diagram_output(
         state,
-        section,
-        diagram_slot="diagram-block",
-        diagram_type=plan.diagram.diagram_type if plan is not None else None,
-        key_concepts=plan.diagram.key_concepts if plan is not None else None,
-        visual_guidance=plan.diagram.visual_guidance if plan is not None else None,
+        slot=slot,
+        frame=frame,
+        section_title=section.header.title,
         model_overrides=model_overrides,
         config=config,
     )
@@ -360,6 +374,7 @@ async def _write_series_diagrams(
     state: TextbookPipelineState,
     section,
     plan,
+    media_slot: VisualSlot | None,
     *,
     model_overrides: dict | None = None,
     config: RunnableConfig | None = None,
@@ -367,26 +382,45 @@ async def _write_series_diagrams(
     seed_steps = _series_seed_steps(section, plan)
     key_concepts = plan.diagram.key_concepts or []
     rendered_steps: list[DiagramSeriesStep] = []
+    slot = media_slot or VisualSlot(
+        slot_id="diagram_series",
+        slot_type=SlotType.DIAGRAM_SERIES,
+        required=True,
+        preferred_render="svg",
+        pedagogical_intent=plan.diagram.visual_guidance or section.header.title,
+        caption=section.diagram_series.title if section.diagram_series is not None else section.header.title,
+        frames=[
+            VisualFrame(
+                slot_id="diagram_series",
+                index=index,
+                label=step.step_label,
+                generation_goal=f"Show sequence step {index + 1} for {section.header.title}.",
+                must_include=[step.step_label],
+                avoid=["text overlays"],
+            )
+            for index, step in enumerate(seed_steps)
+        ],
+    )
 
     for index, step in enumerate(seed_steps):
         if (step.svg_content or "").strip():
             rendered_steps.append(step)
             continue
 
-        key_concept = key_concepts[index] if index < len(key_concepts) else step.step_label
-        visual_guidance = plan.diagram.visual_guidance or ""
-        if visual_guidance:
-            visual_guidance = f"{visual_guidance} Focus on the stage labelled '{step.step_label}'."
-        else:
-            visual_guidance = f"Focus on the stage labelled '{step.step_label}'."
+        frame = slot.frames[index] if index < len(slot.frames) else VisualFrame(
+            slot_id=slot.slot_id,
+            index=index,
+            label=step.step_label,
+            generation_goal=f"Show sequence step {index + 1} for {section.header.title}.",
+            must_include=[key_concepts[index] if index < len(key_concepts) else step.step_label],
+            avoid=["text overlays"],
+        )
 
         output = await _generate_diagram_output(
             state,
-            section,
-            diagram_slot=f"diagram-series step {index + 1}",
-            diagram_type=plan.diagram.diagram_type or "process-flow",
-            key_concepts=[key_concept],
-            visual_guidance=visual_guidance,
+            slot=slot,
+            frame=frame,
+            section_title=section.header.title,
             model_overrides=model_overrides,
             config=config,
         )
@@ -409,6 +443,7 @@ async def _write_compare_diagrams(
     state: TextbookPipelineState,
     section,
     plan,
+    media_slot: VisualSlot | None,
     *,
     model_overrides: dict | None = None,
     config: RunnableConfig | None = None,
@@ -416,40 +451,52 @@ async def _write_compare_diagrams(
     compare_content = _seed_compare_content(section, plan)
     before_svg = compare_content.before_svg
     after_svg = compare_content.after_svg
+    slot = media_slot or VisualSlot(
+        slot_id="diagram_compare",
+        slot_type=SlotType.DIAGRAM_COMPARE,
+        required=True,
+        preferred_render="svg",
+        pedagogical_intent=plan.diagram.visual_guidance or section.header.title,
+        caption=compare_content.caption,
+        frames=[
+            VisualFrame(
+                slot_id="diagram_compare",
+                index=0,
+                label=compare_content.before_label,
+                generation_goal=f"Render the BEFORE state for {section.header.title}.",
+                must_include=[compare_content.before_label],
+                avoid=["text overlays"],
+            ),
+            VisualFrame(
+                slot_id="diagram_compare",
+                index=1,
+                label=compare_content.after_label,
+                generation_goal=f"Render the AFTER state for {section.header.title}.",
+                must_include=[compare_content.after_label],
+                avoid=["text overlays"],
+            ),
+        ],
+    )
 
     if not (before_svg or "").strip():
-        before_guidance = (
-            f"{plan.diagram.visual_guidance} Render the BEFORE state labelled "
-            f"'{compare_content.before_label}'."
-            if plan.diagram.visual_guidance
-            else f"Render the BEFORE state labelled '{compare_content.before_label}'."
-        )
+        before_frame = slot.frames[0]
         before_output = await _generate_diagram_output(
             state,
-            section,
-            diagram_slot="diagram-compare before",
-            diagram_type=plan.diagram.diagram_type or "compare",
-            key_concepts=plan.diagram.key_concepts if plan is not None else None,
-            visual_guidance=before_guidance,
+            slot=slot,
+            frame=before_frame,
+            section_title=section.header.title,
             model_overrides=model_overrides,
             config=config,
         )
         before_svg = _render_spec_svg(before_output.spec)
 
     if not (after_svg or "").strip():
-        after_guidance = (
-            f"{plan.diagram.visual_guidance} Render the AFTER state labelled "
-            f"'{compare_content.after_label}'."
-            if plan.diagram.visual_guidance
-            else f"Render the AFTER state labelled '{compare_content.after_label}'."
-        )
+        after_frame = slot.frames[1]
         after_output = await _generate_diagram_output(
             state,
-            section,
-            diagram_slot="diagram-compare after",
-            diagram_type=plan.diagram.diagram_type or "compare",
-            key_concepts=plan.diagram.key_concepts if plan is not None else None,
-            visual_guidance=after_guidance,
+            slot=slot,
+            frame=after_frame,
+            section_title=section.header.title,
             model_overrides=model_overrides,
             config=config,
         )
@@ -467,7 +514,7 @@ async def _write_compare_diagrams(
     )
 
 
-async def diagram_generator(
+async def _run_diagram_generation(
     state: TextbookPipelineState | dict,
     *,
     model_overrides: dict | None = None,
@@ -581,9 +628,9 @@ async def diagram_generator(
             "diagram_outcomes": outcomes,
             "completed_nodes": ["diagram_generator"],
         }
-
     try:
         updated_section = section
+        media_plan = state.media_plans.get(sid) if sid is not None else None
         for target in targets:
             if target_is_satisfied(updated_section, target, mode="svg"):
                 force_console_log(
@@ -607,6 +654,7 @@ async def diagram_generator(
                     state,
                     updated_section,
                     plan,
+                    find_slot(media_plan, SlotType.DIAGRAM),
                     model_overrides=model_overrides,
                     config=config,
                 )
@@ -615,6 +663,7 @@ async def diagram_generator(
                     state,
                     updated_section,
                     plan,
+                    find_slot(media_plan, SlotType.DIAGRAM_SERIES),
                     model_overrides=model_overrides,
                     config=config,
                 )
@@ -623,6 +672,7 @@ async def diagram_generator(
                     state,
                     updated_section,
                     plan,
+                    find_slot(media_plan, SlotType.DIAGRAM_COMPARE),
                     model_overrides=model_overrides,
                     config=config,
                 )
@@ -704,3 +754,18 @@ async def diagram_generator(
             "diagram_outcomes": outcomes,
             "completed_nodes": ["diagram_generator"],
         }
+
+
+async def diagram_generator(
+    state: TextbookPipelineState | dict,
+    *,
+    model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
+) -> dict:
+    from pipeline.media.executors.diagram_generator import diagram_generator as execute_diagram_generator
+
+    return await execute_diagram_generator(
+        state,
+        model_overrides=model_overrides,
+        config=config,
+    )

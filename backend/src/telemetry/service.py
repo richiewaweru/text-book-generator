@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 _REPORT_EVENT_TYPES = {
     "pipeline_start",
+    "curriculum_planned",
     "section_started",
     "section_partial",
     "section_asset_pending",
@@ -35,6 +36,13 @@ _REPORT_EVENT_TYPES = {
     "llm_call_failed",
     "section_report_updated",
     "section_retry_queued",
+    "media_plan_ready",
+    "media_frame_started",
+    "media_frame_ready",
+    "media_frame_failed",
+    "media_slot_ready",
+    "media_slot_failed",
+    "section_media_blocked",
     "section_failed",
     "validation_repair_attempted",
     "validation_repair_succeeded",
@@ -343,6 +351,8 @@ class TelemetryMonitor:
             generation_time_seconds=model.generation_time_seconds,
             final_error=model.error,
             summary=GenerationReportSummary(),
+            runtime_curriculum_outline=[],
+            planner_trace=None,
         )
         if model.document_json:
             payload = model.document_json

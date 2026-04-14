@@ -4,12 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from pipeline.graph import retry_diagram
+from pipeline.graph import retry_media_frame
+from pipeline.media.types import MediaPlan, VisualFrame, VisualSlot
 from pipeline.nodes import content_generator as content_generator_module
 from pipeline.nodes import process_section as process_section_module
 from pipeline.nodes import section_assembler as section_assembler_module
 from pipeline.state import QCReport, RerenderRequest, StyleContext, TextbookPipelineState
-from pipeline.types.composition import CompositionPlan, DiagramPlan, InteractionPlan
 from pipeline.types.requests import PipelineRequest, SectionPlan
 from pipeline.types.section_content import (
     CalloutBlockContent,
@@ -169,6 +169,28 @@ def _state(**overrides) -> TextbookPipelineState:
     )
     defaults.update(overrides)
     return TextbookPipelineState(**defaults)
+
+
+def _interaction_spec() -> InteractionSpec:
+    return InteractionSpec(
+        type="graph_slider",
+        goal="Understand the idea",
+        anchor_content={"headline": "Hook", "body": "Explain"},
+        context={
+            "learner_level": "allowed",
+            "template_id": "guided-concept-path",
+            "color_mode": "light",
+            "accent_color": "#17417a",
+            "surface_color": "#f7fbff",
+            "font_mono": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+        },
+        dimensions={
+            "width": "100%",
+            "height": 420,
+            "resizable": True,
+        },
+        print_translation="static_diagram",
+    )
 
 
 def _rerender_state(**overrides) -> TextbookPipelineState:
@@ -344,7 +366,7 @@ async def test_content_generator_phased_generates_selected_callout_and_summary(m
 
 
 @pytest.mark.asyncio
-async def test_retry_diagram_skips_timeout_rerun(monkeypatch) -> None:
+async def test_retry_media_frame_runs_targeted_executor_and_reassembly(monkeypatch) -> None:
     captured_steps: list[str] = []
 
     async def fake_run_section_steps(state, *, steps, **kwargs):
@@ -357,11 +379,41 @@ async def test_retry_diagram_skips_timeout_rerun(monkeypatch) -> None:
     state = _state(
         generated_sections={"s-01": _section("s-01")},
         assembled_sections={"s-01": _section("s-01")},
-        diagram_outcomes={"s-01": "timeout"},
+        media_plans={
+            "s-01": MediaPlan(
+                section_id="s-01",
+                slots=[
+                    VisualSlot(
+                        slot_id="diagram",
+                        slot_type="diagram",
+                        required=True,
+                        preferred_render="svg",
+                        pedagogical_intent="Explain the core idea.",
+                        caption="Diagram caption",
+                        frames=[
+                            VisualFrame(
+                                slot_id="diagram",
+                                index=0,
+                                label="Main view",
+                                generation_goal="Render the main diagram.",
+                            )
+                        ],
+                    )
+                ],
+            )
+        },
+        current_media_retry={
+            "section_id": "s-01",
+            "slot_id": "diagram",
+            "slot_type": "diagram",
+            "frame_key": "0",
+            "frame_index": 0,
+            "executor_node": "diagram_generator",
+        },
     )
-    result = await retry_diagram(state)
+    result = await retry_media_frame(state)
 
-    assert captured_steps == ["section_assembler", "qc_agent"]
+    assert captured_steps == ["diagram_generator", "section_assembler", "qc_agent"]
     assert result["completed_nodes"] == captured_steps
 
 
@@ -377,14 +429,7 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
             )
         }
     )
-    interaction_spec = InteractionSpec(
-        type="graph_slider",
-        goal="Understand the idea",
-        anchor_content={"headline": "Hook", "body": "Explain"},
-        context={"subject": "Math"},
-        dimensions={"difficulty": "balanced"},
-        print_translation="static_diagram",
-    )
+    interaction_spec = _interaction_spec()
     section_with_simulation = section_with_diagram.model_copy(
         update={
             "simulation": SimulationContent(
@@ -393,9 +438,43 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
             )
         }
     )
-    composition = CompositionPlan(
-        diagram=DiagramPlan(enabled=True, reasoning="Needs a diagram", diagram_type="concept_map"),
-        interaction=InteractionPlan(enabled=True, reasoning="Needs interaction", interaction_type="graph_slider"),
+    media_plan = MediaPlan(
+        section_id="s-01",
+        slots=[
+            VisualSlot(
+                slot_id="diagram",
+                slot_type="diagram",
+                required=True,
+                preferred_render="svg",
+                pedagogical_intent="Show the concept visually.",
+                caption="diagram",
+                frames=[
+                    VisualFrame(
+                        slot_id="diagram",
+                        index=0,
+                        label="Main view",
+                        generation_goal="Render the concept map.",
+                    )
+                ],
+            ),
+            VisualSlot(
+                slot_id="simulation",
+                slot_type="simulation",
+                required=False,
+                preferred_render="html_simulation",
+                fallback_render="svg",
+                pedagogical_intent="Let learners manipulate the idea.",
+                caption="Interactive view",
+                frames=[
+                    VisualFrame(
+                        slot_id="simulation",
+                        index=0,
+                        label="Interactive view",
+                        generation_goal="Render the interaction.",
+                    )
+                ],
+            ),
+        ],
     )
 
     async def fake_run_section_steps(state, *, steps, **kwargs):
@@ -406,10 +485,10 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
                 "generated_sections": {"s-01": section},
                 "completed_nodes": ["content_generator"],
             }
-        if first == "composition_planner":
+        if first == "media_planner":
             return {
-                "composition_plans": {"s-01": composition},
-                "completed_nodes": ["composition_planner"],
+                "media_plans": {"s-01": media_plan},
+                "completed_nodes": ["media_planner"],
             }
         return {
             "assembled_sections": {"s-01": section_with_simulation},
@@ -434,14 +513,14 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
 
     result = await process_section_module.process_section(_state())
 
-    assert result["composition_plans"]["s-01"].diagram.diagram_type == "concept_map"
+    assert result["media_plans"]["s-01"].section_id == "s-01"
     assert result["interaction_specs"]["s-01"].type == "graph_slider"
     assert result["diagram_outcomes"]["s-01"] == "success"
     assert result["assembled_sections"]["s-01"].simulation is not None
     assert result["qc_reports"]["s-01"].passed is True
     assert result["completed_nodes"] == [
         "content_generator",
-        "composition_planner",
+        "media_planner",
         "diagram_generator",
         "interaction_generator",
         "section_assembler",
@@ -455,12 +534,7 @@ async def test_section_assembler_accepts_singular_simulation_for_simulation_bloc
         update={
             "simulation": SimulationContent(
                 spec=InteractionSpec(
-                    type="graph_slider",
-                    goal="Understand the idea",
-                    anchor_content={"headline": "Hook", "body": "Explain"},
-                    context={"subject": "Math"},
-                    dimensions={"difficulty": "balanced"},
-                    print_translation="static_diagram",
+                    **_interaction_spec().model_dump()
                 ),
                 explanation="Interactive view",
             )
@@ -514,14 +588,26 @@ async def test_process_section_prefers_image_outcome_over_svg_skip(monkeypatch) 
             )
         }
     )
-    composition = CompositionPlan(
-        diagram=DiagramPlan(
-            enabled=True,
-            reasoning="Needs an image",
-            mode="image",
-            diagram_type="concept_map",
-        ),
-        interaction=InteractionPlan(enabled=False, reasoning="No interaction"),
+    media_plan = MediaPlan(
+        section_id=sid,
+        slots=[
+            VisualSlot(
+                slot_id="diagram",
+                slot_type="diagram",
+                required=True,
+                preferred_render="image",
+                fallback_render="svg",
+                pedagogical_intent="Needs an image",
+                caption="diagram",
+                frames=[
+                    VisualFrame(
+                        slot_id="diagram",
+                        index=0,
+                        generation_goal="Render the main visual as an image",
+                    )
+                ],
+            )
+        ],
     )
 
     async def fake_run_section_steps(state, *, steps, **kwargs):
@@ -532,10 +618,10 @@ async def test_process_section_prefers_image_outcome_over_svg_skip(monkeypatch) 
                 "generated_sections": {sid: section},
                 "completed_nodes": ["content_generator"],
             }
-        if first == "composition_planner":
+        if first == "media_planner":
             return {
-                "composition_plans": {sid: composition},
-                "completed_nodes": ["composition_planner"],
+                "media_plans": {sid: media_plan},
+                "completed_nodes": ["media_planner"],
             }
 
         typed = TextbookPipelineState.parse(state)
@@ -562,14 +648,9 @@ async def test_process_section_prefers_image_outcome_over_svg_skip(monkeypatch) 
             "completed_nodes": ["image_generator"],
         }
 
-    async def fake_interaction_path(state, *, model_overrides=None, config=None):
-        _ = (state, model_overrides, config)
-        return {"completed_nodes": ["interaction_decider", "interaction_generator"]}
-
     monkeypatch.setattr(process_section_module, "run_section_steps", fake_run_section_steps)
     monkeypatch.setattr(process_section_module, "diagram_generator", fake_diagram_generator)
     monkeypatch.setattr(process_section_module, "image_generator", fake_image_generator)
-    monkeypatch.setattr(process_section_module, "_run_interaction_path", fake_interaction_path)
 
     result = await process_section_module.process_section(_state())
 

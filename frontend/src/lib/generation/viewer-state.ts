@@ -20,13 +20,18 @@ export interface ViewerWarning {
 }
 
 export type ViewerSectionStatus =
-	| 'queued'
-	| 'writing'
-	| 'visual_pending'
-	| 'finalizing'
-	| 'completed'
-	| 'failed'
-	| 'blocked';
+	| 'planned'
+	| 'generating'
+	| 'partially_ready'
+	| 'blocked_by_required_media'
+	| 'ready'
+	| 'failed';
+
+export interface ViewerSectionSignal {
+	status: ViewerSectionStatus;
+	reason?: string | null;
+	slot_ids?: string[];
+}
 
 export interface ViewerSectionSlot {
 	section_id: string;
@@ -36,6 +41,7 @@ export interface ViewerSectionSlot {
 	section: SectionContent | null;
 	partial: PipelinePartialSectionEntry | null;
 	failure: FailedSectionEntry | null;
+	signal: ViewerSectionSignal | null;
 }
 
 function sortManifest(
@@ -146,12 +152,9 @@ function updatePartialSectionAssets(
 
 function derivePartialSlotStatus(entry: PipelinePartialSectionEntry): ViewerSectionStatus {
 	if (entry.pending_assets.length > 0 || entry.status === 'awaiting_assets') {
-		return 'visual_pending';
+		return 'partially_ready';
 	}
-	if (entry.status === 'finalizing') {
-		return 'finalizing';
-	}
-	return 'writing';
+	return 'generating';
 }
 
 export function normalizeDocument(document: GenerationDocument): GenerationDocument {
@@ -342,7 +345,8 @@ export function applySectionFailed(
 
 export function buildSectionSlots(
 	document: GenerationDocument | null,
-	sectionCount: number | null
+	sectionCount: number | null,
+	sectionSignals: Record<string, ViewerSectionSignal> = {}
 ): ViewerSectionSlot[] {
 	if (!document && !sectionCount) {
 		return [];
@@ -366,15 +370,18 @@ export function buildSectionSlots(
 			const ready = readyById.get(item.section_id) ?? null;
 			const failed = failedById.get(item.section_id) ?? null;
 			const partial = partialById.get(item.section_id) ?? null;
+			const signal = sectionSignals[item.section_id] ?? null;
 			const status: ViewerSectionStatus = ready
-				? 'completed'
+				? 'ready'
 				: failed
 					? 'failed'
-					: partial
-						? derivePartialSlotStatus(partial)
-						: terminal
-							? 'blocked'
-							: 'queued';
+					: signal
+						? signal.status
+						: partial
+							? derivePartialSlotStatus(partial)
+							: terminal
+								? 'failed'
+								: 'planned';
 
 			return {
 				section_id: item.section_id,
@@ -383,7 +390,8 @@ export function buildSectionSlots(
 				status,
 				section: ready,
 				partial,
-				failure: failed
+				failure: failed,
+				signal
 			};
 		}) satisfies ViewerSectionSlot[];
 
@@ -393,10 +401,11 @@ export function buildSectionSlots(
 				section_id: section.section_id,
 				title: section.header.title,
 				position: manifest.length + index + 1,
-				status: 'completed' as const,
+				status: 'ready' as const,
 				section,
 				partial: null,
-				failure: null
+				failure: null,
+				signal: sectionSignals[section.section_id] ?? null
 			}));
 		const orphanPartial = partialSections
 			.filter((section) => !manifestIds.has(section.section_id))
@@ -404,10 +413,11 @@ export function buildSectionSlots(
 				section_id: section.section_id,
 				title: section.content.header.title,
 				position: manifest.length + orphanReady.length + index + 1,
-				status: derivePartialSlotStatus(section),
+				status: sectionSignals[section.section_id]?.status ?? derivePartialSlotStatus(section),
 				section: null,
 				partial: section,
-				failure: null
+				failure: null,
+				signal: sectionSignals[section.section_id] ?? null
 			}));
 		const orphanFailed = failedSections
 			.filter((section) => !manifestIds.has(section.section_id))
@@ -418,7 +428,8 @@ export function buildSectionSlots(
 				status: 'failed' as const,
 				section: null,
 				partial: null,
-				failure: section
+				failure: section,
+				signal: sectionSignals[section.section_id] ?? null
 			}));
 		return [...slots, ...orphanReady, ...orphanPartial, ...orphanFailed];
 	}
@@ -433,15 +444,20 @@ export function buildSectionSlots(
 		const ready = readySections[index] ?? null;
 		const failed = failedSections[index] ?? null;
 		const partial = partialSections[index] ?? null;
+		const signal = sectionSignals[
+			ready?.section_id ?? failed?.section_id ?? partial?.section_id ?? `pending-${index + 1}`
+		] ?? null;
 		const status: ViewerSectionStatus = ready
-			? 'completed'
+			? 'ready'
 			: failed
 				? 'failed'
-				: partial
-					? derivePartialSlotStatus(partial)
-					: terminal
-						? 'blocked'
-						: 'queued';
+				: signal
+					? signal.status
+					: partial
+						? derivePartialSlotStatus(partial)
+						: terminal
+							? 'failed'
+							: 'planned';
 		return {
 			section_id: ready?.section_id ?? failed?.section_id ?? partial?.section_id ?? `pending-${index + 1}`,
 			title:
@@ -453,7 +469,8 @@ export function buildSectionSlots(
 			status,
 			section: ready,
 			partial,
-			failure: failed
+			failure: failed,
+			signal
 		};
 	});
 }

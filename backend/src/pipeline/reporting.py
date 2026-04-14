@@ -73,9 +73,18 @@ class GenerationReportSection(BaseModel):
     queued_retries: list[GenerationReportRetry] = Field(default_factory=list)
     validation_repair_attempts: int = 0
     validation_repair_successes: int = 0
+    media_slots_planned: int = 0
+    media_slots_ready: int = 0
+    media_slots_failed: int = 0
+    media_frame_retry_count: int = 0
+    media_blocked: bool = False
+    media_block_reason: str | None = None
     diagram_outcome: Literal["success", "timeout", "error", "skipped"] | None = None
     image_outcome: Literal["success", "timeout", "error", "skipped"] | None = None
     image_error: str | None = None
+    image_provider: str | None = None
+    simulation_outcome: Literal["generated", "skipped", "failed"] | None = None
+    simulation_failure_reason: str | None = None
     interaction_outcome: Literal["generated", "skipped"] | None = None
     interaction_skip_reason: str | None = None
     interaction_count: int = 0
@@ -126,6 +135,13 @@ class GenerationReportSummary(BaseModel):
     validation_repair_attempts: int = 0
     validation_repair_successes: int = 0
     qc_rerenders: int = 0
+    media_slots_planned: int = 0
+    media_slots_ready: int = 0
+    media_slots_failed: int = 0
+    media_frame_retry_count: int = 0
+    simulation_success_count: int = 0
+    simulation_failure_count: int = 0
+    image_provider_counts: dict[str, int] = Field(default_factory=dict)
     diagram_retries: int = 0
     diagram_timeout_count: int = 0
     diagram_skip_count: int = 0

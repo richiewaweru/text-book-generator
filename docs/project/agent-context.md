@@ -26,7 +26,8 @@ This file is the human-readable source of truth for the current project state.
 ## Current Prompt Source of Truth
 
 - Planning prompt/refinement code lives in `backend/src/planning/prompt_builder.py`.
-- Prompt builders live in `backend/src/pipeline/prompts/`.
+- Media prompt builders live in `backend/src/pipeline/media/prompts/`.
+- Non-media pipeline prompt helpers stay under `backend/src/pipeline/`.
 - Contract loading lives in `backend/src/pipeline/contracts.py`.
 - Reference docs under `docs/` are descriptive only. Code in `backend/src/` is authoritative.
 
@@ -35,7 +36,9 @@ This file is the human-readable source of truth for the current project state.
 - `/textbook/[id]` is generation-centric.
 - `/studio` owns teacher intent capture, planning stream, review, and in-studio generation.
 - The frontend loads generation detail and saved document by generation ID.
-- SSE carries pipeline progress and section updates.
+- SSE carries both section-level events and media lifecycle events.
+- Viewer state is derived from media-aware section statuses: `planned`, `generating`, `partially_ready`, `blocked_by_required_media`, `ready`, and `failed`.
+- Runtime counters are expressed as `media_running` / `media_queued`.
 - Raw filesystem paths are internal storage details and are not part of the viewer contract.
 
 ## Current Contract Source
@@ -43,13 +46,12 @@ This file is the human-readable source of truth for the current project state.
 - `backend/contracts/` is exported from `C:\Projects\lectio`.
 - The current harmonised catalog includes `classification`, `concept-compact`, `diagram-led`, `low-load`, `open-canvas`, `procedure`, `timeline`, `visual-led`, plus the other live-safe templates shipped by Lectio.
 
-## Image Generation (raster path)
+## Current Media Runtime
 
-- Sections where `visual_policy.mode == "image"` generate a PNG via Gemini instead of an SVG spec.
-- **New node:** `backend/src/pipeline/nodes/image_generator.py` runs in Phase 3 parallel alongside `diagram_generator`. The two nodes are mutually exclusive by their own gates.
-- **GCS storage:** `backend/src/core/storage/gcs_image_store.py` — uploads to `GCS_BUCKET_NAME` (currently `lectio-bucket-1`) and returns a signed URL (1-hour TTL). When `GCS_BUCKET_NAME` is unset the node silently no-ops, so local dev works without credentials.
-- **Gemini client:** `backend/src/pipeline/providers/gemini_image_client.py` uses `gemini-3.1-flash-image-preview` via `generate_content_stream()` (multimodal text+image response). Factory: `get_gemini_image_client()` (LRU-cached, reads `GOOGLE_CLOUD_NANO_API_KEY`).
-- **Type changes:** `DiagramPlan.mode: Literal["svg", "image"] | None` (composition.py). `DiagramContent.image_url` was already present.
-- **Wiring:** `composition_planner` reads `plan.visual_policy.mode` and stamps it onto `DiagramPlan.mode`. `diagram_generator` has an early-exit gate for `mode == "image"`.
-- **Required env vars:** `GCS_BUCKET_NAME`, `GCS_SERVICE_ACCOUNT_JSON`, `GCS_IMAGE_BASE_URL` (optional), `GOOGLE_CLOUD_NANO_API_KEY`.
-- **Lectio frontend** (`image_url` branch in the diagram block component) is deferred — to be done in the Lectio repo.
+- `backend/src/pipeline/media/planner/media_planner.py` is the single planning authority for section media.
+- Static media executes through `backend/src/pipeline/media/executors/diagram_generator.py` and `backend/src/pipeline/media/executors/image_generator.py`.
+- Simulation executes through `backend/src/pipeline/media/executors/simulation_generator.py`.
+- `process_section` runs `content_generator -> media_planner -> parallel media executors -> section_assembler -> qc_agent`.
+- Assembly reads typed `media_frame_results` / `media_slot_results`, not legacy composition-plan assumptions.
+- Required media retries are frame-first and report truthfully through media lifecycle events.
+- Image provider routing is config-driven via `PIPELINE_IMAGE_PROVIDER` with `gemini`, `openai`, and `xai` support.

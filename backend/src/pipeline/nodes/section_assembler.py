@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pipeline.contracts import validate_section_for_template
 from pipeline.console_diagnostics import force_console_log
 from pipeline.section_assets import pending_visual_fields, required_visual_fields
+from pipeline.media.assembly import apply_media_results_to_section
+from pipeline.media.qc.simulation_qc import validate_simulation_content
 from pipeline.state import (
     PartialSectionRecord,
     PipelineError,
@@ -146,6 +148,18 @@ async def _assemble_section(
             "completed_nodes": [node_name],
         }
 
+    media_plan = typed.media_plans.get(section_id) if section_id is not None else None
+    section = apply_media_results_to_section(
+        base_section=section,
+        media_plan=media_plan,
+        media_frame_results=typed.media_frame_results.get(section_id, {}) if section_id is not None else {},
+    )
+    simulation_slot = None
+    if media_plan is not None:
+        simulation_slot = next(
+            (slot for slot in media_plan.slots if slot.slot_type.value == "simulation"),
+            None,
+        )
     section_dict = section.model_dump(exclude_none=True)
     visual_issue = resolve_visual_issue(typed)
     if visual_issue:
@@ -169,6 +183,14 @@ async def _assemble_section(
         }
 
     pending_assets = pending_visual_fields(typed)
+    if simulation_slot is not None and simulation_slot.required:
+        simulation_issues = validate_simulation_content(
+            slot=simulation_slot,
+            simulation=section.simulation,
+            fallback_diagram=section.simulation.fallback_diagram if section.simulation is not None else None,
+        )
+        if simulation_issues:
+            pending_assets = [*pending_assets, simulation_slot.slot_id]
     if pending_assets:
         force_console_log(
             "FINALIZE",

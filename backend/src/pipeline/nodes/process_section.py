@@ -3,7 +3,7 @@ Graph-visible per-section orchestration.
 
 process_section is now the canonical 4-phase section flow:
     1. content_generator
-    2. composition_planner
+    2. media_planner
     3. diagram_generator || image_generator || interaction_generator
     4. section_assembler -> qc_agent
 
@@ -18,22 +18,23 @@ from datetime import datetime, timezone
 from langchain_core.runnables.config import RunnableConfig
 
 from pipeline.events import (
+    MediaPlanReadyEvent,
     SectionAssetPendingEvent,
     SectionAssetReadyEvent,
     SectionFinalEvent,
     SectionPartialEvent,
     SectionReadyEvent,
 )
-from pipeline.nodes.composition_planner import composition_planner
 from pipeline.nodes.content_generator import content_generator
 from pipeline.nodes.diagram_generator import diagram_generator
+from pipeline.nodes.media_planner import media_planner
 from pipeline.nodes.image_generator import image_generator
-from pipeline.nodes.interaction_decider import interaction_decider
 from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.nodes.qc_agent import qc_agent
 from pipeline.nodes.section_assembler import section_assembler
 from pipeline.nodes.section_runner import _run_parallel_phase, run_section_steps
 from pipeline.runtime_context import get_runtime_context
+from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.section_assets import pending_visual_fields
 from pipeline.state import PartialSectionRecord, TextbookPipelineState, merge_state_updates
 from pipeline.visual_resolution import resolve_effective_visual_mode
@@ -45,14 +46,10 @@ async def _run_interaction_path(
     model_overrides: dict | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
-    return await run_section_steps(
+    _ = config
+    return await interaction_generator(
         state,
-        steps=[
-            ("interaction_decider", interaction_decider),
-            ("interaction_generator", interaction_generator),
-        ],
         model_overrides=model_overrides,
-        config=config,
     )
 
 
@@ -271,12 +268,21 @@ async def process_section(
 
         phase2 = await run_section_steps(
             typed,
-            steps=[("composition_planner", composition_planner)],
+            steps=[("media_planner", media_planner)],
             model_overrides=model_overrides,
             config=config,
         )
         merge_state_updates(raw_state, phase2)
         typed = TextbookPipelineState.parse(raw_state)
+        if section_id is not None and section_id in typed.media_plans:
+            publish_runtime_event(
+                typed.request.generation_id or "",
+                MediaPlanReadyEvent(
+                    generation_id=typed.request.generation_id or "",
+                    section_id=section_id,
+                    slot_count=len(typed.media_plans[section_id].slots),
+                ),
+            )
 
         phase2_partial = _build_partial_snapshot(
             typed,
@@ -295,9 +301,8 @@ async def process_section(
             steps=[
                 ("diagram_generator", diagram_generator),
                 ("image_generator", image_generator),
-                ("interaction_path", _run_interaction_path),
+                ("interaction_generator", interaction_generator),
             ],
-            pre_instrumented=frozenset({"interaction_path"}),
             model_overrides=model_overrides,
             config=config,
         )

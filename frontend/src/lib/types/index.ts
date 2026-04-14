@@ -274,6 +274,86 @@ export interface SectionReadyEvent {
 	total_sections: number;
 }
 
+export interface MediaPlanReadyEvent {
+	type: 'media_plan_ready';
+	generation_id: string;
+	section_id: string;
+	slot_count: number;
+	planned_at: string;
+}
+
+export interface MediaFrameStartedEvent {
+	type: 'media_frame_started';
+	generation_id: string;
+	section_id: string;
+	slot_id: string;
+	slot_type: string;
+	frame_key: string;
+	frame_index: number;
+	render?: string | null;
+	label?: string | null;
+	started_at: string;
+}
+
+export interface MediaFrameReadyEvent {
+	type: 'media_frame_ready';
+	generation_id: string;
+	section_id: string;
+	slot_id: string;
+	slot_type: string;
+	frame_key: string;
+	frame_index: number;
+	render?: string | null;
+	label?: string | null;
+	ready_at: string;
+}
+
+export interface MediaFrameFailedEvent {
+	type: 'media_frame_failed';
+	generation_id: string;
+	section_id: string;
+	slot_id: string;
+	slot_type: string;
+	frame_key: string;
+	frame_index: number;
+	render?: string | null;
+	label?: string | null;
+	error?: string | null;
+	failed_at: string;
+}
+
+export interface MediaSlotReadyEvent {
+	type: 'media_slot_ready';
+	generation_id: string;
+	section_id: string;
+	slot_id: string;
+	slot_type: string;
+	ready_frames: number;
+	total_frames: number;
+	ready_at: string;
+}
+
+export interface MediaSlotFailedEvent {
+	type: 'media_slot_failed';
+	generation_id: string;
+	section_id: string;
+	slot_id: string;
+	slot_type: string;
+	ready_frames: number;
+	total_frames: number;
+	error?: string | null;
+	failed_at: string;
+}
+
+export interface SectionMediaBlockedEvent {
+	type: 'section_media_blocked';
+	generation_id: string;
+	section_id: string;
+	slot_ids: string[];
+	reason: string;
+	blocked_at: string;
+}
+
 export interface SectionPartialEvent {
 	type: 'section_partial';
 	generation_id: string;
@@ -345,8 +425,9 @@ export interface QCCompleteEvent {
 
 export interface RuntimeConcurrencyPolicy {
 	max_section_concurrency: number;
-	max_diagram_concurrency: number;
+	max_media_concurrency: number;
 	max_qc_concurrency: number;
+	max_diagram_concurrency?: number;
 }
 
 export interface RuntimeTimeoutPolicy {
@@ -390,12 +471,14 @@ export interface RuntimeProgressSnapshot {
 	sections_completed: number;
 	sections_running: number;
 	sections_queued: number;
-	diagram_running: number;
-	diagram_queued: number;
+	media_running: number;
+	media_queued: number;
 	qc_running: number;
 	qc_queued: number;
 	retry_running: number;
 	retry_queued: number;
+	diagram_running?: number;
+	diagram_queued?: number;
 }
 
 export interface RuntimeProgressEvent {
@@ -410,6 +493,7 @@ export type ProgressUpdateStage =
 	| 'generating_section'
 	| 'drafting_partial'
 	| 'awaiting_assets'
+	| 'generating_media'
 	| 'generating_diagram'
 	| 'generating_image'
 	| 'checking_quality'
@@ -459,6 +543,13 @@ export interface GenerationFailedEvent {
 
 export type GenerationStreamEvent =
 	| PipelineStartEvent
+	| MediaPlanReadyEvent
+	| MediaFrameStartedEvent
+	| MediaFrameReadyEvent
+	| MediaFrameFailedEvent
+	| MediaSlotReadyEvent
+	| MediaSlotFailedEvent
+	| SectionMediaBlockedEvent
 	| SectionStartedEvent
 	| SectionPartialEvent
 	| SectionAssetPendingEvent

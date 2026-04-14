@@ -8,9 +8,13 @@ import pytest
 from core.events import event_bus
 from pipeline.api import PipelineDocument, PipelineSectionReport
 from pipeline.events import (
+    CurriculumPlannedEvent,
     DiagramOutcomeEvent,
     FieldRegenOutcomeEvent,
     ImageOutcomeEvent,
+    MediaPlanReadyEvent,
+    MediaSlotFailedEvent,
+    MediaSlotReadyEvent,
     InteractionOutcomeEvent,
     InteractionRetryQueuedEvent,
     LLMCallFailedEvent,
@@ -25,6 +29,7 @@ from pipeline.events import (
     SectionReportUpdatedEvent,
     SectionRetryQueuedEvent,
     SectionStartedEvent,
+    SectionMediaBlockedEvent,
     ValidationRepairAttemptedEvent,
     ValidationRepairSucceededEvent,
 )
@@ -466,6 +471,7 @@ async def test_recorder_tracks_image_interaction_and_field_regen_metrics() -> No
             generation_id=generation.id,
             section_id="s-01",
             outcome="success",
+            provider="gemini",
         )
     )
     await recorder.apply_event(
@@ -532,6 +538,7 @@ async def test_recorder_tracks_image_interaction_and_field_regen_metrics() -> No
     section_two = next(section for section in report.sections if section.section_id == "s-02")
 
     assert section_one.image_outcome == "success"
+    assert section_one.image_provider == "gemini"
     assert section_one.interaction_outcome == "generated"
     assert section_one.interaction_count == 2
     assert section_one.interaction_retry_count == 1
@@ -549,10 +556,138 @@ async def test_recorder_tracks_image_interaction_and_field_regen_metrics() -> No
     assert report.summary.image_success_count == 1
     assert report.summary.image_failure_count == 1
     assert report.summary.image_skip_count == 0
+    assert report.summary.image_provider_counts == {"gemini": 1}
+    assert report.summary.simulation_success_count == 1
     assert report.summary.interaction_skip_count == 1
     assert report.summary.interaction_retry_count == 1
     assert report.summary.field_regen_count == 2
     assert report.summary.field_regen_success_count == 1
+
+
+@pytest.mark.asyncio
+async def test_recorder_tracks_media_slot_metrics_and_required_media_blocks() -> None:
+    generation = _generation("gen-media-slots")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        MediaPlanReadyEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_count=2,
+        )
+    )
+    await recorder.apply_event(
+        MediaSlotReadyEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_id="diagram-main",
+            slot_type="diagram",
+            ready_frames=1,
+            total_frames=1,
+        )
+    )
+    await recorder.apply_event(
+        MediaSlotFailedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_id="simulation-lab",
+            slot_type="simulation",
+            ready_frames=0,
+            total_frames=1,
+            error="Simulation HTML failed QC",
+        )
+    )
+    await recorder.apply_event(
+        SectionMediaBlockedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_ids=["simulation-lab"],
+            reason="Required media is still incomplete after retry exhaustion.",
+        )
+    )
+    await recorder.apply_event(
+        SectionRetryQueuedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            reason="Retrying required media frame.",
+            block_type="simulation",
+            next_attempt=2,
+            max_attempts=2,
+        )
+    )
+    await recorder.finalize_failure(error="Generation failed")
+
+    report = await repo.load_report(generation.id)
+    section = report.sections[0]
+
+    assert section.media_slots_planned == 2
+    assert section.media_slots_ready == 1
+    assert section.media_slots_failed == 1
+    assert section.media_frame_retry_count == 1
+    assert section.media_blocked is True
+    assert section.media_block_reason is not None
+    assert section.simulation_outcome == "failed"
+    assert report.summary.media_slots_planned == 2
+    assert report.summary.media_slots_ready == 1
+    assert report.summary.media_slots_failed == 1
+    assert report.summary.media_frame_retry_count == 1
+    assert report.summary.simulation_failure_count == 1
+
+
+@pytest.mark.asyncio
+async def test_recorder_persists_runtime_outline_and_planner_trace() -> None:
+    generation = _generation("gen-planner-trace")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        CurriculumPlannedEvent(
+            generation_id=generation.id,
+            path="seeded_enrichment",
+            result="enriched",
+            duplicate_term_warnings=[
+                "Duplicate term assignment in curriculum plan term='slope' first_section='s-01' duplicate_section='s-02'"
+            ],
+            runtime_curriculum_outline=[
+                {
+                    "section_id": "s-01",
+                    "title": "Intro to Slope",
+                    "position": 1,
+                    "role": "intro",
+                    "focus": "Introduce slope as the steepness of a line.",
+                    "terms_to_define": ["slope"],
+                    "terms_assumed": [],
+                    "practice_target": "identify slope as steepness from a graph",
+                    "visual_commitment": "diagram",
+                }
+            ],
+            planner_trace_sections=[
+                {
+                    "section_id": "s-01",
+                    "title": "Intro to Slope",
+                    "position": 1,
+                    "role": "intro",
+                    "rationale_summary": "Introduce slope as the steepness of a line.",
+                }
+            ],
+        )
+    )
+
+    report = await repo.load_report(generation.id)
+    assert report.runtime_curriculum_outline[0].terms_to_define == ["slope"]
+    assert report.runtime_curriculum_outline[0].practice_target == (
+        "identify slope as steepness from a graph"
+    )
+    assert report.planner_trace is not None
+    assert report.planner_trace.path == "seeded_enrichment"
+    assert report.planner_trace.result == "enriched"
+    assert report.planner_trace.sections[0].rationale_summary == (
+        "Introduce slope as the steepness of a line."
+    )
+    assert report.planner_trace.duplicate_term_warnings[0].startswith(
+        "Duplicate term assignment in curriculum plan"
+    )
 
 
 @pytest.mark.asyncio

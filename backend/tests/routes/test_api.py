@@ -15,7 +15,13 @@ from core.config import Settings
 from core.database.models import GenerationModel
 from core.database.session import get_async_session
 from pipeline.api import PipelineDocument, PipelineResult
-from pipeline.events import ErrorEvent, SectionReadyEvent, SectionStartedEvent
+from pipeline.events import (
+    ErrorEvent,
+    MediaPlanReadyEvent,
+    SectionMediaBlockedEvent,
+    SectionReadyEvent,
+    SectionStartedEvent,
+)
 from pipeline.runtime_context import (
     build_runtime_context,
     register_runtime_context,
@@ -914,6 +920,9 @@ class TestGenerationApi:
         payload = response.json()
         assert payload["generation_id"] == generation_id
         assert payload["outcome"] == "partial"
+        assert "media_slots_planned" in payload["summary"]
+        assert "media_frame_retry_count" in payload["summary"]
+        assert "image_provider_counts" in payload["summary"]
 
     async def test_generation_report_endpoint_requires_ownership(self, db_session: AsyncSession):
         generation_id = "gen-report-hidden"
@@ -1046,6 +1055,57 @@ class TestGenerationApi:
         assert '"sections_completed": 1' in response.text or '"sections_completed":1' in response.text
         assert '"sections_queued": 1' in response.text or '"sections_queued":1' in response.text
         assert "event: complete" in response.text
+
+    async def test_events_endpoint_forwards_media_lifecycle_events(self, monkeypatch):
+        generation_id = "gen-media-events"
+        document = _document(generation_id, status="completed")
+        path = await DOC_REPO.save_document(document)
+        await GEN_REPO.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER.id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                status="completed",
+                document_path=path,
+                requested_template_id="guided-concept-path",
+                resolved_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                resolved_preset_id="blue-classroom",
+                quality_passed=False,
+            )
+        )
+
+        queue: asyncio.Queue[dict] = asyncio.Queue()
+        queue.put_nowait(
+            MediaPlanReadyEvent(
+                generation_id=generation_id,
+                section_id="s-01",
+                slot_count=2,
+            ).model_dump(mode="json", exclude_none=True),
+        )
+        queue.put_nowait(
+            SectionMediaBlockedEvent(
+                generation_id=generation_id,
+                section_id="s-01",
+                slot_ids=["diagram"],
+                reason="Required media slot did not complete",
+            ).model_dump(mode="json", exclude_none=True),
+        )
+        monkeypatch.setattr("core.events.event_bus.subscribe", lambda _generation_id: queue)
+
+        token = JWT_HANDLER.create_access_token(TEST_USER.id, TEST_USER.email)
+        async with _client() as client:
+            response = await client.get(
+                f"/api/v1/generations/{generation_id}/events?token={token}",
+            )
+
+        assert response.status_code == 200
+        assert "event: media_plan_ready" in response.text
+        assert "event: section_media_blocked" in response.text
+        assert "Planning media" in response.text
+        assert "Required media slot did not complete" in response.text
 
     async def test_events_endpoint_returns_terminal_error_for_failed_generation(self):
         generation_id = "gen-failed-events"

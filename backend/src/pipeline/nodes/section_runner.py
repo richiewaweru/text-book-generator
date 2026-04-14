@@ -43,11 +43,11 @@ SectionStep = Callable[..., Awaitable[dict]]
 NamedSectionStep = tuple[str, SectionStep]
 
 _RESOURCE_LIMITERS = {
-    "diagram_generator": "diagram",
+    "diagram_generator": "media",
+    "image_generator": "media",
+    "interaction_generator": "media",
     "qc_agent": "qc",
 }
-_DIAGRAM_RETRY_FIELDS = {"diagram", "diagram_series", "diagram_compare"}
-_INTERACTION_RETRY_FIELDS = {"simulation", "simulation_block"}
 
 _SECTION_REPORT_SOURCES = {
     "section_assembler": "assembler",
@@ -135,8 +135,16 @@ def _build_section_output(
 
     if section_id and section_id in after_state.generated_sections:
         output["generated_sections"] = {section_id: after_state.generated_sections[section_id]}
-    if section_id and section_id in after_state.composition_plans:
-        output["composition_plans"] = {section_id: after_state.composition_plans[section_id]}
+    if section_id and section_id in after_state.media_plans:
+        output["media_plans"] = {section_id: after_state.media_plans[section_id]}
+    if section_id and section_id in after_state.media_slot_results:
+        output["media_slot_results"] = {section_id: after_state.media_slot_results[section_id]}
+    if section_id and section_id in after_state.media_frame_results:
+        output["media_frame_results"] = {
+            section_id: after_state.media_frame_results[section_id]
+        }
+    if section_id and section_id in after_state.media_lifecycle:
+        output["media_lifecycle"] = {section_id: after_state.media_lifecycle[section_id]}
     if section_id and section_id in after_state.interaction_specs:
         output["interaction_specs"] = {section_id: after_state.interaction_specs[section_id]}
     if section_id and section_id in after_state.partial_sections:
@@ -157,12 +165,24 @@ def _build_section_output(
         output["diagram_outcomes"] = {section_id: after_state.diagram_outcomes[section_id]}
     if (
         section_id
-        and after_state.diagram_retry_count.get(section_id)
-        != before_state.diagram_retry_count.get(section_id)
+        and after_state.media_retry_count.get(section_id)
+        != before_state.media_retry_count.get(section_id)
     ):
-        output["diagram_retry_count"] = {
-            section_id: after_state.diagram_retry_count.get(section_id, 0)
+        output["media_retry_count"] = {
+            section_id: after_state.media_retry_count.get(section_id, 0)
         }
+
+    if (
+        section_id
+        and after_state.media_frame_retry_count.get(section_id)
+        != before_state.media_frame_retry_count.get(section_id)
+    ):
+        output["media_frame_retry_count"] = {
+            section_id: after_state.media_frame_retry_count.get(section_id, {})
+        }
+
+    if before_state.current_media_retry != after_state.current_media_retry:
+        output["current_media_retry"] = after_state.current_media_retry
 
     rerender_updates = _rerender_request_updates(before_state, after_state, section_id)
     if rerender_updates:
@@ -418,7 +438,12 @@ async def _run_parallel_phase(
                 )
                 merged["generated_sections"] = generated_sections
             elif key in {
-                "composition_plans",
+                "media_plans",
+                "media_slot_results",
+                "media_frame_results",
+                "media_lifecycle",
+                "media_retry_count",
+                "media_frame_retry_count",
                 "interaction_specs",
                 "partial_sections",
                 "assembled_sections",
@@ -427,12 +452,12 @@ async def _run_parallel_phase(
                 "qc_reports",
                 "failed_sections",
                 "diagram_outcomes",
-                "diagram_retry_count",
-                "interaction_retry_count",
                 "rerender_requests",
                 "rerender_count",
             }:
                 merged.setdefault(key, {}).update(value)
+            elif key == "current_media_retry":
+                merged[key] = value
             elif key in {"completed_nodes", "errors", "node_failures"}:
                 merged.setdefault(key, []).extend(value)
             else:
@@ -596,15 +621,7 @@ async def run_section_steps(
                 if rerender is None:
                     continue
                 request = _coerce_rerender_request(rerender)
-                diagram_budget_exhausted = (
-                    request.block_type in _DIAGRAM_RETRY_FIELDS
-                    and step_state.diagram_retry_count.get(request.section_id, 0) >= 1
-                )
-                interaction_budget_exhausted = (
-                    request.block_type in _INTERACTION_RETRY_FIELDS
-                    and step_state.interaction_retry_count.get(request.section_id, 0) >= 1
-                )
-                should_queue_retry = not diagram_budget_exhausted and not interaction_budget_exhausted
+                should_queue_retry = True
                 if (
                     runtime_context is not None
                     and should_queue_retry

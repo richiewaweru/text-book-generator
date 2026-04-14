@@ -9,11 +9,15 @@ from typing import Any
 from pipeline.api import PipelineDocument, PipelineSectionReport
 from pipeline.contracts import get_optional_fields, get_required_fields
 import core.events as core_events
+from pipeline.media.retry import is_media_block
 from pipeline.reporting import (
+    GenerationPlannerTrace,
+    GenerationPlannerTraceSection,
     GenerationReport,
     GenerationReportFieldRegenAttempt,
     GenerationReportLLMAttempt,
     GenerationReportNode,
+    GenerationReportOutlineSection,
     GenerationReportRetry,
     GenerationReportSection,
     GenerationReportSummary,
@@ -71,6 +75,9 @@ class GenerationReportRecorder:
         self._sections: dict[str, GenerationReportSection] = {}
         self._generation_nodes: dict[tuple[str, int | None], GenerationReportNode] = {}
         self._section_nodes: dict[tuple[str, str, int | None], GenerationReportNode] = {}
+        self._planned_media_slots: dict[str, set[str]] = {}
+        self._ready_media_slots: dict[str, set[str]] = {}
+        self._failed_media_slots: dict[str, set[str]] = {}
         self._timeline_sequence = 0
         self._queue: asyncio.Queue | None = None
         self._consumer: asyncio.Task | None = None
@@ -199,6 +206,8 @@ class GenerationReportRecorder:
         event_type = payload.get("type")
         if event_type == "pipeline_start":
             self._handle_pipeline_start(payload)
+        elif event_type == "curriculum_planned":
+            self._handle_curriculum_planned(payload)
         elif event_type == "section_started":
             self._handle_section_started(payload)
         elif event_type == "section_partial":
@@ -225,6 +234,14 @@ class GenerationReportRecorder:
             self._handle_section_report_updated(payload)
         elif event_type == "section_retry_queued":
             self._handle_section_retry_queued(payload)
+        elif event_type == "media_plan_ready":
+            self._handle_media_plan_ready(payload)
+        elif event_type == "media_slot_ready":
+            self._handle_media_slot_ready(payload)
+        elif event_type == "media_slot_failed":
+            self._handle_media_slot_failed(payload)
+        elif event_type == "section_media_blocked":
+            self._handle_section_media_blocked(payload)
         elif event_type == "section_failed":
             self._handle_section_failed(payload)
         elif event_type == "validation_repair_attempted":
@@ -328,6 +345,9 @@ class GenerationReportRecorder:
             )
         return self._sections[section_id]
 
+    def _slot_set(self, store: dict[str, set[str]], section_id: str) -> set[str]:
+        return store.setdefault(section_id, set())
+
     def _ensure_node(
         self,
         *,
@@ -362,6 +382,28 @@ class GenerationReportRecorder:
         self._report.status = "running"
         self._report.section_count = payload.get("section_count", self._report.section_count)
         self._report.started_at = _as_utc(payload.get("started_at")) or self._report.started_at
+
+    def _handle_curriculum_planned(self, payload: dict[str, Any]) -> None:
+        outline = [
+            GenerationReportOutlineSection.model_validate(item)
+            for item in payload.get("runtime_curriculum_outline", [])
+        ]
+        planner_sections = [
+            GenerationPlannerTraceSection.model_validate(item)
+            for item in payload.get("planner_trace_sections", [])
+        ]
+        self._report.runtime_curriculum_outline = outline
+        self._report.planner_trace = GenerationPlannerTrace(
+            path=payload["path"],
+            result=payload["result"],
+            duplicate_term_warnings=list(payload.get("duplicate_term_warnings", [])),
+            sections=planner_sections,
+        )
+        if outline:
+            self._report.section_count = max(
+                self._report.section_count or 0,
+                len(outline),
+            )
 
     def _handle_section_started(self, payload: dict[str, Any]) -> None:
         section = self._ensure_section(payload["section_id"])
@@ -522,6 +564,48 @@ class GenerationReportRecorder:
                 queued_at=_as_utc(payload.get("queued_at")) or _utc_now(),
             )
         )
+        if is_media_block(payload.get("block_type")):
+            section.media_frame_retry_count += 1
+
+    def _handle_media_plan_ready(self, payload: dict[str, Any]) -> None:
+        section = self._ensure_section(payload["section_id"])
+        section.media_slots_planned = max(section.media_slots_planned, payload.get("slot_count", 0))
+
+    def _handle_media_slot_ready(self, payload: dict[str, Any]) -> None:
+        section_id = payload.get("section_id")
+        slot_id = payload.get("slot_id")
+        if not section_id or not slot_id:
+            return
+        section = self._ensure_section(section_id)
+        self._slot_set(self._ready_media_slots, section_id).add(slot_id)
+        self._slot_set(self._planned_media_slots, section_id).add(slot_id)
+        section.media_slots_ready = len(self._ready_media_slots[section_id])
+        section.media_slots_planned = max(
+            section.media_slots_planned,
+            len(self._planned_media_slots[section_id]),
+        )
+
+    def _handle_media_slot_failed(self, payload: dict[str, Any]) -> None:
+        section_id = payload.get("section_id")
+        slot_id = payload.get("slot_id")
+        if not section_id or not slot_id:
+            return
+        section = self._ensure_section(section_id)
+        self._slot_set(self._failed_media_slots, section_id).add(slot_id)
+        self._slot_set(self._planned_media_slots, section_id).add(slot_id)
+        section.media_slots_failed = len(self._failed_media_slots[section_id])
+        section.media_slots_planned = max(
+            section.media_slots_planned,
+            len(self._planned_media_slots[section_id]),
+        )
+        if payload.get("slot_type") in {"simulation", "simulation_block"}:
+            section.simulation_outcome = "failed"
+            section.simulation_failure_reason = payload.get("error")
+
+    def _handle_section_media_blocked(self, payload: dict[str, Any]) -> None:
+        section = self._ensure_section(payload["section_id"])
+        section.media_blocked = True
+        section.media_block_reason = payload.get("reason")
 
     def _handle_section_failed(self, payload: dict[str, Any]) -> None:
         section = self._ensure_section(payload["section_id"])
@@ -552,6 +636,7 @@ class GenerationReportRecorder:
         section = self._ensure_section(section_id)
         section.image_outcome = payload.get("outcome")
         section.image_error = payload.get("error_message")
+        section.image_provider = payload.get("provider")
 
     def _handle_interaction_outcome(self, payload: dict[str, Any]) -> None:
         section_id = payload.get("section_id")
@@ -561,6 +646,10 @@ class GenerationReportRecorder:
         section.interaction_outcome = payload.get("outcome")
         section.interaction_skip_reason = payload.get("skip_reason")
         section.interaction_count = payload.get("interaction_count", 0)
+        section.simulation_outcome = (
+            "generated" if payload.get("outcome") == "generated" else "skipped"
+        )
+        section.simulation_failure_reason = None
 
     def _handle_interaction_retry_queued(self, payload: dict[str, Any]) -> None:
         section_id = payload.get("section_id")
@@ -588,6 +677,8 @@ class GenerationReportRecorder:
         section.completed_at = _utc_now()
         section.final_error = None
         section.failure_detail = None
+        section.media_blocked = False
+        section.media_block_reason = None
         delivered = self._delivered_components(payload.get("section", {}))
         section.delivered_components = delivered
         section.missing_components = [
@@ -770,6 +861,18 @@ class GenerationReportRecorder:
             section.validation_repair_successes for section in self._sections.values()
         )
         summary.qc_rerenders = summary.retry_count
+        summary.media_slots_planned = sum(
+            section.media_slots_planned for section in self._sections.values()
+        )
+        summary.media_slots_ready = sum(
+            section.media_slots_ready for section in self._sections.values()
+        )
+        summary.media_slots_failed = sum(
+            section.media_slots_failed for section in self._sections.values()
+        )
+        summary.media_frame_retry_count = sum(
+            section.media_frame_retry_count for section in self._sections.values()
+        )
         summary.warning_count = sum(len(section.warnings) for section in self._sections.values())
         summary.blocking_issue_count = sum(
             1
@@ -821,6 +924,19 @@ class GenerationReportRecorder:
         )
         summary.image_skip_count = sum(
             1 for section in self._sections.values() if section.image_outcome == "skipped"
+        )
+        provider_counts: dict[str, int] = {}
+        for section in self._sections.values():
+            if section.image_provider:
+                provider_counts[section.image_provider] = (
+                    provider_counts.get(section.image_provider, 0) + 1
+                )
+        summary.image_provider_counts = provider_counts
+        summary.simulation_success_count = sum(
+            1 for section in self._sections.values() if section.simulation_outcome == "generated"
+        )
+        summary.simulation_failure_count = sum(
+            1 for section in self._sections.values() if section.simulation_outcome == "failed"
         )
         summary.interaction_skip_count = sum(
             1
@@ -972,7 +1088,7 @@ class GenerationReportRecorder:
 
     def _log_final_summary(self) -> None:
         logger.info(
-            "Generation report summary generation=%s status=%s outcome=%s planned=%s ready=%s missing=%s failed=%s stalled=%s retries=%s llm_transport_retries=%s validation_repairs=%s validation_repair_successes=%s diagram_retries=%s diagram_timeouts=%s diagram_skips=%s warnings=%s blocking_issues=%s tokens_in=%s tokens_out=%s cost_usd=%s slowest_node=%s slowest_section=%s",
+            "Generation report summary generation=%s status=%s outcome=%s planned=%s ready=%s missing=%s failed=%s stalled=%s retries=%s llm_transport_retries=%s validation_repairs=%s validation_repair_successes=%s media_slots_planned=%s media_slots_ready=%s media_slots_failed=%s media_frame_retries=%s diagram_retries=%s diagram_timeouts=%s diagram_skips=%s warnings=%s blocking_issues=%s tokens_in=%s tokens_out=%s cost_usd=%s slowest_node=%s slowest_section=%s",
             self._report.generation_id,
             self._report.status,
             self._report.outcome or "-",
@@ -985,6 +1101,10 @@ class GenerationReportRecorder:
             self._report.summary.llm_transport_retries,
             self._report.summary.validation_repair_attempts,
             self._report.summary.validation_repair_successes,
+            self._report.summary.media_slots_planned,
+            self._report.summary.media_slots_ready,
+            self._report.summary.media_slots_failed,
+            self._report.summary.media_frame_retry_count,
             self._report.summary.diagram_retries,
             self._report.summary.diagram_timeout_count,
             self._report.summary.diagram_skip_count,
@@ -1001,11 +1121,14 @@ class GenerationReportRecorder:
             self._report.summary.slowest_section or "-",
         )
         logger.info(
-            "Generation report image_and_interaction_summary generation=%s image_success=%s image_fail=%s image_skip=%s interaction_skip=%s interaction_retries=%s field_regen=%s field_regen_success=%s",
+            "Generation report image_and_interaction_summary generation=%s image_success=%s image_fail=%s image_skip=%s image_providers=%s simulation_success=%s simulation_fail=%s interaction_skip=%s interaction_retries=%s field_regen=%s field_regen_success=%s",
             self._report.generation_id,
             self._report.summary.image_success_count,
             self._report.summary.image_failure_count,
             self._report.summary.image_skip_count,
+            self._report.summary.image_provider_counts,
+            self._report.summary.simulation_success_count,
+            self._report.summary.simulation_failure_count,
             self._report.summary.interaction_skip_count,
             self._report.summary.interaction_retry_count,
             self._report.summary.field_regen_count,

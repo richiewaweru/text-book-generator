@@ -24,7 +24,7 @@ from pipeline.types.requests import PipelineRequest
 @dataclass
 class PipelineLimiters:
     section: asyncio.Semaphore
-    diagram: asyncio.Semaphore
+    media: asyncio.Semaphore
     qc: asyncio.Semaphore
 
 
@@ -90,7 +90,7 @@ def build_runtime_context(
         generation_timeout_seconds=policy.generation_timeout_seconds(request.section_count),
         limiters=PipelineLimiters(
             section=asyncio.Semaphore(policy.concurrency.max_section_concurrency),
-            diagram=asyncio.Semaphore(policy.concurrency.max_diagram_concurrency),
+            media=asyncio.Semaphore(policy.concurrency.max_media_concurrency),
             qc=asyncio.Semaphore(policy.concurrency.max_qc_concurrency),
         ),
         progress=progress,
@@ -164,6 +164,7 @@ def build_runtime_policy_event(context: PipelineRuntimeContext) -> RuntimePolicy
         generation_max_concurrent_per_user=context.policy.generation_max_concurrent_per_user,
         concurrency={
             "max_section_concurrency": context.policy.concurrency.max_section_concurrency,
+            "max_media_concurrency": context.policy.concurrency.max_media_concurrency,
             "max_diagram_concurrency": context.policy.concurrency.max_diagram_concurrency,
             "max_qc_concurrency": context.policy.concurrency.max_qc_concurrency,
         },

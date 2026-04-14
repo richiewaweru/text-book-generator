@@ -14,6 +14,10 @@ class ConcurrencyPolicy:
     max_diagram_concurrency: int
     max_qc_concurrency: int
 
+    @property
+    def max_media_concurrency(self) -> int:
+        return self.max_diagram_concurrency
+
 
 @dataclass(frozen=True)
 class TimeoutPolicy:
@@ -203,4 +207,3 @@ def resolve_runtime_policy_bundle(
         timeouts=timeouts,
         retries=resolve_retry_policy_map(settings, mode, timeouts=timeouts),
     )
-

@@ -173,6 +173,8 @@ async def test_backfill_failed_reports_synthesizes_missing_failure_report() -> N
     assert report.outcome == "failed"
     assert report.summary.planned_sections == 2
     assert report.summary.failed_sections == 2
+    assert report.runtime_curriculum_outline == []
+    assert report.planner_trace is None
 
 
 async def test_llm_usage_route_scopes_to_authenticated_user() -> None:

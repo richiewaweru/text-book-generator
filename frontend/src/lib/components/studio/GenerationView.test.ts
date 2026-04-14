@@ -289,7 +289,7 @@ describe('GenerationView', () => {
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
 		expect(screen.getByText('Live')).toBeTruthy();
 		expect(screen.getByText(/printed booklet/i)).toBeTruthy();
-		expect(screen.getAllByText(/queued/i).length).toBeGreaterThan(0);
+		expect(screen.getAllByText(/planned/i).length).toBeGreaterThan(0);
 
 		emitEvent('runtime_policy', {
 			type: 'runtime_policy',
@@ -300,6 +300,7 @@ describe('GenerationView', () => {
 			max_section_rerenders: 2,
 			concurrency: {
 				max_section_concurrency: 4,
+				max_media_concurrency: 2,
 				max_diagram_concurrency: 2,
 				max_qc_concurrency: 4
 			},
@@ -329,6 +330,8 @@ describe('GenerationView', () => {
 				sections_completed: 1,
 				sections_running: 1,
 				sections_queued: 0,
+				media_running: 1,
+				media_queued: 0,
 				diagram_running: 1,
 				diagram_queued: 0,
 				qc_running: 0,
@@ -342,7 +345,7 @@ describe('GenerationView', () => {
 		await waitFor(() =>
 			expect(screen.getByText(/1 complete \/ 1 running \/ 0 queued/i)).toBeTruthy()
 		);
-		expect(screen.getByText(/4 sections \/ 2 diagrams \/ 4 qc/i)).toBeTruthy();
+		expect(screen.getByText(/4 sections \/ 2 media \/ 4 qc/i)).toBeTruthy();
 		expect(screen.getByText(/390s/i)).toBeTruthy();
 
 		emitEvent('section_started', {
@@ -353,7 +356,9 @@ describe('GenerationView', () => {
 			position: 2
 		});
 
-		await waitFor(() => expect(screen.getByText(/writing section content/i)).toBeTruthy());
+		await waitFor(() =>
+			expect(screen.getAllByText(/generating section/i).length).toBeGreaterThan(0)
+		);
 
 		emitEvent('section_failed', {
 			type: 'section_failed',
@@ -377,7 +382,7 @@ describe('GenerationView', () => {
 		);
 	});
 
-	it('shows image-specific visual pending copy when the canonical visual mode is image', async () => {
+	it('shows media pending copy when the canonical visual mode is image', async () => {
 		getGenerationDetail.mockResolvedValue(buildDetail());
 		getGenerationDocument.mockResolvedValue(
 			buildDocument({
@@ -401,7 +406,7 @@ describe('GenerationView', () => {
 		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
 
-		expect(screen.getAllByText(/generating image/i).length).toBeGreaterThan(0);
+		expect(screen.getAllByText(/generating media/i).length).toBeGreaterThan(0);
 		expect(screen.getByText(/Fractions divide a whole into equal parts\./i)).toBeTruthy();
 	});
 
@@ -481,7 +486,7 @@ describe('GenerationView', () => {
 		);
 	});
 
-	it('marks untouched queued sections as blocked after a failed generation', async () => {
+	it('marks untouched planned sections as failed after a failed generation', async () => {
 		getGenerationDetail.mockResolvedValue(
 			buildDetail({
 				status: 'failed',
@@ -535,8 +540,6 @@ describe('GenerationView', () => {
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
 
 		expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
-		expect(screen.getAllByText(/did not start because generation failed/i).length).toBeGreaterThan(
-			0
-		);
+		expect(screen.getAllByText(/this section could not be generated/i).length).toBeGreaterThan(0);
 	});
 });

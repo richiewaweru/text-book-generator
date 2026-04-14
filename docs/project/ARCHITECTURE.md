@@ -41,6 +41,9 @@ Architecture guard: `python tools/agent/check_architecture.py --format text`
 - Streaming transport: authenticated SSE at `/api/v1/generations/{id}/events`
 - Document hydration: `/api/v1/generations/{id}/document`
 - Legacy HTML renderer and iframe viewer are removed from the live architecture
+- Section media planning is owned by `pipeline.media.planner.media_planner`
+- Static and simulation execution live under `pipeline.media.executors`
+- Media retries are frame-first and surfaced through media lifecycle SSE events
 
 ## Current LLM Routing
 

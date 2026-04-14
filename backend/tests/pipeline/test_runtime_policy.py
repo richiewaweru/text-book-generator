@@ -17,9 +17,9 @@ async def test_runtime_progress_tracker_tracks_queue_and_completion_state() -> N
 
     await tracker.queue_section("s-01")
     await tracker.start_section("s-01")
-    await tracker.queue_node("diagram", "s-01")
-    await tracker.start_node("diagram", "s-01")
-    await tracker.finish_node("diagram", "s-01")
+    await tracker.queue_node("media", "s-01")
+    await tracker.start_node("media", "s-01")
+    await tracker.finish_node("media", "s-01")
     await tracker.queue_node("qc", "s-01")
     await tracker.start_node("qc", "s-01")
     await tracker.finish_node("qc", "s-01")
@@ -35,13 +35,13 @@ async def test_runtime_progress_tracker_tracks_queue_and_completion_state() -> N
     assert final_snapshot.sections_completed == 1
     assert final_snapshot.sections_running == 0
     assert final_snapshot.sections_queued == 0
-    assert final_snapshot.diagram_running == 0
-    assert final_snapshot.diagram_queued == 0
+    assert final_snapshot.media_running == 0
+    assert final_snapshot.media_queued == 0
     assert final_snapshot.qc_running == 0
     assert final_snapshot.qc_queued == 0
     assert final_snapshot.retry_running == 0
     assert final_snapshot.retry_queued == 0
     assert any(snapshot.sections_running == 1 for snapshot in snapshots)
-    assert any(snapshot.diagram_running == 1 for snapshot in snapshots)
+    assert any(snapshot.media_running == 1 for snapshot in snapshots)
     assert any(snapshot.qc_running == 1 for snapshot in snapshots)
     assert any(snapshot.retry_running == 1 for snapshot in snapshots)

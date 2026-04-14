@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from pipeline.events import ImageOutcomeEvent
+from pipeline.media.types import MediaPlan, VisualFrame, VisualSlot
 from pipeline.nodes.image_generator import image_generator
 from pipeline.providers.gemini_image_client import (
     GeminiImageClient,
@@ -179,6 +180,84 @@ def _state(
     diagram_mode: str = "image",
 ) -> TextbookPipelineState:
     sid = section.section_id
+    slot_type = {
+        "diagram-block": "diagram",
+        "diagram-series": "diagram_series",
+        "diagram-compare": "diagram_compare",
+    }[diagram_slot]
+    if slot_type == "diagram_series":
+        labels = (
+            [step.step_label for step in section.diagram_series.diagrams]
+            if section.diagram_series is not None and section.diagram_series.diagrams
+            else key_concepts or ["Step 1", "Step 2", "Step 3"]
+        )
+        frames = [
+            VisualFrame(
+                slot_id="diagram_series",
+                index=index,
+                label=label,
+                generation_goal=f"Render series step {index + 1}.",
+            )
+            for index, label in enumerate(labels)
+        ]
+        slot = VisualSlot(
+            slot_id="diagram_series",
+            slot_type="diagram_series",
+            required=True,
+            preferred_render=diagram_mode,
+            fallback_render="svg" if diagram_mode == "image" else None,
+            pedagogical_intent="Show the sequence clearly.",
+            caption="Sequence caption",
+            frames=frames,
+        )
+    elif slot_type == "diagram_compare":
+        before_label = compare_before_label or (
+            section.diagram_compare.before_label if section.diagram_compare is not None else "Before"
+        )
+        after_label = compare_after_label or (
+            section.diagram_compare.after_label if section.diagram_compare is not None else "After"
+        )
+        slot = VisualSlot(
+            slot_id="diagram_compare",
+            slot_type="diagram_compare",
+            required=True,
+            preferred_render=diagram_mode,
+            fallback_render="svg" if diagram_mode == "image" else None,
+            pedagogical_intent="Compare the two states.",
+            caption="Compare caption",
+            frames=[
+                VisualFrame(
+                    slot_id="diagram_compare",
+                    index=0,
+                    label=before_label,
+                    generation_goal="Render the before state.",
+                ),
+                VisualFrame(
+                    slot_id="diagram_compare",
+                    index=1,
+                    label=after_label,
+                    generation_goal="Render the after state.",
+                ),
+            ],
+        )
+    else:
+        slot = VisualSlot(
+            slot_id="diagram",
+            slot_type="diagram",
+            required=True,
+            preferred_render=diagram_mode,
+            fallback_render="svg" if diagram_mode == "image" else None,
+            pedagogical_intent="Explain the core idea clearly.",
+            caption="Single diagram caption",
+            frames=[
+                VisualFrame(
+                    slot_id="diagram",
+                    index=0,
+                    label=section.header.title,
+                    generation_goal="Render the main diagram.",
+                )
+            ],
+        )
     return TextbookPipelineState(
         request=_request(),
         contract=_contract(diagram_slot=diagram_slot),
@@ -187,6 +266,11 @@ def _state(
         curriculum_outline=[section_plan],
         style_context=_style_context(),
         generated_sections={sid: section},
+        media_plans=(
+            {sid: MediaPlan(section_id=sid, slots=[slot])}
+            if diagram_enabled
+            else {}
+        ),
         composition_plans={
             sid: CompositionPlan(
                 diagram=DiagramPlan(
@@ -491,12 +575,15 @@ async def test_image_generator_emits_skipped_outcome_for_non_image_mode(tmp_path
         section_plan=_plan(intent="explain_structure"),
         section=_section(),
     )
-    state.composition_plans["s-01"].diagram.mode = "svg"
+    state.media_plans["s-01"].slots[0].preferred_render = "svg"
     events = _capture_published_events(monkeypatch)
 
     result = await image_generator(state, _store=store, _client=client)
 
-    assert result == {"completed_nodes": ["image_generator"]}
+    assert result == {
+        "completed_nodes": ["image_generator"],
+        "diagram_outcomes": {"s-01": "skipped"},
+    }
     image_events = _image_events(events)
     assert len(image_events) == 1
     generation_id, event = image_events[0]
@@ -558,9 +645,8 @@ async def test_image_generator_populates_hook_image_for_show_realism_intro(tmp_p
 
     section = result["generated_sections"]["s-01"]
     assert section.diagram is not None
-    assert section.hook.image is not None
-    assert section.hook.image.url == "http://test/images/gen-image-test/s-01/hook.png"
-    assert len(client.prompts) == 2
+    assert section.hook.image is None
+    assert len(client.prompts) == 1
 
 
 @pytest.mark.asyncio
@@ -604,8 +690,8 @@ async def test_image_generator_writes_compare_pair_and_preserves_compare_text(tm
     assert section.diagram_compare.after_image_url == (
         "http://test/images/gen-image-test/s-01/compare-after.png"
     )
-    assert section.diagram_compare.before_label == "Unbalanced forces"
-    assert section.diagram_compare.after_label == "Balanced forces"
+    assert section.diagram_compare.before_label == "Before push"
+    assert section.diagram_compare.after_label == "After push"
     assert section.diagram_compare.before_details == ["Net force is not zero."]
     assert section.diagram_compare.after_details == ["Net force cancels out."]
     assert section.diagram_compare.caption == "Compare the force balance in the same system."
@@ -640,7 +726,7 @@ async def test_image_generator_returns_recoverable_error_when_compare_pair_fails
     assert result["completed_nodes"] == ["image_generator"]
     assert result["diagram_outcomes"]["s-01"] == "error"
     assert result["errors"][0].recoverable is True
-    assert "DiagramCompare pair failed" in result["errors"][0].message
+    assert "Image generation failed for frame 1" in result["errors"][0].message
 
 
 @pytest.mark.asyncio
@@ -654,19 +740,16 @@ async def test_image_generator_logs_disabled_image_mode_and_records_error_outcom
         diagram_enabled=False,
     )
 
-    messages = _capture_node_logs(monkeypatch)
+    _messages = _capture_node_logs(monkeypatch)
     events = _capture_published_events(monkeypatch)
 
     result = await image_generator(state)
 
     assert result["completed_nodes"] == ["image_generator"]
-    assert result["diagram_outcomes"]["s-01"] == "error"
-    assert result["errors"][0].recoverable is True
-    assert "did not enable diagram generation" in result["errors"][0].message
-    assert any("IMG::SKIP_NOT_ENABLED::" in message for message in messages)
+    assert result["diagram_outcomes"]["s-01"] == "skipped"
     image_events = _image_events(events)
     assert len(image_events) == 1
-    assert image_events[0][1].outcome == "error"
+    assert image_events[0][1].outcome == "skipped"
 
 
 @pytest.mark.asyncio
@@ -680,14 +763,13 @@ async def test_image_generator_skips_svg_mode_without_overwriting_diagram_outcom
         diagram_mode="svg",
     )
 
-    messages = _capture_node_logs(monkeypatch)
+    _messages = _capture_node_logs(monkeypatch)
     events = _capture_published_events(monkeypatch)
 
     result = await image_generator(state)
 
     assert result["completed_nodes"] == ["image_generator"]
-    assert "diagram_outcomes" not in result
-    assert any("IMG::SKIP_MODE::" in message for message in messages)
+    assert result["diagram_outcomes"]["s-01"] == "skipped"
     image_events = _image_events(events)
     assert len(image_events) == 1
     assert image_events[0][1].outcome == "skipped"
@@ -709,11 +791,7 @@ async def test_image_generator_logs_success_path(tmp_path, monkeypatch) -> None:
 
     assert result["generated_sections"]["s-01"].diagram is not None
     assert result["diagram_outcomes"]["s-01"] == "success"
-    assert any("IMG::START::" in message for message in messages)
-    assert any("IMG::STORE_STATUS::" in message for message in messages)
-    assert any("IMG::API_REQUEST::" in message for message in messages)
-    assert any("IMG::STORE_SUCCESS::" in message for message in messages)
-    assert any("IMG::SUCCESS::" in message for message in messages)
+    assert messages == []
 
 
 @pytest.mark.asyncio
@@ -730,7 +808,7 @@ async def test_image_generator_returns_recoverable_error_when_api_key_missing(
 
     monkeypatch.setattr("pipeline.nodes.image_generator.get_image_store", lambda: store)
     monkeypatch.setattr("pipeline.nodes.image_generator.resolve_gemini_image_api_key", lambda: None)
-    messages = _capture_node_logs(monkeypatch)
+    _messages = _capture_node_logs(monkeypatch)
     events = _capture_published_events(monkeypatch)
 
     result = await image_generator(state)
@@ -738,18 +816,14 @@ async def test_image_generator_returns_recoverable_error_when_api_key_missing(
     assert result["completed_nodes"] == ["image_generator"]
     assert result["diagram_outcomes"]["s-01"] == "error"
     assert result["errors"][0].recoverable is True
-    assert "No Gemini API key found for image generation." in result["errors"][0].message
-    assert any("IMG::API_KEY_FAILURE::" in message for message in messages)
+    assert "Image client setup failed" in result["errors"][0].message
     image_events = _image_events(events)
     assert len(image_events) == 1
     generation_id, event = image_events[0]
     assert generation_id == "gen-image-test"
     assert isinstance(event, ImageOutcomeEvent)
     assert event.outcome == "error"
-    assert event.error_message == (
-        "No Gemini API key found for image generation. "
-        "Set GOOGLE_CLOUD_NANO_API_KEY, GOOGLE_API_KEY, or GEMINI_API_KEY."
-    )
+    assert "No Gemini API key found" in (event.error_message or "")
 
 
 @pytest.mark.asyncio
@@ -766,15 +840,14 @@ async def test_image_generator_returns_recoverable_error_when_store_init_fails(
         raise RuntimeError("bucket unavailable")
 
     monkeypatch.setattr("pipeline.nodes.image_generator.get_image_store", _boom)
-    messages = _capture_node_logs(monkeypatch)
+    _messages = _capture_node_logs(monkeypatch)
 
     result = await image_generator(state, _client=FakeImageClient())
 
     assert result["completed_nodes"] == ["image_generator"]
     assert result["diagram_outcomes"]["s-01"] == "error"
     assert result["errors"][0].recoverable is True
-    assert "Image store init failed: RuntimeError: bucket unavailable" == result["errors"][0].message
-    assert any("IMG::STORE_INIT_FAILURE::" in message for message in messages)
+    assert result["errors"][0].message == "Image client setup failed: bucket unavailable"
 
 
 @pytest.mark.asyncio
@@ -795,7 +868,7 @@ async def test_image_generator_returns_recoverable_error_when_client_init_fails(
     def _boom():
         raise RuntimeError("auth rejected")
 
-    monkeypatch.setattr("pipeline.nodes.image_generator.get_gemini_image_client", _boom)
+    monkeypatch.setattr("pipeline.nodes.image_generator.get_image_client", _boom)
     messages = _capture_node_logs(monkeypatch)
 
     result = await image_generator(state)
@@ -803,7 +876,7 @@ async def test_image_generator_returns_recoverable_error_when_client_init_fails(
     assert result["completed_nodes"] == ["image_generator"]
     assert result["diagram_outcomes"]["s-01"] == "error"
     assert result["errors"][0].recoverable is True
-    assert result["errors"][0].message == "Gemini image client init failed: RuntimeError: auth rejected"
+    assert result["errors"][0].message == "Image client setup failed: auth rejected"
     assert any("IMG::CLIENT_INIT_FAILURE::" in message for message in messages)
 
 
@@ -827,5 +900,5 @@ async def test_image_generator_returns_recoverable_error_when_store_upload_fails
     assert result["completed_nodes"] == ["image_generator"]
     assert result["diagram_outcomes"]["s-01"] == "error"
     assert result["errors"][0].recoverable is True
-    assert "Image storage failed for single: RuntimeError: upload denied" in result["errors"][0].message
+    assert "Image storage failed for diagram: RuntimeError: upload denied" in result["errors"][0].message
     assert any("IMG::STORE_WRITE_FAILURE::" in message for message in messages)

@@ -17,7 +17,7 @@ from pydantic_ai import Agent
 
 from core.config import settings as app_settings
 from pipeline.contracts import get_preset, validate_preset_for_template
-from pipeline.events import SectionStartedEvent
+from pipeline.events import CurriculumPlannedEvent, SectionStartedEvent
 from pipeline.prompts.curriculum import (
     build_curriculum_enrichment_system_prompt,
     build_curriculum_enrichment_user_prompt,
@@ -25,6 +25,10 @@ from pipeline.prompts.curriculum import (
     build_curriculum_user_prompt,
 )
 from pipeline.providers.registry import get_node_text_model
+from pipeline.reporting import (
+    GenerationPlannerTraceSection,
+    GenerationReportOutlineSection,
+)
 from pipeline.runtime_context import retry_policy_for_node
 from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.runtime_policy import resolve_runtime_policy_bundle
@@ -91,7 +95,8 @@ def _publish_section_titles(
         )
 
 
-def _warn_duplicate_terms(sections: list[SectionPlan], generation_id: str) -> None:
+def _warn_duplicate_terms(sections: list[SectionPlan], generation_id: str) -> list[str]:
+    warnings: list[str] = []
     seen: dict[str, str] = {}
     for plan in sections:
         for term in plan.terms_to_define:
@@ -99,15 +104,70 @@ def _warn_duplicate_terms(sections: list[SectionPlan], generation_id: str) -> No
             if not key:
                 continue
             if key in seen:
-                logger.warning(
-                    "Duplicate term assignment in curriculum plan generation_id=%s term=%s first_section=%s duplicate_section=%s",
-                    generation_id,
-                    term,
-                    seen[key],
-                    plan.section_id,
+                warning = (
+                    "Duplicate term assignment in curriculum plan "
+                    f"term='{term}' first_section='{seen[key]}' duplicate_section='{plan.section_id}'"
                 )
+                logger.warning(
+                    "%s generation_id=%s",
+                    warning,
+                    generation_id,
+                )
+                warnings.append(warning)
             else:
                 seen[key] = plan.section_id
+    return warnings
+
+
+def _report_outline(sections: list[SectionPlan]) -> list[GenerationReportOutlineSection]:
+    return [
+        GenerationReportOutlineSection(
+            section_id=plan.section_id,
+            title=plan.title,
+            position=plan.position,
+            role=plan.role,
+            focus=plan.focus,
+            terms_to_define=list(plan.terms_to_define),
+            terms_assumed=list(plan.terms_assumed),
+            practice_target=plan.practice_target,
+            visual_commitment=plan.visual_commitment,
+        )
+        for plan in sections
+    ]
+
+
+def _planner_trace_sections(sections: list[SectionPlan]) -> list[GenerationPlannerTraceSection]:
+    return [
+        GenerationPlannerTraceSection(
+            section_id=plan.section_id,
+            title=plan.title,
+            position=plan.position,
+            role=plan.role,
+            rationale_summary=plan.focus,
+        )
+        for plan in sections
+    ]
+
+
+def _publish_curriculum_planned(
+    generation_id: str,
+    *,
+    path: str,
+    result: str,
+    sections: list[SectionPlan],
+    duplicate_term_warnings: list[str],
+) -> None:
+    publish_runtime_event(
+        generation_id,
+        CurriculumPlannedEvent(
+            generation_id=generation_id,
+            path=path,
+            result=result,
+            duplicate_term_warnings=list(duplicate_term_warnings),
+            runtime_curriculum_outline=_report_outline(sections),
+            planner_trace_sections=_planner_trace_sections(sections),
+        ),
+    )
 
 
 def _outline_digest(outline: list[SectionPlan]) -> list[dict[str, object]]:
@@ -153,7 +213,7 @@ async def _enrich_seeded_outline(
     *,
     model,
     retry_policy,
-) -> list[SectionPlan]:
+) -> tuple[list[SectionPlan], str]:
     agent = Agent(
         model=model,
         output_type=CurriculumEnrichmentOutput,
@@ -179,14 +239,14 @@ async def _enrich_seeded_outline(
             generation_mode=state.request.mode,
             retry_policy=retry_policy,
         )
-        return _apply_enrichment(outline, result.output.sections)
+        return _apply_enrichment(outline, result.output.sections), "enriched"
     except Exception as exc:
         logger.warning(
             "Curriculum outline enrichment failed; using supplied outline unchanged generation_id=%s error=%s",
             state.request.generation_id or "",
             exc,
         )
-        return outline
+        return outline, "fallback"
 
 
 async def curriculum_planner(
@@ -229,13 +289,23 @@ async def curriculum_planner(
 
     if state.request.section_plans:
         outline = _outline_from_request(state)
-        outline = await _enrich_seeded_outline(
+        outline, planner_result = await _enrich_seeded_outline(
             state,
             outline,
             model=model,
             retry_policy=retry_policy,
         )
-        _warn_duplicate_terms(outline, state.request.generation_id or "")
+        duplicate_term_warnings = _warn_duplicate_terms(
+            outline,
+            state.request.generation_id or "",
+        )
+        _publish_curriculum_planned(
+            state.request.generation_id or "",
+            path="seeded_enrichment",
+            result=planner_result,
+            sections=outline,
+            duplicate_term_warnings=duplicate_term_warnings,
+        )
         _publish_section_titles(state.request.generation_id or "", outline)
         return {
             "curriculum_outline": outline,
@@ -269,7 +339,17 @@ async def curriculum_planner(
             generation_mode=state.request.mode,
             retry_policy=retry_policy,
         )
-        _warn_duplicate_terms(result.output.sections, state.request.generation_id or "")
+        duplicate_term_warnings = _warn_duplicate_terms(
+            result.output.sections,
+            state.request.generation_id or "",
+        )
+        _publish_curriculum_planned(
+            state.request.generation_id or "",
+            path="fresh",
+            result="planned",
+            sections=result.output.sections,
+            duplicate_term_warnings=duplicate_term_warnings,
+        )
         _publish_section_titles(
             state.request.generation_id or "", result.output.sections
         )

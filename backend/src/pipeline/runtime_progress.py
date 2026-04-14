@@ -16,8 +16,8 @@ class RuntimeProgressSnapshot(BaseModel):
     sections_completed: int = 0
     sections_running: int = 0
     sections_queued: int = 0
-    diagram_running: int = 0
-    diagram_queued: int = 0
+    media_running: int = 0
+    media_queued: int = 0
     qc_running: int = 0
     qc_queued: int = 0
     retry_running: int = 0
@@ -40,8 +40,8 @@ class RuntimeProgressTracker:
         self._completed_sections: set[str] = set()
         self._sections_running: set[str] = set()
         self._sections_queued: set[str] = set()
-        self._diagram_running: set[str] = set()
-        self._diagram_queued: set[str] = set()
+        self._media_running: set[str] = set()
+        self._media_queued: set[str] = set()
         self._qc_running: set[str] = set()
         self._qc_queued: set[str] = set()
         self._retry_running: set[str] = set()
@@ -116,8 +116,8 @@ class RuntimeProgressTracker:
             sections_completed=len(self._completed_sections),
             sections_running=len(self._sections_running),
             sections_queued=len(self._sections_queued),
-            diagram_running=len(self._diagram_running),
-            diagram_queued=len(self._diagram_queued),
+            media_running=len(self._media_running),
+            media_queued=len(self._media_queued),
             qc_running=len(self._qc_running),
             qc_queued=len(self._qc_queued),
             retry_running=len(self._retry_running),
@@ -128,16 +128,15 @@ class RuntimeProgressTracker:
         self._emit_snapshot(self._snapshot_locked())
 
     def _queued_set_for(self, resource: RuntimeResource) -> set[str]:
-        if resource == "diagram":
-            return self._diagram_queued
+        if resource == "media":
+            return self._media_queued
         if resource == "qc":
             return self._qc_queued
         raise ValueError(f"Unsupported queued resource: {resource}")
 
     def _running_set_for(self, resource: RuntimeResource) -> set[str]:
-        if resource == "diagram":
-            return self._diagram_running
+        if resource == "media":
+            return self._media_running
         if resource == "qc":
             return self._qc_running
         raise ValueError(f"Unsupported running resource: {resource}")
-

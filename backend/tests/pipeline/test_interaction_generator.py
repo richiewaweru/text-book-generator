@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.events import InteractionOutcomeEvent
+from pipeline.events import (
+    InteractionOutcomeEvent,
+    MediaFrameReadyEvent,
+    MediaFrameStartedEvent,
+    MediaSlotReadyEvent,
+)
+from pipeline.media.types import MediaPlan, VisualFrame, VisualSlot
 from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.state import TextbookPipelineState
 from pipeline.types.composition import CompositionPlan, DiagramPlan, InteractionPlan
@@ -150,6 +156,40 @@ def _state(
             if composition is not None
             else {}
         ),
+        media_plans=(
+            {
+                section.section_id: MediaPlan(
+                    section_id=section.section_id,
+                    slots=[
+                        VisualSlot(
+                            slot_id="simulation",
+                            slot_type="simulation",
+                            required=interaction_policy == "required",
+                            preferred_render="html_simulation",
+                            fallback_render="svg",
+                            pedagogical_intent="Let learners manipulate the idea.",
+                            caption=f"Interactive exploration for {section.header.title}.",
+                            frames=[
+                                VisualFrame(
+                                    slot_id="simulation",
+                                    index=0,
+                                    label=section.header.title,
+                                    generation_goal=f"Represent an interactive view for {section.header.title}.",
+                                    must_include=["rate of change"],
+                                )
+                            ],
+                            simulation_intent="Explore how the graph changes.",
+                            simulation_type="graph_slider",
+                            simulation_goal="Explore how the graph changes.",
+                            anchor_block="explanation",
+                            print_translation="hide",
+                        )
+                    ],
+                )
+            }
+            if with_slot and composition is not None
+            else {}
+        ),
     )
 
 
@@ -207,10 +247,17 @@ async def test_interaction_generator_emits_single_simulation_when_multiple_plans
     section = result["generated_sections"]["s-01"]
     assert not hasattr(section, "simulations")
     assert section.simulation is not None
-    assert section.simulation.explanation == "Interaction 1"
+    assert section.simulation.html_content is not None
+    assert section.simulation.explanation is not None
     assert result["interaction_specs"]["s-01"].type == "graph_slider"
-    assert len(events) == 1
-    generation_id, event = events[0]
+    assert result["media_slot_results"]["s-01"]["simulation"].ready is True
+    assert [type(event) for _generation_id, event in events] == [
+        MediaFrameStartedEvent,
+        MediaFrameReadyEvent,
+        MediaSlotReadyEvent,
+        InteractionOutcomeEvent,
+    ]
+    generation_id, event = events[-1]
     assert generation_id == "gen-interaction-test"
     assert isinstance(event, InteractionOutcomeEvent)
     assert event.outcome == "generated"

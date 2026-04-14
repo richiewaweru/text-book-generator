@@ -430,17 +430,49 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
     if event_type == "section_asset_pending":
         pending_assets = list(event.get("pending_assets") or [])
         visual_mode = event.get("visual_mode")
-        label = "Waiting for visuals"
+        label = "Generating media"
         if visual_mode == "image":
-            label = "Generating image"
+            label = "Generating media"
         elif "diagram" in pending_assets:
-            label = "Generating diagram"
+            label = "Generating media"
         return [{
             "type": "progress_update",
             "generation_id": event.get("generation_id", ""),
             "stage": "awaiting_assets",
             "section_id": event.get("section_id"),
             "label": label,
+        }]
+    if event_type == "media_plan_ready":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "awaiting_assets",
+            "section_id": event.get("section_id"),
+            "label": "Planning media",
+        }]
+    if event_type == "media_frame_started":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "generating_media",
+            "section_id": event.get("section_id"),
+            "label": "Generating media",
+        }]
+    if event_type == "media_slot_ready":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "awaiting_assets",
+            "section_id": event.get("section_id"),
+            "label": "Media partially ready",
+        }]
+    if event_type == "section_media_blocked":
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "failed",
+            "section_id": event.get("section_id"),
+            "label": event.get("reason", "Blocked by required media"),
         }]
     if event_type == "section_asset_ready":
         return [{
@@ -452,21 +484,13 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
         }]
     if event_type == "node_started":
         node = event.get("node")
-        if node == "diagram_generator":
+        if node in {"diagram_generator", "image_generator", "interaction_generator"}:
             return [{
                 "type": "progress_update",
                 "generation_id": event.get("generation_id", ""),
-                "stage": "generating_diagram",
+                "stage": "generating_media",
                 "section_id": event.get("section_id"),
-                "label": "Generating diagram",
-            }]
-        if node == "image_generator":
-            return [{
-                "type": "progress_update",
-                "generation_id": event.get("generation_id", ""),
-                "stage": "generating_image",
-                "section_id": event.get("section_id"),
-                "label": "Generating image",
+                "label": "Generating media",
             }]
         if node == "qc_agent":
             return [{

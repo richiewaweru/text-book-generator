@@ -115,15 +115,36 @@ class Settings(BaseSettings):
 
     # Runtime concurrency
     pipeline_concurrency_draft_section_max: int = Field(default=6, ge=1)
-    pipeline_concurrency_draft_diagram_max: int = Field(default=2, ge=1)
+    pipeline_concurrency_draft_diagram_max: int = Field(
+        default=2,
+        ge=1,
+        validation_alias=AliasChoices(
+            "PIPELINE_CONCURRENCY_DRAFT_MEDIA_MAX",
+            "PIPELINE_CONCURRENCY_DRAFT_DIAGRAM_MAX",
+        ),
+    )
     pipeline_concurrency_draft_qc_max: int = Field(default=6, ge=1)
 
     pipeline_concurrency_balanced_section_max: int = Field(default=4, ge=1)
-    pipeline_concurrency_balanced_diagram_max: int = Field(default=2, ge=1)
+    pipeline_concurrency_balanced_diagram_max: int = Field(
+        default=2,
+        ge=1,
+        validation_alias=AliasChoices(
+            "PIPELINE_CONCURRENCY_BALANCED_MEDIA_MAX",
+            "PIPELINE_CONCURRENCY_BALANCED_DIAGRAM_MAX",
+        ),
+    )
     pipeline_concurrency_balanced_qc_max: int = Field(default=4, ge=1)
 
     pipeline_concurrency_strict_section_max: int = Field(default=3, ge=1)
-    pipeline_concurrency_strict_diagram_max: int = Field(default=1, ge=1)
+    pipeline_concurrency_strict_diagram_max: int = Field(
+        default=1,
+        ge=1,
+        validation_alias=AliasChoices(
+            "PIPELINE_CONCURRENCY_STRICT_MEDIA_MAX",
+            "PIPELINE_CONCURRENCY_STRICT_DIAGRAM_MAX",
+        ),
+    )
     pipeline_concurrency_strict_qc_max: int = Field(default=3, ge=1)
 
     # Whole-generation timeout
@@ -155,13 +176,24 @@ class Settings(BaseSettings):
     pipeline_retry_content_repair_max_attempts: int = Field(default=2, ge=1)
     pipeline_retry_field_regen_max_attempts: int = Field(default=2, ge=1)
     pipeline_retry_qc_max_attempts: int = Field(default=2, ge=1)
-    pipeline_retry_diagram_max_attempts: int = Field(default=1, ge=1)
+    pipeline_retry_diagram_max_attempts: int = Field(
+        default=1,
+        ge=1,
+        validation_alias=AliasChoices(
+            "PIPELINE_RETRY_MEDIA_MAX_ATTEMPTS",
+            "PIPELINE_RETRY_DIAGRAM_MAX_ATTEMPTS",
+        ),
+    )
 
     # Output
     report_output_dir: str = "outputs/reports"
     pdf_temp_dir: str = "outputs/pdf"
     image_base_url: str = "http://localhost:8000/images"
     gcs_bucket_name: str = "textbook-diagrams"
+    pipeline_image_provider: str = "gemini"
+    pipeline_image_model_name: str = ""
+    pipeline_image_base_url: str = ""
+    pipeline_image_api_key_env: str = ""
 
     # Authentication
     google_client_id: str = ""

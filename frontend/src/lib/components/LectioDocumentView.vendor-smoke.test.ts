@@ -90,6 +90,88 @@ const imagePipelineDocument = {
 	completed_at: '2026-04-07T00:01:00Z'
 } as any;
 
+const simulationPipelineDocument = {
+	generation_id: 'gen_vendor_simulation',
+	subject: 'Probability',
+	context: 'A vendor-smoke lesson proving simulation payloads render through Lectio unchanged.',
+	template_id: 'open-canvas',
+	preset_id: 'blue-classroom',
+	status: 'completed',
+	section_manifest: [],
+	sections: [
+		{
+			section_id: 'sec_vendor_simulation',
+			template_id: 'open-canvas',
+			header: {
+				title: 'Explore random outcomes',
+				subject: 'Mathematics',
+				grade_band: 'secondary'
+			},
+			hook: {
+				headline: 'Random does not mean patternless',
+				body: 'Repeated trials still produce stable distributions.',
+				anchor: 'probability'
+			},
+			explanation: {
+				body: 'Use the simulation to compare short runs with long runs.',
+				emphasis: ['short runs', 'long runs']
+			},
+			simulation: {
+				spec: {
+					type: 'probability_tree',
+					goal: 'Compare short and long runs',
+					anchor_content: {
+						headline: 'Coin flip trials'
+					},
+					context: {
+						learner_level: 'secondary',
+						template_id: 'open-canvas',
+						color_mode: 'light',
+						accent_color: '#17417a',
+						surface_color: '#f7fbff',
+						font_mono: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+					},
+					dimensions: {
+						width: '100%',
+						height: 360,
+						resizable: true
+					},
+					print_translation: 'static_diagram'
+				},
+				html_content:
+					'<!DOCTYPE html><html><body><main><h1>Coin Flip Sandbox</h1><p>Heads: 8, Tails: 12</p></main></body></html>',
+				fallback_diagram: {
+					caption: 'Static print fallback for the simulation.',
+					alt_text: 'A summary diagram of heads and tails outcomes.',
+					svg_content:
+						'<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg"><text x="12" y="48">Heads: 8</text><text x="12" y="84">Tails: 12</text></svg>'
+				},
+				explanation: 'Use the controls to compare how the distribution settles over time.'
+			},
+			practice: {
+				problems: [
+					{
+						difficulty: 'warm',
+						question: 'What changes as the number of trials grows?',
+						hints: [{ level: 1, text: 'Look at the balance between heads and tails.' }]
+					}
+				]
+			},
+			what_next: {
+				body: 'Next we connect repeated trials to expected value.',
+				next: 'Expected value'
+			}
+		}
+	],
+	failed_sections: [],
+	qc_reports: [],
+	quality_passed: true,
+	error: null,
+	created_at: '2026-04-07T00:00:00Z',
+	updated_at: '2026-04-07T00:00:00Z',
+	completed_at: '2026-04-07T00:01:00Z'
+} as any;
+
 describe('LectioDocumentView vendor smoke', () => {
 	afterEach(() => {
 		cleanup();
@@ -125,5 +207,18 @@ describe('LectioDocumentView vendor smoke', () => {
 		});
 
 		expect(screen.getByText('The net force now changes the motion.')).toBeTruthy();
+	});
+
+	it('renders vendored simulation payloads with live html and preserved fallback metadata', () => {
+		const { container } = render(LectioDocumentView, {
+			props: {
+				document: simulationPipelineDocument
+			}
+		});
+
+		const iframe = container.querySelector('iframe[srcdoc*="Coin Flip Sandbox"]');
+		expect(iframe).toBeTruthy();
+		expect(screen.getByText(/Use the controls to compare how the distribution settles over time\./i)).toBeTruthy();
+		expect(screen.getByText('Explore random outcomes')).toBeTruthy();
 	});
 });

@@ -12,6 +12,11 @@ from typing import Annotated, Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from pipeline.media.types import (
+    MediaPlan,
+    VisualFrameResult,
+    VisualSlotResult,
+)
 from pipeline.types.composition import CompositionPlan
 from pipeline.types.requests import PipelineRequest, SectionPlan
 from pipeline.types.section_content import InteractionSpec, SectionContent
@@ -90,6 +95,16 @@ class RerenderRequest(BaseModel):
     auto_fix: Optional[str] = None
 
 
+class MediaFrameRetryRequest(BaseModel):
+    section_id: str
+    slot_id: str
+    slot_type: str
+    frame_key: str
+    frame_index: int
+    executor_node: str
+    reason: str | None = None
+
+
 class QCReport(BaseModel):
     section_id: str
     passed: bool
@@ -147,6 +162,23 @@ class TextbookPipelineState(BaseModel):
     generated_sections: Annotated[dict[str, SectionContent], _merge_dicts] = Field(
         default_factory=dict
     )
+    media_plans: Annotated[dict[str, MediaPlan], _merge_dicts] = Field(default_factory=dict)
+    media_slot_results: Annotated[dict[str, dict[str, VisualSlotResult]], _merge_dicts] = Field(
+        default_factory=dict
+    )
+    media_frame_results: Annotated[
+        dict[str, dict[str, dict[str, VisualFrameResult]]],
+        _merge_dicts,
+    ] = Field(
+        default_factory=dict
+    )
+    media_retry_count: Annotated[dict[str, int], _merge_dicts] = Field(default_factory=dict)
+    media_frame_retry_count: Annotated[
+        dict[str, dict[str, dict[str, int]]],
+        _merge_dicts,
+    ] = Field(default_factory=dict)
+    current_media_retry: MediaFrameRetryRequest | None = None
+    media_lifecycle: Annotated[dict[str, str], _merge_dicts] = Field(default_factory=dict)
     composition_plans: Annotated[dict[str, CompositionPlan], _merge_dicts] = Field(
         default_factory=dict
     )
@@ -233,6 +265,80 @@ class TextbookPipelineState(BaseModel):
             return normalized
         raise TypeError("rerender_requests must be a dict, list, or None")
 
+    @field_validator("media_slot_results", mode="before")
+    @classmethod
+    def _normalize_media_slot_results(
+        cls,
+        value: Any,
+    ) -> dict[str, dict[str, VisualSlotResult]]:
+        if value is None:
+            return {}
+        normalized: dict[str, dict[str, VisualSlotResult]] = {}
+        for section_id, section_results in dict(value).items():
+            normalized[str(section_id)] = {
+                str(slot_id): (
+                    slot_result
+                    if isinstance(slot_result, VisualSlotResult)
+                    else VisualSlotResult.model_validate(slot_result)
+                )
+                for slot_id, slot_result in dict(section_results).items()
+            }
+        return normalized
+
+    @field_validator("media_frame_results", mode="before")
+    @classmethod
+    def _normalize_media_frame_results(
+        cls,
+        value: Any,
+    ) -> dict[str, dict[str, dict[str, VisualFrameResult]]]:
+        if value is None:
+            return {}
+        normalized: dict[str, dict[str, dict[str, VisualFrameResult]]] = {}
+        for section_id, section_results in dict(value).items():
+            normalized_slots: dict[str, dict[str, VisualFrameResult]] = {}
+            for slot_id, slot_results in dict(section_results).items():
+                normalized_slots[str(slot_id)] = {
+                    str(frame_key): (
+                        frame_result
+                        if isinstance(frame_result, VisualFrameResult)
+                        else VisualFrameResult.model_validate(frame_result)
+                    )
+                    for frame_key, frame_result in dict(slot_results).items()
+                }
+            normalized[str(section_id)] = normalized_slots
+        return normalized
+
+    @field_validator("media_frame_retry_count", mode="before")
+    @classmethod
+    def _normalize_media_frame_retry_count(
+        cls,
+        value: Any,
+    ) -> dict[str, dict[str, dict[str, int]]]:
+        if value is None:
+            return {}
+        normalized: dict[str, dict[str, dict[str, int]]] = {}
+        for section_id, section_counts in dict(value).items():
+            normalized_slots: dict[str, dict[str, int]] = {}
+            for slot_id, frame_counts in dict(section_counts).items():
+                normalized_slots[str(slot_id)] = {
+                    str(frame_key): int(count)
+                    for frame_key, count in dict(frame_counts).items()
+                }
+            normalized[str(section_id)] = normalized_slots
+        return normalized
+
+    @field_validator("current_media_retry", mode="before")
+    @classmethod
+    def _normalize_current_media_retry(
+        cls,
+        value: Any,
+    ) -> MediaFrameRetryRequest | None:
+        if value is None:
+            return None
+        if isinstance(value, MediaFrameRetryRequest):
+            return value
+        return MediaFrameRetryRequest.model_validate(value)
+
     def has_errors_for(self, section_id: str) -> bool:
         return any(error.section_id == section_id for error in self.errors)
 
@@ -243,6 +349,20 @@ class TextbookPipelineState(BaseModel):
         if section_id is None:
             return None
         return self.rerender_requests.get(section_id)
+
+    def pending_media_retry_for(self, section_id: str | None) -> MediaFrameRetryRequest | None:
+        if section_id is None:
+            return None
+        if self.current_media_retry is None:
+            return None
+        retry = (
+            self.current_media_retry
+            if isinstance(self.current_media_retry, MediaFrameRetryRequest)
+            else MediaFrameRetryRequest.model_validate(self.current_media_retry)
+        )
+        if retry.section_id != section_id:
+            return None
+        return retry
 
     def can_rerender(self, section_id: str) -> bool:
         return self.rerender_count_for(section_id) < self.max_rerenders

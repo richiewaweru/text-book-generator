@@ -16,7 +16,9 @@ from types import SimpleNamespace
 from langgraph.graph import END
 from langgraph.types import Send
 
+from pipeline.media.types import MediaPlan, VisualFrame, VisualSlot
 from pipeline.state import (
+    MediaFrameRetryRequest,
     PartialSectionRecord,
     PipelineError,
     QCReport,
@@ -301,10 +303,33 @@ class TestQCRouting:
         assert result[0].node == "retry_field"
         assert result[0].arg["current_section_id"] == "s-01"
 
-    def test_diagram_block_routes_to_retry_diagram(self):
+    def test_diagram_block_routes_to_retry_media_frame(self):
         state = _base_state(
             current_section_id="s-01",
             assembled_sections={"s-01": _section("s-01")},
+            media_plans={
+                "s-01": MediaPlan(
+                    section_id="s-01",
+                    slots=[
+                        VisualSlot(
+                            slot_id="diagram",
+                            slot_type="diagram",
+                            required=True,
+                            preferred_render="svg",
+                            pedagogical_intent="Show the concept clearly.",
+                            caption="Diagram caption",
+                            frames=[
+                                VisualFrame(
+                                    slot_id="diagram",
+                                    index=0,
+                                    label="Main view",
+                                    generation_goal="Render the main diagram.",
+                                )
+                            ],
+                        )
+                    ],
+                )
+            },
             qc_reports={
                 "s-01": QCReport(
                     section_id="s-01",
@@ -332,10 +357,11 @@ class TestQCRouting:
         result = route_after_qc(state)
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0].node == "retry_diagram"
+        assert result[0].node == "retry_media_frame"
+        assert result[0].arg["current_media_retry"]["slot_id"] == "diagram"
 
-    def test_interaction_block_routes_to_retry_interaction_and_emits_event(self, monkeypatch):
-        from pipeline.events import InteractionRetryQueuedEvent
+    def test_interaction_block_routes_to_retry_media_frame_and_emits_event(self, monkeypatch):
+        from pipeline.events import SectionRetryQueuedEvent
         from pipeline.routers.qc_router import route_after_qc
 
         published: list[tuple[str, object]] = []
@@ -349,6 +375,30 @@ class TestQCRouting:
             request=_request(generation_id="gen-qc-route"),
             current_section_id="s-01",
             assembled_sections={"s-01": _section("s-01")},
+            media_plans={
+                "s-01": MediaPlan(
+                    section_id="s-01",
+                    slots=[
+                        VisualSlot(
+                            slot_id="simulation",
+                            slot_type="simulation",
+                            required=True,
+                            preferred_render="html_simulation",
+                            fallback_render="svg",
+                            pedagogical_intent="Let learners explore the idea.",
+                            caption="Interactive view",
+                            frames=[
+                                VisualFrame(
+                                    slot_id="simulation",
+                                    index=0,
+                                    label="Simulation",
+                                    generation_goal="Render the interaction.",
+                                )
+                            ],
+                        )
+                    ],
+                )
+            },
             qc_reports={
                 "s-01": QCReport(
                     section_id="s-01",
@@ -369,11 +419,11 @@ class TestQCRouting:
 
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0].node == "retry_interaction"
+        assert result[0].node == "retry_media_frame"
         assert len(published) == 1
         generation_id, event = published[0]
         assert generation_id == "gen-qc-route"
-        assert isinstance(event, InteractionRetryQueuedEvent)
+        assert isinstance(event, SectionRetryQueuedEvent)
         assert event.section_id == "s-01"
         assert event.next_attempt == 2
         assert event.reason == "Simulation needs clearer controls"
@@ -1345,9 +1395,6 @@ class TestProcessSectionComposite:
         async def fake_diagram(state, *, model_overrides=None):
             return {"completed_nodes": ["diagram_generator"]}
 
-        async def fake_interaction_decider(state, *, model_overrides=None):
-            return {"completed_nodes": ["interaction_decider"]}
-
         async def fake_interaction_generator(state, *, model_overrides=None):
             return {"completed_nodes": ["interaction_generator"]}
 
@@ -1370,7 +1417,6 @@ class TestProcessSectionComposite:
 
         monkeypatch.setattr(ps_mod, "content_generator", fake_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
-        monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
@@ -1433,7 +1479,6 @@ class TestProcessSectionComposite:
 
         monkeypatch.setattr(ps_mod, "content_generator", failing_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", noop)
-        monkeypatch.setattr(ps_mod, "interaction_decider", noop)
         monkeypatch.setattr(ps_mod, "interaction_generator", noop)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", noop)
@@ -1466,9 +1511,6 @@ class TestProcessSectionComposite:
 
         async def fake_diagram(state, *, model_overrides=None):
             return {"completed_nodes": ["diagram_generator"]}
-
-        async def fake_interaction_decider(state, *, model_overrides=None):
-            return {"completed_nodes": ["interaction_decider"]}
 
         async def fake_interaction_generator(state, *, model_overrides=None):
             return {"completed_nodes": ["interaction_generator"]}
@@ -1515,7 +1557,6 @@ class TestProcessSectionComposite:
 
         monkeypatch.setattr(ps_mod, "content_generator", fake_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
-        monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
@@ -1563,9 +1604,6 @@ class TestProcessSectionComposite:
                 "completed_nodes": ["diagram_generator"],
             }
 
-        async def fake_interaction_decider(state, *, model_overrides=None):
-            return {"completed_nodes": ["interaction_decider"]}
-
         async def fake_interaction_generator(state, *, model_overrides=None):
             return {"completed_nodes": ["interaction_generator"]}
 
@@ -1593,7 +1631,6 @@ class TestProcessSectionComposite:
         monkeypatch.setattr(ps_mod, "content_generator", fake_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
         monkeypatch.setattr(ps_mod, "image_generator", fake_image_generator)
-        monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
@@ -1626,10 +1663,9 @@ class TestProcessSectionComposite:
         assert [event.source for event in report_events] == ["assembler"]
         assert result["completed_nodes"] == [
             "content_generator",
-            "composition_planner",
+            "media_planner",
             "diagram_generator",
             "image_generator",
-            "interaction_decider",
             "interaction_generator",
             "section_assembler",
             "qc_agent",
@@ -1650,9 +1686,6 @@ class TestProcessSectionComposite:
 
         async def fake_diagram(state, *, model_overrides=None):
             return {"completed_nodes": ["diagram_generator"]}
-
-        async def fake_interaction_decider(state, *, model_overrides=None):
-            return {"completed_nodes": ["interaction_decider"]}
 
         async def fake_interaction_generator(state, *, model_overrides=None):
             return {"completed_nodes": ["interaction_generator"]}
@@ -1683,7 +1716,6 @@ class TestProcessSectionComposite:
         monkeypatch.setattr(ps_mod, "content_generator", fake_content)
         monkeypatch.setattr(ps_mod, "diagram_generator", fake_diagram)
         monkeypatch.setattr(ps_mod, "image_generator", fake_image_generator)
-        monkeypatch.setattr(ps_mod, "interaction_decider", fake_interaction_decider)
         monkeypatch.setattr(ps_mod, "interaction_generator", fake_interaction_generator)
         monkeypatch.setattr(ps_mod, "section_assembler", fake_assembler)
         monkeypatch.setattr(ps_mod, "qc_agent", fake_qc)
@@ -1709,10 +1741,9 @@ class TestProcessSectionComposite:
         assert assembler_called is True
         assert result["completed_nodes"] == [
             "content_generator",
-            "composition_planner",
+            "media_planner",
             "diagram_generator",
             "image_generator",
-            "interaction_decider",
             "interaction_generator",
             "section_assembler",
         ]
@@ -1720,7 +1751,7 @@ class TestProcessSectionComposite:
 
 class TestRetryComposites:
 
-    async def test_retry_diagram_preserves_text_fields_and_refreshes_qc(self, monkeypatch):
+    async def test_retry_media_frame_preserves_text_fields_and_refreshes_qc(self, monkeypatch):
         from pipeline import graph as graph_mod
 
         sid = "s-01"
@@ -1729,7 +1760,7 @@ class TestRetryComposites:
 
         async def fake_diagram(state, *, model_overrides=None):
             typed = TextbookPipelineState.parse(state)
-            rerender_counts.append(typed.rerender_count[sid])
+            rerender_counts.append(typed.rerender_count.get(sid, 0))
             updated = typed.generated_sections[sid].model_copy(
                 update={
                     "diagram": DiagramContent(
@@ -1793,20 +1824,56 @@ class TestRetryComposites:
             },
         )
 
-        result = await graph_mod.retry_diagram(state)
+        state = state.model_copy(
+            update={
+                "media_plans": {
+                    sid: MediaPlan(
+                        section_id=sid,
+                        slots=[
+                            VisualSlot(
+                                slot_id="diagram",
+                                slot_type="diagram",
+                                required=True,
+                                preferred_render="svg",
+                                pedagogical_intent="Show the concept clearly.",
+                                caption="Diagram caption",
+                                frames=[
+                                    VisualFrame(
+                                        slot_id="diagram",
+                                        index=0,
+                                        label="Main view",
+                                        generation_goal="Render the main diagram.",
+                                    )
+                                ],
+                            )
+                        ],
+                    )
+                },
+                "current_media_retry": MediaFrameRetryRequest(
+                    section_id=sid,
+                    slot_id="diagram",
+                    slot_type="diagram",
+                    frame_key="0",
+                    frame_index=0,
+                    executor_node="diagram_generator",
+                ),
+            }
+        )
 
-        assert rerender_counts == [1]
+        result = await graph_mod.retry_media_frame(state)
+
+        assert rerender_counts == [0]
         assert result["completed_nodes"] == [
             "diagram_generator",
             "section_assembler",
             "qc_agent",
         ]
-        assert result["rerender_count"] == {sid: 1}
+        assert result["media_retry_count"] == {sid: 1}
         assert result["generated_sections"][sid].hook.model_dump() == original.hook.model_dump()
         assert result["generated_sections"][sid].explanation.model_dump() == original.explanation.model_dump()
         assert result["generated_sections"][sid].diagram.caption == "Updated diagram"
         assert result["qc_reports"][sid].passed is True
-        assert result["rerender_requests"] == {sid: None}
+        assert result["current_media_retry"] is None
 
     async def test_retry_field_changes_only_targeted_field_and_clears_request(self, monkeypatch):
         from pipeline import graph as graph_mod
