@@ -1,8 +1,11 @@
 from .generation_report import (
+    GenerationPlannerTrace,
+    GenerationPlannerTraceSection,
     GenerationReport,
     GenerationReportFieldRegenAttempt,
     GenerationReportLLMAttempt,
     GenerationReportNode,
+    GenerationReportOutlineSection,
     GenerationReportRetry,
     GenerationReportSection,
     GenerationReportSummary,
@@ -10,10 +13,13 @@ from .generation_report import (
 )
 
 __all__ = [
+    "GenerationPlannerTrace",
+    "GenerationPlannerTraceSection",
     "GenerationReport",
     "GenerationReportFieldRegenAttempt",
     "GenerationReportLLMAttempt",
     "GenerationReportNode",
+    "GenerationReportOutlineSection",
     "GenerationReportRetry",
     "GenerationReportSection",
     "GenerationReportSummary",

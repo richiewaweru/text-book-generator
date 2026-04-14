@@ -88,6 +88,33 @@ class GenerationReportSection(BaseModel):
     nodes: list[GenerationReportNode] = Field(default_factory=list)
 
 
+class GenerationReportOutlineSection(BaseModel):
+    section_id: str
+    title: str
+    position: int
+    role: str
+    focus: str
+    terms_to_define: list[str] = Field(default_factory=list)
+    terms_assumed: list[str] = Field(default_factory=list)
+    practice_target: str | None = None
+    visual_commitment: str | None = None
+
+
+class GenerationPlannerTraceSection(BaseModel):
+    section_id: str
+    title: str
+    position: int
+    role: str
+    rationale_summary: str
+
+
+class GenerationPlannerTrace(BaseModel):
+    path: Literal["fresh", "seeded_enrichment"]
+    result: Literal["planned", "enriched", "fallback"]
+    duplicate_term_warnings: list[str] = Field(default_factory=list)
+    sections: list[GenerationPlannerTraceSection] = Field(default_factory=list)
+
+
 class GenerationReportSummary(BaseModel):
     planned_sections: int = 0
     ready_sections: int = 0
@@ -149,6 +176,8 @@ class GenerationReport(BaseModel):
     generation_time_seconds: float | None = None
     final_error: str | None = None
     summary: GenerationReportSummary = Field(default_factory=GenerationReportSummary)
+    runtime_curriculum_outline: list[GenerationReportOutlineSection] = Field(default_factory=list)
+    planner_trace: GenerationPlannerTrace | None = None
     sections: list[GenerationReportSection] = Field(default_factory=list)
     generation_nodes: list[GenerationReportNode] = Field(default_factory=list)
     timeline: list[GenerationTimelineEvent] = Field(default_factory=list)

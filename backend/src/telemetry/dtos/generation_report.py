@@ -1,8 +1,11 @@
 from pipeline.reporting import (
+    GenerationPlannerTrace,
+    GenerationPlannerTraceSection,
     GenerationReport,
     GenerationReportFieldRegenAttempt,
     GenerationReportLLMAttempt,
     GenerationReportNode,
+    GenerationReportOutlineSection,
     GenerationReportRetry,
     GenerationReportSection,
     GenerationReportSummary,
@@ -10,10 +13,13 @@ from pipeline.reporting import (
 )
 
 __all__ = [
+    "GenerationPlannerTrace",
+    "GenerationPlannerTraceSection",
     "GenerationReport",
     "GenerationReportFieldRegenAttempt",
     "GenerationReportLLMAttempt",
     "GenerationReportNode",
+    "GenerationReportOutlineSection",
     "GenerationReportRetry",
     "GenerationReportSection",
     "GenerationReportSummary",
