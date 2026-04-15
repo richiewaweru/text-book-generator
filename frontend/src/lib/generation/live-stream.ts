@@ -141,6 +141,10 @@ function sameProgressUpdate(
 	);
 }
 
+function isActiveSectionStage(stage: ProgressUpdateEvent['stage']): boolean {
+	return stage === 'generating_section' || stage === 'repairing';
+}
+
 function applyMediaFrameSignal(
 	context: GenerationStreamContext,
 	payload: MediaFrameStartedEvent | MediaFrameReadyEvent | MediaFrameFailedEvent
@@ -179,8 +183,14 @@ export function applyGenerationStreamEvent(
 		}
 		case 'progress_update': {
 			const payload = JSON.parse(data) as ProgressUpdateEvent;
+			const shouldTrackActiveSection =
+				Boolean(payload.section_id) &&
+				isActiveSectionStage(payload.stage) &&
+				!isTerminalSectionSignal(
+					payload.section_id ? context.sectionSignals[payload.section_id] : undefined
+				);
 			const nextActiveSectionId =
-				payload.section_id && !isTerminalSectionSignal(context.sectionSignals[payload.section_id])
+				shouldTrackActiveSection && payload.section_id
 					? payload.section_id
 					: context.activeSectionId;
 			if (
@@ -193,7 +203,12 @@ export function applyGenerationStreamEvent(
 			let nextSignals = context.sectionSignals;
 			if (payload.section_id) {
 				const existing = context.sectionSignals[payload.section_id];
-				if (existing) {
+				if (shouldTrackActiveSection) {
+					nextSignals = setSectionSignal(context.sectionSignals, payload.section_id, {
+						status: 'generating',
+						label: payload.label
+					});
+				} else if (existing) {
 					nextSignals = setSectionSignal(context.sectionSignals, payload.section_id, {
 						...existing,
 						label: payload.label
@@ -242,11 +257,7 @@ export function applyGenerationStreamEvent(
 			return {
 				next: {
 					...context,
-					document: applySectionStarted(context.document, payload),
-					activeSectionId: payload.section_id,
-					sectionSignals: setSectionSignal(context.sectionSignals, payload.section_id, {
-						status: 'generating'
-					})
+					document: applySectionStarted(context.document, payload)
 				},
 				terminal: null
 			};

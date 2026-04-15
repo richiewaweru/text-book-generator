@@ -356,6 +356,16 @@ describe('GenerationView', () => {
 			position: 2
 		});
 
+		await waitFor(() => expect(screen.getAllByText(/^planned$/i).length).toBeGreaterThan(0));
+
+		emitEvent('progress_update', {
+			type: 'progress_update',
+			generation_id: 'gen-123',
+			stage: 'generating_section',
+			label: 'Generating section',
+			section_id: 's-02'
+		});
+
 		await waitFor(() =>
 			expect(screen.getAllByText(/generating section/i).length).toBeGreaterThan(0)
 		);
@@ -408,6 +418,53 @@ describe('GenerationView', () => {
 
 		expect(screen.getAllByText(/generating media/i).length).toBeGreaterThan(0);
 		expect(screen.getByText(/Fractions divide a whole into equal parts\./i)).toBeTruthy();
+	});
+
+	it('keeps a repair label scoped to the addressed section', async () => {
+		getGenerationDetail.mockResolvedValue(buildDetail());
+		getGenerationDocument.mockResolvedValue(
+			buildDocument({
+				sections: [],
+				partial_sections: [],
+				section_manifest: [
+					{ section_id: 's-01', title: 'What fractions mean', position: 1 },
+					{ section_id: 's-02', title: 'Try the parts', position: 2 }
+				]
+			})
+		);
+
+		render(GenerationView, {
+			props: {
+				accepted: {
+					generation_id: 'gen-123',
+					status: 'running',
+					events_url: '/api/v1/generations/gen-123/events',
+					document_url: '/api/v1/generations/gen-123/document'
+				},
+				onReset: vi.fn()
+			}
+		});
+
+		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
+
+		emitEvent('progress_update', {
+			type: 'progress_update',
+			generation_id: 'gen-123',
+			stage: 'repairing',
+			label: 'Repairing section',
+			section_id: 's-01'
+		});
+
+		await waitFor(() =>
+			expect(screen.getAllByText(/repairing section/i).length).toBeGreaterThan(0)
+		);
+
+		const sectionLabels = Array.from(screen.getAllByText(/planned|repairing section/i)).map((node) =>
+			node.textContent?.trim()
+		);
+		expect(sectionLabels.filter((label) => label === 'Repairing section').length).toBeGreaterThan(0);
+		expect(sectionLabels.filter((label) => label === 'Planned').length).toBeGreaterThan(0);
 	});
 
 	it('updates the partial lesson preview when repeated partial events arrive', async () => {

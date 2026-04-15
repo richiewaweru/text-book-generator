@@ -128,12 +128,22 @@
 		return slot.status;
 	}
 
+	function activeProgressLabelForSection(sectionId: string): string | null {
+		return progressUpdate?.section_id === sectionId ? progressUpdate.label : null;
+	}
+
 	function statusLabel(slot: (typeof sectionSlots)[number]): string {
 		const status = displaySectionStatus(slot);
 		if (status === 'ready') return 'Ready';
 		if (status === 'failed') return 'Failed';
 		if (status === 'planned') return 'Planned';
-		if (status === 'generating') return slot.signal?.label ?? progressUpdate?.label ?? 'Generating section...';
+		if (status === 'generating') {
+			return (
+				slot.signal?.label ??
+				activeProgressLabelForSection(slot.section_id) ??
+				'Generating section...'
+			);
+		}
 		if (status === 'partially_ready') {
 			const pendingAssets = slot.partial?.pending_assets ?? [];
 			if (slot.partial?.visual_mode === 'image') {
@@ -658,7 +668,7 @@
 								{:else if slotStatus === 'generating'}
 									<div class="active-row">
 										<span class="active-dot"></span>
-										<p>{progressUpdate?.label ?? 'Generating section...'}</p>
+										<p>{statusLabel(slot)}</p>
 									</div>
 								{:else if slotStatus === 'partially_ready'}
 									<p>{statusLabel(slot)}</p>

@@ -396,14 +396,6 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
             "stage": "planning",
             "label": "Planning lesson structure",
         }]
-    if event_type == "section_started":
-        return [{
-            "type": "progress_update",
-            "generation_id": event.get("generation_id", ""),
-            "stage": "generating_section",
-            "section_id": event.get("section_id"),
-            "label": f"Generating {event.get('title', 'section')}",
-        }]
     if event_type == "section_asset_pending":
         return [{
             "type": "progress_update",
@@ -420,13 +412,26 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
             "section_id": event.get("section_id"),
             "label": "Finalizing section",
         }]
-    if event_type in {"section_retry_queued", "section_attempt_started"}:
+    if event_type == "section_retry_queued":
         return [{
             "type": "progress_update",
             "generation_id": event.get("generation_id", ""),
             "stage": "repairing",
             "section_id": event.get("section_id"),
             "label": "Repairing section",
+        }]
+    if event_type == "section_attempt_started":
+        trigger = event.get("trigger", "initial")
+        return [{
+            "type": "progress_update",
+            "generation_id": event.get("generation_id", ""),
+            "stage": "repairing" if trigger == "rerender" else "generating_section",
+            "section_id": event.get("section_id"),
+            "label": (
+                "Repairing section"
+                if trigger == "rerender"
+                else "Generating section"
+            ),
         }]
     if event_type == "qc_complete":
         return [{
@@ -1669,5 +1674,4 @@ async def get_generation_events(
             "X-Accel-Buffering": "no",
         },
     )
-
 

@@ -140,6 +140,86 @@ describe('live-stream helpers', () => {
 		expect(result.next).toBe(context);
 	});
 
+	it('keeps section_started as a manifest update without marking the section active', () => {
+		const context = createContext({
+			document: createDocument({
+				section_manifest: []
+			})
+		});
+
+		const result = applyGenerationStreamEvent(
+			context,
+			'section_started',
+			JSON.stringify({
+				type: 'section_started',
+				generation_id: 'gen-1',
+				section_id: 's-01',
+				title: 'First section',
+				position: 1
+			})
+		);
+
+		expect(result.next.document?.section_manifest).toEqual([
+			{ section_id: 's-01', title: 'First section', position: 1 }
+		]);
+		expect(result.next.activeSectionId).toBeNull();
+		expect(result.next.sectionSignals).toEqual({});
+	});
+
+	it('marks only the targeted section as generating for a generating_section progress update', () => {
+		const context = createContext({
+			sectionSignals: {
+				's-02': { status: 'planned' }
+			}
+		});
+
+		const result = applyGenerationStreamEvent(
+			context,
+			'progress_update',
+			JSON.stringify({
+				type: 'progress_update',
+				generation_id: 'gen-1',
+				stage: 'generating_section',
+				label: 'Generating section',
+				section_id: 's-01'
+			})
+		);
+
+		expect(result.next.activeSectionId).toBe('s-01');
+		expect(result.next.sectionSignals['s-01']).toEqual({
+			status: 'generating',
+			label: 'Generating section'
+		});
+		expect(result.next.sectionSignals['s-02']).toEqual({ status: 'planned' });
+	});
+
+	it('marks only the targeted section as repairing for a repairing progress update', () => {
+		const context = createContext({
+			sectionSignals: {
+				's-02': { status: 'planned' }
+			}
+		});
+
+		const result = applyGenerationStreamEvent(
+			context,
+			'progress_update',
+			JSON.stringify({
+				type: 'progress_update',
+				generation_id: 'gen-1',
+				stage: 'repairing',
+				label: 'Repairing section',
+				section_id: 's-01'
+			})
+		);
+
+		expect(result.next.activeSectionId).toBe('s-01');
+		expect(result.next.sectionSignals['s-01']).toEqual({
+			status: 'generating',
+			label: 'Repairing section'
+		});
+		expect(result.next.sectionSignals['s-02']).toEqual({ status: 'planned' });
+	});
+
 	it('tracks required media blocks at section level', () => {
 		const result = applyGenerationStreamEvent(
 			createContext(),
