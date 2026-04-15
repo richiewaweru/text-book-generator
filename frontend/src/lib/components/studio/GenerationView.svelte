@@ -200,6 +200,7 @@
 			type,
 			data
 		);
+		const prevDocument = document;
 		document = result.next.document;
 		plannedSections = result.next.plannedSections;
 		qcSummary = result.next.qcSummary;
@@ -209,7 +210,7 @@
 		viewerWarning = result.next.viewerWarning;
 		activeSectionId = result.next.activeSectionId;
 		sectionSignals = result.next.sectionSignals;
-		if (document) {
+		if (document && document !== prevDocument) {
 			syncDocument(document);
 		}
 		return { terminal: result.terminal };

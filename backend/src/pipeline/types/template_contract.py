@@ -39,6 +39,7 @@ class TemplateContractSummary(BaseModel):
     optional_components: list[str] = Field(default_factory=list)
     always_present: list[str] = Field(default_factory=list)
     available_components: list[str] = Field(default_factory=list)
+    contextually_present: list[str] = Field(default_factory=list)
     component_budget: dict[str, int] = Field(default_factory=dict)
     max_per_section: dict[str, int] = Field(default_factory=dict)
     default_behaviours: dict[str, str] = Field(default_factory=dict)
