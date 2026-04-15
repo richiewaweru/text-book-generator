@@ -133,7 +133,7 @@
 		if (status === 'ready') return 'Ready';
 		if (status === 'failed') return 'Failed';
 		if (status === 'planned') return 'Planned';
-		if (status === 'generating') return progressUpdate?.label ?? 'Generating section...';
+		if (status === 'generating') return slot.signal?.label ?? progressUpdate?.label ?? 'Generating section...';
 		if (status === 'partially_ready') {
 			const pendingAssets = slot.partial?.pending_assets ?? [];
 			if (slot.partial?.visual_mode === 'image') {

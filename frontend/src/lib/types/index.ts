@@ -390,7 +390,6 @@ export interface SectionFinalEvent {
 	type: 'section_final';
 	generation_id: string;
 	section_id: string;
-	section: SectionContent;
 	completed_sections: number;
 	total_sections: number;
 }

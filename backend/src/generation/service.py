@@ -1282,20 +1282,70 @@ async def _run_generation_job(
             )
     except asyncio.TimeoutError:
         job_logger.error(
-            "Generation timed out",
+            "Generation timed out after %.0fs",
+            timeout_seconds,
             extra={"timeout_seconds": timeout_seconds},
         )
-        try:
-            await finalize_failure(
-                error_message=(
-                    f"Generation timed out after {int(timeout_seconds)} seconds."
-                ),
-                error_type="runtime_error",
-                error_code=_GENERATION_TIMEOUT_ERROR_CODE,
-                generation_time_seconds=perf_counter() - started,
+        # The pipeline may have completed moments before the asyncio timeout fired
+        # (race between pipeline finishing and wait_for deadline). If all sections
+        # reached a terminal state, treat this as success/partial rather than failure.
+        manifest_count = len(document.section_manifest)
+        completed_count = len(document.sections)
+        failed_count = len(document.failed_sections)
+        partial_count = len(document.partial_sections)
+        accounted_for = completed_count + failed_count
+        all_done = (
+            manifest_count > 0
+            and accounted_for >= manifest_count
+            and partial_count == 0
+        )
+        if all_done:
+            gen_time = perf_counter() - started
+            final_status = "completed" if failed_count == 0 else "partial"
+            completed_at = datetime.now(timezone.utc)
+            document = document.model_copy(
+                update={
+                    "status": final_status,
+                    "updated_at": completed_at,
+                    "completed_at": completed_at,
+                }
             )
-        except Exception:
-            job_logger.exception("Generation failed while finalizing timeout state")
+            document_path = await document_repo.save_document(document)
+            await gen_repo.update_status(
+                generation.id,
+                status=final_status,
+                document_path=document_path,
+                quality_passed=document.quality_passed,
+                generation_time_seconds=gen_time,
+            )
+            core_events.event_bus.publish(
+                generation.id,
+                _complete_event(
+                    generation.id,
+                    final_status=final_status,
+                    quality_passed=document.quality_passed,
+                    completed_sections=completed_count,
+                    total_sections=manifest_count,
+                ),
+            )
+            job_logger.info(
+                "Timeout race recovered — pipeline completed just before deadline; "
+                "status=%s sections=%d",
+                final_status,
+                completed_count,
+            )
+        else:
+            try:
+                await finalize_failure(
+                    error_message=(
+                        f"Generation timed out after {int(timeout_seconds)} seconds."
+                    ),
+                    error_type="runtime_error",
+                    error_code=_GENERATION_TIMEOUT_ERROR_CODE,
+                    generation_time_seconds=perf_counter() - started,
+                )
+            except Exception:
+                job_logger.exception("Generation failed while finalizing timeout state")
     except asyncio.CancelledError:
         job_logger.warning("Generation was interrupted before completion")
         try:
