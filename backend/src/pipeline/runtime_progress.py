@@ -46,6 +46,7 @@ class RuntimeProgressTracker:
         self._qc_queued: set[str] = set()
         self._retry_running: set[str] = set()
         self._retry_queued: set[str] = set()
+        self._last_emitted_snapshot: RuntimeProgressSnapshot | None = None
 
     async def queue_section(self, section_id: str) -> None:
         async with self._lock:
@@ -125,7 +126,14 @@ class RuntimeProgressTracker:
         )
 
     def _emit_locked(self) -> None:
-        self._emit_snapshot(self._snapshot_locked())
+        snapshot = self._snapshot_locked()
+        if self._last_emitted_snapshot is not None and (
+            snapshot.model_dump(mode="json")
+            == self._last_emitted_snapshot.model_dump(mode="json")
+        ):
+            return
+        self._emit_snapshot(snapshot)
+        self._last_emitted_snapshot = snapshot
 
     def _queued_set_for(self, resource: RuntimeResource) -> set[str]:
         if resource == "media":

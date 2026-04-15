@@ -13,6 +13,7 @@ from pipeline.events import (
     InteractionOutcomeEvent,
     LLMCallStartedEvent,
     LLMCallSucceededEvent,
+    MediaPlanReadyEvent,
     SectionStartedEvent,
     event_bus,
 )
@@ -390,6 +391,14 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
                 skip_reason="no_plan",
             ),
         )
+        event_bus.publish(
+            generation_id,
+            MediaPlanReadyEvent(
+                generation_id=generation_id,
+                section_id="s-01",
+                slot_count=1,
+            ),
+        )
         return PipelineResult(
             document=PipelineDocument(
                 generation_id=generation_id,
@@ -441,6 +450,7 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
     assert "llm_call_started" in timeline_types
     assert "llm_call_succeeded" in timeline_types
     assert "interaction_outcome" in timeline_types
+    assert "media_plan_ready" in timeline_types
     assert "curriculum_planned" in timeline_types
     assert report_response.status_code == 200
     assert report.runtime_curriculum_outline[0].section_id == "s-01"

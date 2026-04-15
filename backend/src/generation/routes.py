@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 
 import core.events as core_events
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -251,92 +250,11 @@ async def get_generation_events(
     if generation is None or generation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
 
-    async def stream() -> AsyncIterator[str]:
-        async def emit_event_payloads(event_payload: dict) -> AsyncIterator[str]:
-            yield generation_service._sse_payload(event_payload)
-            for progress_update in generation_service._progress_updates_for_event(
-                event_payload
-            ):
-                yield generation_service._sse_payload(progress_update)
-
-        queue = core_events.event_bus.subscribe(generation_id)
-        try:
-            current = await gen_repo.find_by_id(generation_id)
-            runtime_context = generation_service.get_runtime_context_by_generation(
-                generation_id
-            )
-            if runtime_context is not None:
-                policy_payload = generation_service.build_runtime_policy_event(
-                    runtime_context
-                ).model_dump(mode="json", exclude_none=True)
-                async for payload in emit_event_payloads(policy_payload):
-                    yield payload
-                progress_payload = generation_service.RuntimeProgressEvent(
-                    generation_id=generation_id,
-                    snapshot=await runtime_context.progress.snapshot(),
-                ).model_dump(mode="json", exclude_none=True)
-                async for payload in emit_event_payloads(progress_payload):
-                    yield payload
-            while not queue.empty():
-                event = queue.get_nowait()
-                async for payload in emit_event_payloads(event):
-                    yield payload
-                if event.get("type") in {"complete", "error"}:
-                    return
-
-            if current is not None and current.status == "completed":
-                terminal = generation_service._complete_event(generation_id).model_dump(
-                    mode="json",
-                    exclude_none=True,
-                )
-                async for payload in emit_event_payloads(terminal):
-                    yield payload
-                return
-            if current is not None and current.status == "failed":
-                terminal = generation_service._error_event(
-                    generation_id,
-                    current.error or "Generation failed",
-                ).model_dump(mode="json", exclude_none=True)
-                async for payload in emit_event_payloads(terminal):
-                    yield payload
-                return
-
-            while True:
-                try:
-                    event = await asyncio.wait_for(
-                        queue.get(),
-                        timeout=_SSE_KEEPALIVE_TIMEOUT_SECONDS,
-                    )
-                except TimeoutError:
-                    current = await gen_repo.find_by_id(generation_id)
-                    if current is not None and current.status == "completed":
-                        yield generation_service._sse_payload(
-                            generation_service._complete_event(generation_id).model_dump(
-                                mode="json",
-                                exclude_none=True,
-                            )
-                        )
-                        return
-                    if current is not None and current.status == "failed":
-                        yield generation_service._sse_payload(
-                            generation_service._error_event(
-                                generation_id,
-                                current.error or "Generation failed",
-                            ).model_dump(mode="json", exclude_none=True)
-                        )
-                        return
-                    yield ": keep-alive\n\n"
-                    continue
-
-                async for payload in emit_event_payloads(event):
-                    yield payload
-                if event["type"] in {"complete", "error"}:
-                    break
-        finally:
-            core_events.event_bus.unsubscribe(generation_id, queue)
-
     return StreamingResponse(
-        stream(),
+        generation_service._stream_generation_events(
+            generation_id=generation_id,
+            gen_repo=gen_repo,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

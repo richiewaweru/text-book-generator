@@ -1142,6 +1142,157 @@ class TestRunPipelineStreamingEvents:
         assert first_event.template_id == "guided-concept-path"
         assert first_event.preset_id == "blue-classroom"
 
+    async def test_streaming_does_not_replay_direct_bus_events_through_on_event(
+        self, monkeypatch
+    ):
+        import core.events as core_events
+        from pipeline import run as run_mod
+        from pipeline.events import RuntimeProgressEvent
+        from pipeline.runtime_context import get_runtime_context
+
+        class _Graph:
+            async def astream(self, initial_state, config=None):
+                runtime_context = get_runtime_context(config)
+                assert runtime_context is not None
+                _ = initial_state
+                core_events.event_bus.publish(
+                    runtime_context.generation_id,
+                    RuntimeProgressEvent(
+                        generation_id=runtime_context.generation_id,
+                        snapshot=await runtime_context.progress.snapshot(),
+                    ),
+                )
+                if False:
+                    yield {}
+
+        monkeypatch.setattr(run_mod, "build_graph", lambda: _Graph())
+
+        events = []
+
+        async def on_event(event):
+            events.append(event)
+
+        command = run_mod.PipelineCommand(
+            generation_id="gen-no-replay",
+            subject="Mathematics",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=1,
+        )
+
+        await run_mod.run_pipeline_streaming(command, on_event=on_event)
+
+        assert events
+        assert not any(isinstance(event, RuntimeProgressEvent) for event in events)
+
+    async def test_streaming_callback_events_are_emitted_once(self, monkeypatch):
+        from collections import Counter
+
+        from pipeline import run as run_mod
+        from pipeline.events import (
+            SectionAssetPendingEvent,
+            SectionAssetReadyEvent,
+            SectionFinalEvent,
+            SectionPartialEvent,
+            SectionReadyEvent,
+            SectionStartedEvent,
+        )
+        from pipeline.runtime_context import get_runtime_context
+
+        section = _section("s-01")
+
+        class _Graph:
+            async def astream(self, initial_state, config=None):
+                runtime_context = get_runtime_context(config)
+                assert runtime_context is not None
+                _ = initial_state
+                yield {
+                    "curriculum_planner": {
+                        "curriculum_outline": [_plan("s-01", 1)]
+                    }
+                }
+                await runtime_context.emit_event(
+                    SectionPartialEvent(
+                        generation_id="gen-callback-once",
+                        section_id="s-01",
+                        section=section,
+                        template_id=section.template_id,
+                        status="awaiting_assets",
+                        visual_mode="svg",
+                        pending_assets=["diagram"],
+                        updated_at="2026-04-09T00:00:00+00:00",
+                    )
+                )
+                await runtime_context.emit_event(
+                    SectionAssetPendingEvent(
+                        generation_id="gen-callback-once",
+                        section_id="s-01",
+                        pending_assets=["diagram"],
+                        status="awaiting_assets",
+                        visual_mode="svg",
+                        updated_at="2026-04-09T00:00:00+00:00",
+                    )
+                )
+                await runtime_context.emit_event(
+                    SectionAssetReadyEvent(
+                        generation_id="gen-callback-once",
+                        section_id="s-01",
+                        ready_assets=["diagram"],
+                        pending_assets=[],
+                        visual_mode="svg",
+                        updated_at="2026-04-09T00:00:01+00:00",
+                    )
+                )
+                await runtime_context.emit_event(
+                    SectionFinalEvent(
+                        generation_id="gen-callback-once",
+                        section_id="s-01",
+                        section=section,
+                        completed_sections=1,
+                        total_sections=1,
+                    )
+                )
+                await runtime_context.emit_event(
+                    SectionReadyEvent(
+                        generation_id="gen-callback-once",
+                        section_id="s-01",
+                        section=section,
+                        completed_sections=1,
+                        total_sections=1,
+                    )
+                )
+
+        monkeypatch.setattr(run_mod, "build_graph", lambda: _Graph())
+
+        events = []
+
+        async def on_event(event):
+            events.append(event)
+
+        command = run_mod.PipelineCommand(
+            generation_id="gen-callback-once",
+            subject="Mathematics",
+            context="Explain limits",
+            grade_band="secondary",
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+            learner_fit="general",
+            section_count=1,
+        )
+
+        await run_mod.run_pipeline_streaming(command, on_event=on_event)
+
+        counts = Counter(type(event).__name__ for event in events)
+        assert counts["SectionStartedEvent"] == 1
+        assert counts["SectionPartialEvent"] == 1
+        assert counts["SectionAssetPendingEvent"] == 1
+        assert counts["SectionAssetReadyEvent"] == 1
+        assert counts["SectionFinalEvent"] == 1
+        assert counts["SectionReadyEvent"] == 1
+
     async def test_completed_document_includes_section_manifest(self, monkeypatch):
         from pipeline import run as run_mod
 

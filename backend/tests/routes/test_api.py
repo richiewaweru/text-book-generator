@@ -1104,7 +1104,7 @@ class TestGenerationApi:
         assert response.status_code == 200
         assert "event: media_plan_ready" in response.text
         assert "event: section_media_blocked" in response.text
-        assert "Planning media" in response.text
+        assert "Planning media" not in response.text
         assert "Required media slot did not complete" in response.text
 
     async def test_events_endpoint_returns_terminal_error_for_failed_generation(self):
@@ -1145,6 +1145,43 @@ class TestGenerationApi:
         assert "event: error" in response.text
         assert "event: progress_update" in response.text
         assert "interrupted before it finished" in response.text
+
+    async def test_events_endpoint_returns_terminal_complete_for_partial_generation(self):
+        generation_id = "gen-partial-events"
+        document = _document(generation_id, status="partial").model_copy(
+            update={
+                "quality_passed": False,
+                "error": "Some sections were generated, but the lesson did not fully finalize.",
+                "completed_at": _now(),
+            }
+        )
+        path = await DOC_REPO.save_document(document)
+        await GEN_REPO.create(
+            Generation(
+                id=generation_id,
+                user_id=TEST_USER.id,
+                subject="Calculus",
+                context="Explain limits",
+                mode="balanced",
+                status="partial",
+                document_path=path,
+                error=document.error,
+                requested_template_id="guided-concept-path",
+                requested_preset_id="blue-classroom",
+                quality_passed=False,
+            )
+        )
+
+        token = JWT_HANDLER.create_access_token(TEST_USER.id, TEST_USER.email)
+        async with _client() as client:
+            response = await client.get(
+                f"/api/v1/generations/{generation_id}/events?token={token}",
+            )
+
+        assert response.status_code == 200
+        assert "event: complete" in response.text
+        assert '"final_status": "partial"' in response.text or '"final_status":"partial"' in response.text
+        assert "Lesson partially generated" in response.text
 
     async def test_streaming_partial_saves_keep_manifest_and_section_order(self):
         async def fake_run_pipeline(command, on_event=None):

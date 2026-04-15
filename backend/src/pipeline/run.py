@@ -6,13 +6,10 @@ from __future__ import annotations
 
 import inspect
 import uuid
-import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
-
-from pydantic import TypeAdapter
 
 import core.events as core_events
 from core.dependencies import get_settings
@@ -60,9 +57,6 @@ __all__ = [
     "run_pipeline_streaming",
     "build_graph",
 ]
-
-_PIPELINE_EVENT_ADAPTER = TypeAdapter(PipelineEvent)
-
 
 async def _emit(
     event: PipelineEvent,
@@ -316,30 +310,6 @@ def _build_result(
     )
 
 
-async def _forward_published_events(
-    generation_id: str,
-    *,
-    on_event: Callable[[PipelineEvent], Awaitable[None] | None] | None,
-    stop_event: asyncio.Event,
-) -> None:
-    if on_event is None or not generation_id:
-        return
-
-    queue = core_events.event_bus.subscribe(generation_id)
-    try:
-        while not stop_event.is_set() or not queue.empty():
-            try:
-                payload = await asyncio.wait_for(queue.get(), timeout=0.1)
-            except (TimeoutError, asyncio.TimeoutError):
-                continue
-            try:
-                await _emit(_PIPELINE_EVENT_ADAPTER.validate_python(payload), on_event)
-            finally:
-                queue.task_done()
-    finally:
-        core_events.event_bus.unsubscribe(generation_id, queue)
-
-
 async def run_pipeline(
     command: PipelineCommand,
 ) -> PipelineResult:
@@ -372,14 +342,6 @@ async def run_pipeline_streaming(
     }
 
     try:
-        forward_stop = asyncio.Event()
-        forward_task = asyncio.create_task(
-            _forward_published_events(
-                command.generation_id or "",
-                on_event=on_event,
-                stop_event=forward_stop,
-            )
-        )
         await _emit(
             PipelineStartEvent(
                 generation_id=command.generation_id or "",
@@ -480,8 +442,4 @@ async def run_pipeline_streaming(
 
         return _build_result(command, final_state, perf_counter() - started)
     finally:
-        if "forward_stop" in locals():
-            forward_stop.set()
-        if "forward_task" in locals():
-            await forward_task
         unregister_runtime_context(runtime_context.id)

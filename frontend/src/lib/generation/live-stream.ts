@@ -60,13 +60,11 @@ function setSectionSignal(
 	signal: ViewerSectionSignal
 ): Record<string, ViewerSectionSignal> {
 	const existing = signals[sectionId];
-	// Return the same reference when nothing meaningful changed so that
-	// $derived(buildSectionSlots(..., sectionSignals)) does not recalculate.
 	if (
 		existing &&
 		existing.status === signal.status &&
 		(existing.reason ?? null) === (signal.reason ?? null) &&
-		existing.slot_ids === signal.slot_ids &&
+		JSON.stringify(existing.slot_ids ?? []) === JSON.stringify(signal.slot_ids ?? []) &&
 		(existing.label ?? null) === (signal.label ?? null)
 	) {
 		return signals;
@@ -74,14 +72,46 @@ function setSectionSignal(
 	return { ...signals, [sectionId]: signal };
 }
 
+function isTerminalSectionSignal(signal: ViewerSectionSignal | undefined): boolean {
+	return signal?.status === 'ready' || signal?.status === 'failed';
+}
+
 function normalizeRuntimeProgressSnapshot(
 	snapshot: RuntimeProgressEvent['snapshot'] & { diagram_running?: number; diagram_queued?: number }
 ): RuntimeProgressEvent['snapshot'] {
+	const { diagram_running: _diagramRunning, diagram_queued: _diagramQueued, ...rest } = snapshot;
 	return {
-		...snapshot,
+		...rest,
 		media_running: snapshot.media_running ?? snapshot.diagram_running ?? 0,
 		media_queued: snapshot.media_queued ?? snapshot.diagram_queued ?? 0
 	};
+}
+
+function sameRuntimeProgressSnapshot(
+	left: RuntimeProgressEvent['snapshot'] | null,
+	right: RuntimeProgressEvent['snapshot']
+): boolean {
+	if (!left) return false;
+	const normalizedLeft = normalizeRuntimeProgressSnapshot(
+		left as RuntimeProgressEvent['snapshot'] & {
+			diagram_running?: number;
+			diagram_queued?: number;
+		}
+	);
+	const normalizedRight = normalizeRuntimeProgressSnapshot(right);
+	return (
+		normalizedLeft.mode === normalizedRight.mode &&
+		normalizedLeft.sections_total === normalizedRight.sections_total &&
+		normalizedLeft.sections_completed === normalizedRight.sections_completed &&
+		normalizedLeft.sections_running === normalizedRight.sections_running &&
+		normalizedLeft.sections_queued === normalizedRight.sections_queued &&
+		normalizedLeft.media_running === normalizedRight.media_running &&
+		normalizedLeft.media_queued === normalizedRight.media_queued &&
+		normalizedLeft.qc_running === normalizedRight.qc_running &&
+		normalizedLeft.qc_queued === normalizedRight.qc_queued &&
+		normalizedLeft.retry_running === normalizedRight.retry_running &&
+		normalizedLeft.retry_queued === normalizedRight.retry_queued
+	);
 }
 
 function normalizeRuntimePolicyEvent(
@@ -99,10 +129,25 @@ function normalizeRuntimePolicyEvent(
 	};
 }
 
+function sameProgressUpdate(
+	left: ProgressUpdateEvent | null,
+	right: ProgressUpdateEvent
+): boolean {
+	if (!left) return false;
+	return (
+		left.stage === right.stage &&
+		left.label === right.label &&
+		(left.section_id ?? null) === (right.section_id ?? null)
+	);
+}
+
 function applyMediaFrameSignal(
 	context: GenerationStreamContext,
 	payload: MediaFrameStartedEvent | MediaFrameReadyEvent | MediaFrameFailedEvent
 ): GenerationStreamContext {
+	if (isTerminalSectionSignal(context.sectionSignals[payload.section_id])) {
+		return context;
+	}
 	const current = context.sectionSignals[payload.section_id];
 	const status: ViewerSectionSignal =
 		payload.type === 'media_frame_started'
@@ -134,9 +179,17 @@ export function applyGenerationStreamEvent(
 		}
 		case 'progress_update': {
 			const payload = JSON.parse(data) as ProgressUpdateEvent;
-			// Propagate the label into the section-specific signal so that
-			// statusLabel() can use a per-section label instead of a global one,
-			// avoiding re-renders of all generating sections on every update.
+			const nextActiveSectionId =
+				payload.section_id && !isTerminalSectionSignal(context.sectionSignals[payload.section_id])
+					? payload.section_id
+					: context.activeSectionId;
+			if (
+				sameProgressUpdate(context.progressUpdate, payload) &&
+				nextActiveSectionId === context.activeSectionId
+			) {
+				return { next: context, terminal: null };
+			}
+
 			let nextSignals = context.sectionSignals;
 			if (payload.section_id) {
 				const existing = context.sectionSignals[payload.section_id];
@@ -151,7 +204,7 @@ export function applyGenerationStreamEvent(
 				next: {
 					...context,
 					progressUpdate: payload,
-					activeSectionId: payload.section_id ?? context.activeSectionId,
+					activeSectionId: nextActiveSectionId,
 					sectionSignals: nextSignals
 				},
 				terminal: null
@@ -166,11 +219,19 @@ export function applyGenerationStreamEvent(
 		}
 		case 'runtime_progress': {
 			const payload = JSON.parse(data) as RuntimeProgressEvent;
+			const normalizedSnapshot = normalizeRuntimeProgressSnapshot(payload.snapshot);
+			const nextPlannedSections = context.plannedSections ?? payload.snapshot.sections_total;
+			if (
+				sameRuntimeProgressSnapshot(context.runtimeProgress, normalizedSnapshot) &&
+				nextPlannedSections === context.plannedSections
+			) {
+				return { next: context, terminal: null };
+			}
 			return {
 				next: {
 					...context,
-					runtimeProgress: normalizeRuntimeProgressSnapshot(payload.snapshot),
-					plannedSections: context.plannedSections ?? payload.snapshot.sections_total
+					runtimeProgress: normalizedSnapshot,
+					plannedSections: nextPlannedSections
 				},
 				terminal: null
 			};
@@ -192,6 +253,9 @@ export function applyGenerationStreamEvent(
 		}
 		case 'media_plan_ready': {
 			const payload = JSON.parse(data) as MediaPlanReadyEvent;
+			if (isTerminalSectionSignal(context.sectionSignals[payload.section_id])) {
+				return { next: context, terminal: null };
+			}
 			return {
 				next: {
 					...context,
@@ -217,6 +281,9 @@ export function applyGenerationStreamEvent(
 		}
 		case 'media_slot_ready': {
 			const payload = JSON.parse(data) as MediaSlotReadyEvent;
+			if (isTerminalSectionSignal(context.sectionSignals[payload.section_id])) {
+				return { next: context, terminal: null };
+			}
 			return {
 				next: {
 					...context,
@@ -229,6 +296,9 @@ export function applyGenerationStreamEvent(
 		}
 		case 'media_slot_failed': {
 			const payload = JSON.parse(data) as MediaSlotFailedEvent;
+			if (isTerminalSectionSignal(context.sectionSignals[payload.section_id])) {
+				return { next: context, terminal: null };
+			}
 			return {
 				next: {
 					...context,
@@ -243,6 +313,9 @@ export function applyGenerationStreamEvent(
 		}
 		case 'section_media_blocked': {
 			const payload = JSON.parse(data) as SectionMediaBlockedEvent;
+			if (isTerminalSectionSignal(context.sectionSignals[payload.section_id])) {
+				return { next: context, terminal: null };
+			}
 			return {
 				next: {
 					...context,

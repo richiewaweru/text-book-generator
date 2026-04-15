@@ -45,3 +45,27 @@ async def test_runtime_progress_tracker_tracks_queue_and_completion_state() -> N
     assert any(snapshot.media_running == 1 for snapshot in snapshots)
     assert any(snapshot.qc_running == 1 for snapshot in snapshots)
     assert any(snapshot.retry_running == 1 for snapshot in snapshots)
+
+
+@pytest.mark.asyncio
+async def test_runtime_progress_tracker_skips_duplicate_snapshots() -> None:
+    snapshots = []
+    tracker = RuntimeProgressTracker(
+        mode=GenerationMode.BALANCED,
+        sections_total=2,
+        emit_snapshot=snapshots.append,
+    )
+
+    await tracker.queue_section("s-01")
+    await tracker.queue_section("s-01")
+    await tracker.start_section("s-01")
+    await tracker.start_section("s-01")
+    await tracker.mark_section_ready("s-01")
+    await tracker.mark_section_ready("s-01")
+    await tracker.finish_section("s-01")
+    await tracker.finish_section("s-01")
+
+    assert len(snapshots) == 4
+    assert [snapshot.sections_queued for snapshot in snapshots] == [1, 0, 0, 0]
+    assert [snapshot.sections_running for snapshot in snapshots] == [0, 1, 1, 0]
+    assert [snapshot.sections_completed for snapshot in snapshots] == [0, 0, 1, 1]

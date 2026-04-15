@@ -404,75 +404,13 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
             "section_id": event.get("section_id"),
             "label": f"Generating {event.get('title', 'section')}",
         }]
-    if event_type == "section_partial":
-        pending_assets = list(event.get("pending_assets") or [])
-        status = event.get("status")
-        visual_mode = event.get("visual_mode")
-        if status == "finalizing":
-            label = "Finalizing section"
-            stage = "finalizing_section"
-        elif visual_mode == "image" and pending_assets:
-            label = "Generating image"
-            stage = "awaiting_assets"
-        elif "diagram" in pending_assets:
-            label = "Generating diagram"
-            stage = "awaiting_assets"
-        else:
-            label = "Drafting section"
-            stage = "drafting_partial"
-        return [{
-            "type": "progress_update",
-            "generation_id": event.get("generation_id", ""),
-            "stage": stage,
-            "section_id": event.get("section_id"),
-            "label": label,
-        }]
     if event_type == "section_asset_pending":
-        pending_assets = list(event.get("pending_assets") or [])
-        visual_mode = event.get("visual_mode")
-        label = "Generating media"
-        if visual_mode == "image":
-            label = "Generating media"
-        elif "diagram" in pending_assets:
-            label = "Generating media"
         return [{
             "type": "progress_update",
             "generation_id": event.get("generation_id", ""),
             "stage": "awaiting_assets",
-            "section_id": event.get("section_id"),
-            "label": label,
-        }]
-    if event_type == "media_plan_ready":
-        return [{
-            "type": "progress_update",
-            "generation_id": event.get("generation_id", ""),
-            "stage": "awaiting_assets",
-            "section_id": event.get("section_id"),
-            "label": "Planning media",
-        }]
-    if event_type == "media_frame_started":
-        return [{
-            "type": "progress_update",
-            "generation_id": event.get("generation_id", ""),
-            "stage": "generating_media",
             "section_id": event.get("section_id"),
             "label": "Generating media",
-        }]
-    if event_type == "media_slot_ready":
-        return [{
-            "type": "progress_update",
-            "generation_id": event.get("generation_id", ""),
-            "stage": "awaiting_assets",
-            "section_id": event.get("section_id"),
-            "label": "Media partially ready",
-        }]
-    if event_type == "section_media_blocked":
-        return [{
-            "type": "progress_update",
-            "generation_id": event.get("generation_id", ""),
-            "stage": "failed",
-            "section_id": event.get("section_id"),
-            "label": event.get("reason", "Blocked by required media"),
         }]
     if event_type == "section_asset_ready":
         return [{
@@ -482,24 +420,6 @@ def _progress_updates_for_event(event: dict) -> list[dict]:
             "section_id": event.get("section_id"),
             "label": "Finalizing section",
         }]
-    if event_type == "node_started":
-        node = event.get("node")
-        if node in {"diagram_generator", "image_generator", "interaction_generator"}:
-            return [{
-                "type": "progress_update",
-                "generation_id": event.get("generation_id", ""),
-                "stage": "generating_media",
-                "section_id": event.get("section_id"),
-                "label": "Generating media",
-            }]
-        if node == "qc_agent":
-            return [{
-                "type": "progress_update",
-                "generation_id": event.get("generation_id", ""),
-                "stage": "checking_quality",
-                "section_id": event.get("section_id"),
-                "label": "Checking quality",
-            }]
     if event_type in {"section_retry_queued", "section_attempt_started"}:
         return [{
             "type": "progress_update",
@@ -994,6 +914,104 @@ def _generation_failed_event(
         error_code=error_code,
         report_url=report_url,
     )
+
+
+async def _emit_event_payloads(event_payload: dict) -> AsyncIterator[str]:
+    yield _sse_payload(event_payload)
+    for progress_update in _progress_updates_for_event(event_payload):
+        yield _sse_payload(progress_update)
+
+
+def _terminal_event_payloads(
+    generation: Generation | None,
+    generation_id: str,
+) -> list[dict] | None:
+    if generation is None:
+        return None
+    if generation.status in {"completed", "partial"}:
+        return [
+            _complete_event(
+                generation_id,
+                final_status=generation.status,
+                quality_passed=generation.quality_passed,
+            ).model_dump(mode="json", exclude_none=True)
+        ]
+    if generation.status == "failed":
+        return [
+            _generation_failed_event(
+                generation_id,
+                message=generation.error or "Generation failed",
+                error_type=generation.error_type,
+                error_code=generation.error_code,
+            ).model_dump(mode="json", exclude_none=True),
+            _error_event(
+                generation_id,
+                generation.error or "Generation failed",
+            ).model_dump(mode="json", exclude_none=True),
+        ]
+    return None
+
+
+async def _stream_generation_events(
+    *,
+    generation_id: str,
+    gen_repo: GenerationRepository,
+) -> AsyncIterator[str]:
+    queue = core_events.event_bus.subscribe(generation_id)
+    try:
+        current = await gen_repo.find_by_id(generation_id)
+        runtime_context = get_runtime_context_by_generation(generation_id)
+        if runtime_context is not None:
+            policy_payload = build_runtime_policy_event(runtime_context).model_dump(
+                mode="json",
+                exclude_none=True,
+            )
+            async for payload in _emit_event_payloads(policy_payload):
+                yield payload
+            progress_payload = RuntimeProgressEvent(
+                generation_id=generation_id,
+                snapshot=await runtime_context.progress.snapshot(),
+            ).model_dump(mode="json", exclude_none=True)
+            async for payload in _emit_event_payloads(progress_payload):
+                yield payload
+
+        while not queue.empty():
+            event = queue.get_nowait()
+            async for payload in _emit_event_payloads(event):
+                yield payload
+            if event.get("type") in {"complete", "error"}:
+                return
+
+        terminal_payloads = _terminal_event_payloads(current, generation_id)
+        if terminal_payloads is not None:
+            for terminal in terminal_payloads:
+                async for payload in _emit_event_payloads(terminal):
+                    yield payload
+            return
+
+        while True:
+            try:
+                event = await asyncio.wait_for(
+                    queue.get(),
+                    timeout=_SSE_KEEPALIVE_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                current = await gen_repo.find_by_id(generation_id)
+                terminal_payloads = _terminal_event_payloads(current, generation_id)
+                if terminal_payloads is not None:
+                    for terminal in terminal_payloads:
+                        async for payload in _emit_event_payloads(terminal):
+                            yield payload
+                    return
+                yield ": keep-alive\n\n"
+                continue
+
+            async for payload in _emit_event_payloads(event):
+                yield payload
+            if event["type"] in {"complete", "error"}:
+                break
+    finally:
+        core_events.event_bus.unsubscribe(generation_id, queue)
 
 
 def _failed_document_snapshot(
@@ -1639,107 +1657,11 @@ async def get_generation_events(
     if generation is None or generation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
 
-    async def stream() -> AsyncIterator[str]:
-        async def emit_event_payloads(event_payload: dict) -> AsyncIterator[str]:
-            yield _sse_payload(event_payload)
-            for progress_update in _progress_updates_for_event(event_payload):
-                yield _sse_payload(progress_update)
-
-        queue = core_events.event_bus.subscribe(generation_id)
-        try:
-            current = await gen_repo.find_by_id(generation_id)
-            runtime_context = get_runtime_context_by_generation(generation_id)
-            if runtime_context is not None:
-                policy_payload = build_runtime_policy_event(runtime_context).model_dump(
-                    mode="json",
-                    exclude_none=True,
-                )
-                async for payload in emit_event_payloads(policy_payload):
-                    yield payload
-                progress_payload = RuntimeProgressEvent(
-                    generation_id=generation_id,
-                    snapshot=await runtime_context.progress.snapshot(),
-                ).model_dump(mode="json", exclude_none=True)
-                async for payload in emit_event_payloads(progress_payload):
-                    yield payload
-            while not queue.empty():
-                event = queue.get_nowait()
-                async for payload in emit_event_payloads(event):
-                    yield payload
-                if event.get("type") in {"complete", "error"}:
-                    return
-
-            if current is not None and current.status in {"completed", "partial"}:
-                terminal = _complete_event(
-                    generation_id,
-                    final_status=current.status,
-                    quality_passed=current.quality_passed,
-                ).model_dump(mode="json", exclude_none=True)
-                async for payload in emit_event_payloads(terminal):
-                    yield payload
-                return
-            if current is not None and current.status == "failed":
-                failed_payload = _generation_failed_event(
-                    generation_id,
-                    message=current.error or "Generation failed",
-                    error_type=current.error_type,
-                    error_code=current.error_code,
-                ).model_dump(mode="json", exclude_none=True)
-                async for payload in emit_event_payloads(failed_payload):
-                    yield payload
-                terminal = _error_event(
-                    generation_id,
-                    current.error or "Generation failed",
-                ).model_dump(mode="json", exclude_none=True)
-                async for payload in emit_event_payloads(terminal):
-                    yield payload
-                return
-
-            while True:
-                try:
-                    event = await asyncio.wait_for(
-                        queue.get(),
-                        timeout=_SSE_KEEPALIVE_TIMEOUT_SECONDS,
-                    )
-                except TimeoutError:
-                    current = await gen_repo.find_by_id(generation_id)
-                    if current is not None and current.status in {"completed", "partial"}:
-                        yield _sse_payload(
-                            _complete_event(
-                                generation_id,
-                                final_status=current.status,
-                                quality_passed=current.quality_passed,
-                            ).model_dump(mode="json", exclude_none=True)
-                        )
-                        return
-                    if current is not None and current.status == "failed":
-                        yield _sse_payload(
-                            _generation_failed_event(
-                                generation_id,
-                                message=current.error or "Generation failed",
-                                error_type=current.error_type,
-                                error_code=current.error_code,
-                            ).model_dump(mode="json", exclude_none=True)
-                        )
-                        yield _sse_payload(
-                            _error_event(
-                                generation_id,
-                                current.error or "Generation failed",
-                            ).model_dump(mode="json", exclude_none=True)
-                        )
-                        return
-                    yield ": keep-alive\n\n"
-                    continue
-
-                async for payload in emit_event_payloads(event):
-                    yield payload
-                if event["type"] in {"complete", "error"}:
-                    break
-        finally:
-            core_events.event_bus.unsubscribe(generation_id, queue)
-
     return StreamingResponse(
-        stream(),
+        _stream_generation_events(
+            generation_id=generation_id,
+            gen_repo=gen_repo,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
