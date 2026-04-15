@@ -686,7 +686,17 @@ class GenerationReportRecorder:
         ]
 
     def _handle_section_final(self, payload: dict[str, Any]) -> None:
-        self._handle_section_ready(payload)
+        # section_final marks the section entering final assembly.
+        # It no longer carries SectionContent (removed to reduce SSE payload).
+        # Timestamps and error state are updated here; status and
+        # delivered_components are resolved by the section_ready event that
+        # fires immediately after this one.
+        section = self._ensure_section(payload["section_id"])
+        section.completed_at = _utc_now()
+        section.final_error = None
+        section.failure_detail = None
+        section.media_blocked = False
+        section.media_block_reason = None
 
     def _handle_complete(self, payload: dict[str, Any]) -> None:
         self._report.status = "completed"
