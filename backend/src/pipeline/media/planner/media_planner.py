@@ -28,6 +28,7 @@ def _all_contract_components(contract: TemplateContractSummary) -> set[str]:
         | set(getattr(contract, "optional_components", []) or [])
         | set(getattr(contract, "always_present", []) or [])
         | set(getattr(contract, "available_components", []) or [])
+        | set(getattr(contract, "contextually_present", []) or [])
     )
 
 

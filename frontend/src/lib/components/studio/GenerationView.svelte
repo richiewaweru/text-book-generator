@@ -133,7 +133,7 @@
 		if (status === 'ready') return 'Ready';
 		if (status === 'failed') return 'Failed';
 		if (status === 'planned') return 'Planned';
-		if (status === 'generating') return progressUpdate?.label ?? 'Generating section...';
+		if (status === 'generating') return slot.signal?.label ?? progressUpdate?.label ?? 'Generating section...';
 		if (status === 'partially_ready') {
 			const pendingAssets = slot.partial?.pending_assets ?? [];
 			if (slot.partial?.visual_mode === 'image') {
@@ -200,6 +200,7 @@
 			type,
 			data
 		);
+		const prevDocument = document;
 		document = result.next.document;
 		plannedSections = result.next.plannedSections;
 		qcSummary = result.next.qcSummary;
@@ -209,7 +210,7 @@
 		viewerWarning = result.next.viewerWarning;
 		activeSectionId = result.next.activeSectionId;
 		sectionSignals = result.next.sectionSignals;
-		if (document) {
+		if (document && document !== prevDocument) {
 			syncDocument(document);
 		}
 		return { terminal: result.terminal };

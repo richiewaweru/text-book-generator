@@ -31,6 +31,7 @@ export interface ViewerSectionSignal {
 	status: ViewerSectionStatus;
 	reason?: string | null;
 	slot_ids?: string[];
+	label?: string | null;
 }
 
 export interface ViewerSectionSlot {

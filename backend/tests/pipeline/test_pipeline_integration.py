@@ -1258,7 +1258,6 @@ class TestRunPipelineStreamingEvents:
                     SectionFinalEvent(
                         generation_id="gen-stream-order",
                         section_id="s-01",
-                        section=final_section,
                         completed_sections=1,
                         total_sections=1,
                     )

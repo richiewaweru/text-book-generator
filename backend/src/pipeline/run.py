@@ -434,14 +434,14 @@ async def run_pipeline_streaming(
                     completed_sections = len(typed_state.assembled_sections)
                     for section_id, section in assembled.items():
                         await runtime_context.progress.mark_section_ready(section_id)
+                        section_content = (
+                            section
+                            if isinstance(section, SectionContent)
+                            else SectionContent.model_validate(section)
+                        )
                         final_event = SectionFinalEvent(
                             generation_id=command.generation_id or "",
                             section_id=section_id,
-                            section=(
-                                section
-                                if isinstance(section, SectionContent)
-                                else SectionContent.model_validate(section)
-                            ),
                             completed_sections=completed_sections,
                             total_sections=total_sections,
                         )
@@ -450,7 +450,7 @@ async def run_pipeline_streaming(
                             SectionReadyEvent(
                                 generation_id=final_event.generation_id,
                                 section_id=final_event.section_id,
-                                section=final_event.section,
+                                section=section_content,
                                 completed_sections=final_event.completed_sections,
                                 total_sections=final_event.total_sections,
                             ),

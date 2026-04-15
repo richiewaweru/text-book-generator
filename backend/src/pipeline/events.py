@@ -104,7 +104,6 @@ class SectionFinalEvent(BaseModel):
     type: Literal["section_final"] = "section_final"
     generation_id: str
     section_id: str
-    section: SectionContent
     completed_sections: int
     total_sections: int
 

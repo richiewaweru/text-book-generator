@@ -59,10 +59,19 @@ function setSectionSignal(
 	sectionId: string,
 	signal: ViewerSectionSignal
 ): Record<string, ViewerSectionSignal> {
-	return {
-		...signals,
-		[sectionId]: signal
-	};
+	const existing = signals[sectionId];
+	// Return the same reference when nothing meaningful changed so that
+	// $derived(buildSectionSlots(..., sectionSignals)) does not recalculate.
+	if (
+		existing &&
+		existing.status === signal.status &&
+		(existing.reason ?? null) === (signal.reason ?? null) &&
+		existing.slot_ids === signal.slot_ids &&
+		(existing.label ?? null) === (signal.label ?? null)
+	) {
+		return signals;
+	}
+	return { ...signals, [sectionId]: signal };
 }
 
 function normalizeRuntimeProgressSnapshot(
@@ -125,11 +134,25 @@ export function applyGenerationStreamEvent(
 		}
 		case 'progress_update': {
 			const payload = JSON.parse(data) as ProgressUpdateEvent;
+			// Propagate the label into the section-specific signal so that
+			// statusLabel() can use a per-section label instead of a global one,
+			// avoiding re-renders of all generating sections on every update.
+			let nextSignals = context.sectionSignals;
+			if (payload.section_id) {
+				const existing = context.sectionSignals[payload.section_id];
+				if (existing) {
+					nextSignals = setSectionSignal(context.sectionSignals, payload.section_id, {
+						...existing,
+						label: payload.label
+					});
+				}
+			}
 			return {
 				next: {
 					...context,
 					progressUpdate: payload,
-					activeSectionId: payload.section_id ?? context.activeSectionId
+					activeSectionId: payload.section_id ?? context.activeSectionId,
+					sectionSignals: nextSignals
 				},
 				terminal: null
 			};

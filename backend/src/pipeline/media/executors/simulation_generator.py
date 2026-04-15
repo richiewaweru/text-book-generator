@@ -243,7 +243,9 @@ async def simulation_generator(
         return {"completed_nodes": ["interaction_generator"]}
 
     has_contract_slot = "simulation-block" in (
-        set(typed.contract.required_components) | set(typed.contract.optional_components)
+        set(typed.contract.required_components)
+        | set(typed.contract.optional_components)
+        | set(getattr(typed.contract, "contextually_present", []) or [])
     )
     if not has_contract_slot:
         _publish_interaction_outcome(generation_id, sid, "skipped", skip_reason="no_slot")

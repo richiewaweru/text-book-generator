@@ -227,7 +227,6 @@ async def _emit_final_section_events(
         SectionFinalEvent(
             generation_id=state.request.generation_id or "",
             section_id=section_id,
-            section=section,
             completed_sections=completed_sections,
             total_sections=total_sections,
         )

@@ -149,7 +149,7 @@ class Settings(BaseSettings):
 
     # Whole-generation timeout
     pipeline_timeout_generation_base_seconds: float = Field(default=120.0, gt=0)
-    pipeline_timeout_generation_per_section_seconds: float = Field(default=90.0, gt=0)
+    pipeline_timeout_generation_per_section_seconds: float = Field(default=120.0, gt=0)
     pipeline_timeout_generation_cap_seconds: float = Field(default=900.0, gt=0)
 
     # Node execution budgets
