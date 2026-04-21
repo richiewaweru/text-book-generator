@@ -17,7 +17,7 @@ from html import escape
 from core.config import settings as app_settings
 from core.llm.logging import NodeLogger
 from langchain_core.runnables.config import RunnableConfig
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from pipeline.console_diagnostics import force_console_log
@@ -37,10 +37,8 @@ from pipeline.state import PipelineError, TextbookPipelineState
 from pipeline.types.section_content import (
     DiagramCompareContent,
     DiagramContent,
-    DiagramElement,
     DiagramSeriesContent,
     DiagramSeriesStep,
-    DiagramSpec,
 )
 from pipeline.visual_resolution import (
     resolve_effective_visual_mode,
@@ -64,6 +62,32 @@ class DiagramOutput(BaseModel):
     spec: DiagramSpec
     caption: str
     alt_text: str
+
+
+class DiagramElement(BaseModel):
+    id: str
+    label: str
+    x: float
+    y: float
+    width: float = 120
+    height: float = 60
+    shape: str = "rounded-rect"
+    emphasis: bool = False
+
+
+class DiagramConnection(BaseModel):
+    from_id: str
+    to_id: str
+    label: str | None = None
+    style: str = "arrow"
+
+
+class DiagramSpec(BaseModel):
+    type: str
+    title: str
+    elements: list[DiagramElement]
+    connections: list[DiagramConnection] = Field(default_factory=list)
+    layout_hint: str = "horizontal"
 
 
 def _log_diagram_event(level: int, event: str, **payload) -> None:
@@ -282,14 +306,12 @@ def _diagram_defaults(section, output: DiagramOutput) -> DiagramContent:
     if existing is not None:
         return existing.model_copy(
             update={
-                "spec": output.spec,
                 "svg_content": _render_spec_svg(output.spec),
                 "caption": output.caption,
                 "alt_text": output.alt_text,
             }
         )
     return DiagramContent(
-        spec=output.spec,
         svg_content=_render_spec_svg(output.spec),
         caption=output.caption,
         alt_text=output.alt_text,

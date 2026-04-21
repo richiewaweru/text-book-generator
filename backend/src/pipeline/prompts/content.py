@@ -1,19 +1,22 @@
 """
 Prompt builders for the content_generator node.
-
-System prompt: fixed per template (required/optional fields, capacity, guidance).
-User prompt: variable per section (plan, subject, grade, learner fit, rerender reason).
 """
 
 from __future__ import annotations
 
 from pipeline.contracts import (
+    get_component_registry_entry,
     get_generation_guidance,
     get_lesson_flow,
     get_optional_fields,
     get_required_fields,
 )
-from pipeline.prompts.shared import capacity_reminder_for_fields, shared_context
+from pipeline.prompts.shared import (
+    capacity_reminder_for_fields,
+    capacity_reminder_for_manifest_fields,
+    shared_context,
+)
+from pipeline.types.generation_manifest import GenerationFieldContract, SectionGenerationManifest
 from pipeline.types.requests import SectionPlan
 
 
@@ -29,9 +32,37 @@ _FIELD_FORMATTING_RULES = """\
   If you cannot write valid LaTeX for the notation, omit the field entirely.
   Plain English belongs in `examples`, not `notation`.
 
-- `emphasis` arrays contain plain strings — no markdown syntax inside them.
+- `emphasis` arrays contain plain strings; no markdown syntax inside them.
 
 - Short label fields (term, next, misconception, action): plain text, no markdown."""
+
+
+CORE_FIELDS = {"header", "hook", "explanation"}
+PRACTICE_FIELDS = {"practice", "what_next", "pitfall", "pitfalls", "prerequisites"}
+ENRICHMENT_FIELDS = {
+    "callout",
+    "summary",
+    "worked_example",
+    "worked_examples",
+    "process",
+    "definition",
+    "definition_family",
+    "quiz",
+    "reflection",
+    "glossary",
+    "comparison_grid",
+    "timeline",
+    "insight_strip",
+    "interview",
+}
+_EXTERNAL_FIELDS = {
+    "diagram",
+    "diagram_compare",
+    "diagram_series",
+    "simulation",
+    "image_block",
+    "video_embed",
+}
 
 
 def _section_plan_policy_block(section_plan: SectionPlan) -> str:
@@ -79,15 +110,88 @@ def _visual_context_block(section_plan: SectionPlan) -> str:
     )
 
 
+def _compact_shape(schema: dict) -> str:
+    if not schema:
+        return "unknown"
+    title = schema.get("title")
+    if isinstance(title, str) and title:
+        return title
+    any_of = schema.get("anyOf") or schema.get("oneOf")
+    if isinstance(any_of, list):
+        return " / ".join(
+            str(branch.get("title") or branch.get("type") or "object")
+            for branch in any_of[:3]
+            if isinstance(branch, dict)
+        ) or "union"
+    if schema.get("type") == "object":
+        props = schema.get("properties", {})
+        if isinstance(props, dict) and props:
+            sample = ", ".join(list(props.keys())[:4])
+            return f"object({sample})"
+        return "object"
+    return str(schema.get("type", "unknown"))
+
+
+def _format_capacity(capacity: dict) -> str:
+    if not capacity:
+        return "none"
+    return ", ".join(f"{key}={value}" for key, value in sorted(capacity.items()))
+
+
+def _field_contract_block(field: GenerationFieldContract) -> str:
+    registry_entry = get_component_registry_entry(field.component_id) or {}
+    purpose = registry_entry.get("purpose") or "n/a"
+    return (
+        f"Field: {field.field_name}\n"
+        f"Component: {field.component_id}\n"
+        f"Required: {'yes' if field.required else 'no'}\n"
+        f"Purpose: {purpose}\n"
+        f"Generation hint: {field.generation_hint or 'n/a'}\n"
+        f"Capacity: {_format_capacity(field.capacity)}\n"
+        f"Shape: {_compact_shape(field.schema)}"
+    )
+
+
+def _manifest_field_block(fields: list[GenerationFieldContract]) -> str:
+    if not fields:
+        return "none"
+    return "\n\n".join(_field_contract_block(field) for field in fields)
+
+
+def _active_manifest_fields(
+    manifest: SectionGenerationManifest | None,
+    *,
+    phase_fields: set[str] | None = None,
+) -> list[GenerationFieldContract]:
+    if manifest is None:
+        return []
+    fields = manifest.active_text_fields()
+    if phase_fields is None:
+        return fields
+    return [field for field in fields if field.field_name in phase_fields]
+
+
 def build_content_system_prompt(
     template_id: str,
     template_name: str,
     template_family: str,
+    *,
+    manifest: SectionGenerationManifest | None = None,
 ) -> str:
     guidance = get_generation_guidance(template_id)
     lesson_flow = " -> ".join(get_lesson_flow(template_id))
-    required = get_required_fields(template_id)
-    optional = get_optional_fields(template_id)
+    manifest_fields = _active_manifest_fields(manifest)
+
+    if manifest_fields:
+        required = [field.field_name for field in manifest.required_fields if not field.external]
+        optional = [field.field_name for field in manifest.optional_fields if not field.external]
+        field_contracts = _manifest_field_block(manifest_fields)
+        capacity_block = capacity_reminder_for_manifest_fields(manifest_fields)
+    else:
+        required = get_required_fields(template_id)
+        optional = get_optional_fields(template_id)
+        field_contracts = "none"
+        capacity_block = capacity_reminder_for_fields(required + optional)
 
     return f"""You generate content for one section of an educational textbook.
 You fill structured JSON slots. You do not make layout decisions.
@@ -107,7 +211,10 @@ Required fields (must always be present):
 Optional fields (include only when content genuinely warrants it):
 {chr(10).join(f'  - {f}' for f in optional)}
 
-{capacity_reminder_for_fields(required + optional)}
+Field contracts:
+{field_contracts}
+
+{capacity_block}
 
 {_FIELD_FORMATTING_RULES}
 
@@ -172,10 +279,7 @@ def build_content_repair_user_prompt(
     rerender_reason: str | None = None,
 ) -> str:
     if validation_errors:
-        error_lines = "\n".join(
-            f"  - Field `{e['field']}`: {e['message']}"
-            for e in validation_errors
-        )
+        error_lines = "\n".join(f"  - Field `{e['field']}`: {e['message']}" for e in validation_errors)
         error_block = (
             "Fix ONLY these specific fields while keeping all other content intact:\n"
             f"{error_lines}"
@@ -200,29 +304,6 @@ Match the SectionContent schema exactly.
 )}"""
 
 
-# Fields belonging to each generation phase.
-CORE_FIELDS = {"header", "hook", "explanation"}
-PRACTICE_FIELDS = {"practice", "what_next", "pitfall", "pitfalls", "prerequisites"}
-ENRICHMENT_FIELDS = {
-    "callout",
-    "summary",
-    "worked_example",
-    "worked_examples",
-    "process",
-    "definition",
-    "definition_family",
-    "quiz",
-    "reflection",
-    "glossary",
-    "comparison_grid",
-    "timeline",
-    "insight_strip",
-    "interview",
-}
-# Diagram and simulation fields are handled by dedicated nodes, not content phases.
-_EXTERNAL_FIELDS = {"diagram", "diagram_compare", "diagram_series", "simulation"}
-
-
 def _phase_system_prompt(
     *,
     template_id: str,
@@ -230,26 +311,42 @@ def _phase_system_prompt(
     template_family: str,
     phase_name: str,
     phase_fields: set[str],
+    manifest: SectionGenerationManifest | None = None,
 ) -> str:
-    """Build a system prompt scoped to one content phase."""
     guidance = get_generation_guidance(template_id)
-    required = get_required_fields(template_id)
-    optional = get_optional_fields(template_id)
+    manifest_fields = _active_manifest_fields(manifest, phase_fields=phase_fields)
 
-    active_required = [f for f in required if f in phase_fields]
-    active_optional = [f for f in optional if f in phase_fields]
-    active_fields = active_required + active_optional
+    if manifest_fields:
+        active_required = [
+            field.field_name
+            for field in manifest.required_fields
+            if not field.external and field.field_name in phase_fields
+        ]
+        active_optional = [
+            field.field_name
+            for field in manifest.optional_fields
+            if not field.external and field.field_name in phase_fields
+        ]
+        capacity_block = capacity_reminder_for_manifest_fields(manifest_fields)
+        field_contracts = _manifest_field_block(manifest_fields)
+    else:
+        required = get_required_fields(template_id)
+        optional = get_optional_fields(template_id)
+        active_required = [field for field in required if field in phase_fields]
+        active_optional = [field for field in optional if field in phase_fields]
+        capacity_block = capacity_reminder_for_fields(active_required + active_optional)
+        field_contracts = "none"
 
     req_block = (
-        "Required fields:\n" + "\n".join(f"  - {f}" for f in active_required)
+        "Required fields:\n" + "\n".join(f"  - {field}" for field in active_required)
         if active_required
-        else ""
+        else "Required fields:\n  - none"
     )
     opt_block = (
         "Optional fields (include only when warranted):\n"
-        + "\n".join(f"  - {f}" for f in active_optional)
+        + "\n".join(f"  - {field}" for field in active_optional)
         if active_optional
-        else ""
+        else "Optional fields (include only when warranted):\n  - none"
     )
 
     return f"""You generate the {phase_name} phase of an educational textbook section.
@@ -263,7 +360,10 @@ Pacing: {guidance['pacing']}
 {req_block}
 {opt_block}
 
-{capacity_reminder_for_fields(active_fields)}
+Field contracts:
+{field_contracts}
+
+{capacity_block}
 
 {_FIELD_FORMATTING_RULES}
 
@@ -274,6 +374,8 @@ def build_core_system_prompt(
     template_id: str,
     template_name: str,
     template_family: str,
+    *,
+    manifest: SectionGenerationManifest | None = None,
 ) -> str:
     return _phase_system_prompt(
         template_id=template_id,
@@ -281,6 +383,7 @@ def build_core_system_prompt(
         template_family=template_family,
         phase_name="core",
         phase_fields=CORE_FIELDS,
+        manifest=manifest,
     )
 
 
@@ -288,6 +391,8 @@ def build_practice_system_prompt(
     template_id: str,
     template_name: str,
     template_family: str,
+    *,
+    manifest: SectionGenerationManifest | None = None,
 ) -> str:
     return _phase_system_prompt(
         template_id=template_id,
@@ -295,6 +400,7 @@ def build_practice_system_prompt(
         template_family=template_family,
         phase_name="practice",
         phase_fields=PRACTICE_FIELDS,
+        manifest=manifest,
     )
 
 
@@ -303,6 +409,8 @@ def build_enrichment_system_prompt(
     template_name: str,
     template_family: str,
     active_enrichment_fields: list[str] | None = None,
+    *,
+    manifest: SectionGenerationManifest | None = None,
 ) -> str:
     return _phase_system_prompt(
         template_id=template_id,
@@ -310,6 +418,7 @@ def build_enrichment_system_prompt(
         template_family=template_family,
         phase_name="enrichment",
         phase_fields=set(active_enrichment_fields or ENRICHMENT_FIELDS),
+        manifest=manifest,
     )
 
 
@@ -322,7 +431,6 @@ def build_core_user_prompt(
     template_id: str,
     rerender_reason: str | None = None,
 ) -> str:
-    """User prompt for Phase 1: header + hook + explanation."""
     base = f"""Generate the CORE content for this section (header, hook, explanation).
 
 Section:
@@ -361,7 +469,7 @@ def build_practice_user_prompt(
     core_summary: str,
     rerender_reason: str | None = None,
 ) -> str:
-    """User prompt for Phase 2: practice + what_next + optional pitfall/prerequisites."""
+    _ = template_id
     return f"""Generate the PRACTICE content for this section.
 
 Section: {section_plan.title} (position {section_plan.position})
@@ -392,7 +500,7 @@ def build_enrichment_user_prompt(
     active_enrichment_fields: list[str],
     rerender_reason: str | None = None,
 ) -> str:
-    """User prompt for Phase 3: optional enrichment components."""
+    _ = template_id
     fields_block = ", ".join(active_enrichment_fields)
     return f"""Generate ENRICHMENT content for this section.
 

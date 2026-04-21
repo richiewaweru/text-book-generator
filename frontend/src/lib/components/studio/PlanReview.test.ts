@@ -259,6 +259,6 @@ describe('PlanReview', () => {
 		});
 
 		expect(get(editedSpec)?.sections[0].focus_note).toBe('Keep the example concrete.');
-		expect(screen.getByText(/image diagram/i)).toBeTruthy();
+		expect(screen.getByText(/image .*demonstrate process/i)).toBeTruthy();
 	});
 });

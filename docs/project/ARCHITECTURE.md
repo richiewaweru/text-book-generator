@@ -28,7 +28,7 @@ Architecture guard: `python tools/agent/check_architecture.py --format text`
 - `backend/src/planning/` normalizes teacher intent, scores templates, composes sections, routes visuals, and performs the single planning refinement call.
 - Planning emits `PlanningGenerationSpec` artifacts for review. It does not generate lesson content.
 - Routes under `planning/routes.py` are the only place that should adapt planning outputs into generation requests.
-- The exported Lectio contracts in `backend/contracts/` are sourced from the harmonised Lectio catalog in `C:\Projects\lectio` via `npm run export-contracts`.
+- The Lectio contracts in `backend/contracts/` are synced from `frontend/node_modules/lectio/contracts/` via `tools/update_lectio_contracts.py`.
 
 ## Runtime Boundaries
 

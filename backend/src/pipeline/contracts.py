@@ -1,18 +1,7 @@
 """
 pipeline.contracts
 
-The pipeline's interface to the Lectio library.
-
-The pipeline asks questions. This module reads from the exported
-contract JSON files and answers them. No pipeline node imports
-from Lectio's source or knows the JSON structure directly.
-
-Contract files are produced by:
-    cd lectio && npm run export-contracts -- --out <path>/backend/contracts
-
-The contracts directory is resolved in this order:
-    1. LECTIO_CONTRACTS_DIR environment variable
-    2. backend/contracts/ relative to this file's package root
+Deterministic boundary between pipeline code and exported Lectio contracts.
 """
 
 from __future__ import annotations
@@ -22,11 +11,35 @@ import os
 import sys
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
+from pipeline.types.generation_manifest import (
+    GenerationFieldContract,
+    SectionGenerationManifest,
+)
 from pipeline.types.template_contract import TemplateContractSummary, TemplatePresetSummary
 
+_META_FILES = {
+    "component-field-map",
+    "component-registry",
+    "preset-registry",
+    "section-content-schema",
+}
 
-# ── Directory resolution ─────────────────────────────────────────────────────
+_EXTERNAL_FIELDS = {
+    "diagram",
+    "diagram_compare",
+    "diagram_series",
+    "simulation",
+    "image_block",
+    "video_embed",
+}
+
+
+def diag(tag: str, **fields) -> None:
+    sys.stderr.write(f"DIAG::{tag}::{json.dumps(fields, default=str)}\n")
+    sys.stderr.flush()
+
 
 def _contracts_dir() -> Path:
     from_env = os.environ.get("LECTIO_CONTRACTS_DIR")
@@ -35,29 +48,18 @@ def _contracts_dir() -> Path:
         if not path.exists():
             raise FileNotFoundError(
                 f"LECTIO_CONTRACTS_DIR is set to '{from_env}' "
-                f"but the directory does not exist. "
-                f"Run: cd lectio && npm run export-contracts -- --out {from_env}"
+                "but the directory does not exist. "
+                "Run: uv run python tools/update_lectio_contracts.py"
             )
         return path
 
-    # Walk up from src/pipeline/contracts.py → src/pipeline → src → backend/contracts
     default = Path(__file__).resolve().parent.parent.parent / "contracts"
     if not default.exists():
         raise FileNotFoundError(
             f"Contracts directory not found at '{default}'. "
-            f"Run: cd lectio && npm run export-contracts -- --out {default}"
+            "Run: uv run python tools/update_lectio_contracts.py"
         )
     return default
-
-
-# ── Raw loaders (cached) ─────────────────────────────────────────────────────
-
-_META_FILES = {"component-field-map", "component-registry", "preset-registry"}
-
-
-def diag(tag: str, **fields) -> None:
-    sys.stderr.write(f"DIAG::{tag}::{json.dumps(fields, default=str)}\n")
-    sys.stderr.flush()
 
 
 @lru_cache(maxsize=None)
@@ -65,8 +67,7 @@ def _load_contract_raw(template_id: str) -> dict:
     path = _contracts_dir() / f"{template_id}.json"
     if not path.exists():
         available = [
-            p.stem for p in _contracts_dir().glob("*.json")
-            if p.stem not in _META_FILES
+            p.stem for p in _contracts_dir().glob("*.json") if p.stem not in _META_FILES
         ]
         raise ValueError(
             f"No contract found for template '{template_id}'. "
@@ -81,7 +82,7 @@ def _load_field_map() -> dict[str, str]:
     if not path.exists():
         raise FileNotFoundError(
             "component-field-map.json not found. "
-            "Run: cd lectio && npm run export-contracts"
+            "Run: uv run python tools/update_lectio_contracts.py"
         )
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -90,7 +91,10 @@ def _load_field_map() -> dict[str, str]:
 def _load_component_registry() -> dict[str, dict]:
     path = _contracts_dir() / "component-registry.json"
     if not path.exists():
-        raise FileNotFoundError("component-registry.json not found.")
+        raise FileNotFoundError(
+            "component-registry.json not found. "
+            "Run: uv run python tools/update_lectio_contracts.py"
+        )
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -100,7 +104,18 @@ def _load_preset_registry() -> dict[str, dict]:
     if not path.exists():
         raise FileNotFoundError(
             "preset-registry.json not found. "
-            "Run: cd lectio && npm run export-contracts"
+            "Run: uv run python tools/update_lectio_contracts.py"
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@lru_cache(maxsize=None)
+def _load_section_content_schema() -> dict:
+    path = _contracts_dir() / "section-content-schema.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            "section-content-schema.json not found. "
+            "Run: uv run python tools/update_lectio_contracts.py"
         )
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -155,48 +170,31 @@ def _optional_components(contract: dict) -> list[str]:
     return [component_id for component_id in available if component_id not in required]
 
 
-# ── Public API ───────────────────────────────────────────────────────────────
-
 def get_contract(template_id: str) -> TemplateContractSummary:
-    raw = _load_contract_raw(template_id)
-    return TemplateContractSummary.model_validate(raw)
+    return TemplateContractSummary.model_validate(_load_contract_raw(template_id))
 
 
 def get_preset(preset_id: str) -> TemplatePresetSummary:
     registry = _load_preset_registry()
     if preset_id not in registry:
-        raise ValueError(
-            f"Unknown preset '{preset_id}'. "
-            f"Available: {sorted(registry.keys())}"
-        )
+        raise ValueError(f"Unknown preset '{preset_id}'. Available: {sorted(registry.keys())}")
     return TemplatePresetSummary.model_validate(registry[preset_id])
 
 
 def list_template_ids() -> list[str]:
-    return sorted(
-        p.stem for p in _contracts_dir().glob("*.json")
-        if p.stem not in _META_FILES
-    )
+    return sorted(p.stem for p in _contracts_dir().glob("*.json") if p.stem not in _META_FILES)
 
 
 def get_required_fields(template_id: str) -> list[str]:
     contract = _load_contract_raw(template_id)
     field_map = _load_field_map()
-    return [
-        field_map[cid]
-        for cid in _required_components(contract)
-        if cid in field_map
-    ]
+    return [field_map[cid] for cid in _required_components(contract) if cid in field_map]
 
 
 def get_optional_fields(template_id: str) -> list[str]:
     contract = _load_contract_raw(template_id)
     field_map = _load_field_map()
-    return [
-        field_map[cid]
-        for cid in _optional_components(contract)
-        if cid in field_map
-    ]
+    return [field_map[cid] for cid in _optional_components(contract) if cid in field_map]
 
 
 def get_generation_guidance(template_id: str) -> dict:
@@ -205,6 +203,91 @@ def get_generation_guidance(template_id: str) -> dict:
 
 def get_lesson_flow(template_id: str) -> list[str]:
     return _load_contract_raw(template_id).get("lesson_flow", [])
+
+
+def get_section_content_schema() -> dict:
+    return _load_section_content_schema()
+
+
+def get_component_registry_entry(component_id: str) -> dict | None:
+    return _load_component_registry().get(component_id)
+
+
+def get_section_field_for_component(component_id: str) -> str | None:
+    return _load_field_map().get(component_id)
+
+
+def get_component_generation_hint(component_id: str) -> str | None:
+    entry = get_component_registry_entry(component_id)
+    if not entry:
+        return None
+    return entry.get("generation_hint") or entry.get("purpose")
+
+
+def get_component_capacity(component_id: str) -> dict:
+    entry = get_component_registry_entry(component_id)
+    if not entry:
+        return {}
+    return entry.get("capacity", {})
+
+
+def get_capacity_limits(component_id: str) -> dict:
+    return get_component_capacity(component_id)
+
+
+def _resolve_json_pointer(schema: dict, pointer: str) -> Any:
+    if not pointer.startswith("#/"):
+        return None
+    node: Any = schema
+    for token in pointer[2:].split("/"):
+        key = token.replace("~1", "/").replace("~0", "~")
+        if not isinstance(node, dict) or key not in node:
+            return None
+        node = node[key]
+    return node
+
+
+def _resolve_refs(schema: dict, node: Any, seen: set[str] | None = None) -> Any:
+    if seen is None:
+        seen = set()
+
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref not in seen:
+            target = _resolve_json_pointer(schema, ref)
+            if target is None:
+                return dict(node)
+            resolved_target = _resolve_refs(schema, target, seen | {ref})
+            if isinstance(resolved_target, dict):
+                merged = dict(resolved_target)
+                for key, value in node.items():
+                    if key == "$ref":
+                        continue
+                    merged[key] = _resolve_refs(schema, value, seen | {ref})
+                return merged
+            return resolved_target
+        return {key: _resolve_refs(schema, value, seen) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_resolve_refs(schema, item, seen) for item in node]
+    return node
+
+
+def get_field_schema(field_name: str) -> dict | None:
+    schema = _load_section_content_schema()
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        root_ref = schema.get("$ref")
+        if isinstance(root_ref, str):
+            resolved_root = _resolve_json_pointer(schema, root_ref)
+            if isinstance(resolved_root, dict):
+                properties = resolved_root.get("properties")
+    if not isinstance(properties, dict):
+        properties = {}
+    field_schema = properties.get(field_name)
+    if not isinstance(field_schema, dict):
+        return None
+    resolved = _resolve_refs(schema, field_schema)
+    return resolved if isinstance(resolved, dict) else None
 
 
 def _section_field_has_content(section: dict, field: str) -> bool:
@@ -245,9 +328,7 @@ def validate_section_for_template(
 
     for component_id in resolved_required_components:
         field = field_map.get(component_id)
-        content_present = (
-            _section_field_has_content(section, field) if field is not None else False
-        )
+        content_present = _section_field_has_content(section, field) if field is not None else False
         diag(
             "CONTRACT_REQUIRED_CHECK",
             template_id=template_id,
@@ -269,9 +350,7 @@ def validate_section_for_template(
         if mode == "partial" and field in allowed_missing_fields:
             continue
         if not _section_field_has_content(section, field):
-            violations.append(
-                f"Required field '{field}' has no content for template '{template_id}'"
-            )
+            violations.append(f"Required field '{field}' has no content for template '{template_id}'")
 
     if section.get("template_id") != template_id:
         violations.append(
@@ -279,31 +358,104 @@ def validate_section_for_template(
             f"does not match expected '{template_id}'"
         )
 
-    diag(
-        "CONTRACT_VALIDATION_RESULT",
-        template_id=template_id,
-        violations=violations,
-    )
+    diag("CONTRACT_VALIDATION_RESULT", template_id=template_id, violations=violations)
     return len(violations) == 0, violations
 
 
-def get_capacity_limits(component_id: str) -> dict:
-    registry = _load_component_registry()
-    if component_id not in registry:
-        return {}
-    return registry[component_id].get("capacity", {})
+def _section_plan_list(section_plan: Any, field: str) -> list[str]:
+    value = None
+    if isinstance(section_plan, dict):
+        value = section_plan.get(field)
+    else:
+        value = getattr(section_plan, field, None)
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return []
 
 
-def get_component_registry_entry(component_id: str) -> dict | None:
-    """Return raw registry metadata for a component, or None if unknown."""
-    registry = _load_component_registry()
-    return registry.get(component_id)
+def _section_plan_id(section_plan: Any) -> str:
+    if isinstance(section_plan, dict):
+        return str(section_plan.get("section_id", ""))
+    return str(getattr(section_plan, "section_id", "") or "")
 
 
-def get_section_field_for_component(component_id: str) -> str | None:
-    """Map component id to SectionContent field name (from exported field map)."""
-    field_map = _load_field_map()
-    return field_map.get(component_id)
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def _field_contract(component_id: str, *, required: bool) -> GenerationFieldContract | None:
+    field_name = get_section_field_for_component(component_id)
+    if not field_name:
+        return None
+    return GenerationFieldContract(
+        component_id=component_id,
+        field_name=field_name,
+        required=required,
+        external=field_name in _EXTERNAL_FIELDS,
+        schema=get_field_schema(field_name) or {},
+        capacity=get_component_capacity(component_id),
+        generation_hint=get_component_generation_hint(component_id),
+    )
+
+
+def build_section_generation_manifest(
+    *,
+    template_id: str,
+    section_plan,
+) -> SectionGenerationManifest:
+    contract = _load_contract_raw(template_id)
+    required_components = _section_plan_list(section_plan, "required_components")
+    optional_components = _section_plan_list(section_plan, "optional_components")
+
+    if not required_components:
+        required_components = _required_components(contract)
+
+    if not optional_components:
+        optional_components = _optional_components(contract)
+
+    required_components = _dedupe(required_components)
+    optional_components = [
+        component_id
+        for component_id in _dedupe(optional_components)
+        if component_id not in set(required_components)
+    ]
+
+    required_fields: list[GenerationFieldContract] = []
+    optional_fields: list[GenerationFieldContract] = []
+    external_fields: list[GenerationFieldContract] = []
+
+    for component_id in required_components:
+        field_contract = _field_contract(component_id, required=True)
+        if field_contract is None:
+            continue
+        if field_contract.external:
+            external_fields.append(field_contract)
+        else:
+            required_fields.append(field_contract)
+
+    for component_id in optional_components:
+        field_contract = _field_contract(component_id, required=False)
+        if field_contract is None:
+            continue
+        if field_contract.external:
+            external_fields.append(field_contract)
+        else:
+            optional_fields.append(field_contract)
+
+    return SectionGenerationManifest(
+        template_id=template_id,
+        section_id=_section_plan_id(section_plan),
+        required_fields=required_fields,
+        optional_fields=optional_fields,
+        external_fields=external_fields,
+    )
 
 
 def get_allowed_presets(template_id: str) -> list[str]:
@@ -319,3 +471,4 @@ def clear_cache() -> None:
     _load_field_map.cache_clear()
     _load_component_registry.cache_clear()
     _load_preset_registry.cache_clear()
+    _load_section_content_schema.cache_clear()

@@ -2,7 +2,7 @@
 Graph-visible per-section orchestration.
 
 process_section is now the canonical 4-phase section flow:
-    1. content_generator
+    1. content_generator -> schema_validator
     2. media_planner
     3. diagram_generator || image_generator || interaction_generator
     4. section_assembler -> qc_agent
@@ -31,6 +31,7 @@ from pipeline.nodes.media_planner import media_planner
 from pipeline.nodes.image_generator import image_generator
 from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.nodes.qc_agent import qc_agent
+from pipeline.nodes.schema_validator import schema_validator
 from pipeline.nodes.section_assembler import section_assembler
 from pipeline.nodes.section_runner import _run_parallel_phase, run_section_steps
 from pipeline.runtime_context import get_runtime_context
@@ -256,13 +257,21 @@ async def process_section(
     try:
         phase1 = await run_section_steps(
             typed,
-            steps=[("content_generator", content_generator)],
+            steps=[
+                ("content_generator", content_generator),
+                ("schema_validator", schema_validator),
+            ],
             model_overrides=model_overrides,
             config=config,
         )
         merge_state_updates(raw_state, phase1)
         typed = TextbookPipelineState.parse(raw_state)
         if typed.current_section_id not in typed.generated_sections:
+            return phase1
+        if any(
+            error.node == "schema_validator" and error.section_id == section_id
+            for error in typed.errors
+        ):
             return phase1
 
         phase2 = await run_section_steps(

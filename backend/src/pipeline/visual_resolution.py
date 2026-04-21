@@ -299,7 +299,7 @@ def target_is_satisfied(
             return False
         if mode == "image":
             return bool(diagram.image_url)
-        return bool(diagram.spec or diagram.image_url or (diagram.svg_content or "").strip())
+        return bool(diagram.image_url or (diagram.svg_content or "").strip())
     if target == "diagram_series":
         series = getattr(section, "diagram_series", None)
         if series is None or not series.diagrams:

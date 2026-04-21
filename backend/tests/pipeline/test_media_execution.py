@@ -17,7 +17,6 @@ from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.nodes.section_assembler import section_assembler
 from pipeline.state import StyleContext, TextbookPipelineState
 from pipeline.types.section_content import (
-    DiagramSpec,
     ExplanationContent,
     HookHeroContent,
     PracticeContent,
@@ -112,19 +111,6 @@ def _section() -> SectionContent:
             ]
         ),
         what_next=WhatNextContent(body="Next we connect this to gradients.", next="Gradients"),
-    )
-
-
-def _diagram_spec(title: str) -> DiagramSpec:
-    return DiagramSpec(
-        type="process-flow",
-        title=title,
-        elements=[
-            {"id": "a", "label": "Input", "x": 80, "y": 140},
-            {"id": "b", "label": "Output", "x": 320, "y": 140},
-        ],
-        connections=[{"from_id": "a", "to_id": "b", "style": "arrow"}],
-        layout_hint="horizontal",
     )
 
 
@@ -227,7 +213,6 @@ async def test_section_assembler_builds_static_and_simulation_content_from_media
                     render=VisualRender.SVG,
                     status=VisualFrameResultStatus.GENERATED,
                     svg_content="<svg><rect /></svg>",
-                    diagram_spec=_diagram_spec("Main diagram"),
                     alt_text="Main diagram alt",
                 )
             },

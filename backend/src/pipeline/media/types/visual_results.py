@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel
 
 from pipeline.media.types.visual_slot import SlotType, VisualRender
-from pipeline.types.section_content import DiagramSpec, InteractionSpec
+from pipeline.types.section_content import InteractionSpec
 
 
 class VisualFrameResultStatus(str, Enum):
@@ -23,7 +24,7 @@ class VisualFrameResult(BaseModel):
     svg_content: str | None = None
     image_url: str | None = None
     html_content: str | None = None
-    diagram_spec: DiagramSpec | None = None
+    diagram_spec: dict[str, Any] | None = None
     interaction_spec: InteractionSpec | None = None
     alt_text: str | None = None
     explanation: str | None = None

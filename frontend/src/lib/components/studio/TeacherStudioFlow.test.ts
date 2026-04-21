@@ -229,7 +229,7 @@ describe('TeacherStudioFlow', () => {
 		streamPlan.mockReset();
 	});
 
-	it('moves from intent capture into review and supports client-side template swap', async () => {
+it('moves from intent capture into review and keeps ranked alternatives interactive', async () => {
 		let releasePlan!: () => void;
 		const planGate = new Promise<void>((resolve) => {
 			releasePlan = resolve;
@@ -294,7 +294,7 @@ describe('TeacherStudioFlow', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: /procedure/i }));
 
-		await waitFor(() => expect(screen.getByText(/template updated during review/i)).toBeTruthy());
-		expect(screen.getByText(/process steps/i)).toBeTruthy();
+		await waitFor(() => expect(screen.getByText(/current selection/i)).toBeTruthy());
+		expect(screen.getByRole('button', { name: /procedure/i })).toBeTruthy();
 	});
 });

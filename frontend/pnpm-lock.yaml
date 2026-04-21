@@ -24,8 +24,8 @@ importers:
         specifier: ^0.16.22
         version: 0.16.44
       lectio:
-        specifier: file:./vendor/lectio
-        version: file:vendor/lectio
+        specifier: 0.2.5
+        version: 0.2.5(svelte@5.55.0)
       lucide-svelte:
         specifier: ^0.542.0
         version: 0.542.0(svelte@5.55.0)
@@ -1179,8 +1179,10 @@ packages:
     resolution: {integrity: sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==}
     engines: {node: '>=6'}
 
-  lectio@file:vendor/lectio:
-    resolution: {directory: vendor/lectio, type: directory}
+  lectio@0.2.5:
+    resolution: {integrity: sha512-Td2/82pWJMi/i/27LxVa1qk4UP9CUhHE9HdtJjmAHzDAXPOe3441LcDqTd2hTAgEWNkKbNjQEsBjfwYK7Kkpdw==}
+    peerDependencies:
+      svelte: ^5.0.0
 
   lightningcss-android-arm64@1.32.0:
     resolution: {integrity: sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg==}
@@ -1271,6 +1273,11 @@ packages:
     peerDependencies:
       svelte: ^3 || ^4 || ^5.0.0-next.42
 
+  lucide-svelte@0.577.0:
+    resolution: {integrity: sha512-0i88o57KsaHWnc80J57fY99CWzlZsSdtH5kKjLUJa7z8dum/9/AbINNLzJ7NiRFUdOgMnfAmJt8jFbW2zeC5qQ==}
+    peerDependencies:
+      svelte: ^3 || ^4 || ^5.0.0-next.42
+
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
     hasBin: true
@@ -1281,6 +1288,11 @@ packages:
   marked@15.0.12:
     resolution: {integrity: sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA==}
     engines: {node: '>= 18'}
+    hasBin: true
+
+  marked@18.0.2:
+    resolution: {integrity: sha512-NsmlUYBS/Zg57rgDWMYdnre6OTj4e+qq/JS2ot3KrYLSoHLw+sDu0Nm1ZGpRgYAq6c+b1ekaY5NzVchMCQnzcg==}
+    engines: {node: '>= 20'}
     hasBin: true
 
   mdn-data@2.27.1:
@@ -2638,7 +2650,16 @@ snapshots:
 
   kleur@4.1.5: {}
 
-  lectio@file:vendor/lectio: {}
+  lectio@0.2.5(svelte@5.55.0):
+    dependencies:
+      '@types/dompurify': 3.2.0
+      dompurify: 3.3.3
+      esm-env: 1.2.2
+      katex: 0.16.44
+      lucide-svelte: 0.577.0(svelte@5.55.0)
+      marked: 18.0.2
+      qrcode: 1.5.4
+      svelte: 5.55.0
 
   lightningcss-android-arm64@1.32.0:
     optional: true
@@ -2703,6 +2724,10 @@ snapshots:
     dependencies:
       svelte: 5.55.0
 
+  lucide-svelte@0.577.0(svelte@5.55.0):
+    dependencies:
+      svelte: 5.55.0
+
   lz-string@1.5.0: {}
 
   magic-string@0.30.21:
@@ -2710,6 +2735,8 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.5.5
 
   marked@15.0.12: {}
+
+  marked@18.0.2: {}
 
   mdn-data@2.27.1: {}
 

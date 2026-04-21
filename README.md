@@ -48,11 +48,11 @@ Use one env file per surface:
 
 For Docker, the repo-root `GOOGLE_CLIENT_ID` is mapped into both the backend runtime and the frontend build as `VITE_GOOGLE_CLIENT_ID`.
 
-Optional contract refresh from the sibling Lectio repo:
+Optional contract refresh from the installed Lectio package:
 
 ```bash
-cd "C:\Projects\lectio"
-npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\lectio"
+cd "C:\Projects\Textbook agent"
+uv run python tools/update_lectio_contracts.py
 ```
 
 For Docker runs, open `http://localhost:3000`.
@@ -133,12 +133,12 @@ Railway image env vars:
   - the Google Cloud OAuth client must allow `http://localhost:5173` and `http://127.0.0.1:5173` as authorized JavaScript origins
   - if the OAuth consent screen is still in Testing mode, your sign-in email must be added as a test user
 - For Docker-local runs, the Google Cloud OAuth client must also allow `http://localhost:3000`
-- The sibling `C:\Projects\lectio` repo must exist locally because the frontend consumes it as a file dependency.
-- If Lectio template contracts change, refresh the backend copies with:
+- Frontend consumes the published npm `lectio` package pinned in `frontend/package.json`.
+- If Lectio contracts or generated types change, refresh backend copies with:
 
 ```bash
-cd "C:\Projects\lectio"
-npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\lectio"
+cd "C:\Projects\Textbook agent"
+uv run python tools/update_lectio_contracts.py
 ```
 
 ## Current Architecture

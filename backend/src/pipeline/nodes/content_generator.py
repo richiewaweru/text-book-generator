@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from pydantic_ai import Agent
 
 from core.config import settings as app_settings
-from pipeline.contracts import get_optional_fields, get_section_field_for_component
+from pipeline.contracts import build_section_generation_manifest
 from pipeline.events import (
     SectionFailedEvent,
     ValidationRepairAttemptedEvent,
@@ -50,10 +50,13 @@ from pipeline.state import (
     PipelineError,
     TextbookPipelineState,
 )
-from pipeline.types.section_content import (
+from pipeline.types.content_phases import (
     CoreContent,
     EnrichmentPhaseContent,
     PracticePhaseContent,
+)
+from pipeline.types.generation_manifest import SectionGenerationManifest
+from pipeline.types.section_content import (
     SectionContent,
 )
 
@@ -236,29 +239,19 @@ def _core_summary(core: CoreContent) -> str:
     )
 
 
-def _active_enrichment_fields(template_id: str, plan) -> list[str]:
-    """Return enrichment fields selected for this section, with a template fallback."""
+def _active_enrichment_fields(manifest: SectionGenerationManifest) -> list[str]:
     selected_fields: list[str] = []
     seen_fields: set[str] = set()
-    component_ids = [
-        *(getattr(plan, "required_components", []) or []),
-        *(getattr(plan, "optional_components", []) or []),
-    ]
-    for component_id in component_ids:
-        field_name = get_section_field_for_component(component_id)
+    for field_contract in manifest.active_text_fields():
+        field_name = field_contract.field_name
         if (
-            field_name
-            and field_name in ENRICHMENT_FIELDS
+            field_name in ENRICHMENT_FIELDS
             and field_name not in _EXTERNAL_FIELDS
             and field_name not in seen_fields
         ):
             selected_fields.append(field_name)
             seen_fields.add(field_name)
-    if selected_fields:
-        return selected_fields
-
-    optional = get_optional_fields(template_id)
-    return [f for f in optional if f in ENRICHMENT_FIELDS and f not in _EXTERNAL_FIELDS]
+    return selected_fields
 
 
 def _retry_policy(
@@ -286,6 +279,7 @@ async def _generate_monolithic(
     failed_sections: dict,
     errors: list,
     node_failures: list[NodeFailureDetail],
+    manifest: SectionGenerationManifest,
 ) -> None:
     """Original single-call path used for rerenders."""
     _ = model_overrides
@@ -296,6 +290,7 @@ async def _generate_monolithic(
             template_id=state.contract.id,
             template_name=state.contract.name,
             template_family=state.contract.family,
+            manifest=manifest,
         ),
     )
     base_prompt = build_content_user_prompt(
@@ -486,6 +481,7 @@ async def _generate_phased(
     failed_sections: dict,
     errors: list,
     node_failures: list[NodeFailureDetail],
+    manifest: SectionGenerationManifest,
 ) -> None:
     """Three-phase generation: core -> practice -> enrichment."""
     _ = model_overrides
@@ -500,6 +496,7 @@ async def _generate_phased(
             template_id=template_id,
             template_name=state.contract.name,
             template_family=state.contract.family,
+            manifest=manifest,
         ),
     )
     try:
@@ -546,6 +543,7 @@ async def _generate_phased(
             template_id=template_id,
             template_name=state.contract.name,
             template_family=state.contract.family,
+            manifest=manifest,
         ),
     )
     practice = None
@@ -585,7 +583,7 @@ async def _generate_phased(
         )
         return
 
-    enrichment_fields = _active_enrichment_fields(template_id, plan)
+    enrichment_fields = _active_enrichment_fields(manifest)
     enrichment = None
 
     if enrichment_fields:
@@ -597,6 +595,7 @@ async def _generate_phased(
                 template_name=state.contract.name,
                 template_family=state.contract.family,
                 active_enrichment_fields=enrichment_fields,
+                manifest=manifest,
             ),
         )
         try:
@@ -701,6 +700,10 @@ async def content_generator(
     failed_sections = dict(state.failed_sections)
     errors: list[PipelineError] = []
     node_failures: list[NodeFailureDetail] = []
+    manifest = build_section_generation_manifest(
+        template_id=state.contract.id,
+        section_plan=plan,
+    )
 
     use_phased = not is_rerender
 
@@ -717,6 +720,7 @@ async def content_generator(
             failed_sections=failed_sections,
             errors=errors,
             node_failures=node_failures,
+            manifest=manifest,
         )
     else:
         try:
@@ -732,6 +736,7 @@ async def content_generator(
                 failed_sections=failed_sections,
                 errors=errors,
                 node_failures=node_failures,
+                manifest=manifest,
             )
         except _RepairNeeded as repair:
             await _attempt_repair(

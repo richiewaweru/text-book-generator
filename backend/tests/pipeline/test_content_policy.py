@@ -19,16 +19,18 @@ from pipeline.prompts.content import (
     build_practice_user_prompt,
 )
 from pipeline.state import TextbookPipelineState
+from pipeline.types.content_phases import (
+    CoreContent,
+    EnrichmentPhaseContent,
+    PracticePhaseContent,
+)
 from pipeline.types.requests import GenerationMode, PipelineRequest, SectionPlan
 from pipeline.types.section_content import (
-    CoreContent,
     DefinitionContent,
-    EnrichmentPhaseContent,
     ExplanationContent,
     HookHeroContent,
     PracticeContent,
     PracticeHint,
-    PracticePhaseContent,
     PracticeProblem,
     SectionHeaderContent,
     WhatNextContent,
@@ -486,7 +488,8 @@ async def test_phased_content_generator_includes_visual_context_in_practice_prom
                 output=EnrichmentPhaseContent(
                     definition=DefinitionContent(
                         term="chlorophyll",
-                        meaning="A pigment that helps plants absorb light.",
+                        formal="A pigment that absorbs light energy in photosynthesis.",
+                        plain="The green substance that helps plants capture light.",
                     )
                 )
             )

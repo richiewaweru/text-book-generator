@@ -61,7 +61,6 @@ async def _generate_frame(
         render=slot.preferred_render,
         status=VisualFrameResultStatus.GENERATED,
         svg_content=legacy._render_spec_svg(output.spec),
-        diagram_spec=output.spec,
         alt_text=output.alt_text,
         explanation=output.caption,
     )
@@ -262,4 +261,3 @@ async def diagram_generator(
     if errors:
         output["errors"] = errors
     return output
-

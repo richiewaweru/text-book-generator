@@ -10,19 +10,21 @@ from pipeline.nodes import content_generator as content_generator_module
 from pipeline.nodes import process_section as process_section_module
 from pipeline.nodes import section_assembler as section_assembler_module
 from pipeline.state import QCReport, RerenderRequest, StyleContext, TextbookPipelineState
+from pipeline.types.content_phases import (
+    CoreContent,
+    EnrichmentPhaseContent,
+    PracticePhaseContent,
+)
 from pipeline.types.requests import PipelineRequest, SectionPlan
 from pipeline.types.section_content import (
     CalloutBlockContent,
-    CoreContent,
     DiagramContent,
-    EnrichmentPhaseContent,
     ExplanationContent,
     HookHeroContent,
     InteractionSpec,
     PracticeContent,
     PracticeHint,
     PracticeProblem,
-    PracticePhaseContent,
     SectionContent,
     SectionHeaderContent,
     SimulationContent,
@@ -483,7 +485,7 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
         if first == "content_generator":
             return {
                 "generated_sections": {"s-01": section},
-                "completed_nodes": ["content_generator"],
+                "completed_nodes": ["content_generator", "schema_validator"],
             }
         if first == "media_planner":
             return {
@@ -520,6 +522,7 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
     assert result["qc_reports"]["s-01"].passed is True
     assert result["completed_nodes"] == [
         "content_generator",
+        "schema_validator",
         "media_planner",
         "diagram_generator",
         "interaction_generator",

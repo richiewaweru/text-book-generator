@@ -25,4 +25,4 @@ npm run test
 - Only the fully wired `blue-classroom` preset is exposed in-product right now; other preset ids remain supported in data but are not yet live UI choices.
 - Docker builds serve the compiled static app from `nginx:alpine`; the repo-root `GOOGLE_CLIENT_ID` is mapped into the Docker build as `VITE_GOOGLE_CLIENT_ID`.
 - Vercel should deploy from `frontend/` with `npm install`, `npm run build`, output directory `build`, and env vars `PUBLIC_API_URL` plus `PUBLIC_GOOGLE_CLIENT_ID` or `VITE_GOOGLE_CLIENT_ID`.
-- The old external Lectio path blocker no longer applies because this repo vendors Lectio at `frontend/vendor/lectio`.
+- Lectio is consumed from the published npm package pinned in `package.json`; no vendored Lectio copy is used in this repo.

@@ -42,6 +42,7 @@ diag("BUILD_MARKER", file="section_assembler", version="diag_v1")
 
 
 def _check_capacity(section_dict: dict) -> list[str]:
+    # TODO: Replace with capacity warnings derived from Lectio component-registry.json.
     warnings = []
 
     def words(text: str | None) -> int:

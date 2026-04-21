@@ -6,6 +6,8 @@ It appears in every system prompt.
 
 from __future__ import annotations
 
+from pipeline.types.generation_manifest import GenerationFieldContract
+
 
 def shared_context(
     template_name: str,
@@ -48,6 +50,28 @@ _CAPACITY_RULES: dict[str, str] = {
     "prerequisites": "prerequisites.items 4 max",
     "interview": "interview.prompt 35 words max",
 }
+
+
+def _format_capacity(capacity: dict) -> str:
+    if not capacity:
+        return "none"
+    return ", ".join(f"{key}={value}" for key, value in sorted(capacity.items()))
+
+
+def capacity_reminder_for_manifest_fields(
+    active_fields: list[GenerationFieldContract],
+) -> str:
+    """Capacity reminders from Lectio component registry values."""
+    if not active_fields:
+        return ""
+    lines = [
+        f"- {field.field_name}: {_format_capacity(field.capacity)}"
+        for field in active_fields
+        if field.capacity
+    ]
+    if not lines:
+        return ""
+    return "Capacity rules (contract-derived):\n" + "\n".join(lines)
 
 
 def capacity_reminder_for_fields(active_fields: list[str]) -> str:

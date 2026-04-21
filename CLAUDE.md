@@ -41,5 +41,5 @@
 - `docs/project/SCHEMAS.md`
 
 ## Contract Sync
-- Export the live Lectio contract catalog from `C:\Projects\lectio` into `backend/contracts/` with `npm run export-contracts`.
-- The Textbook repo should treat the exported Lectio JSON as the planning/template source of truth.
+- Sync contracts and generated Python types from the installed frontend `lectio` package via `uv run python tools/update_lectio_contracts.py`.
+- The Textbook repo should treat the synced Lectio JSON contracts and generated adapter as the planning/template source of truth.

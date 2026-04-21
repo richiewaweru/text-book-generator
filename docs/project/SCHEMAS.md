@@ -138,7 +138,7 @@ Current schema source of truth lives in:
 - `updated_at`
 - optional `completed_at`
 
-`SectionContent` is Lectio-aligned and comes from `backend/src/pipeline/types/section_content.py` plus the matching frontend library in `C:\Projects\lectio`.
+`SectionContent` is Lectio-aligned and comes from `backend/src/pipeline/types/section_content.py` synced from the published frontend `lectio` package.
 
 ### Current Simulation Gate
 

@@ -43,7 +43,7 @@ This file is the human-readable source of truth for the current project state.
 
 ## Current Contract Source
 
-- `backend/contracts/` is exported from `C:\Projects\lectio`.
+- `backend/contracts/` is synced from `frontend/node_modules/lectio/contracts/` via `tools/update_lectio_contracts.py`.
 - The current harmonised catalog includes `classification`, `concept-compact`, `diagram-led`, `low-load`, `open-canvas`, `procedure`, `timeline`, `visual-led`, plus the other live-safe templates shipped by Lectio.
 
 ## Current Media Runtime

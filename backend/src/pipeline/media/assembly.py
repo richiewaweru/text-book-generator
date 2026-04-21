@@ -50,11 +50,7 @@ def frame_has_required_artifact(slot: VisualSlot, frame_result: VisualFrameResul
     if slot.preferred_render == VisualRender.IMAGE:
         return bool(frame_result.image_url)
     if slot.preferred_render == VisualRender.SVG:
-        return bool(
-            frame_result.svg_content
-            or frame_result.diagram_spec is not None
-            or frame_result.image_url
-        )
+        return bool(frame_result.svg_content or frame_result.image_url)
     return bool(frame_result.image_url or frame_result.svg_content or frame_result.html_content)
 
 
@@ -104,7 +100,7 @@ def capture_static_slot_results(
 
     if slot.slot_type == SlotType.DIAGRAM:
         diagram = section.diagram
-        if diagram is not None and (diagram.image_url or diagram.svg_content or diagram.spec is not None):
+        if diagram is not None and (diagram.image_url or diagram.svg_content):
             frame = slot.frames[0]
             frame_results[frame_result_key(frame)] = VisualFrameResult(
                 slot_id=slot.slot_id,
@@ -114,7 +110,6 @@ def capture_static_slot_results(
                 status=VisualFrameResultStatus.GENERATED,
                 svg_content=diagram.svg_content or None,
                 image_url=diagram.image_url,
-                diagram_spec=diagram.spec,
                 alt_text=diagram.alt_text,
             )
         return frame_results, build_slot_result(slot, frame_results)
@@ -204,7 +199,6 @@ def diagram_content_from_results(
     return DiagramContent(
         svg_content=frame_result.svg_content or "",
         image_url=frame_result.image_url,
-        spec=frame_result.diagram_spec,
         caption=slot.caption,
         alt_text=frame_result.alt_text or f"Diagram for {slot.caption}",
     )

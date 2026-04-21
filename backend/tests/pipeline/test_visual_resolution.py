@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from pipeline.contracts import get_contract
-from pipeline.nodes.diagram_generator import DiagramOutput, diagram_generator
+from pipeline.nodes.diagram_generator import (
+	DiagramElement,
+	DiagramOutput,
+	DiagramSpec,
+	diagram_generator,
+)
 from pipeline.nodes.image_generator import image_generator
 from pipeline.nodes.section_assembler import section_assembler
 from pipeline.run import _build_result
@@ -21,9 +26,7 @@ from pipeline.types.section_content import (
 	CalloutBlockContent,
 	DiagramCompareContent,
 	DiagramContent,
-	DiagramElement,
 	DiagramSeriesContent,
-	DiagramSpec,
 	ExplanationContent,
 	HookHeroContent,
 	PracticeContent,
@@ -518,7 +521,13 @@ async def test_svg_diagram_series_writes_step_svgs_and_finalizes(monkeypatch) ->
 	assert len(updated_section.diagram_series.diagrams) == 3
 	assert all(step.svg_content.startswith("<svg") for step in updated_section.diagram_series.diagrams)
 
-	updated_state = state.model_copy(update={"generated_sections": {sid: updated_section}})
+	updated_state = state.model_copy(
+		update={
+			"generated_sections": {sid: updated_section},
+			"media_frame_results": result.get("media_frame_results", {}),
+			"media_slot_results": result.get("media_slot_results", {}),
+		}
+	)
 	assert pending_visual_fields(updated_state) == []
 
 	assembled = await section_assembler(updated_state)
@@ -605,7 +614,13 @@ async def test_svg_diagram_compare_writes_before_and_after_svgs_and_finalizes(mo
 	assert updated_section.diagram_compare.before_svg.startswith("<svg")
 	assert updated_section.diagram_compare.after_svg.startswith("<svg")
 
-	updated_state = state.model_copy(update={"generated_sections": {sid: updated_section}})
+	updated_state = state.model_copy(
+		update={
+			"generated_sections": {sid: updated_section},
+			"media_frame_results": result.get("media_frame_results", {}),
+			"media_slot_results": result.get("media_slot_results", {}),
+		}
+	)
 	assert pending_visual_fields(updated_state) == []
 
 	assembled = await section_assembler(updated_state)

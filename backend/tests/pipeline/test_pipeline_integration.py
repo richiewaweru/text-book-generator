@@ -1813,6 +1813,7 @@ class TestProcessSectionComposite:
         assert [event.source for event in report_events] == ["assembler"]
         assert result["completed_nodes"] == [
             "content_generator",
+            "schema_validator",
             "media_planner",
             "diagram_generator",
             "image_generator",
@@ -1891,6 +1892,7 @@ class TestProcessSectionComposite:
         assert assembler_called is True
         assert result["completed_nodes"] == [
             "content_generator",
+            "schema_validator",
             "media_planner",
             "diagram_generator",
             "image_generator",

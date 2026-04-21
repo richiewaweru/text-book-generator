@@ -19,7 +19,7 @@
 		"dompurify": "^3.3.3",
 		"marked": "^15.0.0",
 		"katex": "^0.16.22",
-		"lectio": "file:./vendor/lectio",
+		"lectio": "0.2.5",
 		"lucide-svelte": "^0.542.0",
 		"qrcode": "^1.5.4",
 		"qrcode-generator": "^2.0.4",

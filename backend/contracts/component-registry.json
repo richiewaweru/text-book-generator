@@ -17,7 +17,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Full static header"
+    "print_fallback": "Full static header",
+    "generation_hint": "Generate header content that opens a section with title, subject, objective, and level indicators. Prioritize orient the learner with concise, learner-ready wording."
   },
   "hook-hero": {
     "id": "hook-hero",
@@ -36,7 +37,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Pull quote block with left border"
+    "print_fallback": "Pull quote block with left border",
+    "generation_hint": "Generate hook content that creates felt need before explanation arrives. Prioritize create felt need with concise, learner-ready wording."
   },
   "explanation-block": {
     "id": "explanation-block",
@@ -55,7 +57,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Static prose"
+    "print_fallback": "Static prose",
+    "generation_hint": "Generate explanation content that sustained prose that builds a mental model. Prioritize build understanding with concise, learner-ready wording."
   },
   "prerequisite-strip": {
     "id": "prerequisite-strip",
@@ -74,7 +77,8 @@
       "static",
       "hint-toggle"
     ],
-    "print_fallback": "Inline list of prerequisites"
+    "print_fallback": "Inline list of prerequisites",
+    "generation_hint": "Generate prerequisites content that lists assumed knowledge with optional refresher pop-ups. Prioritize activate prior knowledge with concise, learner-ready wording."
   },
   "what-next-bridge": {
     "id": "what-next-bridge",
@@ -94,7 +98,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Static, amber left rule"
+    "print_fallback": "Static, amber left rule",
+    "generation_hint": "Generate what_next content that connects the section forward to what the concept enables. Prioritize connect forward with concise, learner-ready wording."
   },
   "interview-anchor": {
     "id": "interview-anchor",
@@ -114,7 +119,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Static with write-in lines"
+    "print_fallback": "Static with write-in lines",
+    "generation_hint": "Generate interview content that makes knowledge speakable - rehearse explaining the concept. Prioritize make knowledge speakable with concise, learner-ready wording."
   },
   "callout-block": {
     "id": "callout-block",
@@ -133,7 +139,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Bordered callout box"
+    "print_fallback": "Bordered callout box",
+    "generation_hint": "Generate callout content that standalone highlighted callout — tip, warning, info, or exam note. Prioritize flag what matters with concise, learner-ready wording."
   },
   "summary-block": {
     "id": "summary-block",
@@ -154,7 +161,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Bulleted list with border"
+    "print_fallback": "Bulleted list with border",
+    "generation_hint": "Generate summary content that lists what this section covered — key takeaways as bullets. Prioritize consolidate and close with concise, learner-ready wording."
   },
   "section-divider": {
     "id": "section-divider",
@@ -172,7 +180,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Horizontal rule with label"
+    "print_fallback": "Horizontal rule with label",
+    "generation_hint": "Generate divider content that named visual break between parts within a section. Prioritize signal a phase change with concise, learner-ready wording."
   },
   "definition-card": {
     "id": "definition-card",
@@ -193,7 +202,8 @@
       "static",
       "plain-formal-toggle"
     ],
-    "print_fallback": "Both versions shown"
+    "print_fallback": "Both versions shown",
+    "generation_hint": "Generate definition content that anchors a formal term with formal and plain versions. Prioritize anchor formal knowledge with concise, learner-ready wording."
   },
   "definition-family": {
     "id": "definition-family",
@@ -213,7 +223,8 @@
       "static",
       "accordion"
     ],
-    "print_fallback": "All definitions expanded"
+    "print_fallback": "All definitions expanded",
+    "generation_hint": "Generate definition_family content that groups related terms that belong together conceptually. Prioritize distinguish related concepts with concise, learner-ready wording."
   },
   "glossary-rail": {
     "id": "glossary-rail",
@@ -235,7 +246,8 @@
       "drawer",
       "inline-strip"
     ],
-    "print_fallback": "Inline vocabulary strip at section end"
+    "print_fallback": "Inline vocabulary strip at section end",
+    "generation_hint": "Generate glossary content that vocabulary visible in peripheral field, updates by section. Prioritize retrieve meaning without losing place with concise, learner-ready wording."
   },
   "glossary-inline": {
     "id": "glossary-inline",
@@ -253,7 +265,8 @@
     "behaviour_modes": [
       "hint-toggle"
     ],
-    "print_fallback": "Term underlined, definition in footnote"
+    "print_fallback": "Term underlined, definition in footnote",
+    "generation_hint": null
   },
   "insight-strip": {
     "id": "insight-strip",
@@ -273,7 +286,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Static table"
+    "print_fallback": "Static table",
+    "generation_hint": "Generate insight_strip content that side-by-side comparison of 2-3 related values or concepts. Prioritize compare values simultaneously with concise, learner-ready wording."
   },
   "key-fact": {
     "id": "key-fact",
@@ -292,7 +306,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Bold bordered fact box"
+    "print_fallback": "Bold bordered fact box",
+    "generation_hint": "Generate key_fact content that visually prominent stat, formula, or date that anchors the section. Prioritize anchor a critical fact with concise, learner-ready wording."
   },
   "comparison-grid": {
     "id": "comparison-grid",
@@ -314,7 +329,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Static comparison table"
+    "print_fallback": "Static comparison table",
+    "generation_hint": "Generate comparison_grid content that holds multiple concepts in view so distinctions become structural. Prioritize compare and classify in parallel with concise, learner-ready wording."
   },
   "worked-example-card": {
     "id": "worked-example-card",
@@ -338,7 +354,8 @@
       "accordion",
       "compare"
     ],
-    "print_fallback": "All steps expanded"
+    "print_fallback": "All steps expanded",
+    "generation_hint": "Generate worked_example content that shows reasoning in action step by step, each step justified. Prioritize watch reasoning in action with concise, learner-ready wording."
   },
   "process-steps": {
     "id": "process-steps",
@@ -359,7 +376,8 @@
       "static",
       "step-reveal"
     ],
-    "print_fallback": "All steps visible, checkbox squares for print"
+    "print_fallback": "All steps visible, checkbox squares for print",
+    "generation_hint": "Generate process content that a repeatable procedure where order is non-negotiable. Prioritize follow a procedure with concise, learner-ready wording."
   },
   "practice-stack": {
     "id": "practice-stack",
@@ -384,7 +402,8 @@
       "progressive-hints",
       "flat-list"
     ],
-    "print_fallback": "All visible, write-in lines rendered"
+    "print_fallback": "All visible, write-in lines rendered",
+    "generation_hint": "Generate practice content that problems at calibrated difficulty with progressive hints and optional solutions. Prioritize apply understanding under calibrated difficulty with concise, learner-ready wording."
   },
   "quiz-check": {
     "id": "quiz-check",
@@ -405,7 +424,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Question and options shown, correct answer marked"
+    "print_fallback": "Question and options shown, correct answer marked",
+    "generation_hint": "Generate quiz content that quick concept check with immediate feedback mid-section. Prioritize verify understanding immediately with concise, learner-ready wording."
   },
   "reflection-prompt": {
     "id": "reflection-prompt",
@@ -424,7 +444,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Prompt with write-in lines"
+    "print_fallback": "Prompt with write-in lines",
+    "generation_hint": "Generate reflection content that pauses forward motion and turns attention inward. Prioritize pause and consolidate with concise, learner-ready wording."
   },
   "student-textbox": {
     "id": "student-textbox",
@@ -443,7 +464,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Lined write-in area"
+    "print_fallback": "Lined write-in area",
+    "generation_hint": "Generate student_textbox content that simple write-in box for student responses — no framing beyond a prompt. Prioritize record thinking with concise, learner-ready wording."
   },
   "short-answer": {
     "id": "short-answer",
@@ -463,7 +485,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Question with lined answer space, mark allocation shown"
+    "print_fallback": "Question with lined answer space, mark allocation shown",
+    "generation_hint": "Generate short_answer content that open question with write-in space and optional mark scheme. Prioritize recall and explain in own words with concise, learner-ready wording."
   },
   "fill-in-blank": {
     "id": "fill-in-blank",
@@ -484,7 +507,8 @@
       "static",
       "hint-toggle"
     ],
-    "print_fallback": "Passage with underlined blanks, word bank box below"
+    "print_fallback": "Passage with underlined blanks, word bank box below",
+    "generation_hint": "Generate fill_in_blank content that cloze passage with student-completed blanks — tests recall not recognition. Prioritize retrieve and complete with concise, learner-ready wording."
   },
   "pitfall-alert": {
     "id": "pitfall-alert",
@@ -505,7 +529,8 @@
       "static",
       "hint-toggle"
     ],
-    "print_fallback": "Full static, amber left border"
+    "print_fallback": "Full static, amber left border",
+    "generation_hint": "Generate pitfall content that names a specific misconception before the learner makes it. Prioritize inoculate against error with concise, learner-ready wording."
   },
   "diagram-block": {
     "id": "diagram-block",
@@ -526,7 +551,8 @@
       "zoom",
       "hint-toggle"
     ],
-    "print_fallback": "Static SVG 80% width centred"
+    "print_fallback": "Static SVG 80% width centred",
+    "generation_hint": "Generate diagram content that makes spatial or relational structure visible. Prioritize see the structure with concise, learner-ready wording."
   },
   "diagram-compare": {
     "id": "diagram-compare",
@@ -544,7 +570,8 @@
     "behaviour_modes": [
       "compare"
     ],
-    "print_fallback": "Both diagrams shown side by side"
+    "print_fallback": "Both diagrams shown side by side",
+    "generation_hint": "Generate diagram_compare content that before and after comparison with a drag slider. Prioritize see transformation with concise, learner-ready wording."
   },
   "diagram-series": {
     "id": "diagram-series",
@@ -563,7 +590,8 @@
       "step-reveal",
       "static"
     ],
-    "print_fallback": "All diagrams in sequence with step labels"
+    "print_fallback": "All diagrams in sequence with step labels",
+    "generation_hint": "Generate diagram_series content that a progression of diagrams that tells a sequence. Prioritize follow a visual progression with concise, learner-ready wording."
   },
   "video-embed": {
     "id": "video-embed",
@@ -581,7 +609,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "QR code or thumbnail based on setting"
+    "print_fallback": "QR code or thumbnail based on setting",
+    "generation_hint": "Generate video_embed content that embeds a video with caption and print fallback. Prioritize engage through multimedia with concise, learner-ready wording."
   },
   "image-block": {
     "id": "image-block",
@@ -600,7 +629,8 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Static image from embedded data"
+    "print_fallback": "Static image from embedded data",
+    "generation_hint": "Generate image_block content that uploaded raster image with caption and layout options. Prioritize illustrate with photos or screenshots with concise, learner-ready wording."
   },
   "timeline-block": {
     "id": "timeline-block",
@@ -622,7 +652,8 @@
       "static",
       "timeline-scrubber"
     ],
-    "print_fallback": "Vertical event list"
+    "print_fallback": "Vertical event list",
+    "generation_hint": "Generate timeline content that turns chronology into a readable instructional spine. Prioritize follow cause and sequence over time with concise, learner-ready wording."
   },
   "simulation-block": {
     "id": "simulation-block",
@@ -640,6 +671,7 @@
     "behaviour_modes": [
       "static"
     ],
-    "print_fallback": "Static diagram at midstate"
+    "print_fallback": "Static diagram at midstate",
+    "generation_hint": "Generate simulation content that manipulate a variable and discover the concept through observation. Prioritize manipulate and discover with concise, learner-ready wording."
   }
 }

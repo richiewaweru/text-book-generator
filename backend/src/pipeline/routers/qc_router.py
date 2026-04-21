@@ -9,6 +9,8 @@ Routes post-section execution toward the narrowest valid retry:
 
 from __future__ import annotations
 
+import json
+
 import core.events as core_events  # noqa: F401
 from langgraph.graph import END
 from langgraph.types import Send
@@ -32,6 +34,38 @@ _TEXT_FIELDS = {
     "glossary",
     "what_next",
 }
+
+
+def _schema_failures_for_section(
+    state: TextbookPipelineState,
+    section_id: str,
+) -> list[dict]:
+    for error in reversed(state.errors):
+        if error.node != "schema_validator" or error.section_id != section_id:
+            continue
+        try:
+            payload = json.loads(error.message)
+        except json.JSONDecodeError:
+            return []
+        failures = payload.get("failures", [])
+        if isinstance(failures, list):
+            return [failure for failure in failures if isinstance(failure, dict)]
+        return []
+    return []
+
+
+def _schema_single_retry_field(failures: list[dict]) -> str | None:
+    fields: set[str] = set()
+    for failure in failures:
+        field = str(failure.get("field", "")).strip()
+        if not field or field == "<root>":
+            continue
+        root_field = field.split(".", 1)[0]
+        fields.add(root_field)
+    if len(fields) != 1:
+        return None
+    only_field = next(iter(fields))
+    return only_field if only_field in _TEXT_FIELDS else None
 
 
 def _blocking_issues_for_section(
@@ -110,6 +144,32 @@ def route_after_qc(state: TextbookPipelineState | dict) -> list[Send] | str:
             None,
         )
         if plan is None:
+            continue
+
+        schema_failures = _schema_failures_for_section(state, section_id)
+        if schema_failures and state.can_rerender(section_id):
+            retry_field = _schema_single_retry_field(schema_failures)
+            base = {
+                **state.model_dump(),
+                "current_section_id": section_id,
+                "current_section_plan": plan.model_dump(),
+            }
+            if retry_field:
+                _publish_retry_queued(
+                    state,
+                    section_id=section_id,
+                    block_type=retry_field,
+                    reason=f"Schema validation failed for field '{retry_field}'.",
+                )
+                sends.append(Send("retry_field", base))
+            else:
+                _publish_retry_queued(
+                    state,
+                    section_id=section_id,
+                    block_type="schema_validator",
+                    reason="Schema validation failed across multiple fields.",
+                )
+                sends.append(Send("process_section", base))
             continue
 
         blocking_issues = _blocking_issues_for_section(state, section_id)

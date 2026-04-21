@@ -16,7 +16,8 @@ def build_qc_system_prompt(template_id: str) -> str:
 
     return f"""You perform semantic quality control on a generated educational section.
 
-Structural validation (schema, capacity limits) is already done before you run.
+Structural schema validation has already passed.
+Do not report missing JSON fields, wrong field names, or schema issues.
 Your job is semantic quality only -- does this content actually teach well?
 
 Template intent: {lesson_flow}

@@ -7,7 +7,7 @@
 | Backend (Python) | `backend/` | `uv sync --all-extras` |
 | Frontend (SvelteKit) | `frontend/` | `npm ci` |
 
-The frontend consumes the local Lectio package from `C:\Projects\lectio`, so that sibling repo must exist on disk for native development and Docker builds.
+The frontend consumes the published npm `lectio` package pinned in `frontend/package.json`.
 
 ## Docker Stack
 
@@ -80,14 +80,14 @@ Key ownership rules:
 
 ## Contract Sync
 
-Refresh exported Lectio contracts into the backend consumer directory:
+Sync Lectio contracts and generated Python types into the backend consumer directory:
 
 ```bash
-cd "C:\Projects\lectio"
-npm run export-contracts -- --out "C:\Projects\Textbook agent\backend\contracts\lectio"
+cd "C:\Projects\Textbook agent"
+uv run python tools/update_lectio_contracts.py
 ```
 
-Run the export again whenever Lectio template contracts change.
+Run this sync again whenever the frontend Lectio package version changes.
 
 ## Project-Local Tools
 
