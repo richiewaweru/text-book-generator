@@ -7,11 +7,17 @@ from pipeline.types.content_phases import (
 )
 from pipeline.types.section_content import (
     ExplanationContent,
+    FillInBlankContent,
+    FillInBlankSegment,
     HookHeroContent,
+    KeyFactContent,
     PracticeContent,
     PracticeHint,
     PracticeProblem,
     SectionHeaderContent,
+    SectionDividerContent,
+    ShortAnswerContent,
+    StudentTextboxContent,
     WhatNextContent,
 )
 
@@ -50,3 +56,30 @@ def test_enrichment_phase_content_uses_generated_lectio_models() -> None:
     enrichment = EnrichmentPhaseContent()
     assert enrichment.callout is None
     assert enrichment.summary is None
+    assert enrichment.student_textbox is None
+    assert enrichment.short_answer is None
+    assert enrichment.fill_in_blank is None
+    assert enrichment.divider is None
+    assert enrichment.key_fact is None
+
+
+def test_enrichment_phase_content_accepts_new_lectio_enrichment_models() -> None:
+    enrichment = EnrichmentPhaseContent(
+        student_textbox=StudentTextboxContent(prompt="Explain your reasoning."),
+        short_answer=ShortAnswerContent(question="What is slope?", marks=2),
+        fill_in_blank=FillInBlankContent(
+            instruction="Complete the definition.",
+            segments=[
+                FillInBlankSegment(text="Slope is", is_blank=False),
+                FillInBlankSegment(text="", is_blank=True, answer="rise over run"),
+            ],
+        ),
+        divider=SectionDividerContent(label="Practice checkpoint"),
+        key_fact=KeyFactContent(fact="Slope compares vertical change to horizontal change."),
+    )
+
+    assert enrichment.student_textbox is not None
+    assert enrichment.short_answer is not None
+    assert enrichment.fill_in_blank is not None
+    assert enrichment.divider is not None
+    assert enrichment.key_fact is not None

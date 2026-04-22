@@ -28,11 +28,18 @@ _TEXT_FIELDS = {
     "hook",
     "explanation",
     "practice",
+    "callout",
+    "summary",
+    "student_textbox",
+    "short_answer",
+    "fill_in_blank",
     "worked_example",
     "definition",
+    "key_fact",
     "pitfall",
     "glossary",
     "what_next",
+    "divider",
 }
 
 

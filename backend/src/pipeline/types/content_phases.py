@@ -8,10 +8,12 @@ from pipeline.types.section_content import (
     DefinitionContent,
     DefinitionFamilyContent,
     ExplanationContent,
+    FillInBlankContent,
     GlossaryContent,
     HookHeroContent,
     InsightStripContent,
     InterviewContent,
+    KeyFactContent,
     PitfallContent,
     PracticeContent,
     PrerequisiteContent,
@@ -19,6 +21,9 @@ from pipeline.types.section_content import (
     QuizContent,
     ReflectionContent,
     SectionHeaderContent,
+    SectionDividerContent,
+    ShortAnswerContent,
+    StudentTextboxContent,
     SummaryBlockContent,
     TimelineContent,
     WhatNextContent,
@@ -45,6 +50,9 @@ class PracticePhaseContent(BaseModel):
 class EnrichmentPhaseContent(BaseModel):
     callout: CalloutBlockContent | None = None
     summary: SummaryBlockContent | None = None
+    student_textbox: StudentTextboxContent | None = None
+    short_answer: ShortAnswerContent | None = None
+    fill_in_blank: FillInBlankContent | None = None
     worked_example: WorkedExampleContent | None = None
     worked_examples: list[WorkedExampleContent] | None = None
     process: ProcessContent | None = None
@@ -57,3 +65,5 @@ class EnrichmentPhaseContent(BaseModel):
     timeline: TimelineContent | None = None
     insight_strip: InsightStripContent | None = None
     interview: InterviewContent | None = None
+    divider: SectionDividerContent | None = None
+    key_fact: KeyFactContent | None = None

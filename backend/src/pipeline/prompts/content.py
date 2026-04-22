@@ -42,6 +42,9 @@ PRACTICE_FIELDS = {"practice", "what_next", "pitfall", "pitfalls", "prerequisite
 ENRICHMENT_FIELDS = {
     "callout",
     "summary",
+    "student_textbox",
+    "short_answer",
+    "fill_in_blank",
     "worked_example",
     "worked_examples",
     "process",
@@ -54,6 +57,8 @@ ENRICHMENT_FIELDS = {
     "timeline",
     "insight_strip",
     "interview",
+    "divider",
+    "key_fact",
 }
 _EXTERNAL_FIELDS = {
     "diagram",

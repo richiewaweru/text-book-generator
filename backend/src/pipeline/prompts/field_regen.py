@@ -20,12 +20,17 @@ RETRYABLE_FIELDS = {
     "explanation",
     "callout",
     "summary",
+    "student_textbox",
+    "short_answer",
+    "fill_in_blank",
     "practice",
     "worked_example",
     "definition",
+    "key_fact",
     "pitfall",
     "glossary",
     "what_next",
+    "divider",
 }
 
 

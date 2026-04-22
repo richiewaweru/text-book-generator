@@ -11,6 +11,7 @@ from planning.models import PlanningSectionPlan
 from pipeline.nodes import content_generator as content_generator_mod
 from pipeline.nodes import curriculum_planner as curriculum_planner_mod
 from pipeline.prompts.content import (
+    ENRICHMENT_FIELDS,
     _section_plan_policy_block,
     _visual_context_block,
     build_content_user_prompt,
@@ -274,6 +275,18 @@ def test_visual_context_is_injected_into_all_prompt_builders(
 
 def test_visual_context_block_omits_text_for_legacy_none() -> None:
     assert _visual_context_block(_section_plan()) == ""
+
+
+def test_enrichment_fields_include_new_text_components() -> None:
+    assert {
+        "callout",
+        "summary",
+        "student_textbox",
+        "short_answer",
+        "fill_in_blank",
+        "divider",
+        "key_fact",
+    } <= ENRICHMENT_FIELDS
 
 
 @pytest.mark.asyncio
