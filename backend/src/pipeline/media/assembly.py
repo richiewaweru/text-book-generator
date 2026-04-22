@@ -297,8 +297,21 @@ def apply_slot_results_to_section(
         content = diagram_content_from_results(slot, frame_results)
         return section.model_copy(update={"diagram": content or section.diagram})
     if slot.slot_type == SlotType.DIAGRAM_COMPARE:
-        content = compare_content_from_results(slot, frame_results)
-        return section.model_copy(update={"diagram_compare": content or section.diagram_compare})
+        new_content = compare_content_from_results(slot, frame_results)
+        if new_content is None:
+            return section.model_copy(update={"diagram_compare": section.diagram_compare})
+        if section.diagram_compare is not None:
+            content = section.diagram_compare.model_copy(update={
+                "before_svg": new_content.before_svg,
+                "after_svg": new_content.after_svg,
+                "before_image_url": new_content.before_image_url,
+                "after_image_url": new_content.after_image_url,
+                "before_label": new_content.before_label,
+                "after_label": new_content.after_label,
+            })
+        else:
+            content = new_content
+        return section.model_copy(update={"diagram_compare": content})
     if slot.slot_type == SlotType.DIAGRAM_SERIES:
         content = series_content_from_results(slot, frame_results)
         return section.model_copy(update={"diagram_series": content or section.diagram_series})
