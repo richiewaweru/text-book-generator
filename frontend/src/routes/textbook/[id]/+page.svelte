@@ -549,20 +549,20 @@
 <style>
 	.page-shell {
 		display: grid;
-		gap: 1rem;
+		gap: var(--rh-gap-component, 1rem);
 	}
 
 	.header {
 		display: flex;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--rh-gap-component, 1rem);
 		align-items: start;
 	}
 
 	.eyebrow {
 		margin: 0 0 0.3rem 0;
-		font-size: 0.78rem;
-		letter-spacing: 0.14em;
+		font-size: var(--rh-eyebrow-size, 0.78rem);
+		letter-spacing: var(--rh-eyebrow-tracking, 0.14em);
 		text-transform: uppercase;
 		color: #6b7c88;
 	}
@@ -575,13 +575,13 @@
 	.meta {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.55rem;
-		margin-top: 0.5rem;
+		gap: var(--space-2, 0.55rem);
+		margin-top: var(--space-2, 0.5rem);
 		color: #5d554a;
 	}
 
 	.status {
-		padding: 0.2rem 0.55rem;
+		padding: var(--space-1, 0.2rem) var(--space-2, 0.55rem);
 		border-radius: 999px;
 		font-size: 0.76rem;
 		letter-spacing: 0.08em;
@@ -615,29 +615,29 @@
 	.warning,
 	.error,
 	.export-controls {
-		padding: 1rem;
-		border-radius: 18px;
+		padding: var(--rh-pad-card-tight, 1rem);
+		border-radius: var(--rh-radius-card, 18px);
 		background: rgba(255, 251, 244, 0.84);
 		border: 1px solid rgba(36, 52, 63, 0.1);
 	}
 
 	.export-grid {
 		display: grid;
-		gap: 0.75rem;
+		gap: var(--rh-gap-component-tight, 0.75rem);
 		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-		margin-top: 0.75rem;
+		margin-top: var(--space-3, 0.75rem);
 	}
 
 	.export-grid label,
 	.export-toggles label {
 		display: grid;
-		gap: 0.35rem;
+		gap: var(--space-1, 0.35rem);
 	}
 
 	.export-grid input {
 		border: 1px solid rgba(36, 52, 63, 0.18);
-		border-radius: 10px;
-		padding: 0.6rem 0.75rem;
+		border-radius: var(--rh-radius-inner, 10px);
+		padding: var(--space-2, 0.6rem) var(--space-3, 0.75rem);
 		font: inherit;
 		background: rgba(255, 255, 255, 0.82);
 	}
@@ -645,14 +645,14 @@
 	.export-toggles {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 1rem;
-		margin-top: 0.9rem;
+		gap: var(--rh-gap-component, 1rem);
+		margin-top: var(--space-4, 0.9rem);
 	}
 
 	.preset-row {
 		display: grid;
-		gap: 0.55rem;
-		margin-top: 1rem;
+		gap: var(--space-2, 0.55rem);
+		margin-top: var(--space-4, 1rem);
 	}
 
 	.preset-label {
@@ -666,7 +666,7 @@
 	.preset-buttons {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.75rem;
+		gap: var(--rh-gap-component-tight, 0.75rem);
 	}
 
 	.preset-btn {
@@ -674,7 +674,7 @@
 		background: rgba(255, 255, 255, 0.8);
 		color: #24343f;
 		border-radius: 999px;
-		padding: 0.55rem 0.95rem;
+		padding: var(--space-2, 0.55rem) var(--space-4, 0.95rem);
 		font-weight: 600;
 		cursor: pointer;
 	}
@@ -686,8 +686,8 @@
 
 	.export-actions {
 		display: grid;
-		gap: 0.6rem;
-		margin-top: 1rem;
+		gap: var(--space-2, 0.6rem);
+		margin-top: var(--space-4, 1rem);
 	}
 
 	.pdf-btn {
@@ -695,7 +695,7 @@
 		background: #24343f;
 		color: #fffaf2;
 		border-radius: 999px;
-		padding: 0.65rem 1rem;
+		padding: var(--space-3, 0.65rem) var(--space-4, 1rem);
 		font-weight: 600;
 		cursor: pointer;
 	}
@@ -723,20 +723,20 @@
 	}
 
 	.failed-sections ul {
-		margin: 0.75rem 0 0 0;
+		margin: var(--space-3, 0.75rem) 0 0 0;
 		padding-left: 1.1rem;
 		display: grid;
-		gap: 0.55rem;
+		gap: var(--space-2, 0.55rem);
 	}
 
 	.failed-sections li {
 		display: grid;
-		gap: 0.2rem;
+		gap: var(--space-1, 0.2rem);
 	}
 
 	.section-summary {
 		display: grid;
-		gap: 0.15rem;
+		gap: var(--space-1, 0.15rem);
 	}
 
 </style>

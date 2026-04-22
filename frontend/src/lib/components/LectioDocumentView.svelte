@@ -102,7 +102,7 @@
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
-		gap: 0.75rem;
+		gap: var(--rh-gap-component-tight, 0.75rem);
 	}
 
 	@media (min-width: 1024px) {
@@ -113,13 +113,13 @@
 
 	.export-builder-btn {
 		flex-shrink: 0;
-		padding: 0.5rem 1rem;
+		padding: var(--space-2, 0.5rem) var(--space-4, 1rem);
 		font-size: 0.9rem;
 		font-weight: 600;
 		color: #0f172a;
 		background: #e2e8f0;
 		border: 1px solid #cbd5e1;
-		border-radius: 0.375rem;
+		border-radius: var(--rh-radius-inner, 0.375rem);
 		cursor: pointer;
 	}
 
@@ -129,7 +129,7 @@
 
 	.document-meta {
 		display: grid;
-		gap: 0.55rem;
+		gap: var(--space-2, 0.55rem);
 		align-content: start;
 		justify-items: start;
 	}
@@ -138,7 +138,7 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		padding: 0.45rem 0.75rem;
+		padding: var(--space-2, 0.45rem) var(--space-3, 0.75rem);
 		border-radius: 999px;
 		border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 		background: color-mix(in srgb, var(--secondary) 78%, white 22%);
@@ -151,26 +151,26 @@
 
 	.section-stack {
 		display: grid;
-		gap: 1.25rem;
+		gap: var(--rh-gap-section, 1.25rem);
 	}
 
 	.section-skeleton {
 		display: grid;
-		gap: 0.8rem;
-		padding: 1.25rem;
-		border-radius: 1.5rem;
+		gap: var(--rh-gap-component, 0.8rem);
+		padding: var(--rh-pad-card-tight, 1.25rem);
+		border-radius: var(--rh-radius-outer, 1.5rem);
 	}
 
 	.section-partial {
 		display: grid;
-		gap: 0.85rem;
+		gap: var(--rh-gap-component, 0.85rem);
 	}
 
 	.section-partial-badge {
 		display: inline-flex;
 		align-items: center;
 		width: fit-content;
-		padding: 0.28rem 0.65rem;
+		padding: var(--space-1, 0.28rem) var(--space-3, 0.65rem);
 		border-radius: 999px;
 		background: color-mix(in srgb, var(--secondary) 76%, white 24%);
 		color: color-mix(in srgb, var(--foreground) 82%, white 18%);
@@ -182,8 +182,8 @@
 
 	.skeleton-kicker {
 		margin: 0;
-		font-size: 0.78rem;
-		letter-spacing: 0.12em;
+		font-size: var(--rh-eyebrow-size, 0.78rem);
+		letter-spacing: var(--rh-eyebrow-tracking, 0.12em);
 		text-transform: uppercase;
 		color: var(--accent);
 	}
@@ -216,7 +216,7 @@
 		}
 
 		.section-stack[data-print-mode='true'] {
-			gap: 1rem;
+			gap: var(--rh-gap-component, 1rem);
 		}
 	}
 </style>
