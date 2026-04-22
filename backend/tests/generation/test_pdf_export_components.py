@@ -9,7 +9,11 @@ from generation.pdf_export.components.answers import (
     extract_answer_entries,
     generate_answer_key_pdf,
 )
-from generation.pdf_export.components.cover import generate_cover_pdf
+from generation.pdf_export.components.cover import (
+    clean_cover_title,
+    format_cover_date,
+    generate_cover_pdf,
+)
 from generation.pdf_export.components.toc import generate_toc_pdf
 from pipeline.api import PipelineSectionManifestItem
 from pipeline.types.section_content import (
@@ -98,8 +102,7 @@ def test_extract_answer_entries_uses_saved_section_content() -> None:
 def test_generate_cover_pdf_creates_valid_pdf(tmp_path: Path) -> None:
     output = generate_cover_pdf(
         output_path=tmp_path / "cover.pdf",
-        subject="Calculus",
-        context="Explain limits with a clear first-pass lesson.",
+        title="Calculus",
         school_name="Springfield High",
         teacher_name="Ms. Johnson",
         date_label="2026-04-02",
@@ -109,6 +112,45 @@ def test_generate_cover_pdf_creates_valid_pdf(tmp_path: Path) -> None:
     assert output.exists()
     assert len(reader.pages) == 1
     assert reader.metadata.title == "Calculus"
+
+
+def test_generate_cover_pdf_uses_structured_fields_only(tmp_path: Path) -> None:
+    output = generate_cover_pdf(
+        output_path=tmp_path / "cover.pdf",
+        title=(
+            "I want to teach my students a visually enhanced lesson about the process "
+            "of germination. Audience: Year 6"
+        ),
+        school_name="Springfield High",
+        teacher_name="Ms. Johnson",
+        date_label="2026-04-07",
+    )
+
+    reader = PdfReader(str(output))
+    page_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+
+    assert reader.metadata.title == "Germination"
+    assert "Germination" in page_text
+    assert "School:" in page_text
+    assert "Springfield High" in page_text
+    assert "Teacher:" in page_text
+    assert "Ms. Johnson" in page_text
+    assert "7 April 2026" in page_text
+    assert "I want to teach" not in page_text
+    assert "Reviewed lesson plan" not in page_text
+    assert "Planning warning" not in page_text
+
+
+def test_clean_cover_title_extracts_short_topic_from_teacher_prompt() -> None:
+    title = clean_cover_title(
+        "I want to teach my students a visually enhanced lesson about the process of germination."
+    )
+
+    assert title == "Germination"
+
+
+def test_format_cover_date_localizes_iso_date() -> None:
+    assert format_cover_date("2026-04-07") == "7 April 2026"
 
 
 def test_generate_toc_pdf_builds_from_section_manifest(tmp_path: Path) -> None:
