@@ -402,7 +402,7 @@
       "progressive-hints",
       "flat-list"
     ],
-    "print_fallback": "All visible, write-in lines rendered",
+    "print_fallback": "All visible, write-in lines rendered; inline answers hidden by default",
     "generation_hint": "Generate practice content that problems at calibrated difficulty with progressive hints and optional solutions. Prioritize apply understanding under calibrated difficulty with concise, learner-ready wording."
   },
   "quiz-check": {
