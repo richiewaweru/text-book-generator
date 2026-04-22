@@ -10,6 +10,7 @@ All other tests use deterministic state or the contracts on disk.
 
 from __future__ import annotations
 
+import json
 import warnings
 from types import SimpleNamespace
 
@@ -700,6 +701,89 @@ class TestQCRouting:
         assert isinstance(result, list)
         assert len(result) == 1
         assert result[0].node == "process_section"
+
+    def test_extended_single_blocking_fields_route_to_retry_field(self):
+        from pipeline.routers.qc_router import route_after_qc
+
+        for block_type in (
+            "callout",
+            "summary",
+            "student_textbox",
+            "short_answer",
+            "fill_in_blank",
+            "key_fact",
+            "divider",
+        ):
+            state = _base_state(
+                assembled_sections={"s-01": _section("s-01")},
+                qc_reports={
+                    "s-01": QCReport(
+                        section_id="s-01",
+                        passed=False,
+                        issues=[
+                            {
+                                "severity": "blocking",
+                                "block": block_type,
+                                "message": f"{block_type} needs improvement",
+                            }
+                        ],
+                        warnings=[],
+                    )
+                },
+            )
+
+            result = route_after_qc(state)
+            assert isinstance(result, list), block_type
+            assert len(result) == 1, block_type
+            assert result[0].node == "retry_field", block_type
+
+    def test_extended_schema_single_field_failures_route_to_retry_field(self):
+        from pipeline.routers.qc_router import route_after_qc
+
+        field_paths = {
+            "callout": "callout.body",
+            "summary": "summary.items.0.text",
+            "student_textbox": "student_textbox.prompt",
+            "short_answer": "short_answer.question",
+            "fill_in_blank": "fill_in_blank.segments.1.answer",
+            "key_fact": "key_fact.fact",
+            "divider": "divider.label",
+        }
+
+        for field_name, failure_path in field_paths.items():
+            state = _base_state(
+                current_section_id="s-01",
+                errors=[
+                    PipelineError(
+                        node="schema_validator",
+                        section_id="s-01",
+                        message=json.dumps(
+                            {
+                                "summary": "schema_validation_failed",
+                                "failures": [
+                                    {
+                                        "field": failure_path,
+                                        "type": "required_manifest",
+                                        "message": "Required field missing.",
+                                    }
+                                ],
+                            }
+                        ),
+                        recoverable=True,
+                    )
+                ],
+            )
+
+            result = route_after_qc(state)
+            assert isinstance(result, list), field_name
+            assert len(result) == 1, field_name
+            assert result[0].node == "retry_field", field_name
+
+    def test_router_text_fields_are_supported_by_field_regenerator(self):
+        from pipeline.prompts.field_regen import RETRYABLE_FIELDS
+        from pipeline.routers.qc_router import _TEXT_FIELDS
+
+        assert _TEXT_FIELDS <= RETRYABLE_FIELDS
 
 
 # ── Section assembler (deterministic, uses contracts on disk) ────────────────
