@@ -17,7 +17,7 @@ from generation.pdf_export.components.assembly import (
     add_page_numbers,
     merge_pdfs,
 )
-from generation.pdf_export.components.cover import generate_cover_pdf
+from generation.pdf_export.components.cover import clean_cover_title, generate_cover_pdf
 from generation.pdf_export.components.toc import generate_toc_pdf
 from generation.pdf_export.config import PDFExportConfig
 from generation.pdf_export.rendering.playwright import render_generation_pdf
@@ -71,12 +71,12 @@ async def export_generation_pdf(
     final_path = temp_dir / f"{generation.id}-{export_id}-final.pdf"
 
     try:
+        cover_title = clean_cover_title(document.subject or generation.subject)
         cover_started = time.perf_counter()
         _log_stage("cover_generation", "started", generation.id, request_id)
         generate_cover_pdf(
             output_path=cover_path,
-            subject=document.subject,
-            context=document.context,
+            title=cover_title,
             school_name=request.school_name,
             teacher_name=request.teacher_name,
             date_label=request.date,
@@ -151,7 +151,7 @@ async def export_generation_pdf(
         page_count = _count_pages(final_path)
         add_metadata(
             pdf_path=final_path,
-            title=document.subject,
+            title=cover_title,
             subject=document.context,
             author=request.teacher_name,
         )
@@ -179,7 +179,7 @@ async def export_generation_pdf(
     duration_ms = int((time.perf_counter() - started) * 1000)
     _log_stage("pdf_export", "completed", generation.id, request_id, duration_ms=duration_ms)
     pdf_export_telemetry.record_export(duration_ms=duration_ms, status="completed")
-    filename = _slugify(document.subject or generation.subject) + ".pdf"
+    filename = _slugify(cover_title) + ".pdf"
     return PDFExportResult(
         pdf_path=final_path,
         filename=filename,

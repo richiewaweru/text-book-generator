@@ -27,6 +27,21 @@
 		padding: 0 !important;
 	}
 
+	.page-frame,
+	.textbook-document-shell,
+	.lesson-shell,
+	[class*='theme-surface'],
+	[class*='page-shell'],
+	[class*='surface'] {
+		background-image: none !important;
+		background: white !important;
+	}
+
+	[class*='bg-[linear-gradient'],
+	[class*='bg-[radial-gradient'] {
+		background-image: none !important;
+	}
+
 	.page-shell[data-print-mode='true'] {
 		gap: 0;
 	}
@@ -38,8 +53,43 @@
 	}
 
 	.page-shell[data-print-mode='true'] .section-stack > article {
-		break-inside: avoid-page;
+		break-inside: avoid;
 		page-break-inside: avoid;
+		break-after: auto;
+		page-break-after: auto;
+	}
+
+	.table-of-contents,
+	.toc-section {
+		break-after: auto;
+		page-break-after: auto;
+	}
+
+	h2,
+	h3,
+	h4 {
+		break-after: avoid;
+		page-break-after: avoid;
+	}
+
+	[data-action='expand'],
+	[data-action='show-more'],
+	button[aria-expanded],
+	.expand-trigger,
+	.show-more-link,
+	.what-next-link,
+	.section-forward-link,
+	.see-example-link,
+	a[data-nav-link] {
+		display: none !important;
+	}
+
+	.diagram-step-label,
+	[class*='step-label']:not(.worked-step-label) {
+		font-size: 10px !important;
+		color: #888 !important;
+		letter-spacing: 0.1em !important;
+		text-transform: uppercase !important;
 	}
 
 	* {
