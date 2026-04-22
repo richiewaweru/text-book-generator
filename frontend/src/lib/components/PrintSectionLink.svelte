@@ -45,11 +45,11 @@
 	.print-section-link {
 		display: grid;
 		grid-template-columns: 112px 1fr;
-		gap: 1rem;
+		gap: var(--rh-gap-component, 1rem);
 		align-items: center;
-		padding: 1rem;
+		padding: var(--rh-pad-card-tight, 1rem);
 		border: 1px dashed rgba(31, 43, 52, 0.25);
-		border-radius: 18px;
+		border-radius: var(--rh-radius-card, 18px);
 		background: rgba(255, 251, 244, 0.82);
 	}
 
@@ -66,13 +66,13 @@
 
 	.qr-copy {
 		display: grid;
-		gap: 0.35rem;
+		gap: var(--space-1, 0.35rem);
 	}
 
 	.qr-label,
 	.qr-url {
-		font-size: 0.78rem;
-		letter-spacing: 0.08em;
+		font-size: var(--rh-eyebrow-size, 0.78rem);
+		letter-spacing: var(--rh-eyebrow-tracking, 0.08em);
 		text-transform: uppercase;
 		color: #5f574d;
 		word-break: break-word;
