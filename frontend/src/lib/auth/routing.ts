@@ -38,6 +38,22 @@ export function shouldRedirectToOnboarding(user: User | null, path: string): boo
 	return !safePaths.some((safePath) => path.startsWith(safePath));
 }
 
+export function resolveShellRedirect(user: User | null, path: string): string | null {
+	if (!user) {
+		return path.startsWith('/login') ? null : '/login';
+	}
+
+	if (path === '/') {
+		return resolveLandingRoute(user);
+	}
+
+	if (shouldRedirectToOnboarding(user, path)) {
+		return '/onboarding';
+	}
+
+	return null;
+}
+
 export async function navigateToLanding(
 	user: User,
 	navigate: (path: string, options: { replaceState: boolean }) => void | Promise<void>,

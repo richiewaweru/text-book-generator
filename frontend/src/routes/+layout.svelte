@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { fromStore } from 'svelte/store';
-	import { shouldRedirectToOnboarding } from '$lib/auth/routing';
+	import { resolveShellRedirect } from '$lib/auth/routing';
 	import { fetchCurrentUser } from '$lib/api/auth';
 	import { authInitialized, authIsAuthenticated, authUser, bootstrapAuth, logout } from '$lib/stores/auth';
 
@@ -24,20 +24,13 @@
 	$effect(() => {
 		if (!initialized.current) return;
 		const path = page.url.pathname;
-		const isLogin = path.startsWith('/login');
 		if (isPrintTextbookRoute) {
 			return;
 		}
 
-		if (!user.current) {
-			if (!isLogin) {
-				goto('/login', { replaceState: true });
-			}
-			return;
-		}
-
-		if (shouldRedirectToOnboarding(user.current, path)) {
-			goto('/onboarding', { replaceState: true });
+		const redirectTo = resolveShellRedirect(user.current, path);
+		if (redirectTo && redirectTo !== path) {
+			goto(redirectTo, { replaceState: true });
 		}
 	});
 
