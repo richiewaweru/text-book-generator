@@ -304,6 +304,28 @@ def test_visual_router_uses_intent_regardless_of_print_first():
             assert [placement.slot_type for placement in section.visual_placements] == ["diagram"]
 
 
+def test_visual_router_routes_graph_topics_to_image_for_explain_structure() -> None:
+    contract = build_contract()
+    brief = normalize_brief(
+        build_brief(
+            intent="Explain slope and graph interpretation with coordinate axes and linear equations",
+            constraints={
+                "more_practice": False,
+                "keep_short": False,
+                "use_visuals": True,
+                "print_first": False,
+            },
+        )
+    )
+
+    routed = route_visuals(brief, contract, compose_sections(brief, contract))
+    explain_section = next(section for section in routed if section.role == "explain")
+
+    assert explain_section.visual_policy is not None
+    assert explain_section.visual_policy.intent == "explain_structure"
+    assert explain_section.visual_policy.mode == "image"
+
+
 def test_visual_router_prefers_compare_placements_for_compare_intent() -> None:
     contract = build_contract(
         template_id="compare-and-apply",

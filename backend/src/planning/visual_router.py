@@ -42,9 +42,56 @@ _SPATIAL_HINTS = {
     "galaxy",
 }
 
+_GRAPH_HINTS = {
+    "graph",
+    "plot",
+    "axes",
+    "axis",
+    "coordinate",
+    "gradient",
+    "slope",
+    "derivative",
+    "integral",
+    "function",
+    "equation",
+    "curve",
+    "tangent",
+    "linear",
+    "quadratic",
+    "parabola",
+    "intercept",
+    "asymptote",
+    "vector",
+    "force",
+    "velocity",
+    "acceleration",
+    "displacement",
+    "distance",
+    "frequency",
+    "wavelength",
+    "amplitude",
+    "probability",
+    "distribution",
+    "histogram",
+    "scatter",
+    "correlation",
+    "regression",
+    "demand",
+    "supply",
+    "elasticity",
+    "marginal",
+    "revenue",
+    "cost",
+    "profit",
+}
+
 
 def _classify_spatial(brief: NormalizedBrief) -> bool:
     return any(keyword in _SPATIAL_HINTS for keyword in brief.keyword_profile)
+
+
+def _classify_graph(brief: NormalizedBrief) -> bool:
+    return any(keyword in _GRAPH_HINTS for keyword in brief.keyword_profile)
 
 
 def _visual_intent(section: PlanningSectionPlan) -> PlanningVisualIntent:
@@ -60,7 +107,11 @@ def _visual_intent(section: PlanningSectionPlan) -> PlanningVisualIntent:
 def _visual_mode(brief: NormalizedBrief, intent: str) -> PlanningVisualMode:
     if intent in {"show_realism", "demonstrate_process", "compare_variants"}:
         return "image"
-    return "image" if _classify_spatial(brief) else "svg"
+    if _classify_spatial(brief):
+        return "image"
+    if _classify_graph(brief):
+        return "image"
+    return "svg"
 
 
 def _derive_visual_placements(
