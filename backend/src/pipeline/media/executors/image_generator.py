@@ -20,7 +20,9 @@ from pipeline.media.types import SlotType, VisualFrameResult, VisualFrameResultS
 from pipeline.state import PipelineError, TextbookPipelineState
 
 
-def _image_size_for_frame(frame) -> str:
+def _image_size_for_frame(slot, frame) -> str:
+    if getattr(slot, "sizing", "full") == "compact":
+        return "1024x1024"
     if frame.target_w is None or frame.target_h is None:
         return "1024x1024"
     ratio = frame.target_w / frame.target_h
@@ -79,7 +81,7 @@ async def _generate_image_frame(
         section_id=sid,
         variant=variant,
         api_key_present=api_key_present,
-        size=_image_size_for_frame(frame),
+        size=_image_size_for_frame(slot, frame),
     )
     normalised_bytes = normalise_image_for_frame(
         image_result.bytes, target_w=frame.target_w, target_h=frame.target_h
@@ -134,7 +136,7 @@ async def _generate_compare_frame(
         section_id=sid,
         variant=variant,
         api_key_present=api_key_present,
-        size=_image_size_for_frame(frame),
+        size=_image_size_for_frame(slot, frame),
     )
     normalised_bytes = normalise_image_for_frame(
         image_result.bytes, target_w=frame.target_w, target_h=frame.target_h
@@ -187,7 +189,7 @@ async def _generate_series_frame(
         section_id=sid,
         variant=variant,
         api_key_present=api_key_present,
-        size=_image_size_for_frame(frame),
+        size=_image_size_for_frame(slot, frame),
         prompt_details={
             "step_index": frame.index + 1,
             "step_total": len(slot.frames),
@@ -374,7 +376,7 @@ async def image_generator(
                         store=store,
                         client=client,
                         api_key_present=api_key_present,
-                        variant="diagram",
+                        variant=slot.slot_id,
                     )
                 slot_frame_results[frame_result_key(frame)] = frame_result
                 emit_frame_ready(
@@ -457,4 +459,3 @@ async def image_generator(
     if errors:
         output["errors"] = errors
     return output
-

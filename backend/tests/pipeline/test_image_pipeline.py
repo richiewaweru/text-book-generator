@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 import os
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from PIL import Image
 
 from pipeline.events import ImageOutcomeEvent
 from pipeline.media.types import MediaPlan, VisualFrame, VisualSlot
@@ -190,12 +192,15 @@ def _state(
             if section.diagram_series is not None and section.diagram_series.diagrams
             else key_concepts or ["Step 1", "Step 2", "Step 3"]
         )
+        target_w, target_h = (800, 600) if len(labels) <= 2 else (800, 800)
         frames = [
             VisualFrame(
                 slot_id="diagram_series",
                 index=index,
                 label=label,
                 generation_goal=f"Render series step {index + 1}.",
+                target_w=target_w,
+                target_h=target_h,
             )
             for index, label in enumerate(labels)
         ]
@@ -230,12 +235,16 @@ def _state(
                     index=0,
                     label=before_label,
                     generation_goal="Render the before state.",
+                    target_w=800,
+                    target_h=600,
                 ),
                 VisualFrame(
                     slot_id="diagram_compare",
                     index=1,
                     label=after_label,
                     generation_goal="Render the after state.",
+                    target_w=800,
+                    target_h=600,
                 ),
             ],
         )
@@ -254,6 +263,8 @@ def _state(
                     index=0,
                     label=section.header.title,
                     generation_goal="Render the main diagram.",
+                    target_w=1200,
+                    target_h=675,
                 )
             ],
         )
@@ -276,24 +287,48 @@ def _state(
 class FakeImageClient:
     def __init__(self):
         self.prompts: list[str] = []
+        self.sizes: list[str] = []
+
+    @staticmethod
+    def _image_bytes(size: str, *, format: str) -> bytes:
+        width, height = (int(part) for part in size.split("x", maxsplit=1))
+        image = Image.new("RGB", (width, height), color=(240, 248, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format=format)
+        return buffer.getvalue()
 
     async def generate_image(self, *, prompt, size="1024x1024", format="png", seed=None):
         self.prompts.append(prompt)
-        return ImageGenerationResult(bytes=b"PNG", format="png", mime_type="image/png")
+        self.sizes.append(size)
+        return ImageGenerationResult(
+            bytes=self._image_bytes(size, format="PNG"),
+            format="png",
+            mime_type="image/png",
+        )
 
 
 class FailAfterFirstImageClient(FakeImageClient):
     async def generate_image(self, *, prompt, size="1024x1024", format="png", seed=None):
         self.prompts.append(prompt)
+        self.sizes.append(size)
         if len(self.prompts) > 1:
             raise RuntimeError("second compare image failed")
-        return ImageGenerationResult(bytes=b"PNG", format="png", mime_type="image/png")
+        return ImageGenerationResult(
+            bytes=self._image_bytes(size, format="PNG"),
+            format="png",
+            mime_type="image/png",
+        )
 
 
 class FakeJpegImageClient(FakeImageClient):
     async def generate_image(self, *, prompt, size="1024x1024", format="png", seed=None):
         self.prompts.append(prompt)
-        return ImageGenerationResult(bytes=b"JPEG", format="jpeg", mime_type="image/jpeg")
+        self.sizes.append(size)
+        return ImageGenerationResult(
+            bytes=self._image_bytes(size, format="JPEG"),
+            format="jpeg",
+            mime_type="image/jpeg",
+        )
 
 
 class FailingStore(LocalImageStore):
@@ -314,6 +349,7 @@ class RecordingStore(LocalImageStore):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.calls: list[dict[str, str]] = []
+        self.payloads: list[bytes] = []
 
     async def store_image(
         self,
@@ -324,6 +360,7 @@ class RecordingStore(LocalImageStore):
         filename: str,
         format: str = "png",
     ) -> str:
+        self.payloads.append(image_bytes)
         self.calls.append(
             {
                 "generation_id": generation_id,
@@ -503,7 +540,7 @@ async def test_image_generator_writes_single_image_with_local_store(tmp_path) ->
 
 
 @pytest.mark.asyncio
-async def test_image_generator_uses_provider_returned_format_for_store_and_url(tmp_path) -> None:
+async def test_image_generator_normalises_targeted_images_to_png_store_format(tmp_path) -> None:
     store = RecordingStore(base_path=tmp_path, base_url="http://test/images")
     client = FakeJpegImageClient()
     state = _state(
@@ -516,15 +553,71 @@ async def test_image_generator_uses_provider_returned_format_for_store_and_url(t
 
     section = result["generated_sections"]["s-01"]
     assert section.diagram is not None
-    assert section.diagram.image_url == "http://test/images/gen-image-test/s-01/diagram.jpeg"
+    assert section.diagram.image_url == "http://test/images/gen-image-test/s-01/diagram.png"
     assert store.calls == [
         {
             "generation_id": "gen-image-test",
             "section_id": "s-01",
-            "filename": "diagram.jpeg",
-            "format": "jpeg",
+            "filename": "diagram.png",
+            "format": "png",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_image_generator_normalises_compact_slots_to_600_by_400(tmp_path) -> None:
+    store = RecordingStore(base_path=tmp_path, base_url="http://test/images")
+    client = FakeImageClient()
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    )
+    sid = "s-01"
+    compact_slot = state.media_plans[sid].slots[0].model_copy(
+        update={
+            "slot_id": "practice-0-diagram",
+            "sizing": "compact",
+            "block_target": "practice",
+            "problem_index": 0,
+            "frames": [
+                state.media_plans[sid].slots[0].frames[0].model_copy(
+                    update={"slot_id": "practice-0-diagram", "target_w": 600, "target_h": 400}
+                )
+            ],
+        }
+    )
+    state = state.model_copy(
+        update={"media_plans": {sid: MediaPlan(section_id=sid, slots=[compact_slot])}}
+    )
+
+    result = await image_generator(state, _store=store, _client=client)
+
+    assert result["generated_sections"][sid].practice.problems[0].diagram is not None
+    assert result["generated_sections"][sid].practice.problems[0].diagram.image_url == (
+        "http://test/images/gen-image-test/s-01/practice-0-diagram.png"
+    )
+    assert client.sizes == ["1024x1024"]
+    saved = Image.open(tmp_path / "gen-image-test" / sid / "practice-0-diagram.png")
+    assert saved.size == (600, 400)
+    assert len(store.payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_image_generator_keeps_full_slot_dimensions_for_section_diagram(tmp_path) -> None:
+    store = RecordingStore(base_path=tmp_path, base_url="http://test/images")
+    client = FakeImageClient()
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    )
+
+    await image_generator(state, _store=store, _client=client)
+
+    assert client.sizes == ["1792x1024"]
+    saved = Image.open(tmp_path / "gen-image-test" / "s-01" / "diagram.png")
+    assert saved.size == (1200, 675)
 
 
 @pytest.mark.asyncio
@@ -857,7 +950,7 @@ async def test_image_generator_returns_recoverable_error_when_client_init_fails(
         raise RuntimeError("auth rejected")
 
     monkeypatch.setattr("pipeline.nodes.image_generator.get_image_client", _boom)
-    messages = _capture_node_logs(monkeypatch)
+    _capture_node_logs(monkeypatch)
 
     result = await image_generator(state)
 

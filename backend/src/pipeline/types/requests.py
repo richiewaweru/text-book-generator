@@ -70,6 +70,7 @@ class BlockVisualPlacement(BaseModel):
     slot_type: Literal["diagram", "diagram_series", "diagram_compare"] = "diagram"
     sizing: Literal["full", "compact"] = "full"
     hint: str = ""
+    problem_indices: list[int] | None = None
 
 
 class SectionPlan(BaseModel):

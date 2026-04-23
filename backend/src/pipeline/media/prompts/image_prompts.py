@@ -34,17 +34,25 @@ def build_image_generation_prompt(
     visual_style = _translate_style_to_image_keywords(style_context)
     must_include = ", ".join(frame.must_include) if frame.must_include else "the core idea"
     avoid = ", ".join(frame.avoid) if frame.avoid else "text overlays"
+    primary_brief = slot.content_brief or frame.generation_goal
     size_hint = ""
     if frame.target_w and frame.target_h:
         ratio = f"{frame.target_w}:{frame.target_h}"
-        size_hint = f"\nTarget aspect ratio: {ratio} — optimise composition for this shape"
+        size_hint = f"\nTarget aspect ratio: {ratio} - optimise composition for this shape"
+    sizing_hint = (
+        "Simple, focused composition. Single concept. Small-format educational graphic."
+        if slot.sizing == "compact"
+        else "Use the available frame to show the core concept clearly."
+    )
 
     return f"""Educational image for {section_title}
 
 Slot type: {slot.slot_type.value}
+Sizing: {slot.sizing}
+Target block: {slot.block_target or "section"}
 Frame label: {frame.label or "n/a"}
 Pedagogical intent: {slot.pedagogical_intent}
-Generation goal: {frame.generation_goal}
+Content brief: {primary_brief}
 Caption to support: {slot.caption}
 Reference style: {slot.reference_style.value}
 Must include: {must_include}
@@ -56,7 +64,8 @@ Requirements:
 - Clear, simple composition for textbook use
 - Educational illustration style
 - High contrast, readable
-- No text overlays{size_hint}"""
+- No text overlays
+- {sizing_hint}{size_hint}"""
 
 
 def build_series_step_image_prompt(

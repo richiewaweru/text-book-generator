@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 from pipeline.media.types import (
@@ -11,8 +12,8 @@ from pipeline.media.types import (
     VisualSlot,
 )
 from pipeline.state import StyleContext
-from pipeline.types.requests import SectionPlan
-from pipeline.types.section_content import SectionContent
+from pipeline.types.requests import BlockVisualPlacement, SectionPlan
+from pipeline.types.section_content import SectionContent, WorkedExampleContent
 from pipeline.types.template_contract import TemplateContractSummary
 
 _DIAGRAM_COMPONENTS: dict[str, SlotType] = {
@@ -20,6 +21,40 @@ _DIAGRAM_COMPONENTS: dict[str, SlotType] = {
     "diagram-series": SlotType.DIAGRAM_SERIES,
     "diagram-compare": SlotType.DIAGRAM_COMPARE,
 }
+
+_VISUAL_CONCRETE_HINTS = (
+    "angle",
+    "angles",
+    "arrow",
+    "axis",
+    "axes",
+    "before",
+    "compare",
+    "comparison",
+    "coordinate",
+    "coordinates",
+    "curve",
+    "diagram",
+    "distance",
+    "graph",
+    "grid",
+    "label",
+    "labeled",
+    "line",
+    "point",
+    "points",
+    "process",
+    "rectangle",
+    "run",
+    "sequence",
+    "shape",
+    "slope",
+    "step",
+    "table",
+    "triangle",
+    "vector",
+    "vertex",
+)
 
 
 def _all_contract_components(contract: TemplateContractSummary) -> set[str]:
@@ -32,8 +67,19 @@ def _all_contract_components(contract: TemplateContractSummary) -> set[str]:
     )
 
 
-def _slot_id(slot_type: SlotType) -> str:
-    return slot_type.value
+def _slot_id(
+    slot_type: SlotType,
+    *,
+    block_target: str | None = None,
+    problem_index: int | None = None,
+) -> str:
+    if block_target in {None, "explanation"} and problem_index is None:
+        return slot_type.value
+    if block_target == "practice" and problem_index is not None:
+        return f"practice-{problem_index}-{slot_type.value}"
+    if block_target == "worked_example":
+        return f"worked-example-{slot_type.value}"
+    return f"{block_target or 'slot'}-{slot_type.value}"
 
 
 def _visual_policy(plan: SectionPlan):
@@ -263,16 +309,124 @@ def _simulation_print_translation(plan: SectionPlan, contract: TemplateContractS
     return "hide"
 
 
-def _target_dimensions(slot_type: SlotType, frame_count: int) -> tuple[int, int]:
+def _target_dimensions(slot_type: SlotType, frame_count: int, *, sizing: str = "full") -> tuple[int, int]:
+    if sizing == "compact":
+        return 600, 400
     if slot_type == SlotType.DIAGRAM:
-        return 1200, 675          # 16:9
+        return 1200, 675
     if slot_type == SlotType.DIAGRAM_COMPARE:
-        return 800, 600           # 4:3 per panel
+        return 800, 600
     if slot_type == SlotType.DIAGRAM_SERIES:
         if frame_count <= 2:
-            return 800, 600       # 4:3 side by side
-        return 800, 800           # 1:1 for 3-4 frames in a row
-    return 1024, 1024             # fallback
+            return 800, 600
+        return 800, 800
+    return 1024, 1024
+
+
+def _normalise_brief(*parts: str | None) -> str | None:
+    cleaned = [" ".join((part or "").split()) for part in parts if part and str(part).strip()]
+    if not cleaned:
+        return None
+    return " ".join(cleaned)[:500]
+
+
+def _extract_explanation_brief(section: SectionContent) -> str | None:
+    definition_bits: list[str] = []
+    if section.definition is not None:
+        definition_bits.append(section.definition.term)
+        definition_bits.append(section.definition.plain)
+    return _normalise_brief(
+        section.explanation.body,
+        "Key ideas: " + ", ".join(section.explanation.emphasis[:3]) if section.explanation.emphasis else None,
+        "Definition context: " + " ".join(definition_bits) if definition_bits else None,
+    )
+
+
+def _practice_problem_text(section: SectionContent, problem_index: int) -> tuple[str | None, str | None, str | None]:
+    if problem_index < 0 or problem_index >= len(section.practice.problems):
+        return None, None, None
+    problem = section.practice.problems[problem_index]
+    first_hint = problem.hints[0].text if problem.hints else None
+    return problem.context, problem.question, first_hint
+
+
+def _extract_practice_brief(section: SectionContent, problem_index: int) -> str | None:
+    context, question, first_hint = _practice_problem_text(section, problem_index)
+    return _normalise_brief(context, question, first_hint)
+
+
+def _primary_worked_example(section: SectionContent) -> WorkedExampleContent | None:
+    if section.worked_example is not None:
+        return section.worked_example
+    worked_examples = getattr(section, "worked_examples", None) or []
+    return worked_examples[0] if worked_examples else None
+
+
+def _extract_worked_example_brief(section: SectionContent) -> str | None:
+    example = _primary_worked_example(section)
+    if example is None:
+        return None
+    step_text = " ".join(step.content for step in example.steps[:3])
+    return _normalise_brief(example.setup, step_text, example.conclusion)
+
+
+def _looks_visually_concrete(text: str) -> bool:
+    lowered = text.lower()
+    if re.search(r"\(\s*-?\d+\s*,\s*-?\d+\s*\)", lowered):
+        return True
+    if any(token in lowered for token in _VISUAL_CONCRETE_HINTS):
+        return True
+    return False
+
+
+def _resolve_practice_problem_indices(
+    placement: BlockVisualPlacement,
+    section: SectionContent,
+) -> list[int]:
+    problems = section.practice.problems
+    if placement.problem_indices is not None:
+        seen: set[int] = set()
+        ordered: list[int] = []
+        for index in placement.problem_indices:
+            if 0 <= index < len(problems) and index not in seen:
+                seen.add(index)
+                ordered.append(index)
+        return ordered
+
+    for index, problem in enumerate(problems):
+        if (problem.context or "").strip():
+            return [index]
+
+    for index, problem in enumerate(problems):
+        combined = " ".join(
+            part
+            for part in (
+                problem.question,
+                problem.hints[0].text if problem.hints else None,
+            )
+            if part
+        )
+        if _looks_visually_concrete(combined):
+            return [index]
+    return []
+
+
+def _placement_caption(
+    placement: BlockVisualPlacement,
+    section: SectionContent,
+    *,
+    problem_index: int | None = None,
+) -> str:
+    if placement.block == "practice":
+        label = f"practice problem {problem_index + 1}" if problem_index is not None else "practice problem"
+        return placement.hint.strip() or f"Supporting diagram for {label} in {section.header.title}."
+    if placement.block == "worked_example":
+        return placement.hint.strip() or f"Supporting diagram for the worked example in {section.header.title}."
+    if placement.slot_type == "diagram_series":
+        return _series_caption(section)
+    if placement.slot_type == "diagram_compare":
+        return _compare_caption(section)
+    return placement.hint.strip() or f"Supporting diagram for {section.header.title}."
 
 
 def _build_single_slot(
@@ -280,43 +434,63 @@ def _build_single_slot(
     section: SectionContent,
     plan: SectionPlan,
     slot_type: SlotType,
+    sizing: str = "full",
+    block_target: str | None = None,
+    problem_index: int | None = None,
+    content_brief: str | None = None,
+    caption: str | None = None,
+    label: str | None = None,
 ) -> VisualSlot:
     preferred_render = _preferred_render_for_slot(plan, slot_type)
     concepts = _key_concepts(section)
-    tw, th = _target_dimensions(slot_type, 1)
+    must_include = [label] if block_target in {"practice", "worked_example"} and label else concepts[:4]
+    tw, th = _target_dimensions(slot_type, 1, sizing=sizing)
+    slot_id = _slot_id(slot_type, block_target=block_target, problem_index=problem_index)
     frame = VisualFrame(
-        slot_id=_slot_id(slot_type),
+        slot_id=slot_id,
         index=0,
-        label=section.header.title,
-        generation_goal=f"Show the core idea of {section.header.title} clearly for learners.",
-        must_include=concepts[:4],
+        label=label or section.header.title,
+        generation_goal=content_brief or f"Show the core idea of {section.header.title} clearly for learners.",
+        must_include=must_include,
         avoid=_base_avoid_list(preferred_render),
         output_placeholders=_frame_output_placeholders(preferred_render, slot_type),
         target_w=tw,
         target_h=th,
     )
     return VisualSlot(
-        slot_id=_slot_id(slot_type),
+        slot_id=slot_id,
         slot_type=slot_type,
         required=True,
         preferred_render=preferred_render,
         fallback_render=_fallback_render_for_slot(slot_type, preferred_render),
+        sizing=sizing,
+        block_target=block_target,
+        problem_index=problem_index,
+        content_brief=content_brief,
         pedagogical_intent=_pedagogical_intent(plan),
-        caption=_single_caption(section, plan),
+        caption=caption or _single_caption(section, plan),
         reference_style=_reference_style(slot_type),
         frames=[frame],
     )
 
 
-def _build_series_slot(section: SectionContent, plan: SectionPlan) -> VisualSlot:
+def _build_series_slot(
+    section: SectionContent,
+    plan: SectionPlan,
+    *,
+    sizing: str = "full",
+    block_target: str | None = "explanation",
+    content_brief: str | None = None,
+) -> VisualSlot:
     preferred_render = _preferred_render_for_slot(plan, SlotType.DIAGRAM_SERIES)
     concepts = _key_concepts(section)
     labels = _series_labels(section, concepts)
     frame_count = len(labels)
-    tw, th = _target_dimensions(SlotType.DIAGRAM_SERIES, frame_count)
+    tw, th = _target_dimensions(SlotType.DIAGRAM_SERIES, frame_count, sizing=sizing)
+    slot_id = _slot_id(SlotType.DIAGRAM_SERIES, block_target=block_target)
     frames = [
         VisualFrame(
-            slot_id=_slot_id(SlotType.DIAGRAM_SERIES),
+            slot_id=slot_id,
             index=index,
             label=label,
             generation_goal=f"Show sequence step {index + 1} for {section.header.title}: {label}.",
@@ -329,11 +503,14 @@ def _build_series_slot(section: SectionContent, plan: SectionPlan) -> VisualSlot
         for index, label in enumerate(labels)
     ]
     return VisualSlot(
-        slot_id=_slot_id(SlotType.DIAGRAM_SERIES),
+        slot_id=slot_id,
         slot_type=SlotType.DIAGRAM_SERIES,
         required=True,
         preferred_render=preferred_render,
         fallback_render=_fallback_render_for_slot(SlotType.DIAGRAM_SERIES, preferred_render),
+        sizing=sizing,
+        block_target=block_target,
+        content_brief=content_brief,
         pedagogical_intent=_pedagogical_intent(plan),
         caption=_series_caption(section),
         reference_style=_reference_style(SlotType.DIAGRAM_SERIES),
@@ -342,13 +519,21 @@ def _build_series_slot(section: SectionContent, plan: SectionPlan) -> VisualSlot
     )
 
 
-def _build_compare_slot(section: SectionContent, plan: SectionPlan) -> VisualSlot:
+def _build_compare_slot(
+    section: SectionContent,
+    plan: SectionPlan,
+    *,
+    sizing: str = "full",
+    block_target: str | None = "explanation",
+    content_brief: str | None = None,
+) -> VisualSlot:
     preferred_render = _preferred_render_for_slot(plan, SlotType.DIAGRAM_COMPARE)
     before_label, after_label = _compare_labels(section)
-    tw, th = _target_dimensions(SlotType.DIAGRAM_COMPARE, 2)
+    tw, th = _target_dimensions(SlotType.DIAGRAM_COMPARE, 2, sizing=sizing)
+    slot_id = _slot_id(SlotType.DIAGRAM_COMPARE, block_target=block_target)
     frames = [
         VisualFrame(
-            slot_id=_slot_id(SlotType.DIAGRAM_COMPARE),
+            slot_id=slot_id,
             index=0,
             label=before_label,
             generation_goal=f"Render the before state for {section.header.title}.",
@@ -359,7 +544,7 @@ def _build_compare_slot(section: SectionContent, plan: SectionPlan) -> VisualSlo
             target_h=th,
         ),
         VisualFrame(
-            slot_id=_slot_id(SlotType.DIAGRAM_COMPARE),
+            slot_id=slot_id,
             index=1,
             label=after_label,
             generation_goal=f"Render the after state for {section.header.title}.",
@@ -371,11 +556,14 @@ def _build_compare_slot(section: SectionContent, plan: SectionPlan) -> VisualSlo
         ),
     ]
     return VisualSlot(
-        slot_id=_slot_id(SlotType.DIAGRAM_COMPARE),
+        slot_id=slot_id,
         slot_type=SlotType.DIAGRAM_COMPARE,
         required=True,
         preferred_render=preferred_render,
         fallback_render=_fallback_render_for_slot(SlotType.DIAGRAM_COMPARE, preferred_render),
+        sizing=sizing,
+        block_target=block_target,
+        content_brief=content_brief,
         pedagogical_intent=_pedagogical_intent(plan),
         caption=_compare_caption(section),
         reference_style=_reference_style(SlotType.DIAGRAM_COMPARE),
@@ -415,6 +603,94 @@ def _build_simulation_slot(section: SectionContent, plan: SectionPlan) -> Visual
     )
 
 
+def _slots_from_visual_placements(
+    *,
+    section_plan: SectionPlan,
+    section_content: SectionContent,
+) -> list[VisualSlot]:
+    slots: list[VisualSlot] = []
+    seen_slot_ids: set[str] = set()
+
+    for placement in section_plan.visual_placements:
+        if placement.block == "explanation":
+            content_brief = _extract_explanation_brief(section_content)
+            if placement.slot_type == "diagram_series":
+                slot = _build_series_slot(
+                    section_content,
+                    section_plan,
+                    sizing=placement.sizing,
+                    block_target="explanation",
+                    content_brief=content_brief,
+                )
+            elif placement.slot_type == "diagram_compare":
+                slot = _build_compare_slot(
+                    section_content,
+                    section_plan,
+                    sizing=placement.sizing,
+                    block_target="explanation",
+                    content_brief=content_brief,
+                )
+            else:
+                slot = _build_single_slot(
+                    section=section_content,
+                    plan=section_plan,
+                    slot_type=SlotType.DIAGRAM,
+                    sizing=placement.sizing,
+                    block_target="explanation",
+                    content_brief=content_brief,
+                    caption=_single_caption(section_content, section_plan),
+                )
+            if slot.slot_id not in seen_slot_ids:
+                slots.append(slot)
+                seen_slot_ids.add(slot.slot_id)
+            continue
+
+        if placement.block == "practice":
+            for problem_index in _resolve_practice_problem_indices(placement, section_content):
+                slot = _build_single_slot(
+                    section=section_content,
+                    plan=section_plan,
+                    slot_type=SlotType.DIAGRAM,
+                    sizing=placement.sizing,
+                    block_target="practice",
+                    problem_index=problem_index,
+                    content_brief=_normalise_brief(
+                        placement.hint,
+                        _extract_practice_brief(section_content, problem_index),
+                    ),
+                    caption=_placement_caption(
+                        placement,
+                        section_content,
+                        problem_index=problem_index,
+                    ),
+                    label=f"Practice problem {problem_index + 1}",
+                )
+                if slot.slot_id not in seen_slot_ids:
+                    slots.append(slot)
+                    seen_slot_ids.add(slot.slot_id)
+            continue
+
+        if placement.block == "worked_example" and _primary_worked_example(section_content) is not None:
+            slot = _build_single_slot(
+                section=section_content,
+                plan=section_plan,
+                slot_type=SlotType.DIAGRAM,
+                sizing=placement.sizing,
+                block_target="worked_example",
+                content_brief=_normalise_brief(
+                    placement.hint,
+                    _extract_worked_example_brief(section_content),
+                ),
+                caption=_placement_caption(placement, section_content),
+                label="Worked example",
+            )
+            if slot.slot_id not in seen_slot_ids:
+                slots.append(slot)
+                seen_slot_ids.add(slot.slot_id)
+
+    return slots
+
+
 def media_planner(
     *,
     section_plan: SectionPlan,
@@ -426,19 +702,29 @@ def media_planner(
     slots: list[VisualSlot] = []
     notes: list[str] = []
 
-    for slot_type in _required_slot_types(section_plan, contract=template_contract):
-        if slot_type == SlotType.DIAGRAM_SERIES:
-            slots.append(_build_series_slot(section_content, section_plan))
-        elif slot_type == SlotType.DIAGRAM_COMPARE:
-            slots.append(_build_compare_slot(section_content, section_plan))
-        else:
-            slots.append(
-                _build_single_slot(
-                    section=section_content,
-                    plan=section_plan,
-                    slot_type=slot_type,
-                )
+    if section_plan.visual_placements:
+        slots.extend(
+            _slots_from_visual_placements(
+                section_plan=section_plan,
+                section_content=section_content,
             )
+        )
+        if not slots:
+            notes.append("Visual placements were present but no renderable slots were resolved.")
+    else:
+        for slot_type in _required_slot_types(section_plan, contract=template_contract):
+            if slot_type == SlotType.DIAGRAM_SERIES:
+                slots.append(_build_series_slot(section_content, section_plan))
+            elif slot_type == SlotType.DIAGRAM_COMPARE:
+                slots.append(_build_compare_slot(section_content, section_plan))
+            else:
+                slots.append(
+                    _build_single_slot(
+                        section=section_content,
+                        plan=section_plan,
+                        slot_type=slot_type,
+                    )
+                )
 
     if _simulation_allowed(section_plan, template_contract):
         simulation_slot = _build_simulation_slot(section_content, section_plan)
@@ -463,7 +749,14 @@ def media_planner(
 def find_slot(media_plan: MediaPlan | None, slot_type: SlotType) -> VisualSlot | None:
     if media_plan is None:
         return None
-    return next((slot for slot in media_plan.slots if slot.slot_type == slot_type), None)
+    return next(
+        (
+            slot
+            for slot in media_plan.slots
+            if slot.slot_type == slot_type and slot.block_target not in {"practice", "worked_example"}
+        ),
+        None,
+    )
 
 
 def visual_slots(media_plan: MediaPlan | None) -> Iterable[VisualSlot]:
@@ -473,6 +766,7 @@ def visual_slots(media_plan: MediaPlan | None) -> Iterable[VisualSlot]:
         slot
         for slot in media_plan.slots
         if slot.slot_type in {SlotType.DIAGRAM, SlotType.DIAGRAM_COMPARE, SlotType.DIAGRAM_SERIES}
+        and slot.block_target not in {"practice", "worked_example"}
     )
 
 

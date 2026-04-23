@@ -134,6 +134,66 @@ def _explanation_visual_reference(section_plan: SectionPlan) -> tuple[str, str] 
     return "diagram below", "the diagram below"
 
 
+def _format_problem_indices(problem_indices: list[int]) -> str:
+    labels = [str(index + 1) for index in problem_indices]
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return ", ".join(labels[:-1]) + f", and {labels[-1]}"
+
+
+def _practice_visual_context(section_plan: SectionPlan, reference: tuple[str, str] | None) -> str:
+    practice_placements = [
+        placement for placement in section_plan.visual_placements if placement.block == "practice"
+    ]
+    if practice_placements:
+        indexed = [placement for placement in practice_placements if placement.problem_indices]
+        if indexed:
+            referenced = ", ".join(
+                f"problems {_format_problem_indices(placement.problem_indices or [])}"
+                for placement in indexed
+            )
+            return (
+                "Visual context:\n"
+                f"The selected inline diagrams belong to {referenced}. "
+                "Only those specific problems may say 'the diagram'. "
+                "All other practice problems must work without a visual."
+            )
+        return (
+            "Visual context:\n"
+            "Some practice items include their own supporting visuals. "
+            "Only reference a diagram when the placement explicitly belongs to that problem."
+        )
+    if reference is not None:
+        return (
+            "Visual context:\n"
+            "The section diagram appears elsewhere. "
+            "Do not reference it from individual practice problems."
+        )
+    return (
+        "Visual context:\n"
+        "This section has NO diagram for practice problems. "
+        "Do not reference any visual element."
+    )
+
+
+def _enrichment_visual_context(section_plan: SectionPlan) -> str:
+    if any(placement.block == "worked_example" for placement in section_plan.visual_placements):
+        return (
+            "Visual context:\n"
+            "A worked example may include its own compact diagram. "
+            "Only the worked example may reference that inline visual. "
+            "All other enrichment content must avoid visual references."
+        )
+    return (
+        "Visual context:\n"
+        "Do not reference any diagram or other visual element in enrichment content."
+    )
+
+
 def _visual_context_block(
     section_plan: SectionPlan,
     *,
@@ -173,31 +233,26 @@ def _visual_context_block(
         )
 
     if phase == "practice":
+        return _practice_visual_context(section_plan, reference)
+
+    if phase == "enrichment":
+        return _enrichment_visual_context(section_plan)
+
+    if reference is None:
         if any(placement.block == "practice" for placement in section_plan.visual_placements):
             return (
                 "Visual context:\n"
-                "Some practice items include their own supporting visuals. "
-                "Only reference a diagram when the placement explicitly belongs to that problem."
+                "This section has no explanation-adjacent diagram. "
+                "Only explicitly targeted practice problems may reference their own inline diagram. "
+                "Other content must not reference visuals."
             )
-        if reference is not None:
+        if any(placement.block == "worked_example" for placement in section_plan.visual_placements):
             return (
                 "Visual context:\n"
-                "The section diagram appears elsewhere. "
-                "Do not reference it from individual practice problems."
+                "This section has no explanation-adjacent diagram. "
+                "Only the worked example may reference its own inline diagram if one is present. "
+                "Other content must not reference visuals."
             )
-        return (
-            "Visual context:\n"
-            "This section has NO diagram for practice problems. "
-            "Do not reference any visual element."
-        )
-
-    if phase == "enrichment":
-        return (
-            "Visual context:\n"
-            "Do not reference any diagram or other visual element in enrichment content."
-        )
-
-    if reference is None:
         return (
             "Visual context:\n"
             "This section has NO diagram or interactive. "
@@ -211,7 +266,7 @@ def _visual_context_block(
             "This section includes a diagram below the explanation. "
             f"Only the explanation may reference it as '{phrase}'. "
             "Practice problems must not reference that section-level diagram, "
-            "and enrichment content must not reference visuals."
+            "and only a placed worked example may reference its own inline visual."
         )
     if location == "diagrams above":
         return (
@@ -219,14 +274,14 @@ def _visual_context_block(
             "This section includes diagrams above the explanation. "
             f"Only the explanation may reference them as '{phrase}'. "
             "Practice problems must not reference that section-level visual, "
-            "and enrichment content must not reference visuals."
+            "and only a placed worked example may reference its own inline visual."
         )
     return (
         "Visual context:\n"
         f"This section includes a {location} the explanation. "
         f"Only the explanation may reference it as '{phrase}'. "
         "Practice problems must not reference that section-level visual, "
-        "and enrichment content must not reference visuals."
+        "and only a placed worked example may reference its own inline visual."
     )
 
 

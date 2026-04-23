@@ -383,6 +383,9 @@
         },
         "context": {
           "type": "string"
+        },
+        "diagram": {
+          "$ref": "#/definitions/DiagramContent"
         }
       },
       "required": [
@@ -597,6 +600,9 @@
           "items": {
             "type": "string"
           }
+        },
+        "diagram": {
+          "$ref": "#/definitions/DiagramContent"
         }
       },
       "required": [

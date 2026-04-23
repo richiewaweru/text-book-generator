@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pipeline.contracts import validate_section_for_template
 from pipeline.console_diagnostics import force_console_log
 from pipeline.section_assets import pending_visual_fields, required_visual_fields
-from pipeline.media.assembly import apply_media_results_to_section
+from pipeline.media.assembly import apply_media_results_to_section, slot_is_ready
 from pipeline.media.qc.simulation_qc import validate_simulation_content
 from pipeline.state import (
     PartialSectionRecord,
@@ -184,6 +184,21 @@ async def _assemble_section(
         }
 
     pending_assets = pending_visual_fields(typed)
+    if media_plan is not None:
+        inline_pending = [
+            slot.slot_id
+            for slot in media_plan.slots
+            if slot.block_target in {"practice", "worked_example"}
+            and not (
+                typed.media_slot_results.get(section_id, {}).get(slot.slot_id).ready
+                if typed.media_slot_results.get(section_id, {}).get(slot.slot_id) is not None
+                else slot_is_ready(
+                    slot,
+                    typed.media_frame_results.get(section_id, {}).get(slot.slot_id),
+                )
+            )
+        ]
+        pending_assets = [*pending_assets, *inline_pending]
     if simulation_slot is not None and simulation_slot.required:
         simulation_issues = validate_simulation_content(
             slot=simulation_slot,
@@ -192,6 +207,7 @@ async def _assemble_section(
         )
         if simulation_issues:
             pending_assets = [*pending_assets, simulation_slot.slot_id]
+    pending_assets = list(dict.fromkeys(pending_assets))
     if pending_assets:
         force_console_log(
             "FINALIZE",

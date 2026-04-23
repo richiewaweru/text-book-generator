@@ -63,6 +63,7 @@ class PracticeProblem(BaseModel):
     writein_lines: Optional[float] = None
     self_assess: Optional[bool] = None
     context: Optional[str] = None
+    diagram: Optional[DiagramContent] = None
 class PracticeHint(BaseModel):
     model_config = ConfigDict(extra='forbid')
     level: HintLevel
@@ -111,6 +112,7 @@ class WorkedExampleContent(BaseModel):
     alternative: Optional[WorkedExampleContent] = None
     answer: Optional[str] = None
     alternatives: Optional[list[str]] = None
+    diagram: Optional[DiagramContent] = None
 class WorkedStep(BaseModel):
     model_config = ConfigDict(extra='forbid')
     label: str

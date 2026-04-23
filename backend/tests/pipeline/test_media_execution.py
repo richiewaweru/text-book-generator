@@ -17,6 +17,7 @@ from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.nodes.section_assembler import section_assembler
 from pipeline.state import StyleContext, TextbookPipelineState
 from pipeline.types.section_content import (
+    DiagramContent,
     ExplanationContent,
     HookHeroContent,
     PracticeContent,
@@ -26,8 +27,10 @@ from pipeline.types.section_content import (
     SectionHeaderContent,
     SimulationContent,
     WhatNextContent,
+    WorkedExampleContent,
+    WorkedStep,
 )
-from pipeline.types.requests import GenerationMode, PipelineRequest, SectionPlan
+from pipeline.types.requests import BlockVisualPlacement, GenerationMode, PipelineRequest, SectionPlan
 from pipeline.types.template_contract import GenerationGuidance, TemplateContractSummary
 from pipeline.visual_resolution import pending_visual_fields
 
@@ -343,3 +346,133 @@ async def test_graph_visible_diagram_node_delegates_to_media_executor(monkeypatc
     result = await diagram_node(_base_state(media_plan=MediaPlan(section_id="s-01", slots=[])))
 
     assert result["marker"] == "delegated"
+
+
+@pytest.mark.asyncio
+async def test_section_assembler_writes_compact_practice_diagram_to_target_problem() -> None:
+    practice_slot = VisualSlot(
+        slot_id="practice-0-diagram",
+        slot_type="diagram",
+        required=True,
+        preferred_render="image",
+        sizing="compact",
+        block_target="practice",
+        problem_index=0,
+        pedagogical_intent="Support the selected practice problem.",
+        caption="Practice support diagram.",
+        frames=[
+            VisualFrame(
+                slot_id="practice-0-diagram",
+                index=0,
+                label="Practice problem 1",
+                generation_goal="Show the support diagram.",
+            )
+        ],
+    )
+    state = _base_state(media_plan=MediaPlan(section_id="s-01", slots=[practice_slot]))
+    state.current_section_plan = state.current_section_plan.model_copy(
+        update={
+            "needs_diagram": False,
+            "required_components": [],
+            "visual_placements": [
+                BlockVisualPlacement(
+                    block="practice",
+                    slot_type="diagram",
+                    sizing="compact",
+                    problem_indices=[0],
+                )
+            ],
+        }
+    )
+    state.media_frame_results = {
+        "s-01": {
+            "practice-0-diagram": {
+                "0": VisualFrameResult(
+                    slot_id="practice-0-diagram",
+                    frame_index=0,
+                    label="Practice problem 1",
+                    render=VisualRender.IMAGE,
+                    status=VisualFrameResultStatus.GENERATED,
+                    image_url="http://test/images/gen-media-exec/s-01/practice-0-diagram.png",
+                    alt_text="Practice diagram alt",
+                )
+            }
+        }
+    }
+
+    result = await section_assembler(state)
+
+    assembled = result["assembled_sections"]["s-01"]
+    assert isinstance(assembled.practice.problems[0].diagram, DiagramContent)
+    assert assembled.practice.problems[0].diagram.image_url == (
+        "http://test/images/gen-media-exec/s-01/practice-0-diagram.png"
+    )
+    assert assembled.diagram is None
+
+
+@pytest.mark.asyncio
+async def test_section_assembler_writes_compact_worked_example_diagram() -> None:
+    worked_slot = VisualSlot(
+        slot_id="worked-example-diagram",
+        slot_type="diagram",
+        required=True,
+        preferred_render="svg",
+        sizing="compact",
+        block_target="worked_example",
+        pedagogical_intent="Support the worked example.",
+        caption="Worked example support diagram.",
+        frames=[
+            VisualFrame(
+                slot_id="worked-example-diagram",
+                index=0,
+                label="Worked example",
+                generation_goal="Show the worked example setup.",
+            )
+        ],
+    )
+    state = _base_state(media_plan=MediaPlan(section_id="s-01", slots=[worked_slot]))
+    state.current_section_plan = state.current_section_plan.model_copy(
+        update={
+            "needs_diagram": False,
+            "required_components": [],
+            "visual_placements": [
+                BlockVisualPlacement(
+                    block="worked_example",
+                    slot_type="diagram",
+                    sizing="compact",
+                )
+            ],
+        }
+    )
+    state.generated_sections["s-01"] = state.generated_sections["s-01"].model_copy(
+        update={
+            "worked_example": WorkedExampleContent(
+                title="Find the gradient",
+                setup="Plot the two points.",
+                steps=[WorkedStep(label="Step 1", content="Mark the rise and run.")],
+                conclusion="Compute the ratio.",
+            )
+        }
+    )
+    state.media_frame_results = {
+        "s-01": {
+            "worked-example-diagram": {
+                "0": VisualFrameResult(
+                    slot_id="worked-example-diagram",
+                    frame_index=0,
+                    label="Worked example",
+                    render=VisualRender.SVG,
+                    status=VisualFrameResultStatus.GENERATED,
+                    svg_content="<svg><rect /></svg>",
+                    alt_text="Worked example diagram alt",
+                )
+            }
+        }
+    }
+
+    result = await section_assembler(state)
+
+    assembled = result["assembled_sections"]["s-01"]
+    assert assembled.worked_example is not None
+    assert isinstance(assembled.worked_example.diagram, DiagramContent)
+    assert assembled.worked_example.diagram.caption == "Worked example support diagram."
