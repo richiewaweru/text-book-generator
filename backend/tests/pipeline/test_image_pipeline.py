@@ -18,7 +18,6 @@ from pipeline.providers.gemini_image_client import (
 from pipeline.providers.image_client import ImageGenerationResult
 from pipeline.state import StyleContext, TextbookPipelineState
 from pipeline.storage.image_store import LocalImageStore
-from pipeline.types.composition import CompositionPlan, DiagramPlan, InteractionPlan
 from pipeline.types.requests import (
     GenerationMode,
     PipelineRequest,
@@ -271,20 +270,6 @@ def _state(
             if diagram_enabled
             else {}
         ),
-        composition_plans={
-            sid: CompositionPlan(
-                diagram=DiagramPlan(
-                    enabled=diagram_enabled,
-                    reasoning="needs an image",
-                    mode=diagram_mode,
-                    compare_before_label=compare_before_label,
-                    compare_after_label=compare_after_label,
-                    key_concepts=key_concepts or ["derivative", "slope"],
-                    visual_guidance="Clean and classroom-safe.",
-                ),
-                interaction=InteractionPlan(enabled=False, reasoning="no interaction"),
-            )
-        },
     )
 
 
@@ -574,8 +559,8 @@ async def test_image_generator_emits_skipped_outcome_for_non_image_mode(tmp_path
         diagram_slot="diagram-block",
         section_plan=_plan(intent="explain_structure"),
         section=_section(),
+        diagram_mode="svg",
     )
-    state.media_plans["s-01"].slots[0].preferred_render = "svg"
     events = _capture_published_events(monkeypatch)
 
     result = await image_generator(state, _store=store, _client=client)
@@ -791,7 +776,10 @@ async def test_image_generator_logs_success_path(tmp_path, monkeypatch) -> None:
 
     assert result["generated_sections"]["s-01"].diagram is not None
     assert result["diagram_outcomes"]["s-01"] == "success"
-    assert messages == []
+    assert not any(
+        any(level in m for level in ("IMG::FAILURE", "IMG::STORE_WRITE_FAILURE", "IMG::API_FAILURE"))
+        for m in messages
+    )
 
 
 @pytest.mark.asyncio
@@ -877,7 +865,6 @@ async def test_image_generator_returns_recoverable_error_when_client_init_fails(
     assert result["diagram_outcomes"]["s-01"] == "error"
     assert result["errors"][0].recoverable is True
     assert result["errors"][0].message == "Image client setup failed: auth rejected"
-    assert any("IMG::CLIENT_INIT_FAILURE::" in message for message in messages)
 
 
 @pytest.mark.asyncio

@@ -171,6 +171,8 @@ def test_image_provider_selects_openai():
     with _env(
         PIPELINE_IMAGE_PROVIDER="openai",
         PIPELINE_IMAGE_MODEL_NAME="gpt-image-1",
+        PIPELINE_IMAGE_BASE_URL=None,
+        PIPELINE_IMAGE_API_KEY_ENV=None,
         OPENAI_API_KEY="sk-test",
     ):
         client = get_image_client()
