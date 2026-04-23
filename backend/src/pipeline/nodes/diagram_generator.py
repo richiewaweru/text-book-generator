@@ -273,7 +273,7 @@ async def _generate_diagram_output(
     agent = Agent(
         model=model,
         output_type=DiagramOutput,
-        system_prompt=build_diagram_system_prompt(state.style_context),
+        system_prompt=build_diagram_system_prompt(state.style_context, sizing=slot.sizing),
     )
     timeout_policy = timeout_policy_from_config(config)
     retry_policy = retry_policy_for_node(config, "diagram_generator")

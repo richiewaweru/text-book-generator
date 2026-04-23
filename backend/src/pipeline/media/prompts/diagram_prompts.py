@@ -41,8 +41,16 @@ Labels: {labels}
 Complexity: {detail}"""
 
 
-def build_diagram_system_prompt(ctx: StyleContext) -> str:
+def build_diagram_system_prompt(ctx: StyleContext, *, sizing: str = "full") -> str:
     style_instruction = build_diagram_style_instruction(ctx)
+    coordinate_space = "400x300" if sizing == "compact" else "600x400"
+    safe_zone = "x 30-370, y 40-260." if sizing == "compact" else "x 40-560, y 50-360."
+    default_element_size = "90x48" if sizing == "compact" else "120x60"
+    compact_guidance = (
+        "- Keep the layout compact: 2-4 elements only, one focal relationship, minimal ornament."
+        if sizing == "compact"
+        else "- Use the full canvas deliberately for clear spacing and label readability."
+    )
 
     return f"""You design diagrams for educational content by outputting structured JSON specs.
 The specs are rendered client-side and you do NOT generate SVG or HTML.
@@ -62,13 +70,14 @@ Diagram type selection rules:
 - If the intent involves coordinates, axes, measurement, or physical space, do not represent it as a concept-map.
 
 Element placement:
-- Use a 600x400 coordinate space.
-- SAFE ZONE: every edge of every element must stay at least 40px inside canvas bounds.
-- Valid placement range: x 40-560, y 50-360.
+- Use a {coordinate_space} coordinate space.
+- SAFE ZONE: every edge of every element must stay inside the canvas bounds.
+- Valid placement range: {safe_zone}
 - Never place elements outside the safe zone.
-- Default element size: 120x60. Adjust for label length.
+- Default element size: {default_element_size}. Adjust for label length.
 - Shapes: "rect", "circle", "diamond", "rounded-rect"
 - Set emphasis=true for the most important element(s)
+{compact_guidance}
 
 Connections:
 - Use from_id/to_id referencing element ids
@@ -91,11 +100,14 @@ def build_diagram_user_prompt(
 ) -> str:
     must_include = ", ".join(frame.must_include) if frame.must_include else "None"
     avoid = ", ".join(frame.avoid) if frame.avoid else "None"
+    primary_brief = slot.content_brief or frame.generation_goal
     return f"""Section: {section_title}
 Slot type: {slot.slot_type.value}
+Sizing: {slot.sizing}
+Target block: {slot.block_target or "section"}
 Frame label: {frame.label or "n/a"}
 Pedagogical intent: {slot.pedagogical_intent}
-Generation goal: {frame.generation_goal}
+Content brief: {primary_brief}
 Caption to support: {slot.caption}
 Reference style: {slot.reference_style.value}
 Must include: {must_include}

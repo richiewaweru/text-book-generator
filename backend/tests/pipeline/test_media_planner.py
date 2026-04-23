@@ -3,7 +3,7 @@ from __future__ import annotations
 from pipeline.media.planner.media_planner import media_planner
 from pipeline.media.types import MediaPlan, VisualFrame, VisualSlot
 from pipeline.state import StyleContext, TextbookPipelineState
-from pipeline.types.requests import PipelineRequest, SectionPlan, SectionVisualPolicy
+from pipeline.types.requests import BlockVisualPlacement, PipelineRequest, SectionPlan, SectionVisualPolicy
 from pipeline.types.section_content import (
     ComparisonColumn,
     ComparisonGridContent,
@@ -18,6 +18,8 @@ from pipeline.types.section_content import (
     SectionContent,
     SectionHeaderContent,
     WhatNextContent,
+    WorkedExampleContent,
+    WorkedStep,
 )
 from pipeline.types.template_contract import GenerationGuidance, TemplateContractSummary
 
@@ -90,6 +92,8 @@ def _section(
     sid: str = "s-01",
     comparison_grid: ComparisonGridContent | None = None,
     process: ProcessContent | None = None,
+    practice_problems: list[PracticeProblem] | None = None,
+    worked_example: WorkedExampleContent | None = None,
 ) -> SectionContent:
     return SectionContent(
         section_id=sid,
@@ -101,7 +105,8 @@ def _section(
             emphasis=["rate of change", "input and output", "slope"],
         ),
         practice=PracticeContent(
-            problems=[
+            problems=practice_problems
+            or [
                 PracticeProblem(
                     difficulty="warm",
                     question="What changes?",
@@ -112,6 +117,7 @@ def _section(
         what_next=WhatNextContent(body="Next we connect this to graphs.", next="Graphs"),
         comparison_grid=comparison_grid,
         process=process,
+        worked_example=worked_example,
     )
 
 
@@ -267,3 +273,165 @@ def test_media_planner_represents_simulation_separately() -> None:
     simulation_slot = next(slot for slot in plan.slots if slot.slot_type.value == "simulation")
     assert simulation_slot.preferred_render.value == "html_simulation"
     assert simulation_slot.simulation_intent == "Explore the changing slope."
+
+
+def test_media_planner_builds_compact_practice_slot_from_explicit_problem_indices() -> None:
+    plan = media_planner(
+        section_plan=SectionPlan(
+            section_id="s-01",
+            title="Practice graphs",
+            position=1,
+            focus="Support a targeted practice problem.",
+            visual_placements=[
+                BlockVisualPlacement(
+                    block="practice",
+                    slot_type="diagram",
+                    sizing="compact",
+                    hint="Show the line and marked points.",
+                    problem_indices=[1],
+                )
+            ],
+        ),
+        section_content=_section(
+            practice_problems=[
+                PracticeProblem(
+                    difficulty="warm",
+                    question="State the definition.",
+                    hints=[PracticeHint(level=1, text="Use the key term.")],
+                ),
+                PracticeProblem(
+                    difficulty="medium",
+                    question="Plot the line through (0,1) and (4,9).",
+                    hints=[PracticeHint(level=1, text="Mark the two coordinates.")],
+                ),
+            ]
+        ),
+        template_contract=_contract(optional=["diagram-block"]),
+        style_context=_style_context(),
+    )
+
+    slot = next(slot for slot in plan.slots if slot.block_target == "practice")
+    assert slot.slot_id == "practice-1-diagram"
+    assert slot.sizing == "compact"
+    assert slot.problem_index == 1
+    assert slot.frames[0].target_w == 600
+    assert slot.frames[0].target_h == 400
+    assert "Plot the line through (0,1) and (4,9)." in (slot.content_brief or "")
+
+
+def test_media_planner_selects_first_eligible_problem_when_indices_are_omitted() -> None:
+    plan = media_planner(
+        section_plan=SectionPlan(
+            section_id="s-01",
+            title="Practice graphs",
+            position=1,
+            focus="Support the most concrete practice problem.",
+            visual_placements=[
+                BlockVisualPlacement(
+                    block="practice",
+                    slot_type="diagram",
+                    sizing="compact",
+                    hint="Pick the first concrete problem.",
+                )
+            ],
+        ),
+        section_content=_section(
+            practice_problems=[
+                PracticeProblem(
+                    difficulty="warm",
+                    question="Explain the term in words.",
+                    hints=[PracticeHint(level=1, text="Use the definition.")],
+                ),
+                PracticeProblem(
+                    difficulty="medium",
+                    question="Compare the before and after graphs.",
+                    hints=[PracticeHint(level=1, text="Track the axes.")],
+                ),
+                PracticeProblem(
+                    difficulty="cold",
+                    question="Describe the result.",
+                    hints=[PracticeHint(level=1, text="Summarise the pattern.")],
+                ),
+            ]
+        ),
+        template_contract=_contract(optional=["diagram-block"]),
+        style_context=_style_context(),
+    )
+
+    slot = next(slot for slot in plan.slots if slot.block_target == "practice")
+    assert slot.problem_index == 1
+    assert "Compare the before and after graphs." in (slot.content_brief or "")
+
+
+def test_media_planner_prefers_contextful_problem_for_compact_diagram_selection() -> None:
+    plan = media_planner(
+        section_plan=SectionPlan(
+            section_id="s-01",
+            title="Practice contexts",
+            position=1,
+            focus="Support the first contextual problem.",
+            visual_placements=[
+                BlockVisualPlacement(block="practice", slot_type="diagram", sizing="compact")
+            ],
+        ),
+        section_content=_section(
+            practice_problems=[
+                PracticeProblem(
+                    difficulty="warm",
+                    question="Explain the term in words.",
+                    hints=[PracticeHint(level=1, text="Use the definition.")],
+                ),
+                PracticeProblem(
+                    difficulty="medium",
+                    question="Use the speed graph.",
+                    hints=[PracticeHint(level=1, text="Read the axes.")],
+                    context="A cyclist speeds up from the start line.",
+                ),
+            ]
+        ),
+        template_contract=_contract(optional=["diagram-block"]),
+        style_context=_style_context(),
+    )
+
+    slot = next(slot for slot in plan.slots if slot.block_target == "practice")
+    assert slot.problem_index == 1
+    assert "A cyclist speeds up from the start line." in (slot.content_brief or "")
+
+
+def test_media_planner_builds_compact_worked_example_slot() -> None:
+    plan = media_planner(
+        section_plan=SectionPlan(
+            section_id="s-01",
+            title="Worked example",
+            position=1,
+            focus="Support the worked example setup.",
+            visual_placements=[
+                BlockVisualPlacement(
+                    block="worked_example",
+                    slot_type="diagram",
+                    sizing="compact",
+                    hint="Show the triangle and labels.",
+                )
+            ],
+        ),
+        section_content=_section(
+            worked_example=WorkedExampleContent(
+                title="Find the gradient",
+                setup="Use the two plotted points to find the slope.",
+                steps=[
+                    WorkedStep(label="Step 1", content="Mark the rise and run."),
+                    WorkedStep(label="Step 2", content="Compute the ratio."),
+                ],
+                conclusion="The gradient is the rise divided by the run.",
+            )
+        ),
+        template_contract=_contract(optional=["diagram-block"]),
+        style_context=_style_context(),
+    )
+
+    slot = next(slot for slot in plan.slots if slot.block_target == "worked_example")
+    assert slot.sizing == "compact"
+    assert slot.problem_index is None
+    assert slot.frames[0].target_w == 600
+    assert slot.frames[0].target_h == 400
+    assert "Use the two plotted points to find the slope." in (slot.content_brief or "")

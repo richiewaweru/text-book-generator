@@ -33,7 +33,7 @@ Each plan has: section_id, title, position, focus, bridges_from, bridges_to,
 needs_diagram (bool), needs_worked_example (bool), terms_to_define (list[str]),
 terms_assumed (list[str]), practice_target (string or null),
 visual_commitment ("diagram" | "interaction" | "none" | null),
-visual_placements (optional array of objects with block, slot_type, sizing, hint).
+visual_placements (optional array of objects with block, slot_type, sizing, hint, optional problem_indices).
 
 Rules:
 - section_id format: s-01, s-02, s-03 etc.
@@ -52,8 +52,8 @@ Rules:
   - "none" when the section should not reference any visual
 - visual_placements is optional:
   - use it only for actual renderable placements in this system
-  - for this phase, only emit explanation placements
-  - block must be "explanation"
+  - explanation placements are always safe
+  - practice placements may include problem_indices when you know the exact problem targets
   - slot_type must be one of "diagram", "diagram_series", or "diagram_compare"
   - sizing should usually be "full"
 
@@ -102,7 +102,7 @@ Each entry in `sections` must include:
 - terms_assumed (list[str])
 - practice_target (string or null)
 - visual_commitment ("diagram" | "interaction" | "none" | null)
-- visual_placements (optional array of objects with block, slot_type, sizing, hint)
+- visual_placements (optional array of objects with block, slot_type, sizing, hint, optional problem_indices)
 
 Rules:
 - Assign each key term to exactly one section via terms_to_define.

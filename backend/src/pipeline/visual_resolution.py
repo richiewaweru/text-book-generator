@@ -90,6 +90,34 @@ def resolve_visual_targets(state: TextbookPipelineState | dict) -> list[VisualTa
     visual_policy = getattr(plan, "visual_policy", None) if plan is not None else None
     required_components = list(getattr(plan, "required_components", []) or [])
     diagram_policy = getattr(plan, "diagram_policy", None)
+    visual_placements = list(getattr(plan, "visual_placements", []) or []) if plan is not None else []
+
+    if visual_placements:
+        placement_targets = _dedupe(
+            [
+                placement.slot_type
+                for placement in visual_placements
+                if placement.block == "explanation"
+                and placement.slot_type in {"diagram", "diagram_series", "diagram_compare"}
+            ]
+        )
+        if placement_targets:
+            force_console_log(
+                "VISUAL_RESOLVE",
+                "TARGETS",
+                section_id=typed.current_section_id,
+                source="visual_placements",
+                targets=placement_targets,
+            )
+            return placement_targets  # type: ignore[return-value]
+        force_console_log(
+            "VISUAL_RESOLVE",
+            "TARGETS",
+            section_id=typed.current_section_id,
+            source="visual_placements",
+            targets=[],
+        )
+        return []
 
     explicit_targets = _dedupe(
         [

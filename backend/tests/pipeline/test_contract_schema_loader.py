@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -11,6 +13,7 @@ from pipeline.contracts import (
     list_template_ids,
 )
 from pipeline.types.section_content import (
+    DiagramContent,
     ExplanationContent,
     HookHeroContent,
     PracticeContent,
@@ -18,6 +21,7 @@ from pipeline.types.section_content import (
     PracticeProblem,
     SectionContent,
     SectionHeaderContent,
+    WorkedExampleContent,
     WhatNextContent,
 )
 
@@ -84,3 +88,40 @@ def test_generated_section_content_rejects_invalid_field_types() -> None:
             ),
             what_next=WhatNextContent(body="Next topic", next="Next"),
         )
+
+
+def test_synced_lectio_contract_keeps_inline_diagram_fields() -> None:
+    lectio_types = Path("frontend/node_modules/lectio/dist/schema/types.d.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "export interface PracticeProblem {\n    diagram?: DiagramContent;" in lectio_types
+    assert "export interface WorkedExampleContent {\n    diagram?: DiagramContent;" in lectio_types
+
+    practice_problem = PracticeProblem.model_validate(
+        {
+            "difficulty": "warm",
+            "question": "Read the diagram.",
+            "hints": [{"level": 1, "text": "Follow the arrows."}],
+            "diagram": {
+                "caption": "A compact support diagram.",
+                "alt_text": "Compact support diagram.",
+                "image_url": "http://example.test/practice.png",
+            },
+        }
+    )
+    worked_example = WorkedExampleContent.model_validate(
+        {
+            "title": "Worked example",
+            "setup": "Set up the comparison.",
+            "steps": [{"label": "Step 1", "content": "Inspect the graphic."}],
+            "conclusion": "Use the visual evidence.",
+            "diagram": {
+                "caption": "A compact worked-example diagram.",
+                "alt_text": "Compact worked-example diagram.",
+                "image_url": "http://example.test/worked.png",
+            },
+        }
+    )
+
+    assert isinstance(practice_problem.diagram, DiagramContent)
+    assert isinstance(worked_example.diagram, DiagramContent)

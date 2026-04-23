@@ -319,6 +319,25 @@ def test_visual_context_block_forbids_practice_references_when_section_diagram_i
     assert "individual practice problems" in visual
 
 
+def test_visual_context_block_targets_only_selected_practice_problems() -> None:
+    plan = _section_plan(
+        visual_placements=[
+            BlockVisualPlacement(
+                block="practice",
+                slot_type="diagram",
+                sizing="compact",
+                hint="Use a compact grid diagram.",
+                problem_indices=[0, 2],
+            )
+        ]
+    )
+
+    visual = _visual_context_block(plan, phase="practice")
+
+    assert "problems 1 and 3" in visual
+    assert "Only those specific problems may say 'the diagram'" in visual
+
+
 def test_visual_context_block_forbids_enrichment_references_when_placements_exist() -> None:
     plan = _section_plan(
         visual_placements=[
@@ -329,6 +348,24 @@ def test_visual_context_block_forbids_enrichment_references_when_placements_exis
     visual = _visual_context_block(plan, phase="enrichment")
 
     assert "Do not reference any diagram or other visual element in enrichment content." in visual
+
+
+def test_visual_context_block_allows_only_worked_example_visual_references_in_enrichment() -> None:
+    plan = _section_plan(
+        visual_placements=[
+            BlockVisualPlacement(
+                block="worked_example",
+                slot_type="diagram",
+                sizing="compact",
+                hint="Use a compact worked-example diagram.",
+            )
+        ]
+    )
+
+    visual = _visual_context_block(plan, phase="enrichment")
+
+    assert "worked example may include its own compact diagram" in visual
+    assert "All other enrichment content must avoid visual references." in visual
 
 
 def test_enrichment_fields_include_new_text_components() -> None:

@@ -92,6 +92,23 @@ def build_slot_result(
     )
 
 
+def _practice_problem_diagram(section: SectionContent, problem_index: int | None) -> DiagramContent | None:
+    if problem_index is None:
+        return None
+    if problem_index < 0 or problem_index >= len(section.practice.problems):
+        return None
+    return getattr(section.practice.problems[problem_index], "diagram", None)
+
+
+def _worked_example_diagram(section: SectionContent) -> DiagramContent | None:
+    if section.worked_example is not None:
+        return getattr(section.worked_example, "diagram", None)
+    worked_examples = getattr(section, "worked_examples", None) or []
+    if not worked_examples:
+        return None
+    return getattr(worked_examples[0], "diagram", None)
+
+
 def capture_static_slot_results(
     section: SectionContent,
     slot: VisualSlot,
@@ -99,7 +116,12 @@ def capture_static_slot_results(
     frame_results: dict[str, VisualFrameResult] = {}
 
     if slot.slot_type == SlotType.DIAGRAM:
-        diagram = section.diagram
+        if slot.block_target == "practice":
+            diagram = _practice_problem_diagram(section, slot.problem_index)
+        elif slot.block_target == "worked_example":
+            diagram = _worked_example_diagram(section)
+        else:
+            diagram = section.diagram
         if diagram is not None and (diagram.image_url or diagram.svg_content):
             frame = slot.frames[0]
             frame_results[frame_result_key(frame)] = VisualFrameResult(
@@ -286,6 +308,38 @@ def fallback_diagram_from_section(section: SectionContent) -> DiagramContent | N
     return None
 
 
+def _write_practice_diagram(
+    section: SectionContent,
+    *,
+    problem_index: int,
+    diagram: DiagramContent | None,
+) -> SectionContent:
+    if diagram is None or problem_index < 0 or problem_index >= len(section.practice.problems):
+        return section
+    problems = list(section.practice.problems)
+    problems[problem_index] = problems[problem_index].model_copy(update={"diagram": diagram})
+    return section.model_copy(update={"practice": section.practice.model_copy(update={"problems": problems})})
+
+
+def _write_worked_example_diagram(
+    section: SectionContent,
+    *,
+    diagram: DiagramContent | None,
+) -> SectionContent:
+    if diagram is None:
+        return section
+    if section.worked_example is not None:
+        return section.model_copy(
+            update={"worked_example": section.worked_example.model_copy(update={"diagram": diagram})}
+        )
+    worked_examples = getattr(section, "worked_examples", None) or []
+    if not worked_examples:
+        return section
+    updated_examples = list(worked_examples)
+    updated_examples[0] = updated_examples[0].model_copy(update={"diagram": diagram})
+    return section.model_copy(update={"worked_examples": updated_examples})
+
+
 def apply_slot_results_to_section(
     section: SectionContent,
     slot: VisualSlot,
@@ -295,6 +349,10 @@ def apply_slot_results_to_section(
 ) -> SectionContent:
     if slot.slot_type == SlotType.DIAGRAM:
         content = diagram_content_from_results(slot, frame_results)
+        if slot.block_target == "practice" and slot.problem_index is not None:
+            return _write_practice_diagram(section, problem_index=slot.problem_index, diagram=content)
+        if slot.block_target == "worked_example":
+            return _write_worked_example_diagram(section, diagram=content)
         return section.model_copy(update={"diagram": content or section.diagram})
     if slot.slot_type == SlotType.DIAGRAM_COMPARE:
         new_content = compare_content_from_results(slot, frame_results)
