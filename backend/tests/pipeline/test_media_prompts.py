@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from pipeline.media.prompts.diagram_prompts import build_diagram_user_prompt
+from pipeline.media.prompts.diagram_prompts import (
+    build_diagram_system_prompt,
+    build_diagram_user_prompt,
+)
 from pipeline.media.prompts.image_prompts import (
     build_compare_image_prompts,
     build_image_generation_prompt,
@@ -52,6 +55,14 @@ def test_diagram_prompt_uses_slot_and_frame_contract() -> None:
 
     assert "Pedagogical intent: Explain the structure clearly." in prompt
     assert "Must include: slope, rise over run" in prompt
+
+
+def test_diagram_system_prompt_includes_safe_zone_and_type_guard() -> None:
+    prompt = build_diagram_system_prompt(_style_context())
+
+    assert "SAFE ZONE" in prompt
+    assert "Valid placement range: x 40-560, y 50-360." in prompt
+    assert "Do not use \"concept-map\" for mathematical, spatial, or graphical content." in prompt
 
 
 def test_image_prompts_consume_frame_data_only() -> None:

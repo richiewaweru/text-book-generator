@@ -170,6 +170,26 @@ def test_media_planner_builds_single_diagram_plan() -> None:
     assert plan.slots[0].frames[0].must_include
 
 
+def test_media_planner_defaults_base_diagram_slot_to_image_render() -> None:
+    plan = media_planner(
+        section_plan=SectionPlan(
+            section_id="s-01",
+            title="Rates of change",
+            position=1,
+            focus="Make the concept visible.",
+            needs_diagram=True,
+        ),
+        section_content=_section(),
+        template_contract=_contract(),
+        style_context=_style_context(),
+    )
+
+    diagram_slot = next(slot for slot in plan.slots if slot.slot_type.value == "diagram")
+    assert diagram_slot.preferred_render.value == "image"
+    assert diagram_slot.fallback_render is not None
+    assert diagram_slot.fallback_render.value == "svg"
+
+
 def test_media_planner_builds_compare_plan_with_seeded_labels() -> None:
     plan = media_planner(
         section_plan=SectionPlan(

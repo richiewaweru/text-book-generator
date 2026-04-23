@@ -45,7 +45,7 @@ def build_diagram_system_prompt(ctx: StyleContext) -> str:
     style_instruction = build_diagram_style_instruction(ctx)
 
     return f"""You design diagrams for educational content by outputting structured JSON specs.
-The specs are rendered client-side — you do NOT generate SVG or HTML.
+The specs are rendered client-side and you do NOT generate SVG or HTML.
 
 {style_instruction}
 
@@ -54,10 +54,18 @@ Diagram types:
 - "hierarchy": parent-child tree structure
 - "compare": side-by-side comparison layout
 - "cycle": circular process with repeating steps
-- "concept-map": interconnected concepts with labeled relationships
+- "concept-map": vocabulary terms or concept relationships only
+
+Diagram type selection rules:
+- Use "concept-map" only for vocabulary or term-relationship content.
+- Do not use "concept-map" for mathematical, spatial, or graphical content.
+- If the intent involves coordinates, axes, measurement, or physical space, do not represent it as a concept-map.
 
 Element placement:
-- Use a 600x400 coordinate space (x: 0-600, y: 0-400)
+- Use a 600x400 coordinate space.
+- SAFE ZONE: every edge of every element must stay at least 40px inside canvas bounds.
+- Valid placement range: x 40-560, y 50-360.
+- Never place elements outside the safe zone.
 - Default element size: 120x60. Adjust for label length.
 - Shapes: "rect", "circle", "diamond", "rounded-rect"
 - Set emphasis=true for the most important element(s)

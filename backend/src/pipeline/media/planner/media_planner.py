@@ -138,7 +138,7 @@ def _preferred_render_for_slot(
         return VisualRender.HTML_SIMULATION
     if slot_type in {SlotType.DIAGRAM_COMPARE, SlotType.DIAGRAM_SERIES}:
         return VisualRender.IMAGE
-    return VisualRender.SVG
+    return VisualRender.IMAGE
 
 
 def _fallback_render_for_slot(slot_type: SlotType, preferred_render: VisualRender) -> VisualRender | None:
