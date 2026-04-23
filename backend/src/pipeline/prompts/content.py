@@ -92,7 +92,7 @@ def _section_plan_policy_block(section_plan: SectionPlan) -> str:
   visual_commitment: {visual_commitment}"""
 
 
-def _visual_context_block(section_plan: SectionPlan) -> str:
+def _legacy_visual_context_block(section_plan: SectionPlan) -> str:
     commitment = section_plan.visual_commitment
     if commitment is None:
         return ""
@@ -112,6 +112,121 @@ def _visual_context_block(section_plan: SectionPlan) -> str:
         "Visual context:\n"
         "This section has NO diagram or interactive. Do not reference any visual "
         "element in explanations or practice."
+    )
+
+
+def _explanation_visual_reference(section_plan: SectionPlan) -> tuple[str, str] | None:
+    placements = [placement for placement in section_plan.visual_placements if placement.block == "explanation"]
+    slot_order = {
+        "diagram_compare": 0,
+        "diagram_series": 1,
+        "diagram": 2,
+    }
+    placements.sort(key=lambda placement: slot_order.get(placement.slot_type, 99))
+    if not placements:
+        return None
+
+    primary = placements[0]
+    if primary.slot_type == "diagram_compare":
+        return "comparison above", "the comparison above"
+    if primary.slot_type == "diagram_series":
+        return "diagrams above", "the diagrams above"
+    return "diagram below", "the diagram below"
+
+
+def _visual_context_block(
+    section_plan: SectionPlan,
+    *,
+    phase: str = "all",
+) -> str:
+    if not section_plan.visual_placements:
+        return _legacy_visual_context_block(section_plan)
+
+    reference = _explanation_visual_reference(section_plan)
+
+    if phase == "core":
+        if reference is None:
+            return (
+                "Visual context:\n"
+                "This section has NO diagram near the explanation. "
+                "Do not reference any visual element."
+            )
+        location, phrase = reference
+        if location == "diagram below":
+            return (
+                "Visual context:\n"
+                "This section includes a diagram below the explanation. "
+                f"You may reference it as '{phrase}'."
+            )
+        if location == "diagrams above":
+            return (
+                "Visual context:\n"
+                "This section includes diagrams above the explanation. "
+                f"You may reference them as '{phrase}'. "
+                "Do NOT say 'the diagram below'."
+            )
+        return (
+            "Visual context:\n"
+            f"This section includes a {location} the explanation. "
+            f"You may reference it as '{phrase}'. "
+            "Do NOT say 'the diagram below'."
+        )
+
+    if phase == "practice":
+        if any(placement.block == "practice" for placement in section_plan.visual_placements):
+            return (
+                "Visual context:\n"
+                "Some practice items include their own supporting visuals. "
+                "Only reference a diagram when the placement explicitly belongs to that problem."
+            )
+        if reference is not None:
+            return (
+                "Visual context:\n"
+                "The section diagram appears elsewhere. "
+                "Do not reference it from individual practice problems."
+            )
+        return (
+            "Visual context:\n"
+            "This section has NO diagram for practice problems. "
+            "Do not reference any visual element."
+        )
+
+    if phase == "enrichment":
+        return (
+            "Visual context:\n"
+            "Do not reference any diagram or other visual element in enrichment content."
+        )
+
+    if reference is None:
+        return (
+            "Visual context:\n"
+            "This section has NO diagram or interactive. "
+            "Do not reference any visual element."
+        )
+
+    location, phrase = reference
+    if location == "diagram below":
+        return (
+            "Visual context:\n"
+            "This section includes a diagram below the explanation. "
+            f"Only the explanation may reference it as '{phrase}'. "
+            "Practice problems must not reference that section-level diagram, "
+            "and enrichment content must not reference visuals."
+        )
+    if location == "diagrams above":
+        return (
+            "Visual context:\n"
+            "This section includes diagrams above the explanation. "
+            f"Only the explanation may reference them as '{phrase}'. "
+            "Practice problems must not reference that section-level visual, "
+            "and enrichment content must not reference visuals."
+        )
+    return (
+        "Visual context:\n"
+        f"This section includes a {location} the explanation. "
+        f"Only the explanation may reference it as '{phrase}'. "
+        "Practice problems must not reference that section-level visual, "
+        "and enrichment content must not reference visuals."
     )
 
 
@@ -256,7 +371,7 @@ Learner type: {learner_fit}
 
 {_section_plan_policy_block(section_plan)}"""
 
-    visual_context = _visual_context_block(section_plan)
+    visual_context = _visual_context_block(section_plan, phase="all")
     if visual_context:
         base += f"\n\n{visual_context}"
 
@@ -454,7 +569,7 @@ Learner type: {learner_fit}
 
 {_section_plan_policy_block(section_plan)}"""
 
-    visual_context = _visual_context_block(section_plan)
+    visual_context = _visual_context_block(section_plan, phase="core")
     if visual_context:
         base += f"\n\n{visual_context}"
 
@@ -485,7 +600,7 @@ Grade level: {grade_band}
 Learner type: {learner_fit}
 {_section_plan_policy_block(section_plan)}
 
-{_visual_context_block(section_plan)}
+{_visual_context_block(section_plan, phase="practice")}
 
 Core content already generated:
 {core_summary}
@@ -517,7 +632,7 @@ Grade level: {grade_band}
 Learner type: {learner_fit}
 {_section_plan_policy_block(section_plan)}
 
-{_visual_context_block(section_plan)}
+{_visual_context_block(section_plan, phase="enrichment")}
 
 Core content already generated:
 {core_summary}

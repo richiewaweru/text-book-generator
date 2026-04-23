@@ -8,6 +8,7 @@ from planning.models import (
     PlanningVisualMode,
     VisualPolicy,
 )
+from pipeline.types.requests import BlockVisualPlacement
 
 _SPATIAL_HINTS = {
     "biology",
@@ -62,6 +63,53 @@ def _visual_mode(brief: NormalizedBrief, intent: str) -> PlanningVisualMode:
     return "image" if _classify_spatial(brief) else "svg"
 
 
+def _derive_visual_placements(
+    *,
+    section: PlanningSectionPlan,
+    contract: PlanningTemplateContract,
+    intent: PlanningVisualIntent,
+    should_visualize: bool,
+) -> list[BlockVisualPlacement]:
+    if not should_visualize:
+        return []
+
+    available = set(contract.available_components)
+    selected = set(section.selected_components)
+
+    if "diagram-compare" in selected or (
+        intent == "compare_variants" and "diagram-compare" in available
+    ):
+        return [
+            BlockVisualPlacement(
+                block="explanation",
+                slot_type="diagram_compare",
+                hint="Use an explanation-adjacent comparison visual.",
+            )
+        ]
+
+    if "diagram-series" in selected or (
+        intent == "demonstrate_process" and "diagram-series" in available
+    ):
+        return [
+            BlockVisualPlacement(
+                block="explanation",
+                slot_type="diagram_series",
+                hint="Use an explanation-adjacent sequence visual.",
+            )
+        ]
+
+    if "diagram-block" in selected or "diagram-block" in available:
+        return [
+            BlockVisualPlacement(
+                block="explanation",
+                slot_type="diagram",
+                hint="Use an explanation-adjacent diagram.",
+            )
+        ]
+
+    return []
+
+
 def route_visuals(
     brief: NormalizedBrief,
     contract: PlanningTemplateContract,
@@ -80,6 +128,7 @@ def route_visuals(
             )
         )
         if not should_visualize:
+            section.visual_placements = []
             continue
 
         intent = _visual_intent(section)
@@ -99,6 +148,12 @@ def route_visuals(
                 if mode == "svg"
                 else "Classroom-friendly educational image, accurate labels, no decorative clutter."
             ),
+        )
+        section.visual_placements = _derive_visual_placements(
+            section=section,
+            contract=contract,
+            intent=intent,
+            should_visualize=should_visualize,
         )
 
     return sections

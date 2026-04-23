@@ -65,6 +65,13 @@ class SectionVisualPolicy(BaseModel):
     simulation_intent: str | None = None
 
 
+class BlockVisualPlacement(BaseModel):
+    block: Literal["hook", "explanation", "practice", "worked_example"]
+    slot_type: Literal["diagram", "diagram_series", "diagram_compare"] = "diagram"
+    sizing: Literal["full", "compact"] = "full"
+    hint: str = ""
+
+
 class SectionPlan(BaseModel):
     """One entry in the curriculum outline produced by curriculum_planner."""
 
@@ -100,3 +107,4 @@ class SectionPlan(BaseModel):
     terms_assumed: list[str] = Field(default_factory=list)
     practice_target: str | None = None
     visual_commitment: Literal["diagram", "interaction", "none"] | None = None
+    visual_placements: list[BlockVisualPlacement] = Field(default_factory=list)

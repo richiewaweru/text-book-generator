@@ -4,7 +4,7 @@ from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-from pipeline.types.requests import GenerationMode
+from pipeline.types.requests import BlockVisualPlacement, GenerationMode
 
 PlanningTopicType = Literal["concept", "process", "facts", "mixed"]
 PlanningLearningOutcome = Literal[
@@ -223,6 +223,7 @@ class PlanningSectionPlan(BaseModel):
     terms_assumed: list[str] = Field(default_factory=list)
     practice_target: str | None = None
     visual_commitment: Literal["diagram", "interaction", "none"] | None = None
+    visual_placements: list[BlockVisualPlacement] = Field(default_factory=list)
 
     @field_validator("title", "objective", "focus_note", "rationale")
     @classmethod

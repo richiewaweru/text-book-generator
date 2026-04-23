@@ -160,6 +160,7 @@ def _pipeline_section_from_planning(
         terms_assumed=list(section.terms_assumed),
         practice_target=section.practice_target,
         visual_commitment=section.visual_commitment,
+        visual_placements=list(section.visual_placements),
     )
 
 

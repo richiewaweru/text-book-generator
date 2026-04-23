@@ -33,7 +33,7 @@ from pipeline.runtime_context import retry_policy_for_node
 from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, StyleContext, TextbookPipelineState
-from pipeline.types.requests import SectionPlan
+from pipeline.types.requests import BlockVisualPlacement, SectionPlan
 from pipeline.llm_runner import run_llm
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ class SectionPlanEnrichment(BaseModel):
     terms_assumed: list[str] = Field(default_factory=list)
     practice_target: str | None = None
     visual_commitment: str | None = None
+    visual_placements: list[BlockVisualPlacement] | None = None
 
 
 class CurriculumEnrichmentOutput(BaseModel):
@@ -182,6 +183,11 @@ def _outline_digest(outline: list[SectionPlan]) -> list[dict[str, object]]:
             "bridges_to": plan.bridges_to,
             "needs_diagram": plan.needs_diagram,
             "needs_worked_example": plan.needs_worked_example,
+            "terms_to_define": list(plan.terms_to_define),
+            "terms_assumed": list(plan.terms_assumed),
+            "practice_target": plan.practice_target,
+            "visual_commitment": plan.visual_commitment,
+            "visual_placements": [placement.model_dump(mode="json") for placement in plan.visual_placements],
         }
         for plan in outline
     ]
@@ -192,19 +198,25 @@ def _apply_enrichment(
     enrichment: list[SectionPlanEnrichment],
 ) -> list[SectionPlan]:
     enrichment_by_id = {item.section_id: item for item in enrichment}
-    return [
-        plan.model_copy(
-            update={
-                "terms_to_define": list(enrichment_by_id[plan.section_id].terms_to_define),
-                "terms_assumed": list(enrichment_by_id[plan.section_id].terms_assumed),
-                "practice_target": enrichment_by_id[plan.section_id].practice_target,
-                "visual_commitment": enrichment_by_id[plan.section_id].visual_commitment,
-            }
-        )
-        if plan.section_id in enrichment_by_id
-        else plan
-        for plan in outline
-    ]
+    enriched_outline: list[SectionPlan] = []
+    for plan in outline:
+        enriched = enrichment_by_id.get(plan.section_id)
+        if enriched is None:
+            enriched_outline.append(plan)
+            continue
+
+        updates = {
+            "terms_to_define": list(enriched.terms_to_define),
+            "terms_assumed": list(enriched.terms_assumed),
+            "practice_target": enriched.practice_target,
+            "visual_commitment": enriched.visual_commitment,
+        }
+        if enriched.visual_placements is not None:
+            updates["visual_placements"] = list(enriched.visual_placements)
+
+        enriched_outline.append(plan.model_copy(update=updates))
+
+    return enriched_outline
 
 
 async def _enrich_seeded_outline(
