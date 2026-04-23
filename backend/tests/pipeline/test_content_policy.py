@@ -25,7 +25,7 @@ from pipeline.types.content_phases import (
     EnrichmentPhaseContent,
     PracticePhaseContent,
 )
-from pipeline.types.requests import GenerationMode, PipelineRequest, SectionPlan
+from pipeline.types.requests import BlockVisualPlacement, GenerationMode, PipelineRequest, SectionPlan
 from pipeline.types.section_content import (
     DefinitionContent,
     ExplanationContent,
@@ -158,10 +158,12 @@ def test_section_plan_and_planning_section_plan_accept_legacy_payloads() -> None
     assert plan.terms_assumed == []
     assert plan.practice_target is None
     assert plan.visual_commitment is None
+    assert plan.visual_placements == []
     assert planning_section.terms_to_define == []
     assert planning_section.terms_assumed == []
     assert planning_section.practice_target is None
     assert planning_section.visual_commitment is None
+    assert planning_section.visual_placements == []
 
 
 def test_planning_to_pipeline_adapters_forward_policy_fields() -> None:
@@ -176,6 +178,13 @@ def test_planning_to_pipeline_adapters_forward_policy_fields() -> None:
         terms_assumed=["cell"],
         practice_target="identify chlorophyll's role in absorbing light",
         visual_commitment="diagram",
+        visual_placements=[
+            BlockVisualPlacement(
+                block="explanation",
+                slot_type="diagram",
+                hint="Use a labeled leaf diagram.",
+            )
+        ],
     )
 
     planning_route_plan = planning_routes._pipeline_section_from_planning(
@@ -193,10 +202,12 @@ def test_planning_to_pipeline_adapters_forward_policy_fields() -> None:
     assert planning_route_plan.terms_assumed == ["cell"]
     assert planning_route_plan.practice_target == "identify chlorophyll's role in absorbing light"
     assert planning_route_plan.visual_commitment == "diagram"
+    assert planning_route_plan.visual_placements == planning_section.visual_placements
     assert generation_service_plan.terms_to_define == ["chlorophyll"]
     assert generation_service_plan.terms_assumed == ["cell"]
     assert generation_service_plan.practice_target == "identify chlorophyll's role in absorbing light"
     assert generation_service_plan.visual_commitment == "diagram"
+    assert generation_service_plan.visual_placements == planning_section.visual_placements
 
 
 def test_policy_and_visual_prompt_blocks_include_new_fields() -> None:
@@ -204,32 +215,42 @@ def test_policy_and_visual_prompt_blocks_include_new_fields() -> None:
         terms_to_define=["chlorophyll"],
         terms_assumed=["leaf"],
         practice_target="apply the chlorophyll definition to explain light capture",
-        visual_commitment="interaction",
+        visual_placements=[
+            BlockVisualPlacement(
+                block="explanation",
+                slot_type="diagram_series",
+                hint="Sequence of light capture stages.",
+            )
+        ],
     )
 
     policy = _section_plan_policy_block(plan)
-    visual = _visual_context_block(plan)
+    visual = _visual_context_block(plan, phase="core")
 
     assert "terms_to_define: chlorophyll" in policy
     assert "terms_assumed: leaf" in policy
     assert "practice_target: apply the chlorophyll definition" in policy
-    assert "visual_commitment: interaction" in policy
-    assert "interactive above" in visual
+    assert "visual_commitment: not specified" in policy
+    assert "diagrams above" in visual
 
 
 @pytest.mark.parametrize(
-    ("commitment", "expected"),
+    ("slot_type", "expected"),
     [
         ("diagram", "diagram below"),
-        ("interaction", "interactive above"),
-        ("none", "NO diagram or interactive"),
+        ("diagram_series", "diagrams above"),
+        ("diagram_compare", "comparison above"),
     ],
 )
-def test_visual_context_is_injected_into_all_prompt_builders(
-    commitment: str,
+def test_visual_context_uses_placements_for_core_and_monolithic_prompts(
+    slot_type: str,
     expected: str,
 ) -> None:
-    plan = _section_plan(visual_commitment=commitment)
+    plan = _section_plan(
+        visual_placements=[
+            BlockVisualPlacement(block="explanation", slot_type=slot_type, hint="Test placement.")
+        ]
+    )
 
     monolithic = build_content_user_prompt(
         section_plan=plan,
@@ -269,12 +290,45 @@ def test_visual_context_is_injected_into_all_prompt_builders(
 
     assert expected in monolithic
     assert expected in core
-    assert expected in practice
-    assert expected in enrichment
+    assert "section diagram appears elsewhere" in practice
+    assert "Do not reference any diagram or other visual element in enrichment content." in enrichment
 
 
-def test_visual_context_block_omits_text_for_legacy_none() -> None:
-    assert _visual_context_block(_section_plan()) == ""
+def test_visual_context_block_uses_legacy_fallback_without_placements() -> None:
+    assert _visual_context_block(_section_plan(), phase="core") == ""
+    assert "diagram below" in _visual_context_block(
+        _section_plan(visual_commitment="diagram"),
+        phase="core",
+    )
+    assert "interactive above" in _visual_context_block(
+        _section_plan(visual_commitment="interaction"),
+        phase="practice",
+    )
+
+
+def test_visual_context_block_forbids_practice_references_when_section_diagram_is_elsewhere() -> None:
+    plan = _section_plan(
+        visual_placements=[
+            BlockVisualPlacement(block="explanation", slot_type="diagram", hint="Use a core diagram.")
+        ]
+    )
+
+    visual = _visual_context_block(plan, phase="practice")
+
+    assert "section diagram appears elsewhere" in visual
+    assert "individual practice problems" in visual
+
+
+def test_visual_context_block_forbids_enrichment_references_when_placements_exist() -> None:
+    plan = _section_plan(
+        visual_placements=[
+            BlockVisualPlacement(block="explanation", slot_type="diagram_compare", hint="Use a comparison.")
+        ]
+    )
+
+    visual = _visual_context_block(plan, phase="enrichment")
+
+    assert "Do not reference any diagram or other visual element in enrichment content." in visual
 
 
 def test_enrichment_fields_include_new_text_components() -> None:
@@ -292,8 +346,32 @@ def test_enrichment_fields_include_new_text_components() -> None:
 @pytest.mark.asyncio
 async def test_curriculum_planner_enriches_seeded_outline_without_changing_structure(monkeypatch) -> None:
     outline = [
-        _section_plan(section_id="s-01", title="Intro plants", position=1, role="intro"),
-        _section_plan(section_id="s-02", title="Practice plants", position=2, role="practice"),
+        _section_plan(
+            section_id="s-01",
+            title="Intro plants",
+            position=1,
+            role="intro",
+            visual_placements=[
+                BlockVisualPlacement(
+                    block="explanation",
+                    slot_type="diagram",
+                    hint="Existing intro diagram.",
+                )
+            ],
+        ),
+        _section_plan(
+            section_id="s-02",
+            title="Practice plants",
+            position=2,
+            role="practice",
+            visual_placements=[
+                BlockVisualPlacement(
+                    block="explanation",
+                    slot_type="diagram_series",
+                    hint="Existing series to clear.",
+                )
+            ],
+        ),
     ]
     state = _base_state(
         request=_request(section_plans=outline),
@@ -310,6 +388,7 @@ async def test_curriculum_planner_enriches_seeded_outline_without_changing_struc
                         terms_assumed=[],
                         practice_target="name chlorophyll and what it does",
                         visual_commitment="diagram",
+                        visual_placements=None,
                     ),
                     curriculum_planner_mod.SectionPlanEnrichment(
                         section_id="s-02",
@@ -317,6 +396,7 @@ async def test_curriculum_planner_enriches_seeded_outline_without_changing_struc
                         terms_assumed=["chlorophyll"],
                         practice_target="apply chlorophyll knowledge to explain leaf color",
                         visual_commitment="none",
+                        visual_placements=[],
                     ),
                 ]
             )
@@ -340,6 +420,8 @@ async def test_curriculum_planner_enriches_seeded_outline_without_changing_struc
     assert enriched[0].terms_to_define == ["chlorophyll"]
     assert enriched[1].terms_assumed == ["chlorophyll"]
     assert enriched[1].visual_commitment == "none"
+    assert enriched[0].visual_placements == outline[0].visual_placements
+    assert enriched[1].visual_placements == []
     planner_event = next(event for event in published_events if event.type == "curriculum_planned")
     assert planner_event.path == "seeded_enrichment"
     assert planner_event.result == "enriched"
@@ -400,6 +482,13 @@ async def test_curriculum_planner_fresh_path_preserves_policy_fields(monkeypatch
                         terms_assumed=[],
                         practice_target="name the role of chlorophyll",
                         visual_commitment="diagram",
+                        visual_placements=[
+                            BlockVisualPlacement(
+                                block="explanation",
+                                slot_type="diagram",
+                                hint="Use a labeled chlorophyll diagram.",
+                            )
+                        ],
                     ),
                     _section_plan(
                         section_id="s-02",
@@ -409,6 +498,13 @@ async def test_curriculum_planner_fresh_path_preserves_policy_fields(monkeypatch
                         terms_assumed=[],
                         practice_target="spot the repeated term",
                         visual_commitment="none",
+                        visual_placements=[
+                            BlockVisualPlacement(
+                                block="explanation",
+                                slot_type="diagram_compare",
+                                hint="Compare two leaf states.",
+                            )
+                        ],
                     )
                 ]
             )
@@ -430,6 +526,7 @@ async def test_curriculum_planner_fresh_path_preserves_policy_fields(monkeypatch
     assert section.terms_to_define == ["chlorophyll"]
     assert section.practice_target == "name the role of chlorophyll"
     assert section.visual_commitment == "diagram"
+    assert section.visual_placements[0].slot_type == "diagram"
     planner_event = next(event for event in published_events if event.type == "curriculum_planned")
     assert planner_event.path == "fresh"
     assert planner_event.result == "planned"
@@ -514,7 +611,13 @@ async def test_phased_content_generator_includes_visual_context_in_practice_prom
 
     state = _base_state(
         current_section_plan=_section_plan(
-            visual_commitment="none",
+            visual_placements=[
+                BlockVisualPlacement(
+                    block="explanation",
+                    slot_type="diagram",
+                    hint="Use a core diagram only.",
+                )
+            ],
             terms_to_define=["chlorophyll"],
             practice_target="apply chlorophyll knowledge to explain light capture",
         )
@@ -523,5 +626,5 @@ async def test_phased_content_generator_includes_visual_context_in_practice_prom
     result = await content_generator_mod.content_generator(state)
 
     assert "content_generator" in result["completed_nodes"]
-    assert "This section has NO diagram or interactive" in captured_prompts["content_generator_practice"]
+    assert "The section diagram appears elsewhere" in captured_prompts["content_generator_practice"]
     assert "practice_target: apply chlorophyll knowledge to explain light capture" in captured_prompts["content_generator_practice"]

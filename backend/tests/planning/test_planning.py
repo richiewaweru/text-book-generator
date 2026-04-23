@@ -301,6 +301,119 @@ def test_visual_router_uses_intent_regardless_of_print_first():
     for section in routed:
         if section.visual_policy and section.role == "process":
             assert section.visual_policy.mode == "image"
+            assert [placement.slot_type for placement in section.visual_placements] == ["diagram"]
+
+
+def test_visual_router_prefers_compare_placements_for_compare_intent() -> None:
+    contract = build_contract(
+        template_id="compare-and-apply",
+        intent="compare-ideas",
+        available_components=[
+            "hook-hero",
+            "explanation-block",
+            "diagram-compare",
+            "practice-stack",
+            "what-next-bridge",
+        ],
+        section_role_defaults={
+            "intro": ["hook-hero"],
+            "compare": ["explanation-block"],
+            "practice": ["practice-stack"],
+            "summary": ["what-next-bridge"],
+        },
+    )
+    brief = normalize_brief(
+        build_brief(
+            intent="Compare plant and animal cells",
+            signals={
+                "topic_type": "concept",
+                "learning_outcome": "understand-why",
+                "class_style": ["engages-with-visuals"],
+                "format": "both",
+            },
+            constraints={
+                "more_practice": False,
+                "keep_short": False,
+                "use_visuals": True,
+                "print_first": False,
+            },
+        )
+    )
+
+    sections = compose_sections(brief, contract)
+    compare_section = next(section for section in sections if section.role == "compare")
+
+    routed = route_visuals(brief, contract, sections)
+    routed_compare = next(section for section in routed if section.id == compare_section.id)
+
+    assert [placement.block for placement in routed_compare.visual_placements] == ["explanation"]
+    assert [placement.slot_type for placement in routed_compare.visual_placements] == [
+        "diagram_compare"
+    ]
+
+
+def test_visual_router_prefers_series_placements_for_process_intent() -> None:
+    contract = build_contract(
+        template_id="procedure",
+        intent="teach-procedure",
+        available_components=[
+            "hook-hero",
+            "explanation-block",
+            "diagram-series",
+            "practice-stack",
+            "what-next-bridge",
+        ],
+        section_role_defaults={
+            "intro": ["hook-hero"],
+            "process": ["explanation-block"],
+            "practice": ["practice-stack"],
+            "summary": ["what-next-bridge"],
+        },
+    )
+    brief = normalize_brief(
+        build_brief(
+            signals={
+                "topic_type": "process",
+                "learning_outcome": "be-able-to-do",
+                "class_style": [],
+                "format": "both",
+            },
+            constraints={
+                "more_practice": False,
+                "keep_short": False,
+                "use_visuals": True,
+                "print_first": False,
+            },
+        )
+    )
+
+    routed = route_visuals(brief, contract, compose_sections(brief, contract))
+    process_section = next(section for section in routed if section.role == "process")
+
+    assert [placement.block for placement in process_section.visual_placements] == ["explanation"]
+    assert [placement.slot_type for placement in process_section.visual_placements] == [
+        "diagram_series"
+    ]
+
+
+def test_visual_router_falls_back_to_single_diagram_placement() -> None:
+    contract = build_contract()
+    brief = normalize_brief(
+        build_brief(
+            constraints={
+                "more_practice": False,
+                "keep_short": False,
+                "use_visuals": True,
+                "print_first": False,
+            }
+        )
+    )
+
+    routed = route_visuals(brief, contract, compose_sections(brief, contract))
+    explain_section = next(section for section in routed if section.role == "explain")
+
+    assert [placement.block for placement in explain_section.visual_placements] == ["explanation"]
+    assert [placement.slot_type for placement in explain_section.visual_placements] == ["diagram"]
 
 
 def test_fallback_uses_contract_defaults_and_returns_reviewable_spec():

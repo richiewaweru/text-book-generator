@@ -32,7 +32,8 @@ Your output is a JSON array of section plans.
 Each plan has: section_id, title, position, focus, bridges_from, bridges_to,
 needs_diagram (bool), needs_worked_example (bool), terms_to_define (list[str]),
 terms_assumed (list[str]), practice_target (string or null),
-visual_commitment ("diagram" | "interaction" | "none" | null).
+visual_commitment ("diagram" | "interaction" | "none" | null),
+visual_placements (optional array of objects with block, slot_type, sizing, hint).
 
 Rules:
 - section_id format: s-01, s-02, s-03 etc.
@@ -49,6 +50,12 @@ Rules:
   - "diagram" when the section should reference a diagram
   - "interaction" when the section should reference an interactive
   - "none" when the section should not reference any visual
+- visual_placements is optional:
+  - use it only for actual renderable placements in this system
+  - for this phase, only emit explanation placements
+  - block must be "explanation"
+  - slot_type must be one of "diagram", "diagram_series", or "diagram_compare"
+  - sizing should usually be "full"
 
 Output only valid JSON. No preamble, no markdown fences."""
 
@@ -95,12 +102,15 @@ Each entry in `sections` must include:
 - terms_assumed (list[str])
 - practice_target (string or null)
 - visual_commitment ("diagram" | "interaction" | "none" | null)
+- visual_placements (optional array of objects with block, slot_type, sizing, hint)
 
 Rules:
 - Assign each key term to exactly one section via terms_to_define.
 - Later sections that use earlier terms should list them in terms_assumed.
 - practice_target should be specific to that section's practice work.
 - visual_commitment must be set for every section.
+- Omit `visual_placements` to preserve existing placements.
+- If you provide `visual_placements`, use only explanation-level placements in this phase.
 - Preserve the order of sections exactly as supplied.
 
 Output only valid JSON. No preamble, no markdown fences."""
