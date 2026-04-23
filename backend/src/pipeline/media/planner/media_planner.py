@@ -263,6 +263,18 @@ def _simulation_print_translation(plan: SectionPlan, contract: TemplateContractS
     return "hide"
 
 
+def _target_dimensions(slot_type: SlotType, frame_count: int) -> tuple[int, int]:
+    if slot_type == SlotType.DIAGRAM:
+        return 1200, 675          # 16:9
+    if slot_type == SlotType.DIAGRAM_COMPARE:
+        return 800, 600           # 4:3 per panel
+    if slot_type == SlotType.DIAGRAM_SERIES:
+        if frame_count <= 2:
+            return 800, 600       # 4:3 side by side
+        return 800, 800           # 1:1 for 3-4 frames in a row
+    return 1024, 1024             # fallback
+
+
 def _build_single_slot(
     *,
     section: SectionContent,
@@ -271,6 +283,7 @@ def _build_single_slot(
 ) -> VisualSlot:
     preferred_render = _preferred_render_for_slot(plan, slot_type)
     concepts = _key_concepts(section)
+    tw, th = _target_dimensions(slot_type, 1)
     frame = VisualFrame(
         slot_id=_slot_id(slot_type),
         index=0,
@@ -279,6 +292,8 @@ def _build_single_slot(
         must_include=concepts[:4],
         avoid=_base_avoid_list(preferred_render),
         output_placeholders=_frame_output_placeholders(preferred_render, slot_type),
+        target_w=tw,
+        target_h=th,
     )
     return VisualSlot(
         slot_id=_slot_id(slot_type),
@@ -297,6 +312,8 @@ def _build_series_slot(section: SectionContent, plan: SectionPlan) -> VisualSlot
     preferred_render = _preferred_render_for_slot(plan, SlotType.DIAGRAM_SERIES)
     concepts = _key_concepts(section)
     labels = _series_labels(section, concepts)
+    frame_count = len(labels)
+    tw, th = _target_dimensions(SlotType.DIAGRAM_SERIES, frame_count)
     frames = [
         VisualFrame(
             slot_id=_slot_id(SlotType.DIAGRAM_SERIES),
@@ -306,6 +323,8 @@ def _build_series_slot(section: SectionContent, plan: SectionPlan) -> VisualSlot
             must_include=[label] + ([concepts[index]] if index < len(concepts) else []),
             avoid=_base_avoid_list(preferred_render),
             output_placeholders=_frame_output_placeholders(preferred_render, SlotType.DIAGRAM_SERIES),
+            target_w=tw,
+            target_h=th,
         )
         for index, label in enumerate(labels)
     ]
@@ -326,6 +345,7 @@ def _build_series_slot(section: SectionContent, plan: SectionPlan) -> VisualSlot
 def _build_compare_slot(section: SectionContent, plan: SectionPlan) -> VisualSlot:
     preferred_render = _preferred_render_for_slot(plan, SlotType.DIAGRAM_COMPARE)
     before_label, after_label = _compare_labels(section)
+    tw, th = _target_dimensions(SlotType.DIAGRAM_COMPARE, 2)
     frames = [
         VisualFrame(
             slot_id=_slot_id(SlotType.DIAGRAM_COMPARE),
@@ -335,6 +355,8 @@ def _build_compare_slot(section: SectionContent, plan: SectionPlan) -> VisualSlo
             must_include=[before_label],
             avoid=_base_avoid_list(preferred_render),
             output_placeholders=_frame_output_placeholders(preferred_render, SlotType.DIAGRAM_COMPARE),
+            target_w=tw,
+            target_h=th,
         ),
         VisualFrame(
             slot_id=_slot_id(SlotType.DIAGRAM_COMPARE),
@@ -344,6 +366,8 @@ def _build_compare_slot(section: SectionContent, plan: SectionPlan) -> VisualSlo
             must_include=[after_label],
             avoid=_base_avoid_list(preferred_render),
             output_placeholders=_frame_output_placeholders(preferred_render, SlotType.DIAGRAM_COMPARE),
+            target_w=tw,
+            target_h=th,
         ),
     ]
     return VisualSlot(

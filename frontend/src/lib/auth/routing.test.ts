@@ -10,6 +10,7 @@ import {
 	resolveDashboardProfileFailure,
 	resolveLandingRoute,
 	resolveOnboardingGuard,
+	resolveShellRedirect,
 	shouldRedirectToOnboarding
 } from './routing';
 
@@ -43,6 +44,12 @@ describe('auth routing helpers', () => {
 		expect(shouldRedirectToOnboarding(baseUser, '/studio')).toBe(false);
 		expect(shouldRedirectToOnboarding(baseUser, '/onboarding')).toBe(false);
 		expect(shouldRedirectToOnboarding({ ...baseUser, has_profile: true }, '/')).toBe(false);
+	});
+
+	it('resolves the root route to the correct post-bootstrap destination', () => {
+		expect(resolveShellRedirect(null, '/')).toBe('/login');
+		expect(resolveShellRedirect(baseUser, '/')).toBe('/onboarding');
+		expect(resolveShellRedirect({ ...baseUser, has_profile: true }, '/')).toBe('/dashboard');
 	});
 
 	it('detects onboarding edit mode and builds the edit route', () => {

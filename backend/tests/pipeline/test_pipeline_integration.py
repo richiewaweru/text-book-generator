@@ -428,6 +428,97 @@ class TestQCRouting:
         assert event.section_id == "s-01"
         assert event.next_attempt == 2
         assert event.reason == "Simulation needs clearer controls"
+
+    def test_multiple_sections_media_retry_produces_multiple_sends(self):
+        state = _base_state(
+            assembled_sections={
+                "s-01": _section("s-01"),
+                "s-02": _section("s-02"),
+            },
+            media_plans={
+                "s-01": MediaPlan(
+                    section_id="s-01",
+                    slots=[
+                        VisualSlot(
+                            slot_id="diagram",
+                            slot_type="diagram",
+                            required=True,
+                            preferred_render="svg",
+                            pedagogical_intent="Show concept.",
+                            caption="Diagram",
+                            frames=[
+                                VisualFrame(
+                                    slot_id="diagram",
+                                    index=0,
+                                    label="Main",
+                                    generation_goal="Render diagram.",
+                                )
+                            ],
+                        )
+                    ],
+                ),
+                "s-02": MediaPlan(
+                    section_id="s-02",
+                    slots=[
+                        VisualSlot(
+                            slot_id="diagram",
+                            slot_type="diagram",
+                            required=True,
+                            preferred_render="svg",
+                            pedagogical_intent="Show concept.",
+                            caption="Diagram",
+                            frames=[
+                                VisualFrame(
+                                    slot_id="diagram",
+                                    index=0,
+                                    label="Main",
+                                    generation_goal="Render diagram.",
+                                )
+                            ],
+                        )
+                    ],
+                ),
+            },
+            qc_reports={
+                "s-01": QCReport(
+                    section_id="s-01",
+                    passed=False,
+                    issues=[
+                        {
+                            "severity": "blocking",
+                            "block": "diagram",
+                            "message": "Diagram is malformed",
+                        }
+                    ],
+                    warnings=[],
+                ),
+                "s-02": QCReport(
+                    section_id="s-02",
+                    passed=False,
+                    issues=[
+                        {
+                            "severity": "blocking",
+                            "block": "diagram",
+                            "message": "Diagram is malformed",
+                        }
+                    ],
+                    warnings=[],
+                ),
+            },
+        )
+        from pipeline.routers.qc_router import route_after_qc
+
+        result = route_after_qc(state)
+
+        assert isinstance(result, list)
+        media_sends = [send for send in result if send.node == "retry_media_frame"]
+        assert len(media_sends) == 2
+        section_ids = {
+            send.arg["current_media_retry"]["section_id"]
+            for send in media_sends
+        }
+        assert section_ids == {"s-01", "s-02"}
+
     def test_multi_field_block_routes_to_full_process_section(self):
         state = _base_state(
             current_section_id="s-01",

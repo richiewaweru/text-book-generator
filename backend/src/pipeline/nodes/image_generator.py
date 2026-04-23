@@ -10,6 +10,7 @@ import core.events as core_events
 
 from pipeline.console_diagnostics import force_console_log
 from pipeline.events import DiagramOutcomeEvent, ImageOutcomeEvent
+from pipeline.media.providers.image_client import ImageSize
 from pipeline.media.providers.registry import get_image_client, load_image_provider_spec
 from pipeline.providers.gemini_image_client import resolve_gemini_image_api_key
 from pipeline.providers.image_client import ImageGenerationResult
@@ -110,6 +111,7 @@ async def _generate_with_retry(
     client,
     prompt: str,
     timeout: float,
+    size: ImageSize = "1024x1024",
 ) -> tuple[ImageGenerationResult, int]:
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
@@ -121,7 +123,7 @@ async def _generate_with_retry(
                 timeout_seconds=timeout,
             )
             result = await asyncio.wait_for(
-                client.generate_image(prompt=prompt, size="1024x1024", format="png"),
+                client.generate_image(prompt=prompt, size=size, format="png"),
                 timeout=timeout,
             )
             return result, attempt
@@ -161,6 +163,7 @@ async def _request_image_bytes(
     section_id: str,
     variant: str,
     api_key_present: bool,
+    size: ImageSize = "1024x1024",
     prompt_details: dict | None = None,
 ) -> tuple[ImageGenerationResult, int]:
     payload = {
@@ -175,7 +178,7 @@ async def _request_image_bytes(
 
     _log_image_event(logging.INFO, "API_REQUEST", **payload)
     try:
-        image_result, attempts = await _generate_with_retry(client, prompt, _IMAGE_TIMEOUT_SECONDS)
+        image_result, attempts = await _generate_with_retry(client, prompt, _IMAGE_TIMEOUT_SECONDS, size=size)
     except Exception as exc:
         _log_image_event(
             logging.ERROR,

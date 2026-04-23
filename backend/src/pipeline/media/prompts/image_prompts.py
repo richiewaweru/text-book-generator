@@ -34,6 +34,10 @@ def build_image_generation_prompt(
     visual_style = _translate_style_to_image_keywords(style_context)
     must_include = ", ".join(frame.must_include) if frame.must_include else "the core idea"
     avoid = ", ".join(frame.avoid) if frame.avoid else "text overlays"
+    size_hint = ""
+    if frame.target_w and frame.target_h:
+        ratio = f"{frame.target_w}:{frame.target_h}"
+        size_hint = f"\nTarget aspect ratio: {ratio} — optimise composition for this shape"
 
     return f"""Educational image for {section_title}
 
@@ -52,7 +56,7 @@ Requirements:
 - Clear, simple composition for textbook use
 - Educational illustration style
 - High contrast, readable
-- No text overlays"""
+- No text overlays{size_hint}"""
 
 
 def build_series_step_image_prompt(
