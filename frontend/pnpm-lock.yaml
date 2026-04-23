@@ -21,8 +21,8 @@ importers:
         specifier: ^3.3.3
         version: 3.3.3
       katex:
-        specifier: ^0.16.22
-        version: 0.16.44
+        specifier: ^0.16.45
+        version: 0.16.45
       lectio:
         specifier: 0.2.9
         version: 0.2.9(svelte@5.55.4(@typescript-eslint/types@8.57.2))
@@ -1179,8 +1179,8 @@ packages:
       canvas:
         optional: true
 
-  katex@0.16.44:
-    resolution: {integrity: sha512-EkxoDTk8ufHqHlf9QxGwcxeLkWRR3iOuYfRpfORgYfqc8s13bgb+YtRY59NK5ZpRaCwq1kqA6a5lpX8C/eLphQ==}
+  katex@0.16.45:
+    resolution: {integrity: sha512-pQpZbdBu7wCTmQUh7ufPmLr0pFoObnGUoL/yhtwJDgmmQpbkg/0HSVti25Fu4rmd1oCR6NGWe9vqTWuWv3GcNA==}
     hasBin: true
 
   kleur@4.1.5:
@@ -2656,7 +2656,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  katex@0.16.44:
+  katex@0.16.45:
     dependencies:
       commander: 8.3.0
 
@@ -2667,7 +2667,7 @@ snapshots:
       '@types/dompurify': 3.2.0
       dompurify: 3.3.3
       esm-env: 1.2.2
-      katex: 0.16.44
+      katex: 0.16.45
       lucide-svelte: 0.577.0(svelte@5.55.4(@typescript-eslint/types@8.57.2))
       marked: 18.0.2
       qrcode: 1.5.4
