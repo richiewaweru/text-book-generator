@@ -27,6 +27,12 @@ def _merge_dicts(left: dict, right: dict) -> dict:
     return {**left, **right}
 
 
+def _last_wins(existing: Any, new: Any) -> Any:
+    """Allow concurrent scalar writes by taking the most recent value."""
+    _ = existing
+    return new
+
+
 def _merge_rerender_requests(left: dict, right: dict) -> dict:
     merged = dict(left)
     for section_id, request in right.items():
@@ -156,8 +162,8 @@ class TextbookPipelineState(BaseModel):
 
     curriculum_outline: Optional[list[SectionPlan]] = None
     style_context: Optional[StyleContext] = None
-    current_section_id: Optional[str] = None
-    current_section_plan: Optional[SectionPlan] = None
+    current_section_id: Annotated[Optional[str], _last_wins] = None
+    current_section_plan: Annotated[Optional[SectionPlan], _last_wins] = None
 
     generated_sections: Annotated[dict[str, SectionContent], _merge_dicts] = Field(
         default_factory=dict
@@ -177,7 +183,7 @@ class TextbookPipelineState(BaseModel):
         dict[str, dict[str, dict[str, int]]],
         _merge_dicts,
     ] = Field(default_factory=dict)
-    current_media_retry: MediaFrameRetryRequest | None = None
+    current_media_retry: Annotated[MediaFrameRetryRequest | None, _last_wins] = None
     media_lifecycle: Annotated[dict[str, str], _merge_dicts] = Field(default_factory=dict)
     composition_plans: Annotated[dict[str, CompositionPlan], _merge_dicts] = Field(
         default_factory=dict
