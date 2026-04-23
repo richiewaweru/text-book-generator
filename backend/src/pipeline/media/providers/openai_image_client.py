@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import urllib.error
 import urllib.request
 
 from pipeline.media.providers.image_client import ImageFormat, ImageGenerationResult, ImageSize
@@ -59,8 +60,18 @@ class OpenAICompatibleImageClient:
             },
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=60) as response:
-            parsed = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                parsed = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"HTTP Error {exc.code}: {exc.reason} | Body: {body[:500]}"
+            ) from exc
 
         data = parsed.get("data") or []
         if not data:
