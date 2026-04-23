@@ -20,3 +20,5 @@ class VisualFrame(BaseModel):
     avoid: list[str] = Field(default_factory=list)
     output_placeholders: dict[str, str | None] = Field(default_factory=dict)
     status: VisualFrameStatus = VisualFrameStatus.PLANNED
+    target_w: int | None = None
+    target_h: int | None = None

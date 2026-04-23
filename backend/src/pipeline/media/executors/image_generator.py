@@ -9,6 +9,7 @@ from pipeline.media.prompts.image_prompts import (
     build_image_generation_prompt,
     build_series_step_image_prompt,
 )
+from pipeline.media.utils.image_processing import normalise_image_for_frame
 from pipeline.media.runtime_events import (
     emit_frame_failed,
     emit_frame_ready,
@@ -17,6 +18,15 @@ from pipeline.media.runtime_events import (
 )
 from pipeline.media.types import SlotType, VisualFrameResult, VisualFrameResultStatus
 from pipeline.state import PipelineError, TextbookPipelineState
+
+
+def _image_size_for_frame(frame) -> str:
+    if frame.target_w is None or frame.target_h is None:
+        return "1024x1024"
+    ratio = frame.target_w / frame.target_h
+    if ratio > 1.4:
+        return "1792x1024"
+    return "1024x1024"
 
 
 def _static_image_slots(state: TextbookPipelineState) -> list:
@@ -69,14 +79,19 @@ async def _generate_image_frame(
         section_id=sid,
         variant=variant,
         api_key_present=api_key_present,
+        size=_image_size_for_frame(frame),
     )
+    normalised_bytes = normalise_image_for_frame(
+        image_result.bytes, target_w=frame.target_w, target_h=frame.target_h
+    )
+    store_format = "png" if (frame.target_w and frame.target_h) else image_result.format
     image_url = await legacy._store_image_with_logging(
         store,
-        image_bytes=image_result.bytes,
+        image_bytes=normalised_bytes,
         generation_id=generation_id,
         section_id=sid,
-        filename=legacy._filename_for_variant(variant, image_result),
-        format=image_result.format,
+        filename=f"{variant}.{store_format}",
+        format=store_format,
         variant=variant,
     )
     return VisualFrameResult(
@@ -119,14 +134,19 @@ async def _generate_compare_frame(
         section_id=sid,
         variant=variant,
         api_key_present=api_key_present,
+        size=_image_size_for_frame(frame),
     )
+    normalised_bytes = normalise_image_for_frame(
+        image_result.bytes, target_w=frame.target_w, target_h=frame.target_h
+    )
+    store_format = "png" if (frame.target_w and frame.target_h) else image_result.format
     image_url = await legacy._store_image_with_logging(
         store,
-        image_bytes=image_result.bytes,
+        image_bytes=normalised_bytes,
         generation_id=generation_id,
         section_id=sid,
-        filename=legacy._filename_for_variant(variant, image_result),
-        format=image_result.format,
+        filename=f"{variant}.{store_format}",
+        format=store_format,
         variant=variant,
     )
     _ = peer_frame
@@ -167,18 +187,23 @@ async def _generate_series_frame(
         section_id=sid,
         variant=variant,
         api_key_present=api_key_present,
+        size=_image_size_for_frame(frame),
         prompt_details={
             "step_index": frame.index + 1,
             "step_total": len(slot.frames),
         },
     )
+    normalised_bytes = normalise_image_for_frame(
+        image_result.bytes, target_w=frame.target_w, target_h=frame.target_h
+    )
+    store_format = "png" if (frame.target_w and frame.target_h) else image_result.format
     image_url = await legacy._store_image_with_logging(
         store,
-        image_bytes=image_result.bytes,
+        image_bytes=normalised_bytes,
         generation_id=generation_id,
         section_id=sid,
-        filename=legacy._filename_for_variant(variant, image_result),
-        format=image_result.format,
+        filename=f"{variant}.{store_format}",
+        format=store_format,
         variant=variant,
     )
     return VisualFrameResult(
