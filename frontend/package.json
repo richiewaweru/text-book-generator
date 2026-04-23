@@ -18,7 +18,7 @@
 		"clsx": "^2.1.1",
 		"dompurify": "^3.3.3",
 		"katex": "^0.16.22",
-		"lectio": "0.2.7",
+		"lectio": "0.2.9",
 		"lucide-svelte": "^0.542.0",
 		"marked": "^15.0.0",
 		"qrcode": "^1.5.4",
