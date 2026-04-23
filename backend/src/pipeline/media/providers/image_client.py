@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 
-ImageSize = Literal["256x256", "512x512", "1024x1024"]
+ImageSize = Literal["256x256", "512x512", "1024x1024", "1792x1024"]
 ImageFormat = Literal["png", "jpeg", "webp"]
 
 
