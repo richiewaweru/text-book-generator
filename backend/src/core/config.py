@@ -153,7 +153,7 @@ class Settings(BaseSettings):
     pipeline_timeout_generation_cap_seconds: float = Field(default=900.0, gt=0)
 
     # Node execution budgets
-    pipeline_timeout_curriculum_seconds: float = Field(default=60.0, gt=0)
+    pipeline_timeout_curriculum_seconds: float = Field(default=90.0, gt=0)
     pipeline_timeout_content_core_seconds: float = Field(default=180.0, gt=0)
     pipeline_timeout_content_practice_seconds: float = Field(default=120.0, gt=0)
     pipeline_timeout_content_enrichment_seconds: float = Field(default=90.0, gt=0)
@@ -161,7 +161,8 @@ class Settings(BaseSettings):
     pipeline_timeout_field_regen_seconds: float = Field(default=60.0, gt=0)
     pipeline_timeout_qc_seconds: float = Field(default=60.0, gt=0)
     pipeline_timeout_diagram_inner_seconds: float = Field(default=45.0, gt=0)
-    pipeline_timeout_diagram_node_budget_seconds: float = Field(default=60.0, gt=0)
+    pipeline_timeout_diagram_node_budget_seconds: float = Field(default=90.0, gt=0)
+    pipeline_timeout_interaction_seconds: float = Field(default=60.0, gt=0)
 
     # Rerender budgets
     pipeline_rerender_draft_section_max: int = Field(default=1, ge=0)

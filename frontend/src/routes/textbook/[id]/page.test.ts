@@ -358,7 +358,6 @@ describe('textbook page stream lifecycle', () => {
 			concurrency: {
 				max_section_concurrency: 4,
 				max_media_concurrency: 2,
-				max_diagram_concurrency: 2,
 				max_qc_concurrency: 4
 			},
 			timeouts: {
@@ -369,8 +368,8 @@ describe('textbook page stream lifecycle', () => {
 				content_repair_timeout_seconds: 120,
 				field_regenerator_timeout_seconds: 60,
 				qc_timeout_seconds: 60,
-				diagram_inner_timeout_seconds: 45,
-				diagram_node_budget_seconds: 60,
+				media_inner_timeout_seconds: 45,
+				media_node_budget_seconds: 60,
 				generation_timeout_base_seconds: 120,
 				generation_timeout_per_section_seconds: 90,
 				generation_timeout_cap_seconds: 900
@@ -389,8 +388,6 @@ describe('textbook page stream lifecycle', () => {
 				sections_queued: 2,
 				media_running: 1,
 				media_queued: 0,
-				diagram_running: 1,
-				diagram_queued: 0,
 				qc_running: 0,
 				qc_queued: 1,
 				retry_running: 0,

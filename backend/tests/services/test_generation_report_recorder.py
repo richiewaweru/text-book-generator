@@ -12,6 +12,7 @@ from pipeline.events import (
     DiagramOutcomeEvent,
     FieldRegenOutcomeEvent,
     ImageOutcomeEvent,
+    VisualPlacementsCommittedEvent,
     MediaPlanReadyEvent,
     MediaSlotFailedEvent,
     MediaSlotReadyEvent,
@@ -23,6 +24,8 @@ from pipeline.events import (
     NodeFinishedEvent,
     NodeStartedEvent,
     PipelineStartEvent,
+    SimulationTypeSelectedEvent,
+    SlotRenderModeResolvedEvent,
     SectionAttemptStartedEvent,
     SectionFailedEvent,
     SectionReadyEvent,
@@ -659,6 +662,7 @@ async def test_recorder_persists_runtime_outline_and_planner_trace() -> None:
                     "terms_to_define": ["slope"],
                     "terms_assumed": [],
                     "practice_target": "identify slope as steepness from a graph",
+                    "visual_placements_count": 1,
                 }
             ],
             planner_trace_sections=[
@@ -689,6 +693,67 @@ async def test_recorder_persists_runtime_outline_and_planner_trace() -> None:
     assert report.planner_trace.duplicate_term_warnings[0].startswith(
         "Duplicate term assignment in curriculum plan"
     )
+
+
+@pytest.mark.asyncio
+async def test_recorder_tracks_visual_placement_and_render_mode_observability() -> None:
+    generation = _generation("gen-visual-observability")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        VisualPlacementsCommittedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            placements_count=2,
+            placements_summary=[
+                "explanation:diagram:full_bleed",
+                "worked_example:diagram:compact",
+            ],
+        )
+    )
+    await recorder.apply_event(
+        SlotRenderModeResolvedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_id="diagram-main",
+            render_mode="image",
+            decided_by="intelligent_image_prompt",
+        )
+    )
+
+    report = await repo.load_report(generation.id)
+    section = report.sections[0]
+    assert section.visual_placements_count == 2
+    assert section.visual_placements_summary == [
+        "explanation:diagram:full_bleed",
+        "worked_example:diagram:compact",
+    ]
+    assert section.slot_render_modes == {"diagram-main": "image"}
+    assert report.summary.image_slots_count == 1
+    assert report.summary.svg_slots_count == 0
+    assert report.summary.prompt_builder_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_recorder_tracks_selected_simulation_metadata() -> None:
+    generation = _generation("gen-simulation-selection")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        SimulationTypeSelectedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            simulation_type="timeline_scrubber",
+            simulation_goal="Explore how the graph changes.",
+        )
+    )
+
+    report = await repo.load_report(generation.id)
+    section = report.sections[0]
+    assert section.simulation_type_selected == "timeline_scrubber"
+    assert section.simulation_goal_selected == "Explore how the graph changes."
 
 
 @pytest.mark.asyncio

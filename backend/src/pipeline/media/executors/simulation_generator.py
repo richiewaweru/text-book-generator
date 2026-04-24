@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 import core.events as core_events
 from pydantic_ai import Agent
 
-from pipeline.events import InteractionOutcomeEvent
+from core.config import settings
+from pipeline.events import InteractionOutcomeEvent, SimulationTypeSelectedEvent
 from pipeline.llm_runner import run_llm
 from pipeline.media.assembly import apply_slot_results_to_section, build_slot_result
 from pipeline.media.planner.media_planner import find_slot
@@ -160,24 +162,39 @@ async def _generate_simulation_markup(
         output_type=str,
         system_prompt=_SIMULATION_SYSTEM_PROMPT,
     )
-    result = await run_llm(
-        generation_id=state.request.generation_id or "",
-        node="interaction_generator",
-        agent=agent,
-        model=model,
-        section_id=state.current_section_id,
-        generation_mode=state.request.mode,
-        user_prompt=build_simulation_prompt(
-            section_title=section.header.title,
-            slot=slot,
-            frame=frame,
+    result = await asyncio.wait_for(
+        run_llm(
+            generation_id=state.request.generation_id or "",
+            node="interaction_generator",
+            agent=agent,
+            model=model,
+            section_id=state.current_section_id,
+            generation_mode=state.request.mode,
+            user_prompt=build_simulation_prompt(
+                section_title=section.header.title,
+                slot=slot,
+                frame=frame,
+            ),
         ),
+        timeout=settings.pipeline_timeout_interaction_seconds,
     )
     output = result.output if hasattr(result, "output") else result
     if not isinstance(output, str):
         raise ValueError("Simulation generator expected string HTML output.")
 
     parsed = _parse_simulation_output(output, slot=slot)
+    generation_id = state.request.generation_id or ""
+    section_id = state.current_section_id or ""
+    if generation_id and section_id:
+        core_events.event_bus.publish(
+            generation_id,
+            SimulationTypeSelectedEvent(
+                generation_id=generation_id,
+                section_id=section_id,
+                simulation_type=parsed.simulation_type,
+                simulation_goal=parsed.goal,
+            ),
+        )
     spec = build_interaction_spec(
         state,
         section,

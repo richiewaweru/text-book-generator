@@ -78,6 +78,9 @@ class GenerationReportRecorder:
         self._planned_media_slots: dict[str, set[str]] = {}
         self._ready_media_slots: dict[str, set[str]] = {}
         self._failed_media_slots: dict[str, set[str]] = {}
+        self._image_slot_ids: set[tuple[str, str]] = set()
+        self._svg_slot_ids: set[tuple[str, str]] = set()
+        self._prompt_builder_slot_ids: set[tuple[str, str]] = set()
         self._timeline_sequence = 0
         self._queue: asyncio.Queue | None = None
         self._consumer: asyncio.Task | None = None
@@ -236,6 +239,14 @@ class GenerationReportRecorder:
             self._handle_section_retry_queued(payload)
         elif event_type == "media_plan_ready":
             self._handle_media_plan_ready(payload)
+        elif event_type == "visual_placements_committed":
+            self._handle_visual_placements_committed(payload)
+        elif event_type == "slot_render_mode_resolved":
+            self._handle_slot_render_mode_resolved(payload)
+        elif event_type == "simulation_type_selected":
+            self._handle_simulation_type_selected(payload)
+        elif event_type == "intent_resolved":
+            self._handle_intent_resolved(payload)
         elif event_type == "media_slot_ready":
             self._handle_media_slot_ready(payload)
         elif event_type == "media_slot_failed":
@@ -384,14 +395,21 @@ class GenerationReportRecorder:
         self._report.started_at = _as_utc(payload.get("started_at")) or self._report.started_at
 
     def _handle_curriculum_planned(self, payload: dict[str, Any]) -> None:
-        outline = [
-            GenerationReportOutlineSection.model_validate(item)
-            for item in payload.get("runtime_curriculum_outline", [])
-        ]
         planner_sections = [
             GenerationPlannerTraceSection.model_validate(item)
             for item in payload.get("planner_trace_sections", [])
         ]
+        planner_counts = {
+            section.section_id: section.visual_placements_count for section in planner_sections
+        }
+        outline = []
+        for item in payload.get("runtime_curriculum_outline", []):
+            normalized = dict(item)
+            normalized["visual_placements_count"] = normalized.get(
+                "visual_placements_count",
+                planner_counts.get(normalized.get("section_id", ""), 0),
+            )
+            outline.append(GenerationReportOutlineSection.model_validate(normalized))
         self._report.runtime_curriculum_outline = outline
         self._report.planner_trace = GenerationPlannerTrace(
             path=payload["path"],
@@ -570,6 +588,37 @@ class GenerationReportRecorder:
     def _handle_media_plan_ready(self, payload: dict[str, Any]) -> None:
         section = self._ensure_section(payload["section_id"])
         section.media_slots_planned = max(section.media_slots_planned, payload.get("slot_count", 0))
+
+    def _handle_visual_placements_committed(self, payload: dict[str, Any]) -> None:
+        section = self._ensure_section(payload["section_id"])
+        section.visual_placements_count = payload.get("placements_count", 0)
+        section.visual_placements_summary = list(payload.get("placements_summary", []))
+
+    def _handle_slot_render_mode_resolved(self, payload: dict[str, Any]) -> None:
+        section_id = payload.get("section_id")
+        slot_id = payload.get("slot_id")
+        if not section_id or not slot_id:
+            return
+        section = self._ensure_section(section_id)
+        render_mode = payload.get("render_mode", "")
+        section.slot_render_modes[slot_id] = render_mode
+        slot_key = (section_id, slot_id)
+        if render_mode == "image":
+            self._image_slot_ids.add(slot_key)
+            self._svg_slot_ids.discard(slot_key)
+        else:
+            self._svg_slot_ids.add(slot_key)
+            self._image_slot_ids.discard(slot_key)
+        if payload.get("decided_by") == "intelligent_image_prompt":
+            self._prompt_builder_slot_ids.add(slot_key)
+
+    def _handle_simulation_type_selected(self, payload: dict[str, Any]) -> None:
+        section = self._ensure_section(payload["section_id"])
+        section.simulation_type_selected = payload.get("simulation_type")
+        section.simulation_goal_selected = payload.get("simulation_goal")
+
+    def _handle_intent_resolved(self, payload: dict[str, Any]) -> None:
+        _ = payload
 
     def _handle_media_slot_ready(self, payload: dict[str, Any]) -> None:
         section_id = payload.get("section_id")
@@ -935,6 +984,9 @@ class GenerationReportRecorder:
         summary.image_skip_count = sum(
             1 for section in self._sections.values() if section.image_outcome == "skipped"
         )
+        summary.image_slots_count = len(self._image_slot_ids)
+        summary.svg_slots_count = len(self._svg_slot_ids)
+        summary.prompt_builder_calls = len(self._prompt_builder_slot_ids)
         provider_counts: dict[str, int] = {}
         for section in self._sections.values():
             if section.image_provider:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from pipeline.events import SlotRenderModeResolvedEvent
 from pipeline.media.types import MediaPlan, VisualFrame, VisualRender, VisualSlot
 from pipeline.nodes.media_planner import media_planner
 from pipeline.state import StyleContext, TextbookPipelineState
@@ -114,17 +115,26 @@ def _state() -> TextbookPipelineState:
 
 @pytest.mark.asyncio
 async def test_media_planner_resolves_render_mode_before_parallel_generation(monkeypatch) -> None:
+    published: list[tuple[str, object]] = []
+
     async def _build_prompt(**kwargs):
         _ = kwargs
         return "Use a precise coordinate grid with labeled axes and a tangent line.", VisualRender.SVG
 
     monkeypatch.setattr("pipeline.nodes.media_planner.build_intelligent_image_prompt", _build_prompt)
+    monkeypatch.setattr(
+        "pipeline.nodes.media_planner.event_bus.publish",
+        lambda generation_id, event: published.append((generation_id, event)),
+    )
     result = await media_planner(_state())
 
     slot = result["media_plans"]["s-01"].slots[0]
     assert slot.preferred_render == VisualRender.SVG
     assert slot.generation_prompt == "Use a precise coordinate grid with labeled axes and a tangent line."
     assert slot.frames[0].output_placeholders == {"svg_content": None}
+    assert published[0][0] == "gen-media-plan"
+    assert isinstance(published[0][1], SlotRenderModeResolvedEvent)
+    assert published[0][1].render_mode == "svg"
 
 
 @pytest.mark.asyncio

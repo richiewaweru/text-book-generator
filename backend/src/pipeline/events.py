@@ -245,6 +245,52 @@ class MediaPlanReadyEvent(BaseModel):
     )
 
 
+class VisualPlacementsCommittedEvent(BaseModel):
+    type: Literal["visual_placements_committed"] = "visual_placements_committed"
+    generation_id: str
+    section_id: str
+    placements_count: int
+    placements_summary: list[str] = Field(default_factory=list)
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class SlotRenderModeResolvedEvent(BaseModel):
+    type: Literal["slot_render_mode_resolved"] = "slot_render_mode_resolved"
+    generation_id: str
+    section_id: str
+    slot_id: str
+    render_mode: str
+    decided_by: str
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class SimulationTypeSelectedEvent(BaseModel):
+    type: Literal["simulation_type_selected"] = "simulation_type_selected"
+    generation_id: str
+    section_id: str
+    simulation_type: str
+    simulation_goal: str
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+class IntentResolvedEvent(BaseModel):
+    type: Literal["intent_resolved"] = "intent_resolved"
+    generation_id: str
+    topic_type: str
+    learning_outcome: str
+    resolved_by: str
+    template_override: str | None = None
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
 class MediaFrameStartedEvent(BaseModel):
     type: Literal["media_frame_started"] = "media_frame_started"
     generation_id: str
@@ -468,6 +514,10 @@ PipelineEvent = (
     | SectionReportUpdatedEvent
     | SectionRetryQueuedEvent
     | MediaPlanReadyEvent
+    | VisualPlacementsCommittedEvent
+    | SlotRenderModeResolvedEvent
+    | SimulationTypeSelectedEvent
+    | IntentResolvedEvent
     | MediaFrameStartedEvent
     | MediaFrameReadyEvent
     | MediaFrameFailedEvent
@@ -513,6 +563,10 @@ __all__ = [
     "SectionReportUpdatedEvent",
     "SectionRetryQueuedEvent",
     "MediaPlanReadyEvent",
+    "VisualPlacementsCommittedEvent",
+    "SlotRenderModeResolvedEvent",
+    "SimulationTypeSelectedEvent",
+    "IntentResolvedEvent",
     "MediaFrameStartedEvent",
     "MediaFrameReadyEvent",
     "MediaFrameFailedEvent",

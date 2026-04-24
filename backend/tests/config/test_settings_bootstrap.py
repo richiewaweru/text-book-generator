@@ -143,6 +143,9 @@ def test_runtime_policy_settings_defaults() -> None:
     bundle = resolve_runtime_policy_bundle(settings, GenerationMode.BALANCED)
 
     assert settings.generation_max_concurrent_per_user == 2
+    assert settings.pipeline_timeout_curriculum_seconds == 90.0
+    assert settings.pipeline_timeout_diagram_node_budget_seconds == 90.0
+    assert settings.pipeline_timeout_interaction_seconds == 60.0
     assert bundle.concurrency.max_section_concurrency == 4
     assert bundle.concurrency.max_media_concurrency == 2
     assert bundle.concurrency.max_diagram_concurrency == 2

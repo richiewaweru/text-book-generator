@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pipeline.events import SlotRenderModeResolvedEvent, event_bus
 from pipeline.media.prompts.intelligent_image_prompt import (
     build_intelligent_image_prompt,
     should_resolve_intelligent_image_prompt,
@@ -51,6 +52,18 @@ async def _resolve_static_slot_prompts(
 
         slot.preferred_render = preferred_render
         slot.fallback_render = _fallback_render_for_slot(slot.slot_type, preferred_render)
+        generation_id = typed.request.generation_id or ""
+        if generation_id:
+            event_bus.publish(
+                generation_id,
+                SlotRenderModeResolvedEvent(
+                    generation_id=generation_id,
+                    section_id=sid,
+                    slot_id=slot.slot_id,
+                    render_mode=preferred_render.value,
+                    decided_by="intelligent_image_prompt",
+                ),
+            )
         if len(slot.frames) == 1:
             slot.generation_prompt = prompt
         for frame in slot.frames:

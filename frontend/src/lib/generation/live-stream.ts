@@ -77,14 +77,9 @@ function isTerminalSectionSignal(signal: ViewerSectionSignal | undefined): boole
 }
 
 function normalizeRuntimeProgressSnapshot(
-	snapshot: RuntimeProgressEvent['snapshot'] & { diagram_running?: number; diagram_queued?: number }
+	snapshot: RuntimeProgressEvent['snapshot']
 ): RuntimeProgressEvent['snapshot'] {
-	const { diagram_running: _diagramRunning, diagram_queued: _diagramQueued, ...rest } = snapshot;
-	return {
-		...rest,
-		media_running: snapshot.media_running ?? snapshot.diagram_running ?? 0,
-		media_queued: snapshot.media_queued ?? snapshot.diagram_queued ?? 0
-	};
+	return snapshot;
 }
 
 function sameRuntimeProgressSnapshot(
@@ -92,12 +87,7 @@ function sameRuntimeProgressSnapshot(
 	right: RuntimeProgressEvent['snapshot']
 ): boolean {
 	if (!left) return false;
-	const normalizedLeft = normalizeRuntimeProgressSnapshot(
-		left as RuntimeProgressEvent['snapshot'] & {
-			diagram_running?: number;
-			diagram_queued?: number;
-		}
-	);
+	const normalizedLeft = normalizeRuntimeProgressSnapshot(left);
 	const normalizedRight = normalizeRuntimeProgressSnapshot(right);
 	return (
 		normalizedLeft.mode === normalizedRight.mode &&
@@ -115,18 +105,9 @@ function sameRuntimeProgressSnapshot(
 }
 
 function normalizeRuntimePolicyEvent(
-	event: RuntimePolicyEvent & {
-		concurrency: RuntimePolicyEvent['concurrency'] & { max_diagram_concurrency?: number };
-	}
+	event: RuntimePolicyEvent
 ): RuntimePolicyEvent {
-	return {
-		...event,
-		concurrency: {
-			...event.concurrency,
-			max_media_concurrency:
-				event.concurrency.max_media_concurrency ?? event.concurrency.max_diagram_concurrency ?? 0
-		}
-	};
+	return event;
 }
 
 function sameProgressUpdate(

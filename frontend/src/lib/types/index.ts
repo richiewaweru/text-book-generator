@@ -428,7 +428,6 @@ export interface RuntimeConcurrencyPolicy {
 	max_section_concurrency: number;
 	max_media_concurrency: number;
 	max_qc_concurrency: number;
-	max_diagram_concurrency?: number;
 }
 
 export interface RuntimeTimeoutPolicy {
@@ -439,8 +438,8 @@ export interface RuntimeTimeoutPolicy {
 	content_repair_timeout_seconds: number;
 	field_regenerator_timeout_seconds: number;
 	qc_timeout_seconds: number;
-	diagram_inner_timeout_seconds: number;
-	diagram_node_budget_seconds: number;
+	media_inner_timeout_seconds: number;
+	media_node_budget_seconds: number;
 	generation_timeout_base_seconds: number;
 	generation_timeout_per_section_seconds: number;
 	generation_timeout_cap_seconds: number;
@@ -478,8 +477,6 @@ export interface RuntimeProgressSnapshot {
 	qc_queued: number;
 	retry_running: number;
 	retry_queued: number;
-	diagram_running?: number;
-	diagram_queued?: number;
 }
 
 export interface RuntimeProgressEvent {

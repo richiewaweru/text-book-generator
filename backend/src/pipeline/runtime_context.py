@@ -165,7 +165,6 @@ def build_runtime_policy_event(context: PipelineRuntimeContext) -> RuntimePolicy
         concurrency={
             "max_section_concurrency": context.policy.concurrency.max_section_concurrency,
             "max_media_concurrency": context.policy.concurrency.max_media_concurrency,
-            "max_diagram_concurrency": context.policy.concurrency.max_diagram_concurrency,
             "max_qc_concurrency": context.policy.concurrency.max_qc_concurrency,
         },
         timeouts={
@@ -176,8 +175,8 @@ def build_runtime_policy_event(context: PipelineRuntimeContext) -> RuntimePolicy
             "content_repair_timeout_seconds": context.policy.timeouts.content_repair_timeout_seconds,
             "field_regenerator_timeout_seconds": context.policy.timeouts.field_regenerator_timeout_seconds,
             "qc_timeout_seconds": context.policy.timeouts.qc_timeout_seconds,
-            "diagram_inner_timeout_seconds": context.policy.timeouts.diagram_inner_timeout_seconds,
-            "diagram_node_budget_seconds": context.policy.timeouts.diagram_node_budget_seconds,
+            "media_inner_timeout_seconds": context.policy.timeouts.diagram_inner_timeout_seconds,
+            "media_node_budget_seconds": context.policy.timeouts.diagram_node_budget_seconds,
             "generation_timeout_base_seconds": context.policy.timeouts.generation_timeout_base_seconds,
             "generation_timeout_per_section_seconds": context.policy.timeouts.generation_timeout_per_section_seconds,
             "generation_timeout_cap_seconds": context.policy.timeouts.generation_timeout_cap_seconds,

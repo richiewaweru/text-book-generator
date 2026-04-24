@@ -9,6 +9,7 @@ from pipeline.events import (
     MediaFrameReadyEvent,
     MediaFrameStartedEvent,
     MediaSlotReadyEvent,
+    SimulationTypeSelectedEvent,
 )
 from pipeline.media.types import MediaPlan, VisualFrame, VisualSlot
 from pipeline.nodes.interaction_generator import interaction_generator
@@ -278,6 +279,7 @@ async def test_interaction_generator_emits_single_simulation_when_multiple_plans
     assert result["media_slot_results"]["s-01"]["simulation"].ready is True
     assert [type(event) for _generation_id, event in events] == [
         MediaFrameStartedEvent,
+        SimulationTypeSelectedEvent,
         MediaFrameReadyEvent,
         MediaSlotReadyEvent,
         InteractionOutcomeEvent,

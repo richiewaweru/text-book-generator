@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 import logging
 from typing import Any
 
+import core.events as core_events
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
@@ -350,5 +351,19 @@ async def route_visuals(
             if placements
             else None,
         )
+        if generation_id:
+            core_events.event_bus.publish(
+                generation_id,
+                {
+                    "type": "visual_placements_committed",
+                    "generation_id": generation_id,
+                    "section_id": section.id,
+                    "placements_count": len(placements),
+                    "placements_summary": [
+                        f"{placement.block}:{placement.slot_type}:{placement.sizing}"
+                        for placement in placements
+                    ],
+                },
+            )
 
     return sections

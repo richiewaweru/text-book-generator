@@ -76,6 +76,9 @@ class GenerationReportSection(BaseModel):
     media_slots_planned: int = 0
     media_slots_ready: int = 0
     media_slots_failed: int = 0
+    visual_placements_count: int = 0
+    visual_placements_summary: list[str] = Field(default_factory=list)
+    slot_render_modes: dict[str, str] = Field(default_factory=dict)
     media_frame_retry_count: int = 0
     media_blocked: bool = False
     media_block_reason: str | None = None
@@ -85,6 +88,8 @@ class GenerationReportSection(BaseModel):
     image_provider: str | None = None
     simulation_outcome: Literal["generated", "skipped", "failed"] | None = None
     simulation_failure_reason: str | None = None
+    simulation_type_selected: str | None = None
+    simulation_goal_selected: str | None = None
     interaction_outcome: Literal["generated", "skipped"] | None = None
     interaction_skip_reason: str | None = None
     interaction_count: int = 0
@@ -106,6 +111,7 @@ class GenerationReportOutlineSection(BaseModel):
     terms_to_define: list[str] = Field(default_factory=list)
     terms_assumed: list[str] = Field(default_factory=list)
     practice_target: str | None = None
+    visual_placements_count: int = 0
 
 
 class GenerationPlannerTraceSection(BaseModel):
@@ -148,8 +154,11 @@ class GenerationReportSummary(BaseModel):
     image_success_count: int = 0
     image_failure_count: int = 0
     image_skip_count: int = 0
+    image_slots_count: int = 0
+    svg_slots_count: int = 0
     interaction_skip_count: int = 0
     interaction_retry_count: int = 0
+    prompt_builder_calls: int = 0
     field_regen_count: int = 0
     field_regen_success_count: int = 0
     warning_count: int = 0
