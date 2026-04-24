@@ -33,7 +33,12 @@ from pipeline.runtime_context import retry_policy_for_node
 from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, StyleContext, TextbookPipelineState
-from pipeline.types.requests import BlockVisualPlacement, SectionPlan
+from pipeline.types.requests import (
+    BlockVisualPlacement,
+    SectionPlan,
+    SectionVisualPolicy,
+    count_visual_placements,
+)
 from pipeline.llm_runner import run_llm
 
 logger = logging.getLogger(__name__)
@@ -48,12 +53,86 @@ class SectionPlanEnrichment(BaseModel):
     terms_to_define: list[str] = Field(default_factory=list)
     terms_assumed: list[str] = Field(default_factory=list)
     practice_target: str | None = None
-    visual_commitment: str | None = None
-    visual_placements: list[BlockVisualPlacement] | None = None
 
 
 class CurriculumEnrichmentOutput(BaseModel):
     sections: list[SectionPlanEnrichment] = Field(default_factory=list)
+
+
+_SPATIAL_HINTS = {
+    "biology",
+    "chemistry",
+    "ecosystem",
+    "cell",
+    "atom",
+    "heart",
+    "anatomy",
+    "river",
+    "map",
+    "planet",
+    "cycle",
+    "photosynthesis",
+    "geography",
+    "architecture",
+    "geology",
+    "organ",
+    "molecule",
+    "skeleton",
+    "volcano",
+    "ocean",
+    "continent",
+    "mountain",
+    "weather",
+    "circuit",
+    "engine",
+    "building",
+    "bridge",
+    "solar",
+    "galaxy",
+}
+
+_GRAPH_HINTS = {
+    "graph",
+    "plot",
+    "axes",
+    "axis",
+    "coordinate",
+    "gradient",
+    "slope",
+    "derivative",
+    "integral",
+    "function",
+    "equation",
+    "curve",
+    "tangent",
+    "linear",
+    "quadratic",
+    "parabola",
+    "intercept",
+    "asymptote",
+    "vector",
+    "force",
+    "velocity",
+    "acceleration",
+    "displacement",
+    "distance",
+    "frequency",
+    "wavelength",
+    "amplitude",
+    "probability",
+    "distribution",
+    "histogram",
+    "scatter",
+    "correlation",
+    "regression",
+    "demand",
+    "supply",
+    "elasticity",
+    "marginal",
+    "revenue",
+    "cost",
+    "profit",
+}
 
 
 def _build_style_context(state: TextbookPipelineState) -> StyleContext:
@@ -77,6 +156,181 @@ def _outline_from_request(state: TextbookPipelineState) -> list[SectionPlan]:
     outline = [SectionPlan.model_validate(plan) for plan in supplied]
     outline.sort(key=lambda item: (item.position, item.section_id))
     return outline
+
+
+def _all_contract_components(state: TextbookPipelineState) -> set[str]:
+    contract = state.contract
+    return (
+        set(getattr(contract, "required_components", []) or [])
+        | set(getattr(contract, "optional_components", []) or [])
+        | set(getattr(contract, "always_present", []) or [])
+        | set(getattr(contract, "available_components", []) or [])
+        | set(getattr(contract, "contextually_present", []) or [])
+    )
+
+
+def _visual_mode_for_plan(state: TextbookPipelineState, plan: SectionPlan, slot_type: str) -> str:
+    if plan.visual_policy is not None and plan.visual_policy.mode is not None:
+        return plan.visual_policy.mode
+    if slot_type in {"diagram_series", "diagram_compare"}:
+        return "image"
+
+    profile = " ".join(
+        part.lower()
+        for part in (
+            state.request.subject,
+            state.request.context,
+            plan.title,
+            plan.focus,
+        )
+        if part
+    )
+    if any(keyword in profile for keyword in _SPATIAL_HINTS | _GRAPH_HINTS):
+        return "image"
+    return "svg"
+
+
+def _visual_intent_for_plan(plan: SectionPlan) -> str:
+    if plan.role == "process":
+        return "demonstrate_process"
+    if plan.role == "compare":
+        return "compare_variants"
+    if plan.role in {"visual", "discover"}:
+        return "show_realism"
+    return "explain_structure"
+
+
+def _derive_visual_placements_for_plan(
+    state: TextbookPipelineState,
+    plan: SectionPlan,
+) -> list[BlockVisualPlacement]:
+    if plan.diagram_policy == "disabled":
+        return []
+
+    available = _all_contract_components(state)
+    selected = set(plan.required_components) | set(plan.optional_components)
+    visual_supported = available.intersection({"diagram-block", "diagram-series", "diagram-compare"})
+    if not visual_supported:
+        return []
+
+    if "diagram-compare" in selected:
+        return [
+            BlockVisualPlacement(
+                block="explanation",
+                slot_type="diagram_compare",
+                hint=f"Explanation comparison for {plan.title}.",
+            )
+        ]
+    if "diagram-series" in selected:
+        return [
+            BlockVisualPlacement(
+                block="explanation",
+                slot_type="diagram_series",
+                hint=f"Explanation sequence for {plan.title}.",
+            )
+        ]
+    if "diagram-block" in selected:
+        return [
+            BlockVisualPlacement(
+                block="explanation",
+                slot_type="diagram",
+                hint=f"Explanation diagram for {plan.title}.",
+            )
+        ]
+
+    profile = " ".join(
+        part.lower()
+        for part in (
+            state.request.subject,
+            state.request.context,
+            plan.title,
+            plan.focus,
+        )
+        if part
+    )
+    should_visualize = bool(
+        selected.intersection({"diagram-block", "diagram-series", "diagram-compare"})
+        or plan.role in {"visual", "process", "compare", "discover"}
+        or any(keyword in profile for keyword in _SPATIAL_HINTS | _GRAPH_HINTS)
+    )
+    if not should_visualize:
+        return []
+    if plan.role == "compare" and "diagram-compare" in available:
+        return [
+            BlockVisualPlacement(
+                block="explanation",
+                slot_type="diagram_compare",
+                hint=f"Explanation comparison for {plan.title}.",
+            )
+        ]
+    if plan.role == "process" and "diagram-series" in available:
+        return [
+            BlockVisualPlacement(
+                block="explanation",
+                slot_type="diagram_series",
+                hint=f"Explanation sequence for {plan.title}.",
+            )
+        ]
+    if "diagram-block" in available:
+        return [
+            BlockVisualPlacement(
+                block="explanation",
+                slot_type="diagram",
+                hint=f"Explanation diagram for {plan.title}.",
+            )
+        ]
+    return []
+
+
+def _route_visual_placements(state: TextbookPipelineState, outline: list[SectionPlan]) -> list[SectionPlan]:
+    routed: list[SectionPlan] = []
+    for plan in outline:
+        placements = _derive_visual_placements_for_plan(state, plan)
+        visual_policy = plan.visual_policy
+        diagram_policy = plan.diagram_policy
+        if placements:
+            intent = _visual_intent_for_plan(plan)
+            mode = _visual_mode_for_plan(state, plan, placements[0].slot_type)
+            diagram_policy = "required"
+            if visual_policy is None:
+                visual_policy = SectionVisualPolicy(
+                    required=True,
+                    intent=intent,
+                    mode=mode,
+                )
+            else:
+                visual_policy = visual_policy.model_copy(
+                    update={
+                        "required": True,
+                        "intent": visual_policy.intent or intent,
+                        "mode": visual_policy.mode or mode,
+                    }
+                )
+        else:
+            if diagram_policy != "disabled":
+                diagram_policy = "allowed"
+        if not placements and visual_policy is not None:
+            visual_policy = visual_policy.model_copy(
+                update={
+                    "required": False,
+                    "intent": None,
+                    "mode": None,
+                    "goal": None,
+                    "style_notes": None,
+                }
+            )
+
+        routed.append(
+            plan.model_copy(
+                update={
+                    "visual_placements": placements,
+                    "needs_diagram": bool(placements),
+                    "diagram_policy": diagram_policy,
+                    "visual_policy": visual_policy,
+                }
+            )
+        )
+    return routed
 
 
 def _publish_section_titles(
@@ -131,7 +385,6 @@ def _report_outline(sections: list[SectionPlan]) -> list[GenerationReportOutline
             terms_to_define=list(plan.terms_to_define),
             terms_assumed=list(plan.terms_assumed),
             practice_target=plan.practice_target,
-            visual_commitment=plan.visual_commitment,
         )
         for plan in sections
     ]
@@ -145,6 +398,7 @@ def _planner_trace_sections(sections: list[SectionPlan]) -> list[GenerationPlann
             position=plan.position,
             role=plan.role,
             rationale_summary=plan.focus,
+            visual_placements_count=count_visual_placements(plan),
         )
         for plan in sections
     ]
@@ -181,12 +435,10 @@ def _outline_digest(outline: list[SectionPlan]) -> list[dict[str, object]]:
             "role": plan.role,
             "bridges_from": plan.bridges_from,
             "bridges_to": plan.bridges_to,
-            "needs_diagram": plan.needs_diagram,
             "needs_worked_example": plan.needs_worked_example,
             "terms_to_define": list(plan.terms_to_define),
             "terms_assumed": list(plan.terms_assumed),
             "practice_target": plan.practice_target,
-            "visual_commitment": plan.visual_commitment,
             "visual_placements": [placement.model_dump(mode="json") for placement in plan.visual_placements],
         }
         for plan in outline
@@ -209,10 +461,7 @@ def _apply_enrichment(
             "terms_to_define": list(enriched.terms_to_define),
             "terms_assumed": list(enriched.terms_assumed),
             "practice_target": enriched.practice_target,
-            "visual_commitment": enriched.visual_commitment,
         }
-        if enriched.visual_placements is not None:
-            updates["visual_placements"] = list(enriched.visual_placements)
 
         enriched_outline.append(plan.model_copy(update=updates))
 
@@ -307,6 +556,7 @@ async def curriculum_planner(
             model=model,
             retry_policy=retry_policy,
         )
+        outline = _route_visual_placements(state, outline)
         duplicate_term_warnings = _warn_duplicate_terms(
             outline,
             state.request.generation_id or "",
@@ -351,22 +601,23 @@ async def curriculum_planner(
             generation_mode=state.request.mode,
             retry_policy=retry_policy,
         )
+        outline = _route_visual_placements(state, result.output.sections)
         duplicate_term_warnings = _warn_duplicate_terms(
-            result.output.sections,
+            outline,
             state.request.generation_id or "",
         )
         _publish_curriculum_planned(
             state.request.generation_id or "",
             path="fresh",
             result="planned",
-            sections=result.output.sections,
+            sections=outline,
             duplicate_term_warnings=duplicate_term_warnings,
         )
         _publish_section_titles(
-            state.request.generation_id or "", result.output.sections
+            state.request.generation_id or "", outline
         )
         return {
-            "curriculum_outline": result.output.sections,
+            "curriculum_outline": outline,
             "style_context": style_context,
             "completed_nodes": ["curriculum_planner"],
         }

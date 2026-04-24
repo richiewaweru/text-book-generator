@@ -13,7 +13,13 @@ from core.rate_limit import limiter
 import core.events as core_events
 from core.llm import build_model, run_llm
 from pipeline.contracts import get_contract, list_template_ids, validate_preset_for_template
-from pipeline.types.requests import GenerationMode, SectionPlan, SectionVisualPolicy
+from pipeline.types.requests import (
+    GenerationMode,
+    SectionPlan,
+    SectionVisualPolicy,
+    count_visual_placements,
+    needs_diagram_from_placements,
+)
 from generation.dtos import GenerationAcceptedResponse
 from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_report_repository import (
@@ -98,16 +104,13 @@ def _pipeline_section_from_planning(
     generation_mode: GenerationMode,
 ) -> SectionPlan:
     selected = list(dict.fromkeys([*always_present, *section.selected_components]))
-    visual_required = bool(section.visual_policy and section.visual_policy.required)
-    needs_diagram = visual_required or any(
-        component.startswith("diagram") for component in selected
-    )
+    needs_diagram = needs_diagram_from_placements(section)
     needs_worked_example = any(
         component == "worked-example-card" for component in selected
     )
     interaction_required = any(component == "simulation-block" for component in selected)
     focus = section.focus_note or section.objective or section.rationale or section.title
-    computed_diagram_policy = "required" if visual_required else "allowed"
+    computed_diagram_policy = "required" if needs_diagram else "allowed"
     pipeline_visual_policy = (
         SectionVisualPolicy(
             required=section.visual_policy.required,
@@ -130,6 +133,7 @@ def _pipeline_section_from_planning(
         planning_visual_policy=(
             section.visual_policy.model_dump() if section.visual_policy else None
         ),
+        visual_placements_count=count_visual_placements(section),
         computed_needs_diagram=needs_diagram,
         computed_diagram_policy=computed_diagram_policy,
         pipeline_visual_policy=(
@@ -159,7 +163,6 @@ def _pipeline_section_from_planning(
         terms_to_define=list(section.terms_to_define),
         terms_assumed=list(section.terms_assumed),
         practice_target=section.practice_target,
-        visual_commitment=section.visual_commitment,
         visual_placements=list(section.visual_placements),
     )
 

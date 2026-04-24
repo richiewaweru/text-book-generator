@@ -131,6 +131,7 @@ def _build_failed_sections(state: TextbookPipelineState) -> list[FailedSectionEn
             bridges_from=record.bridges_from,
             bridges_to=record.bridges_to,
             needs_diagram=record.needs_diagram,
+            visual_placements_count=record.visual_placements_count,
             needs_worked_example=record.needs_worked_example,
             failed_at_node=record.failed_at_node,
             error_type=record.error_type,

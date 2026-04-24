@@ -178,33 +178,34 @@ def route_visuals(
                 or section.role in {"visual", "process", "compare", "discover"}
             )
         )
-        if not should_visualize:
-            section.visual_placements = []
-            continue
-
         intent = _visual_intent(section)
         mode = _visual_mode(brief, intent)
-        section.visual_policy = VisualPolicy(
-            required=True,
+        placements = _derive_visual_placements(
+            section=section,
+            contract=contract,
             intent=intent,
-            mode=mode,
+            should_visualize=should_visualize,
+        )
+        section.visual_placements = placements
+        section.visual_policy = VisualPolicy(
+            required=bool(placements),
+            intent=intent if placements else None,
+            mode=mode if placements else None,
             goal={
                 "demonstrate_process": "Show the sequence or method clearly enough that the learner can follow each step.",
                 "compare_variants": "Put the alternatives in view so the learner can spot the difference that matters.",
                 "show_realism": "Ground the section in a realistic visual anchor the learner can point at.",
                 "explain_structure": "Show the important structure or relationship the section is describing.",
-            }[intent],
+            }[intent]
+            if placements
+            else None,
             style_notes=(
                 "Clean structural diagram, labeled nodes, clear arrows."
                 if mode == "svg"
                 else "Classroom-friendly educational image, accurate labels, no decorative clutter."
-            ),
-        )
-        section.visual_placements = _derive_visual_placements(
-            section=section,
-            contract=contract,
-            intent=intent,
-            should_visualize=should_visualize,
+            )
+            if placements
+            else None,
         )
 
     return sections

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from pipeline.media.qc.simulation_qc import validate_simulation_content
+from pipeline.media.slot_state import pending_required_slot_ids
 from pipeline.media.types import (
     MediaPlan,
     VisualFrame,
@@ -32,7 +33,6 @@ from pipeline.types.section_content import (
 )
 from pipeline.types.requests import BlockVisualPlacement, GenerationMode, PipelineRequest, SectionPlan
 from pipeline.types.template_contract import GenerationGuidance, TemplateContractSummary
-from pipeline.visual_resolution import pending_visual_fields
 
 
 def _guidance() -> GenerationGuidance:
@@ -139,7 +139,7 @@ def _base_state(*, media_plan: MediaPlan, contract: TemplateContractSummary | No
     )
 
 
-def test_pending_visual_fields_prefers_media_slot_results_over_stale_section_preview() -> None:
+def test_pending_required_slot_ids_prefers_media_slot_results_over_stale_section_preview() -> None:
     slot = VisualSlot(
         slot_id="diagram",
         slot_type="diagram",
@@ -172,7 +172,7 @@ def test_pending_visual_fields_prefers_media_slot_results_over_stale_section_pre
         }
     }
 
-    assert pending_visual_fields(state) == ["diagram"]
+    assert pending_required_slot_ids(state) == ["diagram"]
 
 
 @pytest.mark.asyncio

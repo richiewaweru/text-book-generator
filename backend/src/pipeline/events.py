@@ -342,6 +342,7 @@ class SectionFailedEvent(BaseModel):
     bridges_from: str | None = None
     bridges_to: str | None = None
     needs_diagram: bool = False
+    visual_placements_count: int = 0
     needs_worked_example: bool = False
     attempt_count: int = 0
     can_retry: bool = False

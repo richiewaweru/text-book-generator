@@ -834,7 +834,6 @@ class TestGenerationApi:
                         "terms_to_define": ["slope"],
                         "terms_assumed": [],
                         "practice_target": "identify slope as steepness from a graph",
-                        "visual_commitment": "diagram",
                     }
                 ],
                 planner_trace={
@@ -848,6 +847,7 @@ class TestGenerationApi:
                             "position": 1,
                             "role": "intro",
                             "rationale_summary": "Introduce slope as steepness on a graph.",
+                            "visual_placements_count": 0,
                         }
                     ],
                 },
@@ -864,11 +864,12 @@ class TestGenerationApi:
         payload = detail_response.json()
         assert payload["planning_spec"]["status"] == "committed"
         assert payload["runtime_curriculum_outline"][0]["terms_to_define"] == ["slope"]
-        assert payload["runtime_curriculum_outline"][0]["visual_commitment"] == "diagram"
+        assert "visual_commitment" not in payload["runtime_curriculum_outline"][0]
         assert payload["planner_trace"]["path"] == "seeded_enrichment"
         assert payload["planner_trace"]["sections"][0]["rationale_summary"] == (
             "Introduce slope as steepness on a graph."
         )
+        assert payload["planner_trace"]["sections"][0]["visual_placements_count"] == 0
 
     async def test_generation_report_endpoint_returns_saved_report(self, db_session: AsyncSession):
         generation_id = "gen-report"

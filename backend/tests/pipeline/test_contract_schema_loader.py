@@ -91,11 +91,19 @@ def test_generated_section_content_rejects_invalid_field_types() -> None:
 
 
 def test_synced_lectio_contract_keeps_inline_diagram_fields() -> None:
-    lectio_types = Path("frontend/node_modules/lectio/dist/schema/types.d.ts").read_text(
-        encoding="utf-8"
-    )
-    assert "export interface PracticeProblem {\n    diagram?: DiagramContent;" in lectio_types
-    assert "export interface WorkedExampleContent {\n    diagram?: DiagramContent;" in lectio_types
+    repo_root = Path(__file__).resolve().parents[3]
+    lectio_types = (
+        repo_root / "frontend" / "node_modules" / "lectio" / "dist" / "schema" / "types.d.ts"
+    ).read_text(encoding="utf-8")
+    practice_problem_block = lectio_types.split("export interface PracticeProblem {", 1)[1].split(
+        "export interface PracticeContent {", 1
+    )[0]
+    worked_example_block = lectio_types.split(
+        "export interface WorkedExampleContent {", 1
+    )[1].split("export interface ProcessStepItem {", 1)[0]
+
+    assert "diagram?: DiagramContent;" in practice_problem_block
+    assert "diagram?: DiagramContent;" in worked_example_block
 
     practice_problem = PracticeProblem.model_validate(
         {

@@ -659,7 +659,6 @@ async def test_recorder_persists_runtime_outline_and_planner_trace() -> None:
                     "terms_to_define": ["slope"],
                     "terms_assumed": [],
                     "practice_target": "identify slope as steepness from a graph",
-                    "visual_commitment": "diagram",
                 }
             ],
             planner_trace_sections=[
@@ -669,6 +668,7 @@ async def test_recorder_persists_runtime_outline_and_planner_trace() -> None:
                     "position": 1,
                     "role": "intro",
                     "rationale_summary": "Introduce slope as the steepness of a line.",
+                    "visual_placements_count": 1,
                 }
             ],
         )
@@ -685,6 +685,7 @@ async def test_recorder_persists_runtime_outline_and_planner_trace() -> None:
     assert report.planner_trace.sections[0].rationale_summary == (
         "Introduce slope as the steepness of a line."
     )
+    assert report.planner_trace.sections[0].visual_placements_count == 1
     assert report.planner_trace.duplicate_term_warnings[0].startswith(
         "Duplicate term assignment in curriculum plan"
     )

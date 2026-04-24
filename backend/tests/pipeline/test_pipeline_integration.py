@@ -27,7 +27,7 @@ from pipeline.state import (
     StyleContext,
     TextbookPipelineState,
 )
-from pipeline.types.requests import PipelineRequest, SectionPlan, SectionVisualPolicy
+from pipeline.types.requests import BlockVisualPlacement, PipelineRequest, SectionPlan, SectionVisualPolicy
 from pipeline.types.section_content import (
     ExplanationContent,
     HookHeroContent,
@@ -1019,7 +1019,7 @@ class TestSectionAssembler:
         warnings = _check_capacity(section_dict)
         assert any("hook.headline" in w for w in warnings)
 
-    async def test_section_assembler_allows_pending_required_visual(self):
+    async def test_section_assembler_accepts_sections_without_visual_placements(self):
         from pipeline.nodes.section_assembler import section_assembler
 
         state = _base_state(
@@ -1039,13 +1039,12 @@ class TestSectionAssembler:
         )
         result = await section_assembler(state)
 
-        assert result["partial_sections"]["s-01"].status == "awaiting_assets"
-        assert result["partial_sections"]["s-01"].pending_assets == ["diagram"]
-        assert result["section_pending_assets"]["s-01"] == ["diagram"]
-        assert result["section_lifecycle"]["s-01"] == "awaiting_assets"
+        assert "s-01" in result["assembled_sections"]
+        assert result["section_pending_assets"]["s-01"] == []
+        assert result["section_lifecycle"]["s-01"] == "final"
         assert "section_assembler" in result["completed_nodes"]
 
-    async def test_final_section_assembler_defers_while_required_visual_is_pending(self):
+    async def test_final_section_assembler_defers_while_placed_visual_is_pending(self):
         from pipeline.nodes.section_assembler import section_assembler
 
         state = _base_state(
@@ -1061,7 +1060,37 @@ class TestSectionAssembler:
                 optional_components=["definition-card"],
             ),
             current_section_id="s-01",
+            current_section_plan=_plan("s-01").model_copy(
+                update={
+                    "visual_placements": [
+                        BlockVisualPlacement(block="explanation", slot_type="diagram")
+                    ]
+                }
+            ),
             generated_sections={"s-01": _section("s-01")},
+            media_plans={
+                "s-01": MediaPlan(
+                    section_id="s-01",
+                    slots=[
+                        VisualSlot(
+                            slot_id="diagram",
+                            slot_type="diagram",
+                            required=True,
+                            preferred_render="svg",
+                            pedagogical_intent="Show the concept clearly.",
+                            caption="Diagram caption",
+                            frames=[
+                                VisualFrame(
+                                    slot_id="diagram",
+                                    index=0,
+                                    label="Main view",
+                                    generation_goal="Render the main diagram.",
+                                )
+                            ],
+                        )
+                    ],
+                )
+            },
         )
         result = await section_assembler(state)
 

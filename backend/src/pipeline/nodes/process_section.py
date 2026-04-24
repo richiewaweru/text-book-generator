@@ -36,9 +36,8 @@ from pipeline.nodes.section_assembler import section_assembler
 from pipeline.nodes.section_runner import _run_parallel_phase, run_section_steps
 from pipeline.runtime_context import get_runtime_context
 from pipeline.runtime_diagnostics import publish_runtime_event
-from pipeline.section_assets import pending_visual_fields
+from pipeline.media.slot_state import pending_required_slot_ids, visual_mode
 from pipeline.state import PartialSectionRecord, TextbookPipelineState, merge_state_updates
-from pipeline.visual_resolution import resolve_effective_visual_mode
 
 
 async def _run_interaction_path(
@@ -113,7 +112,7 @@ def _build_partial_snapshot(
         return {}
 
     next_pending_assets = list(
-        pending_visual_fields(state) if pending_assets is None else pending_assets
+        pending_required_slot_ids(state) if pending_assets is None else pending_assets
     )
     lifecycle = "awaiting_assets" if next_pending_assets else status
     timestamp = updated_at or _utc_now_iso()
@@ -125,7 +124,7 @@ def _build_partial_snapshot(
                 template_id=section.template_id,
                 content=section,
                 status=lifecycle,
-                visual_mode=resolve_effective_visual_mode(state),
+                visual_mode=visual_mode(state.media_plans.get(section_id)),
                 pending_assets=next_pending_assets,
                 updated_at=timestamp,
             )
@@ -317,7 +316,7 @@ async def process_section(
         merge_state_updates(raw_state, phase3)
         typed = TextbookPipelineState.parse(raw_state)
 
-        final_pending_assets = list(pending_visual_fields(typed))
+        final_pending_assets = list(pending_required_slot_ids(typed))
         phase3_partial = _build_partial_snapshot(
             typed,
             status="finalizing",

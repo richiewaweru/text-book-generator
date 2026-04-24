@@ -77,7 +77,7 @@ def _section_plan_policy_block(section_plan: SectionPlan) -> str:
     terms_to_define = ", ".join(section_plan.terms_to_define) or "none"
     terms_assumed = ", ".join(section_plan.terms_assumed) or "none"
     practice_target = section_plan.practice_target or "not specified"
-    visual_commitment = section_plan.visual_commitment or "not specified"
+    placement_count = len(section_plan.visual_placements)
     return f"""Planning policy:
   role: {section_plan.role}
   required_components: {required_components}
@@ -89,49 +89,7 @@ def _section_plan_policy_block(section_plan: SectionPlan) -> str:
   terms_to_define: {terms_to_define}
   terms_assumed: {terms_assumed}
   practice_target: {practice_target}
-  visual_commitment: {visual_commitment}"""
-
-
-def _legacy_visual_context_block(section_plan: SectionPlan) -> str:
-    commitment = section_plan.visual_commitment
-    if commitment is None:
-        return ""
-    if commitment == "diagram":
-        return (
-            "Visual context:\n"
-            "This section WILL include a diagram. You may reference it as "
-            "'the diagram below' in explanations or practice."
-        )
-    if commitment == "interaction":
-        return (
-            "Visual context:\n"
-            "This section WILL include an interactive element. You may reference "
-            "it as 'the interactive above' in explanations or practice."
-        )
-    return (
-        "Visual context:\n"
-        "This section has NO diagram or interactive. Do not reference any visual "
-        "element in explanations or practice."
-    )
-
-
-def _explanation_visual_reference(section_plan: SectionPlan) -> tuple[str, str] | None:
-    placements = [placement for placement in section_plan.visual_placements if placement.block == "explanation"]
-    slot_order = {
-        "diagram_compare": 0,
-        "diagram_series": 1,
-        "diagram": 2,
-    }
-    placements.sort(key=lambda placement: slot_order.get(placement.slot_type, 99))
-    if not placements:
-        return None
-
-    primary = placements[0]
-    if primary.slot_type == "diagram_compare":
-        return "comparison above", "the comparison above"
-    if primary.slot_type == "diagram_series":
-        return "diagrams above", "the diagrams above"
-    return "diagram below", "the diagram below"
+  visual_placements: {placement_count} placement(s)"""
 
 
 def _format_problem_indices(problem_indices: list[int]) -> str:
@@ -170,13 +128,12 @@ def _practice_visual_context(section_plan: SectionPlan, reference: tuple[str, st
     if reference is not None:
         return (
             "Visual context:\n"
-            "The section diagram appears elsewhere. "
-            "Do not reference it from individual practice problems."
+            "The section diagram appears elsewhere in the section - not next to practice problems. "
+            "Do NOT reference any diagram from practice problems. Describe every scenario in words."
         )
     return (
         "Visual context:\n"
-        "This section has NO diagram for practice problems. "
-        "Do not reference any visual element."
+        "Practice problems have NO diagram. Describe every scenario in words."
     )
 
 
@@ -200,88 +157,98 @@ def _visual_context_block(
     phase: str = "all",
 ) -> str:
     if not section_plan.visual_placements:
-        return _legacy_visual_context_block(section_plan)
+        return (
+            "Visual context:\n"
+            "This section has NO diagram or visual element. "
+            "Do NOT reference 'the diagram', 'the diagrams above', or any other visual."
+        )
 
-    reference = _explanation_visual_reference(section_plan)
+    explanation_placements = [
+        placement for placement in section_plan.visual_placements if placement.block == "explanation"
+    ]
+    has_series = any(
+        placement.slot_type in {"diagram_series", "diagram_compare"}
+        for placement in explanation_placements
+    )
+    has_explanation_diagram = any(
+        placement.slot_type == "diagram" for placement in explanation_placements
+    )
 
     if phase == "core":
-        if reference is None:
+        if has_series:
             return (
                 "Visual context:\n"
-                "This section has NO diagram near the explanation. "
-                "Do not reference any visual element."
-            )
-        location, phrase = reference
-        if location == "diagram below":
-            return (
-                "Visual context:\n"
-                "This section includes a diagram below the explanation. "
-                f"You may reference it as '{phrase}'."
-            )
-        if location == "diagrams above":
-            return (
-                "Visual context:\n"
-                "This section includes diagrams above the explanation. "
-                f"You may reference them as '{phrase}'. "
+                "This section includes a diagram series above the explanation. "
+                "You may reference it as 'the diagrams above'. "
                 "Do NOT say 'the diagram below'."
+            )
+        if has_explanation_diagram:
+            return (
+                "Visual context:\n"
+                "This section includes a diagram alongside the explanation. "
+                "You may reference it as 'the diagram'."
             )
         return (
             "Visual context:\n"
-            f"This section includes a {location} the explanation. "
-            f"You may reference it as '{phrase}'. "
-            "Do NOT say 'the diagram below'."
+            "This section has visuals elsewhere, but none adjacent to the explanation. "
+            "Do NOT reference any diagram in the explanation."
         )
 
     if phase == "practice":
-        return _practice_visual_context(section_plan, reference)
+        practice_placements = [
+            placement for placement in section_plan.visual_placements if placement.block == "practice"
+        ]
+        if practice_placements:
+            indexed = [placement for placement in practice_placements if placement.problem_indices]
+            if indexed:
+                referenced = ", ".join(
+                    f"problems {_format_problem_indices(placement.problem_indices or [])}"
+                    for placement in indexed
+                )
+                return (
+                    "Visual context:\n"
+                    f"The selected inline diagrams belong to {referenced}. "
+                    "Only those specific problems may say 'the diagram'. "
+                    "All other practice problems must describe scenarios in words."
+                )
+            return (
+                "Visual context:\n"
+                "Some practice items include their own supporting diagrams. "
+                "Only reference a diagram when the placement explicitly belongs to that problem."
+            )
+        if has_series or has_explanation_diagram:
+            return (
+                "Visual context:\n"
+                "The section diagram appears elsewhere in the section - not next to practice problems. "
+                "Do NOT reference 'the diagram below' or any section-level diagram from practice problems. "
+                "Describe every scenario in words."
+            )
+        return (
+            "Visual context:\n"
+            "Practice problems have NO diagram. Describe every scenario in words."
+        )
 
     if phase == "enrichment":
         return _enrichment_visual_context(section_plan)
 
-    if reference is None:
-        if any(placement.block == "practice" for placement in section_plan.visual_placements):
-            return (
-                "Visual context:\n"
-                "This section has no explanation-adjacent diagram. "
-                "Only explicitly targeted practice problems may reference their own inline diagram. "
-                "Other content must not reference visuals."
-            )
-        if any(placement.block == "worked_example" for placement in section_plan.visual_placements):
-            return (
-                "Visual context:\n"
-                "This section has no explanation-adjacent diagram. "
-                "Only the worked example may reference its own inline diagram if one is present. "
-                "Other content must not reference visuals."
-            )
+    if has_series:
         return (
             "Visual context:\n"
-            "This section has NO diagram or interactive. "
-            "Do not reference any visual element."
+            "This section includes a diagram series above the explanation. "
+            "Only the explanation may reference 'the diagrams above'. "
+            "Practice and enrichment content must follow their own placement rules."
         )
-
-    location, phrase = reference
-    if location == "diagram below":
+    if has_explanation_diagram:
         return (
             "Visual context:\n"
-            "This section includes a diagram below the explanation. "
-            f"Only the explanation may reference it as '{phrase}'. "
-            "Practice problems must not reference that section-level diagram, "
-            "and only a placed worked example may reference its own inline visual."
-        )
-    if location == "diagrams above":
-        return (
-            "Visual context:\n"
-            "This section includes diagrams above the explanation. "
-            f"Only the explanation may reference them as '{phrase}'. "
-            "Practice problems must not reference that section-level visual, "
-            "and only a placed worked example may reference its own inline visual."
+            "This section includes a diagram alongside the explanation. "
+            "Only the explanation may reference 'the diagram'. "
+            "Practice and enrichment content must follow their own placement rules."
         )
     return (
         "Visual context:\n"
-        f"This section includes a {location} the explanation. "
-        f"Only the explanation may reference it as '{phrase}'. "
-        "Practice problems must not reference that section-level visual, "
-        "and only a placed worked example may reference its own inline visual."
+        "This section has visuals, but none are adjacent to the explanation. "
+        "Only explicitly targeted blocks may reference a diagram."
     )
 
 
@@ -426,7 +393,7 @@ Learner type: {learner_fit}
 
 {_section_plan_policy_block(section_plan)}"""
 
-    visual_context = _visual_context_block(section_plan, phase="all")
+    visual_context = _visual_context_block(section_plan, phase="core")
     if visual_context:
         base += f"\n\n{visual_context}"
 

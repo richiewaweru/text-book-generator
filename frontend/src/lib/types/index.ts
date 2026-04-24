@@ -195,6 +195,7 @@ export interface FailedSectionEntry {
 	bridges_from?: string | null;
 	bridges_to?: string | null;
 	needs_diagram: boolean;
+	visual_placements_count?: number;
 	needs_worked_example: boolean;
 	failed_at_node: string;
 	error_type: string;
@@ -407,6 +408,7 @@ export interface SectionFailedEvent {
 	bridges_from?: string | null;
 	bridges_to?: string | null;
 	needs_diagram: boolean;
+	visual_placements_count?: number;
 	needs_worked_example: boolean;
 	attempt_count: number;
 	can_retry: boolean;
@@ -493,7 +495,6 @@ export type ProgressUpdateStage =
 	| 'drafting_partial'
 	| 'awaiting_assets'
 	| 'generating_media'
-	| 'generating_diagram'
 	| 'generating_image'
 	| 'checking_quality'
 	| 'repairing'

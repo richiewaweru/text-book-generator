@@ -113,6 +113,14 @@ export interface SectionGenerationNotes {
 	explanation_override: string | null;
 }
 
+export interface PlanningBlockVisualPlacement {
+	block: 'hook' | 'explanation' | 'practice' | 'worked_example';
+	slot_type: 'diagram' | 'diagram_series' | 'diagram_compare';
+	sizing?: 'full' | 'compact';
+	hint?: string;
+	problem_indices?: number[] | null;
+}
+
 export interface PlanningSectionPlan {
 	id: string;
 	order: number;
@@ -124,6 +132,7 @@ export interface PlanningSectionPlan {
 	visual_policy: VisualPolicy | null;
 	generation_notes: SectionGenerationNotes | null;
 	rationale: string;
+	visual_placements?: PlanningBlockVisualPlacement[];
 }
 
 export interface PlanningGenerationSpec {

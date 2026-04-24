@@ -47,10 +47,6 @@ class PipelineRequest(BaseModel):
 
 class SectionVisualPolicy(BaseModel):
     required: bool = False
-    target: Literal["diagram", "diagram_compare", "diagram_series", "simulation"] | None = None
-    fallback_target: (
-        Literal["diagram", "diagram_compare", "diagram_series", "simulation"] | None
-    ) = None
     intent: Literal[
         "explain_structure",
         "show_realism",
@@ -58,8 +54,6 @@ class SectionVisualPolicy(BaseModel):
         "compare_variants",
     ] | None = None
     mode: Literal["image", "svg"] | None = None
-    preferred_render: Literal["image", "svg", "html_simulation"] | None = None
-    fallback_render: Literal["image", "svg", "html_simulation"] | None = None
     goal: str | None = None
     style_notes: str | None = None
     simulation_intent: str | None = None
@@ -71,6 +65,19 @@ class BlockVisualPlacement(BaseModel):
     sizing: Literal["full", "compact"] = "full"
     hint: str = ""
     problem_indices: list[int] | None = None
+
+
+def count_visual_placements(
+    section_or_placements: object | list[BlockVisualPlacement] | None,
+) -> int:
+    placements = getattr(section_or_placements, "visual_placements", section_or_placements)
+    return len(placements or [])
+
+
+def needs_diagram_from_placements(
+    section_or_placements: object | list[BlockVisualPlacement] | None,
+) -> bool:
+    return count_visual_placements(section_or_placements) > 0
 
 
 class SectionPlan(BaseModel):
@@ -107,5 +114,4 @@ class SectionPlan(BaseModel):
     terms_to_define: list[str] = Field(default_factory=list)
     terms_assumed: list[str] = Field(default_factory=list)
     practice_target: str | None = None
-    visual_commitment: Literal["diagram", "interaction", "none"] | None = None
     visual_placements: list[BlockVisualPlacement] = Field(default_factory=list)

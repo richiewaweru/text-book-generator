@@ -35,6 +35,7 @@ from pipeline.state import (
     TextbookPipelineState,
     merge_state_updates,
 )
+from pipeline.types.requests import count_visual_placements, needs_diagram_from_placements
 from pipeline.types.section_content import SectionContent
 
 logger = logging.getLogger(__name__)
@@ -246,7 +247,8 @@ def _synthetic_failed_section(
         focus=plan.focus if plan is not None else None,
         bridges_from=plan.bridges_from if plan is not None else None,
         bridges_to=plan.bridges_to if plan is not None else None,
-        needs_diagram=plan.needs_diagram if plan is not None else False,
+        needs_diagram=needs_diagram_from_placements(plan),
+        visual_placements_count=count_visual_placements(plan),
         needs_worked_example=plan.needs_worked_example if plan is not None else False,
         failed_at_node=node_name,
         error_type="missing_content",
@@ -277,6 +279,7 @@ def _publish_section_failed(
             bridges_from=record.bridges_from,
             bridges_to=record.bridges_to,
             needs_diagram=record.needs_diagram,
+            visual_placements_count=record.visual_placements_count,
             needs_worked_example=record.needs_worked_example,
             attempt_count=record.attempt_count,
             can_retry=record.can_retry,

@@ -149,7 +149,7 @@ def test_runtime_policy_settings_defaults() -> None:
     assert bundle.concurrency.max_qc_concurrency == 4
     assert bundle.max_section_rerenders == 2
     assert bundle.retries.qc_agent.max_attempts == 2
-    assert resolve_generation_timeout_seconds(settings, 3) == 390.0
+    assert resolve_generation_timeout_seconds(settings, 3) == 480.0
     assert resolve_generation_timeout_seconds(settings, 20) == 900.0
 
 

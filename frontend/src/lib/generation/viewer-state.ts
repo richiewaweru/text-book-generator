@@ -158,6 +158,15 @@ function derivePartialSlotStatus(entry: PipelinePartialSectionEntry): ViewerSect
 	return 'generating';
 }
 
+function normalizeFailedSectionEntry(entry: FailedSectionEntry): FailedSectionEntry {
+	const visualPlacementsCount = entry.visual_placements_count ?? (entry.needs_diagram ? 1 : 0);
+	return {
+		...entry,
+		visual_placements_count: visualPlacementsCount,
+		needs_diagram: visualPlacementsCount > 0
+	};
+}
+
 export function normalizeDocument(document: GenerationDocument): GenerationDocument {
 	const section_manifest = sortManifest(document.section_manifest);
 	return {
@@ -165,7 +174,10 @@ export function normalizeDocument(document: GenerationDocument): GenerationDocum
 		section_manifest,
 		sections: sortSectionsByManifest(document.sections, section_manifest),
 		partial_sections: sortPartialSections(document.partial_sections ?? [], section_manifest),
-		failed_sections: sortFailedSections(document.failed_sections ?? [], section_manifest)
+		failed_sections: sortFailedSections(
+			(document.failed_sections ?? []).map(normalizeFailedSectionEntry),
+			section_manifest
+		)
 	};
 }
 
@@ -308,6 +320,7 @@ export function applySectionFailed(
 	payload: SectionFailedEvent
 ): GenerationDocument {
 	const failedSections = [...document.failed_sections];
+	const visualPlacementsCount = payload.visual_placements_count ?? (payload.needs_diagram ? 1 : 0);
 	const nextFailed: FailedSectionEntry = {
 		section_id: payload.section_id,
 		title: payload.title,
@@ -315,7 +328,8 @@ export function applySectionFailed(
 		focus: payload.focus ?? null,
 		bridges_from: payload.bridges_from ?? null,
 		bridges_to: payload.bridges_to ?? null,
-		needs_diagram: payload.needs_diagram,
+		needs_diagram: visualPlacementsCount > 0,
+		visual_placements_count: visualPlacementsCount,
 		needs_worked_example: payload.needs_worked_example,
 		failed_at_node: payload.failed_at_node,
 		error_type: payload.error_type,

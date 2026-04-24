@@ -56,6 +56,7 @@ from pipeline.types.content_phases import (
     PracticePhaseContent,
 )
 from pipeline.types.generation_manifest import SectionGenerationManifest
+from pipeline.types.requests import count_visual_placements, needs_diagram_from_placements
 from pipeline.types.section_content import (
     SectionContent,
 )
@@ -157,7 +158,8 @@ def _failed_section_record(
         focus=plan.focus if plan is not None else None,
         bridges_from=plan.bridges_from if plan is not None else None,
         bridges_to=plan.bridges_to if plan is not None else None,
-        needs_diagram=plan.needs_diagram if plan is not None else False,
+        needs_diagram=needs_diagram_from_placements(plan),
+        visual_placements_count=count_visual_placements(plan),
         needs_worked_example=plan.needs_worked_example if plan is not None else False,
         failed_at_node="content_generator",
         error_type=detail.error_type,
@@ -188,6 +190,7 @@ def _publish_section_failed(
             bridges_from=failed_record.bridges_from,
             bridges_to=failed_record.bridges_to,
             needs_diagram=failed_record.needs_diagram,
+            visual_placements_count=failed_record.visual_placements_count,
             needs_worked_example=failed_record.needs_worked_example,
             attempt_count=failed_record.attempt_count,
             can_retry=failed_record.can_retry,

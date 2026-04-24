@@ -44,6 +44,7 @@ from pipeline.runtime_diagnostics import (
     publish_runtime_event,
 )
 from pipeline.state import FailedSectionRecord, NodeFailureDetail, TextbookPipelineState, merge_state_updates
+from pipeline.types.requests import count_visual_placements, needs_diagram_from_placements
 
 
 def _normalize_langgraph_config_signature(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -194,7 +195,8 @@ def _media_blocked_updates(
         focus=plan.focus if plan is not None else None,
         bridges_from=plan.bridges_from if plan is not None else None,
         bridges_to=plan.bridges_to if plan is not None else None,
-        needs_diagram=plan.needs_diagram if plan is not None else False,
+        needs_diagram=needs_diagram_from_placements(plan),
+        visual_placements_count=count_visual_placements(plan),
         needs_worked_example=plan.needs_worked_example if plan is not None else False,
         failed_at_node="retry_media_frame",
         error_type="media_blocked",

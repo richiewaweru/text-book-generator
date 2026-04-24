@@ -222,7 +222,6 @@ class PlanningSectionPlan(BaseModel):
     terms_to_define: list[str] = Field(default_factory=list)
     terms_assumed: list[str] = Field(default_factory=list)
     practice_target: str | None = None
-    visual_commitment: Literal["diagram", "interaction", "none"] | None = None
     visual_placements: list[BlockVisualPlacement] = Field(default_factory=list)
 
     @field_validator("title", "objective", "focus_note", "rationale")

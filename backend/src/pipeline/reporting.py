@@ -106,7 +106,6 @@ class GenerationReportOutlineSection(BaseModel):
     terms_to_define: list[str] = Field(default_factory=list)
     terms_assumed: list[str] = Field(default_factory=list)
     practice_target: str | None = None
-    visual_commitment: str | None = None
 
 
 class GenerationPlannerTraceSection(BaseModel):
@@ -115,6 +114,7 @@ class GenerationPlannerTraceSection(BaseModel):
     position: int
     role: str
     rationale_summary: str
+    visual_placements_count: int = 0
 
 
 class GenerationPlannerTrace(BaseModel):

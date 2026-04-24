@@ -23,15 +23,18 @@ from pydantic_ai import Agent
 from pipeline.console_diagnostics import force_console_log
 from pipeline.events import DiagramOutcomeEvent
 from pipeline.llm_runner import run_llm
+from pipeline.media.assembly import capture_static_slot_results
 from pipeline.media.planner.media_planner import find_slot
 from pipeline.media.prompts.diagram_prompts import (
     build_diagram_system_prompt,
     build_diagram_user_prompt,
 )
+from pipeline.media.slot_state import section_level_visual_slots, visual_mode
 from pipeline.media.types import SlotType, VisualFrame, VisualSlot
 from pipeline.providers.registry import get_node_text_model
 from pipeline.runtime_context import retry_policy_for_node, timeout_policy_from_config
 from pipeline.runtime_diagnostics import publish_runtime_event
+from pipeline.types.requests import needs_diagram_from_placements
 from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, TextbookPipelineState
 from pipeline.types.section_content import (
@@ -39,11 +42,6 @@ from pipeline.types.section_content import (
     DiagramContent,
     DiagramSeriesContent,
     DiagramSeriesStep,
-)
-from pipeline.visual_resolution import (
-    resolve_effective_visual_mode,
-    resolve_effective_visual_targets,
-    target_is_satisfied,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,11 +98,15 @@ def _log_diagram_event(level: int, event: str, **payload) -> None:
 
 
 def _get_supported_targets(state: TextbookPipelineState) -> list[str]:
-    return [
-        target
-        for target in resolve_effective_visual_targets(state)
-        if target in {"diagram", "diagram_series", "diagram_compare"}
-    ]
+    media_plan = state.media_plans.get(state.current_section_id)
+    return [slot.slot_type.value for slot in section_level_visual_slots(media_plan)]
+
+
+def _slot_target_ready(section, slot: VisualSlot | None) -> bool:
+    if slot is None:
+        return False
+    _, slot_result = capture_static_slot_results(section, slot)
+    return slot_result.ready
 
 
 def _publish_outcome(generation_id: str, section_id: str | None, outcome: str) -> None:
@@ -552,7 +554,7 @@ async def _run_diagram_generation(
     outcomes = dict(state.diagram_outcomes)
     plan = state.composition_plans.get(sid)
     targets = _get_supported_targets(state)
-    mode = resolve_effective_visual_mode(state)
+    mode = visual_mode(state.media_plans.get(sid))
     force_console_log(
         "VISUAL_RESOLVE",
         "DIAGRAM_GENERATOR",
@@ -615,7 +617,9 @@ async def _run_diagram_generation(
         )
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
 
-    if plan is None and state.current_section_plan and not state.current_section_plan.needs_diagram:
+    if plan is None and state.current_section_plan and not needs_diagram_from_placements(
+        state.current_section_plan
+    ):
         _log_diagram_event(logging.INFO, "GENERATOR_SKIP_PLAN", section_id=sid)
         outcomes = _with_outcome(
             outcomes,
@@ -654,7 +658,8 @@ async def _run_diagram_generation(
         updated_section = section
         media_plan = state.media_plans.get(sid) if sid is not None else None
         for target in targets:
-            if target_is_satisfied(updated_section, target, mode="svg"):
+            slot = find_slot(media_plan, SlotType(target))
+            if _slot_target_ready(updated_section, slot):
                 force_console_log(
                     "VISUAL_RESOLVE",
                     "SVG_TARGET_SKIPPED",
@@ -676,7 +681,7 @@ async def _run_diagram_generation(
                     state,
                     updated_section,
                     plan,
-                    find_slot(media_plan, SlotType.DIAGRAM),
+                    slot,
                     model_overrides=model_overrides,
                     config=config,
                 )
@@ -685,7 +690,7 @@ async def _run_diagram_generation(
                     state,
                     updated_section,
                     plan,
-                    find_slot(media_plan, SlotType.DIAGRAM_SERIES),
+                    slot,
                     model_overrides=model_overrides,
                     config=config,
                 )
@@ -694,7 +699,7 @@ async def _run_diagram_generation(
                     state,
                     updated_section,
                     plan,
-                    find_slot(media_plan, SlotType.DIAGRAM_COMPARE),
+                    slot,
                     model_overrides=model_overrides,
                     config=config,
                 )
@@ -704,7 +709,7 @@ async def _run_diagram_generation(
                 section_id=sid,
                 target=target,
                 status="completed",
-                satisfied=target_is_satisfied(updated_section, target, mode="svg"),
+                satisfied=_slot_target_ready(updated_section, slot),
             )
 
         outcomes = _with_outcome(

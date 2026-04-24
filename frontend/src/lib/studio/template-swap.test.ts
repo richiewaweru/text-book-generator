@@ -45,6 +45,13 @@ function buildSpec(): PlanningGenerationSpec {
 					goal: 'Show the sequence clearly.',
 					style_notes: 'Diagram first.'
 				},
+				visual_placements: [
+					{
+						block: 'explanation',
+						slot_type: 'diagram_series',
+						hint: 'Old template placement.'
+					}
+				],
 				generation_notes: null,
 				rationale: 'Process section.'
 			}
@@ -167,5 +174,6 @@ describe('template swap', () => {
 		expect(swapped.template_decision.chosen_name).toBe('Procedure');
 		expect(swapped.sections[0].selected_components).toEqual(['process-steps']);
 		expect(swapped.sections[0].visual_policy).toBeNull();
+		expect(swapped.sections[0].visual_placements).toEqual([]);
 	});
 });

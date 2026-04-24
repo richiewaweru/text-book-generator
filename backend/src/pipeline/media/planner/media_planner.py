@@ -85,85 +85,6 @@ def _slot_id(
 def _visual_policy(plan: SectionPlan):
     return getattr(plan, "visual_policy", None)
 
-
-def _explicit_slot_type(plan: SectionPlan) -> SlotType | None:
-    visual_policy = _visual_policy(plan)
-    raw_target = getattr(visual_policy, "target", None)
-    if raw_target is not None:
-        return SlotType(raw_target)
-    return None
-
-
-def _fallback_slot_type(
-    plan: SectionPlan,
-    *,
-    contract: TemplateContractSummary,
-) -> SlotType | None:
-    visual_policy = _visual_policy(plan)
-    raw_target = getattr(visual_policy, "fallback_target", None)
-    if raw_target is not None:
-        return SlotType(raw_target)
-
-    components = _all_contract_components(contract)
-    if visual_policy is not None and getattr(visual_policy, "intent", None) == "compare_variants":
-        if "diagram-compare" in components:
-            return SlotType.DIAGRAM_COMPARE
-    if visual_policy is not None and getattr(visual_policy, "intent", None) == "demonstrate_process":
-        if "diagram-series" in components:
-            return SlotType.DIAGRAM_SERIES
-
-    if "diagram-block" in components:
-        return SlotType.DIAGRAM
-    if "diagram-series" in components:
-        return SlotType.DIAGRAM_SERIES
-    if "diagram-compare" in components:
-        return SlotType.DIAGRAM_COMPARE
-    return None
-
-
-def _required_slot_types(
-    plan: SectionPlan,
-    *,
-    contract: TemplateContractSummary,
-) -> list[SlotType]:
-    if plan.diagram_policy == "disabled":
-        return []
-
-    types: list[SlotType] = []
-    explicit_slot = _explicit_slot_type(plan)
-    if explicit_slot is not None:
-        types.append(explicit_slot)
-
-    for component_id in getattr(plan, "required_components", []) or []:
-        slot_type = _DIAGRAM_COMPONENTS.get(component_id)
-        if slot_type is not None:
-            types.append(slot_type)
-
-    for component_id in list(getattr(contract, "required_components", []) or []) + list(
-        getattr(contract, "always_present", []) or []
-    ):
-        slot_type = _DIAGRAM_COMPONENTS.get(component_id)
-        if slot_type is not None:
-            types.append(slot_type)
-
-    visual_policy = _visual_policy(plan)
-    if visual_policy is not None and getattr(visual_policy, "required", False):
-        fallback = _fallback_slot_type(plan, contract=contract)
-        if fallback is not None:
-            types.append(fallback)
-
-    if plan.needs_diagram:
-        fallback = _fallback_slot_type(plan, contract=contract)
-        if fallback is not None:
-            types.append(fallback)
-
-    ordered: list[SlotType] = []
-    for slot_type in types:
-        if slot_type not in ordered:
-            ordered.append(slot_type)
-    return ordered
-
-
 def _simulation_allowed(plan: SectionPlan, contract: TemplateContractSummary) -> bool:
     if plan.interaction_policy == "disabled":
         return False
@@ -175,16 +96,14 @@ def _preferred_render_for_slot(
     slot_type: SlotType,
 ) -> VisualRender:
     visual_policy = _visual_policy(plan)
-    explicit_render = getattr(visual_policy, "preferred_render", None) or getattr(
-        visual_policy, "mode", None
-    )
-    if explicit_render is not None:
-        return VisualRender(explicit_render)
     if slot_type == SlotType.SIMULATION:
         return VisualRender.HTML_SIMULATION
     if slot_type in {SlotType.DIAGRAM_COMPARE, SlotType.DIAGRAM_SERIES}:
         return VisualRender.IMAGE
-    return VisualRender.IMAGE
+    explicit_mode = getattr(visual_policy, "mode", None)
+    if explicit_mode is not None:
+        return VisualRender(explicit_mode)
+    return VisualRender.SVG
 
 
 def _fallback_render_for_slot(slot_type: SlotType, preferred_render: VisualRender) -> VisualRender | None:
@@ -261,6 +180,18 @@ def _series_labels(section: SectionContent, concepts: list[str]) -> list[str]:
     return [section.header.title, "Key step 2", "Key step 3"]
 
 
+def _dedupe_casefold(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(value)
+    return deduped
+
+
 def _compare_labels(section: SectionContent) -> tuple[str, str]:
     if section.comparison_grid is not None and len(section.comparison_grid.columns) >= 2:
         return (
@@ -301,9 +232,6 @@ def _simulation_type(section: SectionContent, plan: SectionPlan) -> str:
 
 
 def _simulation_print_translation(plan: SectionPlan, contract: TemplateContractSummary) -> str:
-    visual_policy = _visual_policy(plan)
-    if visual_policy is not None and getattr(visual_policy, "fallback_target", None) == "simulation":
-        return "hide"
     if "diagram-block" in _all_contract_components(contract):
         return "static_diagram"
     return "hide"
@@ -484,7 +412,7 @@ def _build_series_slot(
 ) -> VisualSlot:
     preferred_render = _preferred_render_for_slot(plan, SlotType.DIAGRAM_SERIES)
     concepts = _key_concepts(section)
-    labels = _series_labels(section, concepts)
+    labels = _dedupe_casefold(_series_labels(section, concepts))
     frame_count = len(labels)
     tw, th = _target_dimensions(SlotType.DIAGRAM_SERIES, frame_count, sizing=sizing)
     slot_id = _slot_id(SlotType.DIAGRAM_SERIES, block_target=block_target)
@@ -712,19 +640,7 @@ def media_planner(
         if not slots:
             notes.append("Visual placements were present but no renderable slots were resolved.")
     else:
-        for slot_type in _required_slot_types(section_plan, contract=template_contract):
-            if slot_type == SlotType.DIAGRAM_SERIES:
-                slots.append(_build_series_slot(section_content, section_plan))
-            elif slot_type == SlotType.DIAGRAM_COMPARE:
-                slots.append(_build_compare_slot(section_content, section_plan))
-            else:
-                slots.append(
-                    _build_single_slot(
-                        section=section_content,
-                        plan=section_plan,
-                        slot_type=slot_type,
-                    )
-                )
+        notes.append("No media slots resolved - visual_placements is empty.")
 
     if _simulation_allowed(section_plan, template_contract):
         simulation_slot = _build_simulation_slot(section_content, section_plan)

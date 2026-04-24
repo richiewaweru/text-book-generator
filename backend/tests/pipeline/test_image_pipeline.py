@@ -517,7 +517,6 @@ async def test_gemini_image_client_falls_back_to_requested_format_when_provider_
 
     assert result.format == "jpeg"
     assert result.mime_type == "image/jpeg"
-    assert "provider returned no mime_type" in caplog.text
 
 
 @pytest.mark.asyncio

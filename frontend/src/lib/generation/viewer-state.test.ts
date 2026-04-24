@@ -174,6 +174,7 @@ describe('viewer-state helpers', () => {
 			error_type: 'validation',
 			error_summary: 'Schema validation failed.',
 			needs_diagram: false,
+			visual_placements_count: 2,
 			needs_worked_example: false,
 			attempt_count: 1,
 			can_retry: true,
@@ -183,6 +184,8 @@ describe('viewer-state helpers', () => {
 
 		const slots = buildSectionSlots(failed, 2);
 		expect(failed.failed_sections).toHaveLength(1);
+		expect(failed.failed_sections[0]?.needs_diagram).toBe(true);
+		expect(failed.failed_sections[0]?.visual_placements_count).toBe(2);
 		expect(slots.map((slot) => `${slot.position}:${slot.status}:${slot.title}`)).toEqual([
 			'1:planned:First section',
 			'2:failed:Second section'

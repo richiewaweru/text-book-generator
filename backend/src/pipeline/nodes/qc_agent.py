@@ -41,6 +41,7 @@ from pipeline.state import (
     TextbookPipelineState,
 )
 from pipeline.llm_runner import run_llm
+from pipeline.types.requests import count_visual_placements, needs_diagram_from_placements
 
 
 class QCOutput(BaseModel):
@@ -73,7 +74,8 @@ def _terminal_qc_failure_record(
         focus=plan.focus if plan is not None else None,
         bridges_from=plan.bridges_from if plan is not None else None,
         bridges_to=plan.bridges_to if plan is not None else None,
-        needs_diagram=plan.needs_diagram if plan is not None else False,
+        needs_diagram=needs_diagram_from_placements(plan),
+        visual_placements_count=count_visual_placements(plan),
         needs_worked_example=plan.needs_worked_example if plan is not None else False,
         failed_at_node="qc_agent",
         error_type="blocking_qc_failure",

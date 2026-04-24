@@ -8,6 +8,8 @@ from pipeline.types.section_content import (
     ComparisonColumn,
     ComparisonGridContent,
     ComparisonRow,
+    DiagramSeriesContent,
+    DiagramSeriesStep,
     ExplanationContent,
     HookHeroContent,
     PracticeContent,
@@ -42,13 +44,8 @@ def _contract(*, required: list[str] | None = None, optional: list[str] | None =
         intent="introduce-concept",
         tagline="test",
         lesson_flow=["Hook", "Explain", "Practice"],
-        required_components=required or [
-            "section-header",
-            "hook-hero",
-            "explanation-block",
-            "practice-stack",
-            "what-next-bridge",
-        ],
+        required_components=required
+        or ["section-header", "hook-hero", "explanation-block", "practice-stack", "what-next-bridge"],
         optional_components=optional or ["diagram-block", "simulation-block"],
         default_behaviours={},
         generation_guidance=_guidance(),
@@ -94,6 +91,7 @@ def _section(
     process: ProcessContent | None = None,
     practice_problems: list[PracticeProblem] | None = None,
     worked_example: WorkedExampleContent | None = None,
+    diagram_series: DiagramSeriesContent | None = None,
 ) -> SectionContent:
     return SectionContent(
         section_id=sid,
@@ -118,6 +116,7 @@ def _section(
         comparison_grid=comparison_grid,
         process=process,
         worked_example=worked_example,
+        diagram_series=diagram_series,
     )
 
 
@@ -157,7 +156,7 @@ def test_state_accepts_media_plans_without_breaking_parsing() -> None:
     assert state.media_plans["s-01"].section_id == "s-01"
 
 
-def test_media_planner_builds_single_diagram_plan() -> None:
+def test_media_planner_requires_visual_placements_for_static_slots() -> None:
     plan = media_planner(
         section_plan=SectionPlan(
             section_id="s-01",
@@ -165,25 +164,29 @@ def test_media_planner_builds_single_diagram_plan() -> None:
             position=1,
             focus="Make the concept visible.",
             needs_diagram=True,
-            visual_policy=SectionVisualPolicy(required=True, mode="svg"),
+            interaction_policy="required",
+            required_components=["diagram-block", "simulation-block"],
         ),
         section_content=_section(),
         template_contract=_contract(),
         style_context=_style_context(),
     )
 
-    assert [slot.slot_type.value for slot in plan.slots] == ["diagram", "simulation"]
-    assert plan.slots[0].frames[0].must_include
+    assert [slot.slot_type.value for slot in plan.slots] == ["simulation"]
+    assert "visual_placements is empty" in " ".join(plan.planner_notes)
 
 
-def test_media_planner_defaults_base_diagram_slot_to_image_render() -> None:
+def test_media_planner_builds_single_diagram_from_explanation_placement() -> None:
     plan = media_planner(
         section_plan=SectionPlan(
             section_id="s-01",
             title="Rates of change",
             position=1,
             focus="Make the concept visible.",
-            needs_diagram=True,
+            visual_policy=SectionVisualPolicy(required=True, mode="svg"),
+            visual_placements=[
+                BlockVisualPlacement(block="explanation", slot_type="diagram", hint="Use a clear line diagram.")
+            ],
         ),
         section_content=_section(),
         template_contract=_contract(),
@@ -191,22 +194,23 @@ def test_media_planner_defaults_base_diagram_slot_to_image_render() -> None:
     )
 
     diagram_slot = next(slot for slot in plan.slots if slot.slot_type.value == "diagram")
-    assert diagram_slot.preferred_render.value == "image"
-    assert diagram_slot.fallback_render is not None
-    assert diagram_slot.fallback_render.value == "svg"
+    assert diagram_slot.block_target == "explanation"
+    assert diagram_slot.preferred_render.value == "svg"
+    assert "Rates of change help explain" in (diagram_slot.content_brief or "")
 
 
-def test_media_planner_builds_compare_plan_with_seeded_labels() -> None:
+def test_media_planner_builds_compare_plan_from_explanation_placement() -> None:
     plan = media_planner(
         section_plan=SectionPlan(
             section_id="s-01",
             title="Compare states",
             position=1,
             focus="Show differences clearly.",
-            needs_diagram=True,
-            required_components=["diagram-compare"],
             role="compare",
-            visual_policy=SectionVisualPolicy(required=True, intent="compare_variants"),
+            visual_policy=SectionVisualPolicy(required=True, mode="image"),
+            visual_placements=[
+                BlockVisualPlacement(block="explanation", slot_type="diagram_compare")
+            ],
         ),
         section_content=_section(
             comparison_grid=ComparisonGridContent(
@@ -224,35 +228,44 @@ def test_media_planner_builds_compare_plan_with_seeded_labels() -> None:
 
     compare_slot = next(slot for slot in plan.slots if slot.slot_type.value == "diagram_compare")
     assert [frame.label for frame in compare_slot.frames] == ["Before push", "After push"]
+    assert compare_slot.preferred_render.value == "image"
 
 
-def test_media_planner_builds_series_plan_from_process_steps() -> None:
+def test_media_planner_deduplicates_series_labels_case_insensitively() -> None:
     plan = media_planner(
         section_plan=SectionPlan(
             section_id="s-01",
             title="Three-step flow",
             position=1,
             focus="Teach the sequence.",
-            needs_diagram=True,
-            required_components=["diagram-series"],
-            visual_policy=SectionVisualPolicy(required=True, intent="demonstrate_process"),
+            visual_policy=SectionVisualPolicy(required=True, mode="image"),
+            visual_placements=[
+                BlockVisualPlacement(block="explanation", slot_type="diagram_series")
+            ],
         ),
         section_content=_section(
+            diagram_series=DiagramSeriesContent(
+                title="Sequence",
+                diagrams=[
+                    DiagramSeriesStep(step_label="Start", caption="Start"),
+                    DiagramSeriesStep(step_label="start", caption="Duplicate"),
+                    DiagramSeriesStep(step_label="Transform", caption="Transform"),
+                ],
+            ),
             process=ProcessContent(
                 title="Sequence",
                 steps=[
                     ProcessStepItem(number=1, action="Start", detail="Begin."),
                     ProcessStepItem(number=2, action="Transform", detail="Change it."),
-                    ProcessStepItem(number=3, action="Conclude", detail="Finish."),
                 ],
-            )
+            ),
         ),
         template_contract=_contract(optional=["diagram-series", "simulation-block"]),
         style_context=_style_context(),
     )
 
     series_slot = next(slot for slot in plan.slots if slot.slot_type.value == "diagram_series")
-    assert [frame.label for frame in series_slot.frames] == ["Start", "Transform", "Conclude"]
+    assert [frame.label for frame in series_slot.frames] == ["Start", "Transform"]
 
 
 def test_media_planner_represents_simulation_separately() -> None:
@@ -317,85 +330,6 @@ def test_media_planner_builds_compact_practice_slot_from_explicit_problem_indice
     assert slot.frames[0].target_w == 600
     assert slot.frames[0].target_h == 400
     assert "Plot the line through (0,1) and (4,9)." in (slot.content_brief or "")
-
-
-def test_media_planner_selects_first_eligible_problem_when_indices_are_omitted() -> None:
-    plan = media_planner(
-        section_plan=SectionPlan(
-            section_id="s-01",
-            title="Practice graphs",
-            position=1,
-            focus="Support the most concrete practice problem.",
-            visual_placements=[
-                BlockVisualPlacement(
-                    block="practice",
-                    slot_type="diagram",
-                    sizing="compact",
-                    hint="Pick the first concrete problem.",
-                )
-            ],
-        ),
-        section_content=_section(
-            practice_problems=[
-                PracticeProblem(
-                    difficulty="warm",
-                    question="Explain the term in words.",
-                    hints=[PracticeHint(level=1, text="Use the definition.")],
-                ),
-                PracticeProblem(
-                    difficulty="medium",
-                    question="Compare the before and after graphs.",
-                    hints=[PracticeHint(level=1, text="Track the axes.")],
-                ),
-                PracticeProblem(
-                    difficulty="cold",
-                    question="Describe the result.",
-                    hints=[PracticeHint(level=1, text="Summarise the pattern.")],
-                ),
-            ]
-        ),
-        template_contract=_contract(optional=["diagram-block"]),
-        style_context=_style_context(),
-    )
-
-    slot = next(slot for slot in plan.slots if slot.block_target == "practice")
-    assert slot.problem_index == 1
-    assert "Compare the before and after graphs." in (slot.content_brief or "")
-
-
-def test_media_planner_prefers_contextful_problem_for_compact_diagram_selection() -> None:
-    plan = media_planner(
-        section_plan=SectionPlan(
-            section_id="s-01",
-            title="Practice contexts",
-            position=1,
-            focus="Support the first contextual problem.",
-            visual_placements=[
-                BlockVisualPlacement(block="practice", slot_type="diagram", sizing="compact")
-            ],
-        ),
-        section_content=_section(
-            practice_problems=[
-                PracticeProblem(
-                    difficulty="warm",
-                    question="Explain the term in words.",
-                    hints=[PracticeHint(level=1, text="Use the definition.")],
-                ),
-                PracticeProblem(
-                    difficulty="medium",
-                    question="Use the speed graph.",
-                    hints=[PracticeHint(level=1, text="Read the axes.")],
-                    context="A cyclist speeds up from the start line.",
-                ),
-            ]
-        ),
-        template_contract=_contract(optional=["diagram-block"]),
-        style_context=_style_context(),
-    )
-
-    slot = next(slot for slot in plan.slots if slot.block_target == "practice")
-    assert slot.problem_index == 1
-    assert "A cyclist speeds up from the start line." in (slot.content_brief or "")
 
 
 def test_media_planner_builds_compact_worked_example_slot() -> None:

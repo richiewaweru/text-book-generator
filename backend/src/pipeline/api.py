@@ -69,6 +69,7 @@ class FailedSectionEntry(BaseModel):
     bridges_from: str | None = None
     bridges_to: str | None = None
     needs_diagram: bool = False
+    visual_placements_count: int = 0
     needs_worked_example: bool = False
     failed_at_node: str
     error_type: str

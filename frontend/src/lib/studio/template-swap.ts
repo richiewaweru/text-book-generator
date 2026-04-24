@@ -108,7 +108,8 @@ export function swapTemplateInSpec(
 		sections: spec.sections.map((section) => ({
 			...section,
 			selected_components: componentsForRole(contract, section.role),
-			visual_policy: visualsSupported ? section.visual_policy : null
+			visual_policy: visualsSupported ? section.visual_policy : null,
+			visual_placements: []
 		}))
 	};
 }

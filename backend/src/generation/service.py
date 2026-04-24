@@ -53,7 +53,13 @@ from pipeline.runtime_policy import (
     resolve_generation_max_concurrent_per_user,
     resolve_generation_timeout_seconds,
 )
-from pipeline.types.requests import GenerationMode, SectionPlan, SectionVisualPolicy
+from pipeline.types.requests import (
+    GenerationMode,
+    SectionPlan,
+    SectionVisualPolicy,
+    count_visual_placements,
+    needs_diagram_from_placements,
+)
 from planning.dtos import GenerationSpec
 from planning.models import PlanningGenerationSpec, PlanningSectionPlan
 from generation.dtos import (
@@ -221,12 +227,11 @@ def _pipeline_section_from_planning(
     selected = list(dict.fromkeys([*always_present, *section.selected_components]))
     bridges_from = None
     bridges_to = None
-    visual_required = bool(section.visual_policy and section.visual_policy.required)
-    needs_diagram = visual_required or any(component.startswith("diagram") for component in selected)
+    needs_diagram = needs_diagram_from_placements(section)
     needs_worked_example = any(component == "worked-example-card" for component in selected)
     interaction_required = any(component == "simulation-block" for component in selected)
     focus = section.focus_note or section.objective or section.rationale or section.title
-    computed_diagram_policy = "required" if visual_required else "allowed"
+    computed_diagram_policy = "required" if needs_diagram else "allowed"
     pipeline_visual_policy = (
         SectionVisualPolicy(
             required=section.visual_policy.required,
@@ -249,6 +254,7 @@ def _pipeline_section_from_planning(
         planning_visual_policy=(
             section.visual_policy.model_dump() if section.visual_policy else None
         ),
+        visual_placements_count=count_visual_placements(section),
         computed_needs_diagram=needs_diagram,
         computed_diagram_policy=computed_diagram_policy,
         pipeline_visual_policy=(
@@ -278,7 +284,6 @@ def _pipeline_section_from_planning(
         terms_to_define=list(section.terms_to_define),
         terms_assumed=list(section.terms_assumed),
         practice_target=section.practice_target,
-        visual_commitment=section.visual_commitment,
         visual_placements=list(section.visual_placements),
     )
 
@@ -1087,10 +1092,12 @@ async def _run_generation_job(
     )
     started = perf_counter()
     heartbeat_task: asyncio.Task[None] | None = None
+    saw_pipeline_progress = False
 
     async def on_event(event) -> None:
-        nonlocal document
+        nonlocal document, saw_pipeline_progress
         if isinstance(event, SectionStartedEvent):
+            saw_pipeline_progress = True
             document = _replace_or_append_manifest_item(
                 document,
                 section_id=event.section_id,
@@ -1099,6 +1106,7 @@ async def _run_generation_job(
             )
             await document_repo.save_document(document)
         if isinstance(event, SectionPartialEvent):
+            saw_pipeline_progress = True
             document = _replace_or_append_partial_section(
                 document,
                 PipelinePartialSectionEntry(
@@ -1113,6 +1121,7 @@ async def _run_generation_job(
             )
             await document_repo.save_document(document)
         if isinstance(event, SectionAssetPendingEvent):
+            saw_pipeline_progress = True
             document = _update_partial_section_assets(
                 document,
                 section_id=event.section_id,
@@ -1122,6 +1131,7 @@ async def _run_generation_job(
             )
             await document_repo.save_document(document)
         if isinstance(event, SectionAssetReadyEvent):
+            saw_pipeline_progress = True
             document = _update_partial_section_assets(
                 document,
                 section_id=event.section_id,
@@ -1131,12 +1141,15 @@ async def _run_generation_job(
             )
             await document_repo.save_document(document)
         if isinstance(event, SectionFinalEvent):
+            saw_pipeline_progress = True
             document = _remove_partial_section(document, event.section_id)
             await document_repo.save_document(document)
         if isinstance(event, SectionReadyEvent):
+            saw_pipeline_progress = True
             document = _replace_or_append_section(document, event.section)
             await document_repo.save_document(document)
         if isinstance(event, SectionFailedEvent):
+            saw_pipeline_progress = True
             document = _replace_or_append_failed_section(
                 document,
                 FailedSectionEntry(
@@ -1147,6 +1160,7 @@ async def _run_generation_job(
                     bridges_from=event.bridges_from,
                     bridges_to=event.bridges_to,
                     needs_diagram=event.needs_diagram,
+                    visual_placements_count=event.visual_placements_count,
                     needs_worked_example=event.needs_worked_example,
                     failed_at_node=event.failed_at_node,
                     error_type=event.error_type,
@@ -1319,6 +1333,9 @@ async def _run_generation_job(
         partial_count = len(document.partial_sections)
         accounted_for = completed_count + failed_count
         all_done = (
+            saw_pipeline_progress
+            and document.status == "running"
+            and
             manifest_count > 0
             and accounted_for >= manifest_count
             and partial_count == 0
