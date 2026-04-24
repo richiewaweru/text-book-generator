@@ -214,23 +214,6 @@ def _frame_output_placeholders(preferred_render: VisualRender, slot_type: SlotTy
     return {"svg_content": None}
 
 
-def _simulation_type(section: SectionContent, plan: SectionPlan) -> str:
-    visual_policy = _visual_policy(plan)
-    intent = getattr(visual_policy, "simulation_intent", None) or plan.practice_target or ""
-    lowered = intent.lower()
-    if section.timeline is not None or plan.role == "timeline":
-        return "timeline_scrubber"
-    if "probability" in lowered or "tree" in lowered:
-        return "probability_tree"
-    if "equation" in lowered or "algebra" in lowered:
-        return "equation_reveal"
-    if "geometry" in lowered:
-        return "geometry_explorer"
-    if "molecule" in lowered or "chem" in lowered:
-        return "molecule_viewer"
-    return "graph_slider"
-
-
 def _simulation_print_translation(plan: SectionPlan, contract: TemplateContractSummary) -> str:
     if "diagram-block" in _all_contract_components(contract):
         return "static_diagram"
@@ -523,7 +506,7 @@ def _build_simulation_slot(section: SectionContent, plan: SectionPlan) -> Visual
         reference_style=_reference_style(SlotType.SIMULATION),
         frames=[frame],
         simulation_intent=simulation_intent,
-        simulation_type=_simulation_type(section, plan),
+        simulation_type=None,
         simulation_goal=simulation_intent or _pedagogical_intent(plan),
         anchor_block="explanation",
         print_translation="static_diagram",

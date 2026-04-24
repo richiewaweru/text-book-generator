@@ -14,6 +14,7 @@ from planning.models import (
     PlanningGenerationSpec,
     PlanningTemplateContract,
     StudioBriefRequest,
+    TemplateAlternative,
     TemplateDecision,
 )
 from planning.normalizer import normalize_brief
@@ -31,6 +32,48 @@ _LIVE_PRESET_ID = "blue-classroom"
 _DEFAULT_TEMPLATE_ID = "guided-concept-path"
 
 
+def _forced_template_decision(
+    *,
+    forced_contract: PlanningTemplateContract,
+    recommended_contract: PlanningTemplateContract,
+    recommended_decision: TemplateDecision,
+) -> TemplateDecision:
+    if forced_contract.id == recommended_contract.id:
+        return TemplateDecision(
+            chosen_id=forced_contract.id,
+            chosen_name=forced_contract.name,
+            rationale=f"Teacher selected {forced_contract.name} during review, and it remains the best fit for this brief.",
+            fit_score=recommended_decision.fit_score,
+            alternatives=recommended_decision.alternatives,
+        )
+
+    carried_alternatives = [
+        alternative
+        for alternative in recommended_decision.alternatives
+        if alternative.template_id != forced_contract.id
+    ]
+    return TemplateDecision(
+        chosen_id=forced_contract.id,
+        chosen_name=forced_contract.name,
+        rationale=(
+            f"Teacher selected {forced_contract.name} during review, so it overrides the "
+            f"top recommendation of {recommended_contract.name}."
+        ),
+        fit_score=1.0,
+        alternatives=[
+            TemplateAlternative(
+                template_id=recommended_contract.id,
+                template_name=recommended_contract.name,
+                fit_score=recommended_decision.fit_score,
+                why_not_chosen=(
+                    f"Top fit for the brief, but the teacher kept {forced_contract.name}."
+                ),
+            ),
+            *carried_alternatives[:2],
+        ],
+    )
+
+
 class PlanningService:
     async def plan(
         self,
@@ -42,25 +85,32 @@ class PlanningService:
         generation_id: str = "",
         emit: PlanningEmitter | None = None,
     ) -> PlanningGenerationSpec:
-        normalized = normalize_brief(brief)
+        forced_contract: PlanningTemplateContract | None = None
         if brief.forced_template_id:
-            chosen_contract = next(
+            forced_contract = next(
                 (c for c in contracts if c.id == brief.forced_template_id), None
             )
-            if chosen_contract is None:
+            if forced_contract is None:
                 raise ValueError(
                     f"Forced template '{brief.forced_template_id}' not in live-safe catalog."
                 )
-            decision = TemplateDecision(
-                chosen_id=chosen_contract.id,
-                chosen_name=chosen_contract.name,
-                rationale="Teacher selected this template during review.",
-                fit_score=1.0,
-                alternatives=[],
+
+        normalized = await normalize_brief(
+            brief,
+            model=model,
+            run_llm_fn=run_llm_fn,
+            generation_id=generation_id,
+        )
+        recommended_contract, recommended_decision = choose_template(normalized, contracts)
+        if forced_contract is not None:
+            decision = _forced_template_decision(
+                forced_contract=forced_contract,
+                recommended_contract=recommended_contract,
+                recommended_decision=recommended_decision,
             )
-            selected_contract = chosen_contract
+            selected_contract = forced_contract
         else:
-            selected_contract, decision = choose_template(normalized, contracts)
+            selected_contract, decision = recommended_contract, recommended_decision
         early_rationale = decision.rationale
 
         if emit is not None:
@@ -77,10 +127,20 @@ class PlanningService:
             if maybe_result is not None:
                 await maybe_result
 
-        sections = route_visuals(
+        sections = await compose_sections(
             normalized,
             selected_contract,
-            compose_sections(normalized, selected_contract),
+            model=model,
+            run_llm_fn=run_llm_fn,
+            generation_id=generation_id,
+        )
+        sections = await route_visuals(
+            normalized,
+            selected_contract,
+            sections,
+            model=model,
+            run_llm_fn=run_llm_fn,
+            generation_id=generation_id,
         )
 
         if emit is not None:
@@ -287,4 +347,3 @@ class BriefPlannerService:
                     return fallback
 
         return fallback
-

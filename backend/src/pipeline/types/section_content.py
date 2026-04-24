@@ -277,7 +277,7 @@ class SimulationContent(BaseModel):
     explanation: Optional[str] = None
 class InteractionSpec(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    type: SimulationType
+    type: str
     goal: str
     anchor_content: dict[str, Any]
     context: InteractionContext
@@ -392,7 +392,7 @@ GradeBand = Literal["primary", "secondary", "advanced"]
 HintLevel = Literal[1, 2, 3]
 HookType = Literal["prose", "quote", "question", "data-point"]
 ReflectionType = Literal["open", "pair-share", "sentence-stem", "timed", "connect", "predict", "transfer"]
-SimulationType = Literal["graph_slider", "probability_tree", "equation_reveal", "geometry_explorer", "molecule_viewer", "timeline_scrubber"]
+SimulationType = str
 
 SectionHeaderContent.model_rebuild()
 LevelPill.model_rebuild()

@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+import logging
+from typing import Any
 from uuid import uuid4
 
+from pydantic import BaseModel, Field
+from pydantic_ai import Agent
+
+from planning.llm_config import (
+    PLANNING_BRIEF_INTERPRETER_CALLER,
+    get_planning_slot,
+)
 from planning.models import (
     NormalizedBrief,
     PlanningSectionPlan,
@@ -10,6 +20,7 @@ from planning.models import (
     SectionGenerationNotes,
 )
 
+logger = logging.getLogger(__name__)
 _ROLE_COMPONENT_FALLBACKS: dict[PlanningSectionRole, tuple[str, ...]] = {
     "intro": ("hook-hero", "callout-block", "key-fact"),
     "explain": ("explanation-block", "definition-card", "worked-example-card"),
@@ -33,6 +44,10 @@ _ROLE_TITLE_STEMS: dict[PlanningSectionRole, str] = {
     "visual": "Let the visual lead",
     "discover": "Explore before formalising",
 }
+
+
+class _SectionRolePlan(BaseModel):
+    roles: list[PlanningSectionRole] = Field(default_factory=list)
 
 
 def _section_count(brief: NormalizedBrief, contract: PlanningTemplateContract) -> int:
@@ -157,16 +172,134 @@ def _generation_notes(role: PlanningSectionRole) -> SectionGenerationNotes | Non
     return None
 
 
-def compose_sections(
+def _system_prompt() -> str:
+    return "\n".join(
+        [
+            "You arrange a short lesson section flow for Teacher Studio.",
+            "Keep the section count fixed.",
+            "Return only valid JSON.",
+            "Schema fields:",
+            "- roles: ordered list of section roles",
+            "Allowed roles: intro, explain, practice, summary, process, compare, timeline, visual, discover",
+            "The first role should usually be intro and the final role should be summary.",
+        ]
+    )
+
+
+def _user_prompt(
     brief: NormalizedBrief,
     contract: PlanningTemplateContract,
+    *,
+    count: int,
+) -> str:
+    available_roles = sorted(
+        {
+            "intro",
+            "summary",
+            *contract.section_role_defaults.keys(),
+            *(_ROLE_COMPONENT_FALLBACKS.keys()),
+        }
+    )
+    return "\n".join(
+        [
+            f"Intent: {brief.brief.intent}",
+            f"Topic type: {brief.resolved_topic_type}",
+            f"Learning outcome: {brief.resolved_learning_outcome}",
+            f"Template: {contract.name} ({contract.intent})",
+            f"Requested section count: {count}",
+            f"More practice: {brief.brief.constraints.more_practice}",
+            f"Use visuals: {brief.brief.constraints.use_visuals}",
+            f"Keep short: {brief.brief.constraints.keep_short}",
+            f"Template role defaults: {contract.section_role_defaults}",
+            f"Allowed roles: {', '.join(available_roles)}",
+            "Choose the most suitable ordered role sequence for this lesson.",
+        ]
+    )
+
+
+def _roles_are_usable(
+    roles: list[PlanningSectionRole],
+    *,
+    count: int,
+    brief: NormalizedBrief,
+) -> bool:
+    if len(roles) != count:
+        return False
+    if not roles or roles[0] != "intro" or roles[-1] != "summary":
+        return False
+    if count > 3 and brief.brief.constraints.more_practice and "practice" not in roles:
+        return False
+    if brief.resolved_topic_type == "process" and not any(
+        role in {"process", "timeline"} for role in roles
+    ):
+        return False
+    return True
+
+
+async def _resolve_roles_with_llm(
+    brief: NormalizedBrief,
+    contract: PlanningTemplateContract,
+    *,
+    count: int,
+    model: Any | None,
+    run_llm_fn: Callable[..., Awaitable[Any]] | None,
+    generation_id: str,
+) -> list[PlanningSectionRole] | None:
+    if model is None or run_llm_fn is None:
+        return None
+
+    agent = Agent(
+        model=model,
+        output_type=_SectionRolePlan,
+        system_prompt=_system_prompt(),
+    )
+    user_prompt = _user_prompt(brief, contract, count=count)
+
+    for attempt in range(2):
+        try:
+            result = await run_llm_fn(
+                trace_id=generation_id,
+                caller=PLANNING_BRIEF_INTERPRETER_CALLER,
+                agent=agent,
+                model=model,
+                user_prompt=user_prompt,
+                slot=get_planning_slot(PLANNING_BRIEF_INTERPRETER_CALLER),
+            )
+            output = result.output
+            if output is None or not _roles_are_usable(output.roles, count=count, brief=brief):
+                raise ValueError("Planning section composer returned an unusable role sequence.")
+            return output.roles
+        except Exception as exc:
+            logger.warning("Planning section composer attempt %s failed: %s", attempt + 1, exc)
+
+    return None
+
+
+async def compose_sections(
+    brief: NormalizedBrief,
+    contract: PlanningTemplateContract,
+    *,
+    model: Any | None = None,
+    run_llm_fn: Callable[..., Awaitable[Any]] | None = None,
+    generation_id: str = "",
 ) -> list[PlanningSectionPlan]:
     remaining_budget = _remaining_budget(contract)
-    roles = _role_sequence(
+    count = _section_count(brief, contract)
+    fallback_roles = _role_sequence(
         contract,
-        _section_count(brief, contract),
+        count,
         brief.brief.constraints.more_practice,
     )
+    roles = await _resolve_roles_with_llm(
+        brief,
+        contract,
+        count=count,
+        model=model,
+        run_llm_fn=run_llm_fn,
+        generation_id=generation_id,
+    )
+    if roles is None:
+        roles = fallback_roles
 
     sections: list[PlanningSectionPlan] = []
     for index, role in enumerate(roles, start=1):

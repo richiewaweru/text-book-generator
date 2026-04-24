@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from pipeline.media.qc.simulation_qc import validate_simulation_content
+from pipeline.media.executors.simulation_generator import _parse_simulation_output
+from pipeline.media.qc.simulation_qc import _check_complexity, _check_html_safety, validate_simulation_content
 from pipeline.media.slot_state import pending_required_slot_ids
 from pipeline.media.types import (
     MediaPlan,
@@ -260,7 +263,9 @@ async def test_section_assembler_builds_static_and_simulation_content_from_media
 
 
 @pytest.mark.asyncio
-async def test_simulation_generator_produces_html_and_lectio_aligned_spec() -> None:
+async def test_simulation_generator_produces_html_and_lectio_aligned_spec(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     simulation_slot = VisualSlot(
         slot_id="simulation",
         slot_type="simulation",
@@ -281,6 +286,23 @@ async def test_simulation_generator_produces_html_and_lectio_aligned_spec() -> N
         contract=_contract(optional=["simulation-block"]),
     )
 
+    async def _run_llm(**kwargs):
+        _ = kwargs
+        return SimpleNamespace(
+            output=(
+                "<!doctype html><html><body><button>Play</button><button>Pause</button>"
+                "<button>Reset</button><input type=\"range\" /></body></html>\n"
+                "SIMULATION_META:\n"
+                "type: timeline_scrubber\n"
+                "goal: Explore how the graph changes.\n"
+                "explanation: Press play to animate the changing state."
+            )
+        )
+
+    monkeypatch.setattr("pipeline.media.executors.simulation_generator.get_node_text_model", lambda *args, **kwargs: object())
+    monkeypatch.setattr("pipeline.media.executors.simulation_generator.Agent", lambda *args, **kwargs: object())
+    monkeypatch.setattr("pipeline.media.executors.simulation_generator.run_llm", _run_llm)
+
     result = await interaction_generator(state)
 
     simulation = result["generated_sections"]["s-01"].simulation
@@ -289,6 +311,7 @@ async def test_simulation_generator_produces_html_and_lectio_aligned_spec() -> N
     assert simulation.spec.context.template_id == "guided-concept-path"
     assert simulation.spec.dimensions.width == "100%"
     assert simulation.spec.dimensions.resizable is True
+    assert simulation.spec.type == "timeline_scrubber"
     assert result["media_slot_results"]["s-01"]["simulation"].ready is True
 
 
@@ -330,6 +353,34 @@ def test_simulation_qc_requires_html_and_required_fallback() -> None:
 
     assert "simulation html_content is missing" in issues
     assert "simulation fallback_diagram is required for print translation" in issues
+
+
+def test_parse_simulation_output_tolerates_missing_meta() -> None:
+    parsed = _parse_simulation_output(
+        "<!doctype html><html><body><input type=\"range\" /></body></html>",
+        slot=VisualSlot(
+            slot_id="simulation",
+            slot_type="simulation",
+            required=True,
+            preferred_render="html_simulation",
+            caption="Interactive exploration.",
+            pedagogical_intent="Explore the concept.",
+            frames=[VisualFrame(slot_id="simulation", index=0, generation_goal="Create an interactive view.")],
+            simulation_goal="Explore the graph.",
+        ),
+    )
+
+    assert parsed.html_content.startswith("<!doctype html>")
+    assert parsed.simulation_type == "graph_slider"
+    assert parsed.goal == "Explore the graph."
+
+
+def test_simulation_qc_flags_forbidden_patterns_and_slider_count() -> None:
+    assert _check_html_safety("<script src=\"https://cdn.jsdelivr.net/lib.js\"></script>")
+    assert _check_complexity(
+        "<input type=\"range\" /><input type=\"range\" /><input type=\"range\" />"
+        "<input type=\"range\" /><input type=\"range\" />"
+    ) == ["simulation html_content uses more than four slider controls"]
 
 
 @pytest.mark.asyncio

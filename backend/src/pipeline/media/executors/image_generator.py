@@ -69,7 +69,7 @@ async def _generate_image_frame(
     api_key_present: bool,
     variant: str,
 ) -> VisualFrameResult:
-    prompt = build_image_generation_prompt(
+    prompt = slot.generation_prompt or build_image_generation_prompt(
         section_title=section_title,
         slot=slot,
         frame=frame,

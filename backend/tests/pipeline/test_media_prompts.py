@@ -4,6 +4,10 @@ from pipeline.media.prompts.diagram_prompts import (
     build_diagram_system_prompt,
     build_diagram_user_prompt,
 )
+from pipeline.media.prompts.intelligent_image_prompt import (
+    _SYSTEM_PROMPT as IMAGE_INTENT_SYSTEM_PROMPT,
+    parse_intelligent_image_output,
+)
 from pipeline.media.prompts.image_prompts import (
     build_compare_image_prompts,
     build_image_generation_prompt,
@@ -162,3 +166,16 @@ def test_media_prompts_include_content_brief_and_compact_sizing() -> None:
     assert "Target aspect ratio: 600:400 - optimise composition for this shape" in image_prompt
     assert "Content brief: Show a small coordinate grid" in diagram_prompt
     assert "Target block: practice" in diagram_prompt
+
+
+def test_intelligent_image_prompt_parser_extracts_render_mode_and_prompt() -> None:
+    prompt, render_mode = parse_intelligent_image_output(
+        "RENDER_MODE: svg\nPROMPT:\nDraw a clean coordinate plane with a labeled tangent line."
+    )
+
+    assert render_mode == "svg"
+    assert "coordinate plane" in prompt
+
+
+def test_intelligent_image_prompt_system_prompt_requires_render_mode() -> None:
+    assert "RENDER_MODE: image|svg" in IMAGE_INTENT_SYSTEM_PROMPT

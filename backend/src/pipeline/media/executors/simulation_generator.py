@@ -1,32 +1,42 @@
 from __future__ import annotations
 
-from html import escape
+from dataclasses import dataclass
 
 import core.events as core_events
+from pydantic_ai import Agent
 
 from pipeline.events import InteractionOutcomeEvent
-from pipeline.media.assembly import (
-    apply_slot_results_to_section,
-    build_slot_result,
+from pipeline.llm_runner import run_llm
+from pipeline.media.assembly import apply_slot_results_to_section, build_slot_result
+from pipeline.media.planner.media_planner import find_slot
+from pipeline.media.prompts.simulation_prompts import (
+    _SIMULATION_SYSTEM_PROMPT,
+    build_simulation_prompt,
 )
+from pipeline.media.qc.simulation_qc import validate_simulation_content
 from pipeline.media.runtime_events import (
     emit_frame_failed,
     emit_frame_ready,
     emit_frame_started,
     emit_slot_state,
 )
-from pipeline.media.planner.media_planner import find_slot
-from pipeline.media.prompts.simulation_prompts import build_simulation_prompt
-from pipeline.media.qc.simulation_qc import validate_simulation_content
 from pipeline.media.types import SlotType, VisualFrameResult, VisualFrameResultStatus
-from pipeline.state import PipelineError
-from pipeline.state import TextbookPipelineState
+from pipeline.providers.registry import get_node_text_model
+from pipeline.state import PipelineError, TextbookPipelineState
 from pipeline.types.section_content import (
     InteractionContext,
     InteractionDimensions,
     InteractionSpec,
     SimulationContent,
 )
+
+
+@dataclass(slots=True)
+class ParsedSimulationOutput:
+    html_content: str
+    simulation_type: str
+    goal: str
+    explanation: str | None
 
 
 def _publish_interaction_outcome(
@@ -64,12 +74,15 @@ def build_interaction_spec(
     state: TextbookPipelineState,
     section,
     slot,
+    *,
+    simulation_type: str | None = None,
+    simulation_goal: str | None = None,
 ) -> InteractionSpec:
     accent_color, surface_color = _resolve_colors(state)
     learner_level = getattr(state.current_section_plan, "interaction_policy", "allowed")
     return InteractionSpec(
-        type=(slot.simulation_type or "graph_slider"),  # type: ignore[arg-type]
-        goal=slot.simulation_goal or slot.simulation_intent or slot.pedagogical_intent,
+        type=simulation_type or slot.simulation_type or "graph_slider",
+        goal=simulation_goal or slot.simulation_goal or slot.simulation_intent or slot.pedagogical_intent,
         anchor_content={
             "headline": section.hook.headline,
             "body": section.explanation.body[:280],
@@ -92,140 +105,140 @@ def build_interaction_spec(
     )
 
 
-def _milestones(slot) -> list[str]:
-    milestones = slot.frames[0].must_include if slot.frames else []
-    return milestones[:4] or ["Observe", "Adjust", "Compare", "Explain"]
+def _strip_wrapping_code_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if not lines:
+        return stripped
+    if lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
 
 
-def _build_html_document(*, title: str, prompt: str, spec: InteractionSpec, milestones: list[str]) -> str:
-    escaped_title = escape(title)
-    escaped_goal = escape(spec.goal)
-    escaped_prompt = escape(prompt)
-    steps = ", ".join(f"'{escape(item)}'" for item in milestones)
-    return f"""<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{escaped_title}</title>
-    <style>
-      :root {{
-        --accent: {spec.context.accent_color};
-        --surface: {spec.context.surface_color};
-        --ink: #132238;
-        --muted: #5b6b82;
-      }}
-      * {{ box-sizing: border-box; }}
-      body {{
-        margin: 0;
-        font-family: Inter, 'Segoe UI', sans-serif;
-        background:
-          radial-gradient(circle at top right, rgba(255,255,255,0.95), transparent 48%),
-          linear-gradient(180deg, #ffffff 0%, var(--surface) 100%);
-        color: var(--ink);
-      }}
-      main {{ padding: 24px; display: grid; gap: 18px; min-height: 100vh; }}
-      .panel {{
-        background: rgba(255,255,255,0.88);
-        border: 1px solid rgba(19,34,56,0.08);
-        border-radius: 18px;
-        padding: 18px;
-        box-shadow: 0 16px 40px rgba(19,34,56,0.08);
-      }}
-      .eyebrow {{
-        font-size: 12px;
-        letter-spacing: 0.18em;
-        text-transform: uppercase;
-        color: var(--muted);
-        margin: 0 0 8px;
-      }}
-      h1 {{ margin: 0 0 10px; font-size: 1.5rem; }}
-      p {{ margin: 0; line-height: 1.55; }}
-      input[type="range"] {{ width: 100%; accent-color: var(--accent); }}
-      .meter {{
-        height: 14px;
-        border-radius: 999px;
-        overflow: hidden;
-        background: rgba(19,34,56,0.08);
-      }}
-      .meter-fill {{
-        height: 100%;
-        width: 0%;
-        background: linear-gradient(90deg, var(--accent), #7dd3fc);
-        transition: width 180ms ease;
-      }}
-      .milestones {{
-        display: grid;
-        gap: 10px;
-        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-      }}
-      .milestone {{
-        border-radius: 14px;
-        padding: 12px;
-        background: rgba(19,34,56,0.04);
-        border: 1px solid rgba(19,34,56,0.08);
-      }}
-      .milestone.active {{
-        border-color: rgba(23,65,122,0.24);
-        background: rgba(23,65,122,0.08);
-      }}
-      code {{
-        display: block;
-        white-space: pre-wrap;
-        font-family: {escape(spec.context.font_mono)};
-        font-size: 12px;
-        color: var(--muted);
-      }}
-    </style>
-  </head>
-  <body>
-    <main>
-      <section class="panel">
-        <p class="eyebrow">{escape(spec.type.replace('_', ' '))}</p>
-        <h1>{escaped_title}</h1>
-        <p>{escaped_goal}</p>
-      </section>
-      <section class="panel">
-        <p class="eyebrow">Manipulate</p>
-        <input id="progress" type="range" min="0" max="100" value="35" />
-        <div class="meter" aria-hidden="true"><div id="meterFill" class="meter-fill"></div></div>
-        <p id="readout"></p>
-      </section>
-      <section class="panel">
-        <p class="eyebrow">Observe</p>
-        <div id="milestones" class="milestones"></div>
-      </section>
-      <section class="panel">
-        <p class="eyebrow">Plan</p>
-        <code>{escaped_prompt}</code>
-      </section>
-    </main>
-    <script>
-      const milestones = [{steps}];
-      const slider = document.getElementById('progress');
-      const readout = document.getElementById('readout');
-      const meterFill = document.getElementById('meterFill');
-      const container = document.getElementById('milestones');
+def _parse_simulation_output(raw_output: str, *, slot) -> ParsedSimulationOutput:
+    stripped = raw_output.strip()
+    html_part = stripped
+    meta_part = ""
+    if "SIMULATION_META:" in stripped:
+        html_part, meta_part = stripped.split("SIMULATION_META:", 1)
 
-      function render(value) {{
-        const normalized = Number(value) / 100;
-        meterFill.style.width = value + '%';
-        const activeIndex = Math.min(milestones.length - 1, Math.floor(normalized * milestones.length));
-        readout.textContent = `Current state: ${{
-          Math.round(normalized * 100)
-        }}% — focus on "${{milestones[activeIndex]}}"`;
-        container.innerHTML = milestones.map((item, index) => `
-          <div class="milestone ${{index <= activeIndex ? 'active' : ''}}">
-            <strong>${{index + 1}}.</strong> ${{item}}
-          </div>
-        `).join('');
-      }}
+    metadata: dict[str, str] = {}
+    for line in meta_part.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        metadata[key.strip().lower()] = value.strip()
 
-      slider.addEventListener('input', (event) => render(event.target.value));
-      render(slider.value);
-    </script>
-  </body>
-</html>"""
+    html_content = _strip_wrapping_code_fence(html_part)
+    return ParsedSimulationOutput(
+        html_content=html_content,
+        simulation_type=metadata.get("type") or slot.simulation_type or "graph_slider",
+        goal=metadata.get("goal") or slot.simulation_goal or slot.simulation_intent or slot.pedagogical_intent,
+        explanation=metadata.get("explanation") or None,
+    )
+
+
+async def _generate_simulation_markup(
+    state: TextbookPipelineState,
+    *,
+    section,
+    slot,
+    frame,
+    model_overrides: dict | None = None,
+) -> tuple[InteractionSpec, str, str]:
+    model = get_node_text_model(
+        "interaction_generator",
+        model_overrides=model_overrides,
+        generation_mode=state.request.mode,
+    )
+    agent = Agent(
+        model=model,
+        output_type=str,
+        system_prompt=_SIMULATION_SYSTEM_PROMPT,
+    )
+    result = await run_llm(
+        generation_id=state.request.generation_id or "",
+        node="interaction_generator",
+        agent=agent,
+        model=model,
+        section_id=state.current_section_id,
+        generation_mode=state.request.mode,
+        user_prompt=build_simulation_prompt(
+            section_title=section.header.title,
+            slot=slot,
+            frame=frame,
+        ),
+    )
+    output = result.output if hasattr(result, "output") else result
+    if not isinstance(output, str):
+        raise ValueError("Simulation generator expected string HTML output.")
+
+    parsed = _parse_simulation_output(output, slot=slot)
+    spec = build_interaction_spec(
+        state,
+        section,
+        slot,
+        simulation_type=parsed.simulation_type,
+        simulation_goal=parsed.goal,
+    )
+    explanation = parsed.explanation or (
+        f"Interactive view for {section.header.title}. "
+        f"Use it to explore {spec.goal.lower()} step by step."
+    )
+    return spec, parsed.html_content, explanation
+
+
+def _failed_interaction_response(
+    *,
+    generation_id: str,
+    sid: str,
+    slot,
+    frame,
+    message: str,
+) -> dict:
+    frame_result = VisualFrameResult(
+        slot_id=slot.slot_id,
+        frame_index=frame.index,
+        label=frame.label,
+        render=slot.preferred_render,
+        status=VisualFrameResultStatus.FAILED,
+        error_message=message,
+    )
+    frame_results = {str(frame.index): frame_result}
+    slot_result = build_slot_result(slot, frame_results, error_message=message)
+    emit_frame_failed(
+        generation_id=generation_id,
+        section_id=sid,
+        slot=slot,
+        frame=frame,
+        error=message,
+    )
+    emit_slot_state(
+        generation_id=generation_id,
+        section_id=sid,
+        slot=slot,
+        ready_frames=slot_result.completed_frames,
+        total_frames=slot_result.total_frames,
+        error=slot_result.error_message,
+    )
+    return {
+        "errors": [
+            PipelineError(
+                node="interaction_generator",
+                section_id=sid,
+                message=message,
+                recoverable=True,
+            )
+        ],
+        "media_frame_results": {sid: {slot.slot_id: frame_results}},
+        "media_slot_results": {sid: {slot.slot_id: slot_result}},
+        "media_lifecycle": {sid: "failed"},
+        "completed_nodes": ["interaction_generator"],
+    }
 
 
 async def simulation_generator(
@@ -233,7 +246,6 @@ async def simulation_generator(
     *,
     model_overrides: dict | None = None,
 ) -> dict:
-    _ = model_overrides
     typed = TextbookPipelineState.parse(state)
     sid = typed.current_section_id
     section = typed.generated_sections.get(sid)
@@ -270,25 +282,31 @@ async def simulation_generator(
         )
         return {"completed_nodes": ["interaction_generator"]}
 
-    spec = build_interaction_spec(typed, section, slot)
     frame = slot.frames[0]
-    prompt = build_simulation_prompt(
-        section_title=section.header.title,
-        slot=slot,
-        frame=frame,
-    )
     emit_frame_started(
         generation_id=generation_id,
         section_id=sid,
         slot=slot,
         frame=frame,
     )
-    html_content = _build_html_document(
-        title=section.header.title,
-        prompt=prompt,
-        spec=spec,
-        milestones=_milestones(slot),
-    )
+
+    try:
+        spec, html_content, explanation = await _generate_simulation_markup(
+            typed,
+            section=section,
+            slot=slot,
+            frame=frame,
+            model_overrides=model_overrides,
+        )
+    except Exception as exc:
+        return _failed_interaction_response(
+            generation_id=generation_id,
+            sid=sid,
+            slot=slot,
+            frame=frame,
+            message=f"Simulation generation failed: {exc}",
+        )
+
     frame_result = VisualFrameResult(
         slot_id=slot.slot_id,
         frame_index=frame.index,
@@ -297,10 +315,7 @@ async def simulation_generator(
         status=VisualFrameResultStatus.GENERATED,
         html_content=html_content,
         interaction_spec=spec,
-        explanation=(
-            f"Interactive view for {section.header.title}. "
-            f"Use it to explore {spec.goal.lower()} step by step."
-        ),
+        explanation=explanation,
     )
     frame_results = {str(frame.index): frame_result}
     slot_result = build_slot_result(slot, frame_results)
@@ -321,40 +336,13 @@ async def simulation_generator(
         fallback_diagram=preview_simulation.fallback_diagram,
     )
     if qc_issues:
-        frame_result.status = VisualFrameResultStatus.FAILED
-        frame_result.error_message = "; ".join(qc_issues)
-        frame_results = {str(frame.index): frame_result}
-        slot_result = build_slot_result(slot, frame_results, error_message=frame_result.error_message)
-        emit_frame_failed(
+        return _failed_interaction_response(
             generation_id=generation_id,
-            section_id=sid,
+            sid=sid,
             slot=slot,
             frame=frame,
-            error=frame_result.error_message,
+            message=f"Simulation QC failed: {'; '.join(qc_issues)}",
         )
-        emit_slot_state(
-            generation_id=generation_id,
-            section_id=sid,
-            slot=slot,
-            ready_frames=slot_result.completed_frames,
-            total_frames=slot_result.total_frames,
-            error=slot_result.error_message,
-        )
-        _publish_interaction_outcome(generation_id, sid, "error", interaction_count=1)
-        return {
-            "errors": [
-                PipelineError(
-                    node="interaction_generator",
-                    section_id=sid,
-                    message=f"Simulation QC failed: {'; '.join(qc_issues)}",
-                    recoverable=True,
-                )
-            ],
-            "media_frame_results": {sid: {slot.slot_id: frame_results}},
-            "media_slot_results": {sid: {slot.slot_id: slot_result}},
-            "media_lifecycle": {sid: "failed"},
-            "completed_nodes": ["interaction_generator"],
-        }
 
     emit_frame_ready(
         generation_id=generation_id,
@@ -379,3 +367,11 @@ async def simulation_generator(
         "media_lifecycle": {sid: "generated"},
         "completed_nodes": ["interaction_generator"],
     }
+
+
+__all__ = [
+    "ParsedSimulationOutput",
+    "_parse_simulation_output",
+    "build_interaction_spec",
+    "simulation_generator",
+]

@@ -44,6 +44,7 @@ class VisualSlot(BaseModel):
     block_target: Literal["hook", "explanation", "practice", "worked_example"] | None = None
     problem_index: int | None = None
     content_brief: str | None = None
+    generation_prompt: str | None = None
     pedagogical_intent: str
     caption: str
     reference_style: ReferenceStyle = ReferenceStyle.STANDARD

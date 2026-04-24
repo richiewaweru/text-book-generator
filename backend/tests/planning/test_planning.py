@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+from collections.abc import Callable
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -8,7 +8,6 @@ import pytest
 
 from planning.fallback import build_fallback_spec
 from planning.models import (
-    PlanningRefinementOutput,
     PlanningTemplateContract,
     StudioBriefRequest,
     VisualPolicy,
@@ -139,12 +138,48 @@ def build_contract(
     )
 
 
-def test_normalizer_derives_defaults_and_scope_warning():
+class FakeAgent:
+    def __init__(self, *, model, output_type, system_prompt) -> None:
+        self.model = model
+        self.output_type = output_type
+        self.system_prompt = system_prompt
+
+
+def make_llm_stub(
+    *,
+    normalizer: dict | Callable[[dict], dict] | None = None,
+    composer: dict | Callable[[dict], dict] | None = None,
+    visual_router: dict | Callable[[dict], dict] | None = None,
+    refinement: dict | Callable[[dict], dict] | None = None,
+    calls: list[dict] | None = None,
+):
+    payloads = {
+        "_BriefIntentResolution": normalizer,
+        "_SectionRolePlan": composer,
+        "_VisualRoutingPlan": visual_router,
+        "PlanningRefinementOutput": refinement,
+    }
+
+    async def fake_run_llm_fn(**kwargs):
+        if calls is not None:
+            calls.append(kwargs)
+        output_type = kwargs["agent"].output_type
+        payload = payloads.get(output_type.__name__)
+        if payload is None:
+            raise AssertionError(f"Unexpected output type: {output_type.__name__}")
+        if callable(payload):
+            payload = payload(kwargs)
+        return SimpleNamespace(output=output_type.model_validate(payload))
+
+    return fake_run_llm_fn
+
+
+async def test_normalizer_derives_defaults_and_scope_warning():
     brief = build_brief(
         intent="How to solve long division using short worked examples for mixed-ability Year 6 students"
     )
 
-    normalized = normalize_brief(brief)
+    normalized = await normalize_brief(brief)
 
     assert normalized.resolved_topic_type == "process"
     assert normalized.resolved_learning_outcome == "be-able-to-do"
@@ -152,8 +187,33 @@ def test_normalizer_derives_defaults_and_scope_warning():
     assert normalized.scope_warning is not None
 
 
-def test_template_scorer_uses_metadata_when_affinity_is_missing():
-    process_brief = normalize_brief(
+async def test_normalizer_uses_llm_resolution_when_available():
+    brief = build_brief(intent="Explore why eclipses happen and how shadows change in space")
+    fake_run_llm_fn = make_llm_stub(
+        normalizer={
+            "topic_type": "mixed",
+            "learning_outcome": "apply-to-new",
+            "keyword_profile": ["eclipses", "shadows", "space"],
+            "scope_warning": "Keep the lesson focused on one eclipse pattern.",
+        }
+    )
+
+    with patch("planning.normalizer.Agent", FakeAgent):
+        normalized = await normalize_brief(
+            brief,
+            model=object(),
+            run_llm_fn=fake_run_llm_fn,
+            generation_id="trace-1",
+        )
+
+    assert normalized.resolved_topic_type == "mixed"
+    assert normalized.resolved_learning_outcome == "apply-to-new"
+    assert normalized.keyword_profile == ["eclipses", "shadows", "space"]
+    assert normalized.scope_warning == "Keep the lesson focused on one eclipse pattern."
+
+
+async def test_template_scorer_uses_metadata_when_affinity_is_missing():
+    process_brief = await normalize_brief(
         build_brief(
             signals={
                 "topic_type": "process",
@@ -187,8 +247,8 @@ def test_template_scorer_uses_metadata_when_affinity_is_missing():
     assert decision.chosen_id == "procedure"
 
 
-def test_template_scorer_falls_back_to_open_canvas_when_scores_are_weak():
-    brief = normalize_brief(
+async def test_template_scorer_falls_back_to_open_canvas_when_scores_are_weak():
+    brief = await normalize_brief(
         build_brief(
             intent="Teach an unusual interdisciplinary studio topic",
             signals={
@@ -242,9 +302,9 @@ def test_template_scorer_falls_back_to_open_canvas_when_scores_are_weak():
     assert chosen.id == "open-canvas"
 
 
-def test_section_composer_respects_component_budgets_across_sections():
+async def test_section_composer_respects_component_budgets_across_sections():
     contract = build_contract()
-    brief = normalize_brief(
+    brief = await normalize_brief(
         build_brief(
             constraints={
                 "more_practice": True,
@@ -255,7 +315,7 @@ def test_section_composer_respects_component_budgets_across_sections():
         )
     )
 
-    sections = compose_sections(brief, contract)
+    sections = await compose_sections(brief, contract)
 
     all_components = [component for section in sections for component in section.selected_components]
     assert all_components.count("diagram-block") <= 1
@@ -266,7 +326,37 @@ def test_section_composer_respects_component_budgets_across_sections():
     assert any("explanation-block" in section.selected_components for section in explain_sections)
 
 
-def test_visual_router_uses_intent_regardless_of_print_first():
+async def test_section_composer_falls_back_when_llm_roles_break_constraints():
+    contract = build_contract(intent="teach-procedure")
+    brief = await normalize_brief(
+        build_brief(
+            signals={
+                "topic_type": "process",
+                "learning_outcome": "be-able-to-do",
+                "class_style": [],
+                "format": "both",
+            }
+        )
+    )
+    fake_run_llm_fn = make_llm_stub(
+        composer={
+            "roles": ["intro", "explain", "summary"],
+        }
+    )
+
+    with patch("planning.section_composer.Agent", FakeAgent):
+        sections = await compose_sections(
+            brief,
+            contract,
+            model=object(),
+            run_llm_fn=fake_run_llm_fn,
+            generation_id="trace-2",
+        )
+
+    assert any(section.role in {"process", "timeline"} for section in sections)
+
+
+async def test_visual_router_uses_intent_regardless_of_print_first():
     contract = build_contract(
         template_id="procedure",
         intent="teach-procedure",
@@ -278,7 +368,7 @@ def test_visual_router_uses_intent_regardless_of_print_first():
         },
         available_components=["hook-hero", "process-steps", "diagram-block", "explanation-block", "what-next-bridge"],
     )
-    brief = normalize_brief(
+    brief = await normalize_brief(
         build_brief(
             signals={
                 "topic_type": "process",
@@ -295,7 +385,7 @@ def test_visual_router_uses_intent_regardless_of_print_first():
         )
     )
 
-    routed = route_visuals(brief, contract, compose_sections(brief, contract))
+    routed = await route_visuals(brief, contract, await compose_sections(brief, contract))
 
     assert any(section.visual_policy and section.visual_policy.required for section in routed)
     for section in routed:
@@ -304,9 +394,9 @@ def test_visual_router_uses_intent_regardless_of_print_first():
             assert [placement.slot_type for placement in section.visual_placements] == ["diagram"]
 
 
-def test_visual_router_routes_graph_topics_to_image_for_explain_structure() -> None:
+async def test_visual_router_routes_graph_topics_to_image_for_explain_structure() -> None:
     contract = build_contract()
-    brief = normalize_brief(
+    brief = await normalize_brief(
         build_brief(
             intent="Explain slope and graph interpretation with coordinate axes and linear equations",
             constraints={
@@ -318,7 +408,7 @@ def test_visual_router_routes_graph_topics_to_image_for_explain_structure() -> N
         )
     )
 
-    routed = route_visuals(brief, contract, compose_sections(brief, contract))
+    routed = await route_visuals(brief, contract, await compose_sections(brief, contract))
     explain_section = next(section for section in routed if section.role == "explain")
 
     assert explain_section.visual_policy is not None
@@ -326,7 +416,7 @@ def test_visual_router_routes_graph_topics_to_image_for_explain_structure() -> N
     assert explain_section.visual_policy.mode == "image"
 
 
-def test_visual_router_prefers_compare_placements_for_compare_intent() -> None:
+async def test_visual_router_prefers_compare_placements_for_compare_intent() -> None:
     contract = build_contract(
         template_id="compare-and-apply",
         intent="compare-ideas",
@@ -344,7 +434,7 @@ def test_visual_router_prefers_compare_placements_for_compare_intent() -> None:
             "summary": ["what-next-bridge"],
         },
     )
-    brief = normalize_brief(
+    brief = await normalize_brief(
         build_brief(
             intent="Compare plant and animal cells",
             signals={
@@ -362,10 +452,10 @@ def test_visual_router_prefers_compare_placements_for_compare_intent() -> None:
         )
     )
 
-    sections = compose_sections(brief, contract)
+    sections = await compose_sections(brief, contract)
     compare_section = next(section for section in sections if section.role == "compare")
 
-    routed = route_visuals(brief, contract, sections)
+    routed = await route_visuals(brief, contract, sections)
     routed_compare = next(section for section in routed if section.id == compare_section.id)
 
     assert [placement.block for placement in routed_compare.visual_placements] == ["explanation"]
@@ -374,7 +464,7 @@ def test_visual_router_prefers_compare_placements_for_compare_intent() -> None:
     ]
 
 
-def test_visual_router_prefers_series_placements_for_process_intent() -> None:
+async def test_visual_router_prefers_series_placements_for_process_intent() -> None:
     contract = build_contract(
         template_id="procedure",
         intent="teach-procedure",
@@ -392,7 +482,7 @@ def test_visual_router_prefers_series_placements_for_process_intent() -> None:
             "summary": ["what-next-bridge"],
         },
     )
-    brief = normalize_brief(
+    brief = await normalize_brief(
         build_brief(
             signals={
                 "topic_type": "process",
@@ -409,7 +499,7 @@ def test_visual_router_prefers_series_placements_for_process_intent() -> None:
         )
     )
 
-    routed = route_visuals(brief, contract, compose_sections(brief, contract))
+    routed = await route_visuals(brief, contract, await compose_sections(brief, contract))
     process_section = next(section for section in routed if section.role == "process")
 
     assert [placement.block for placement in process_section.visual_placements] == ["explanation"]
@@ -418,9 +508,9 @@ def test_visual_router_prefers_series_placements_for_process_intent() -> None:
     ]
 
 
-def test_visual_router_falls_back_to_single_diagram_placement() -> None:
+async def test_visual_router_falls_back_to_single_diagram_placement() -> None:
     contract = build_contract()
-    brief = normalize_brief(
+    brief = await normalize_brief(
         build_brief(
             constraints={
                 "more_practice": False,
@@ -431,11 +521,63 @@ def test_visual_router_falls_back_to_single_diagram_placement() -> None:
         )
     )
 
-    routed = route_visuals(brief, contract, compose_sections(brief, contract))
+    routed = await route_visuals(brief, contract, await compose_sections(brief, contract))
     explain_section = next(section for section in routed if section.role == "explain")
 
     assert [placement.block for placement in explain_section.visual_placements] == ["explanation"]
     assert [placement.slot_type for placement in explain_section.visual_placements] == ["diagram"]
+
+
+async def test_visual_router_falls_back_when_llm_response_is_invalid() -> None:
+    contract = build_contract()
+    brief = await normalize_brief(
+        build_brief(
+            constraints={
+                "more_practice": False,
+                "keep_short": False,
+                "use_visuals": True,
+                "print_first": False,
+            }
+        )
+    )
+    sections = await compose_sections(brief, contract)
+
+    def invalid_visual_payload(kwargs: dict) -> dict:
+        section_ids = [
+            line.split()[0].split("=", 1)[1]
+            for line in kwargs["user_prompt"].splitlines()
+            if line.startswith("- id=")
+        ]
+        return {
+            "sections": [
+                {
+                    "section_id": section_ids[0],
+                    "required": True,
+                    "intent": "explain_structure",
+                    "mode": None,
+                },
+                *[
+                    {"section_id": section_id, "required": False, "intent": None, "mode": None}
+                    for section_id in section_ids[1:]
+                ],
+            ]
+        }
+
+    fake_run_llm_fn = make_llm_stub(visual_router=invalid_visual_payload)
+
+    with patch("planning.visual_router.Agent", FakeAgent):
+        routed = await route_visuals(
+            brief,
+            contract,
+            sections,
+            model=object(),
+            run_llm_fn=fake_run_llm_fn,
+            generation_id="trace-3",
+        )
+
+    explain_section = next(section for section in routed if section.role == "explain")
+    assert explain_section.visual_policy is not None
+    assert explain_section.visual_policy.mode == "svg"
 
 
 def test_fallback_uses_contract_defaults_and_returns_reviewable_spec():
@@ -455,7 +597,7 @@ def test_fallback_uses_contract_defaults_and_returns_reviewable_spec():
     assert spec.warning is not None
 
 
-def test_planning_service_emits_events_and_refines_titles():
+async def test_planning_service_emits_events_and_refines_titles():
     brief = build_brief(
         intent="Teach fractions",
         signals={
@@ -477,46 +619,65 @@ def test_planning_service_emits_events_and_refines_titles():
     async def fake_emit(payload: dict[str, object]) -> None:
         emitted.append(payload)
 
-    async def fake_run_llm_fn(**kwargs):
-        return SimpleNamespace(
-            output=PlanningRefinementOutput.model_validate(
+    def visual_payload(kwargs: dict) -> dict:
+        section_ids = [
+            line.split("id=", 1)[1].split()[0]
+            for line in kwargs["user_prompt"].splitlines()
+            if line.startswith("- id=")
+        ]
+        return {
+            "sections": [
+                {"section_id": section_id, "required": False, "intent": None, "mode": None}
+                for section_id in section_ids
+            ]
+        }
+
+    llm_calls: list[dict] = []
+    fake_run_llm_fn = make_llm_stub(
+        normalizer={
+            "topic_type": "concept",
+            "learning_outcome": "understand-why",
+            "keyword_profile": ["fractions", "students"],
+            "scope_warning": None,
+        },
+        composer={
+            "roles": ["intro", "explain", "summary"],
+        },
+        visual_router=visual_payload,
+        refinement={
+            "lesson_rationale": "A teacher-facing rationale.",
+            "warning": None,
+            "sections": [
                 {
-                    "lesson_rationale": "A teacher-facing rationale.",
-                    "warning": None,
-                    "sections": [
-                        {
-                            "title": "Start with the core idea",
-                            "rationale": "Open with the main idea before moving into practice."
-                        },
-                        {
-                            "title": "Build the explanation",
-                            "rationale": "Clarify the method and its steps."
-                        },
-                        {
-                            "title": "Close and connect forward",
-                            "rationale": "Wrap up the main takeaway."
-                        },
-                    ],
-                }
-            )
-        )
+                    "title": "Start with the core idea",
+                    "rationale": "Open with the main idea before moving into practice.",
+                },
+                {
+                    "title": "Build the explanation",
+                    "rationale": "Clarify the method and its steps.",
+                },
+                {
+                    "title": "Close and connect forward",
+                    "rationale": "Wrap up the main takeaway.",
+                },
+            ],
+        },
+        calls=llm_calls,
+    )
 
-    class FakeAgent:
-        def __init__(self, *, model, output_type, system_prompt) -> None:
-            self.model = model
-            self.output_type = output_type
-            self.system_prompt = system_prompt
-
-    with patch("planning.prompt_builder.Agent", FakeAgent):
+    with (
+        patch("planning.normalizer.Agent", FakeAgent),
+        patch("planning.section_composer.Agent", FakeAgent),
+        patch("planning.visual_router.Agent", FakeAgent),
+        patch("planning.prompt_builder.Agent", FakeAgent),
+    ):
         spec = PlanningService()
-        result = asyncio.run(
-            spec.plan(
-                brief,
-                contracts=[contract],
-                model=object(),
-                run_llm_fn=fake_run_llm_fn,
-                emit=fake_emit,
-            )
+        result = await spec.plan(
+            brief,
+            contracts=[contract],
+            model=object(),
+            run_llm_fn=fake_run_llm_fn,
+            emit=fake_emit,
         )
 
     assert result.sections[0].title == "Start with the core idea"
@@ -526,6 +687,7 @@ def test_planning_service_emits_events_and_refines_titles():
         "section_planned",
         "section_planned",
     ]
+    assert len(llm_calls) == 4
 
 
 def test_visual_policy_rejects_mode_none_when_required():
@@ -547,11 +709,11 @@ def test_visual_policy_rejects_mode_none_when_required():
     assert policy.required is False
 
 
-def test_section_count_boundaries():
+async def test_section_count_boundaries():
     contract = build_contract()
 
     # 3 sections (lower bound)
-    brief_short = normalize_brief(
+    brief_short = await normalize_brief(
         build_brief(
             constraints={
                 "more_practice": False,
@@ -561,17 +723,17 @@ def test_section_count_boundaries():
             }
         )
     )
-    sections_short = compose_sections(brief_short, contract)
+    sections_short = await compose_sections(brief_short, contract)
     assert len(sections_short) >= 2
 
     # Standard brief
-    brief_standard = normalize_brief(build_brief())
-    sections_standard = compose_sections(brief_standard, contract)
+    brief_standard = await normalize_brief(build_brief())
+    sections_standard = await compose_sections(brief_standard, contract)
     assert 2 <= len(sections_standard) <= 5
 
 
-def test_empty_signal_affinity_scoring_uses_metadata():
-    brief = normalize_brief(
+async def test_empty_signal_affinity_scoring_uses_metadata():
+    brief = await normalize_brief(
         build_brief(
             signals={
                 "topic_type": "concept",
@@ -647,57 +809,89 @@ def test_section_focus_fallback_in_bridge():
     assert focus2 == "Explanation"
 
 
-def test_forced_template_id_bypasses_selection():
-    """PlannerService uses forced_template_id regardless of signal affinity scores."""
-    brief = build_brief(forced_template_id="procedure")
+async def test_forced_template_id_can_override_recommended_template():
+    """PlannerService keeps teacher override even when scoring would pick a different template."""
+    brief = build_brief(
+        forced_template_id="procedure",
+        constraints={
+            "more_practice": False,
+            "keep_short": True,
+            "use_visuals": False,
+            "print_first": False,
+        },
+    )
     contracts = [
         build_contract(template_id="guided-concept-path"),
         build_contract(template_id="procedure", name="Procedure"),
     ]
+    llm_calls: list[dict] = []
 
-    async def fake_run_llm_fn(**kwargs):
-        return SimpleNamespace(
-            output=PlanningRefinementOutput.model_validate(
-                {
-                    "lesson_rationale": "Procedure rationale.",
-                    "warning": None,
-                    "sections": [
-                        {"title": "Step one", "rationale": "First step."},
-                    ],
-                }
-            )
-        )
+    def visual_payload(kwargs: dict) -> dict:
+        section_ids = [
+            line.split("id=", 1)[1].split()[0]
+            for line in kwargs["user_prompt"].splitlines()
+            if line.startswith("- id=")
+        ]
+        return {
+            "sections": [
+                {"section_id": section_id, "required": False, "intent": None, "mode": None}
+                for section_id in section_ids
+            ]
+        }
 
-    class FakeAgent:
-        def __init__(self, *, model, output_type, system_prompt) -> None:
-            pass
+    fake_run_llm_fn = make_llm_stub(
+        normalizer={
+            "topic_type": "concept",
+            "learning_outcome": "understand-why",
+            "keyword_profile": ["fractions"],
+            "scope_warning": None,
+        },
+        composer={
+            "roles": ["intro", "explain", "summary"],
+        },
+        visual_router=visual_payload,
+        refinement={
+            "lesson_rationale": "Procedure rationale.",
+            "warning": None,
+            "sections": [
+                {"title": "Step one", "rationale": "First step."},
+                {"title": "Step two", "rationale": "Second step."},
+                {"title": "Wrap up", "rationale": "Close it out."},
+            ],
+        },
+        calls=llm_calls,
+    )
 
-    with patch("planning.prompt_builder.Agent", FakeAgent):
-        result = asyncio.run(
-            PlanningService().plan(
-                brief,
-                contracts=contracts,
-                model=object(),
-                run_llm_fn=fake_run_llm_fn,
-            )
+    with (
+        patch("planning.normalizer.Agent", FakeAgent),
+        patch("planning.section_composer.Agent", FakeAgent),
+        patch("planning.visual_router.Agent", FakeAgent),
+        patch("planning.prompt_builder.Agent", FakeAgent),
+    ):
+        result = await PlanningService().plan(
+            brief,
+            contracts=contracts,
+            model=object(),
+            run_llm_fn=fake_run_llm_fn,
         )
 
     assert result.template_id == "procedure"
     assert result.template_decision.fit_score == 1.0
     assert result.template_decision.chosen_id == "procedure"
+    assert "overrides the top recommendation" in result.template_decision.rationale
+    assert result.template_decision.alternatives[0].template_id == "guided-concept-path"
+    assert len(llm_calls) == 4
 
 
-def test_forced_template_id_raises_if_not_in_catalog():
+async def test_forced_template_id_raises_if_not_in_catalog():
     """PlannerService raises ValueError when forced_template_id is not in the contracts list."""
     brief = build_brief(forced_template_id="nonexistent-template")
     contracts = [build_contract(template_id="guided-concept-path")]
 
     with pytest.raises(ValueError, match="not in live-safe catalog"):
-        asyncio.run(
-            PlanningService().plan(
-                brief,
-                contracts=contracts,
-                model=object(),
-                run_llm_fn=lambda **_: None,
-            )
+        await PlanningService().plan(
+            brief,
+            contracts=contracts,
+            model=None,
+            run_llm_fn=None,
         )

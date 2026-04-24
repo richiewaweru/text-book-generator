@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from pipeline.events import (
@@ -206,6 +208,19 @@ def _capture_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, object]]
     return events
 
 
+def _mock_simulation_llm(monkeypatch: pytest.MonkeyPatch, *, output: str) -> None:
+    async def _run_llm(**kwargs):
+        _ = kwargs
+        return SimpleNamespace(output=output)
+
+    monkeypatch.setattr(
+        "pipeline.media.executors.simulation_generator.get_node_text_model",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr("pipeline.media.executors.simulation_generator.Agent", lambda *args, **kwargs: object())
+    monkeypatch.setattr("pipeline.media.executors.simulation_generator.run_llm", _run_llm)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("state", "expected_reason"),
@@ -240,6 +255,16 @@ async def test_interaction_generator_emits_single_simulation_when_multiple_plans
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events = _capture_events(monkeypatch)
+    _mock_simulation_llm(
+        monkeypatch,
+        output=(
+            "<!doctype html><html><body><button>Reset</button><input type=\"range\" /></body></html>\n"
+            "SIMULATION_META:\n"
+            "type: graph_slider\n"
+            "goal: Explore how the graph changes.\n"
+            "explanation: Move the slider to see the graph respond."
+        ),
+    )
     state = _state(composition=_composition(enabled=True, count=2))
 
     result = await interaction_generator(state)

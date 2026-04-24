@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+import logging
+from typing import Any
+
+from pydantic import BaseModel, Field
+from pydantic_ai import Agent
+
+from planning.llm_config import (
+    PLANNING_BRIEF_INTERPRETER_CALLER,
+    get_planning_slot,
+)
 from planning.models import (
     NormalizedBrief,
     PlanningSectionPlan,
@@ -10,6 +21,7 @@ from planning.models import (
 )
 from pipeline.types.requests import BlockVisualPlacement
 
+logger = logging.getLogger(__name__)
 _SPATIAL_HINTS = {
     "biology",
     "chemistry",
@@ -84,6 +96,17 @@ _GRAPH_HINTS = {
     "cost",
     "profit",
 }
+
+
+class _SectionVisualDecision(BaseModel):
+    section_id: str
+    required: bool = False
+    intent: PlanningVisualIntent | None = None
+    mode: PlanningVisualMode | None = None
+
+
+class _VisualRoutingPlan(BaseModel):
+    sections: list[_SectionVisualDecision] = Field(default_factory=list)
 
 
 def _classify_spatial(brief: NormalizedBrief) -> bool:
@@ -161,30 +184,150 @@ def _derive_visual_placements(
     return []
 
 
-def route_visuals(
+def _system_prompt() -> str:
+    return "\n".join(
+        [
+            "You decide visual intent for planned lesson sections.",
+            "Only set visuals when they help comprehension and the template supports them.",
+            "Return valid JSON only.",
+            "Schema fields:",
+            "- sections [{ section_id, required, intent, mode }]",
+            "If required is false, intent and mode may be null.",
+        ]
+    )
+
+
+def _user_prompt(
     brief: NormalizedBrief,
     contract: PlanningTemplateContract,
     sections: list[PlanningSectionPlan],
+) -> str:
+    section_lines = "\n".join(
+        f"- id={section.id} role={section.role} components={', '.join(section.selected_components) or 'none'} objective={section.objective or 'n/a'}"
+        for section in sections
+    )
+    return "\n".join(
+        [
+            f"Intent: {brief.brief.intent}",
+            f"Topic type: {brief.resolved_topic_type}",
+            f"Learning outcome: {brief.resolved_learning_outcome}",
+            f"Use visuals: {brief.brief.constraints.use_visuals}",
+            f"Print first: {brief.brief.constraints.print_first}",
+            f"Keyword profile: {', '.join(brief.keyword_profile) or 'none'}",
+            f"Template: {contract.name} ({contract.intent})",
+            f"Available components: {', '.join(contract.available_components) or 'none'}",
+            "Sections:",
+            section_lines,
+        ]
+    )
+
+
+def _fallback_decision(
+    brief: NormalizedBrief,
+    contract: PlanningTemplateContract,
+    section: PlanningSectionPlan,
+    *,
+    visual_supported: set[str],
+) -> _SectionVisualDecision:
+    should_visualize = bool(
+        visual_supported
+        and (
+            set(section.selected_components).intersection(visual_supported)
+            or brief.brief.constraints.use_visuals
+            or section.role in {"visual", "process", "compare", "discover"}
+        )
+    )
+    intent = _visual_intent(section)
+    mode = _visual_mode(brief, intent)
+    return _SectionVisualDecision(
+        section_id=section.id,
+        required=should_visualize,
+        intent=intent if should_visualize else None,
+        mode=mode if should_visualize else None,
+    )
+
+
+async def _resolve_with_llm(
+    brief: NormalizedBrief,
+    contract: PlanningTemplateContract,
+    sections: list[PlanningSectionPlan],
+    *,
+    model: Any | None,
+    run_llm_fn: Callable[..., Awaitable[Any]] | None,
+    generation_id: str,
+) -> dict[str, _SectionVisualDecision] | None:
+    if model is None or run_llm_fn is None:
+        return None
+
+    agent = Agent(
+        model=model,
+        output_type=_VisualRoutingPlan,
+        system_prompt=_system_prompt(),
+    )
+    user_prompt = _user_prompt(brief, contract, sections)
+
+    for attempt in range(2):
+        try:
+            result = await run_llm_fn(
+                trace_id=generation_id,
+                caller=PLANNING_BRIEF_INTERPRETER_CALLER,
+                agent=agent,
+                model=model,
+                user_prompt=user_prompt,
+                slot=get_planning_slot(PLANNING_BRIEF_INTERPRETER_CALLER),
+            )
+            output = result.output
+            if output is None or len(output.sections) != len(sections):
+                raise ValueError("Planning visual router returned an unexpected section count.")
+            decisions = {section.section_id: section for section in output.sections}
+            if len(decisions) != len(sections):
+                raise ValueError("Planning visual router returned duplicate section ids.")
+            missing_ids = [section.id for section in sections if section.id not in decisions]
+            if missing_ids:
+                raise ValueError(f"Planning visual router missed sections: {missing_ids!r}")
+            for decision in decisions.values():
+                if decision.required and (decision.intent is None or decision.mode is None):
+                    raise ValueError("Planning visual router omitted intent or mode for a required visual.")
+            return decisions
+        except Exception as exc:
+            logger.warning("Planning visual router attempt %s failed: %s", attempt + 1, exc)
+
+    return None
+
+
+async def route_visuals(
+    brief: NormalizedBrief,
+    contract: PlanningTemplateContract,
+    sections: list[PlanningSectionPlan],
+    *,
+    model: Any | None = None,
+    run_llm_fn: Callable[..., Awaitable[Any]] | None = None,
+    generation_id: str = "",
 ) -> list[PlanningSectionPlan]:
     visual_components = {"diagram-block", "diagram-series", "diagram-compare", "simulation-block"}
     visual_supported = visual_components.intersection(contract.available_components)
+    llm_decisions = await _resolve_with_llm(
+        brief,
+        contract,
+        sections,
+        model=model,
+        run_llm_fn=run_llm_fn,
+        generation_id=generation_id,
+    )
 
     for section in sections:
-        should_visualize = bool(
-            visual_supported
-            and (
-                set(section.selected_components).intersection(visual_components)
-                or brief.brief.constraints.use_visuals
-                or section.role in {"visual", "process", "compare", "discover"}
-            )
+        decision = (
+            llm_decisions.get(section.id)
+            if llm_decisions is not None
+            else _fallback_decision(brief, contract, section, visual_supported=visual_supported)
         )
-        intent = _visual_intent(section)
-        mode = _visual_mode(brief, intent)
+        intent = decision.intent or _visual_intent(section)
+        mode = decision.mode or _visual_mode(brief, intent)
         placements = _derive_visual_placements(
             section=section,
             contract=contract,
             intent=intent,
-            should_visualize=should_visualize,
+            should_visualize=bool(decision.required and visual_supported),
         )
         section.visual_placements = placements
         section.visual_policy = VisualPolicy(

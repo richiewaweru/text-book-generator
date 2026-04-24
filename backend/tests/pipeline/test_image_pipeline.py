@@ -709,6 +709,22 @@ async def test_image_generator_routes_series_images_to_diagram_series(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_image_generator_uses_resolved_generation_prompt_when_available(tmp_path) -> None:
+    store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
+    client = FakeImageClient()
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    )
+    state.media_plans["s-01"].slots[0].generation_prompt = "Use the resolved LLM-authored image prompt."
+
+    await image_generator(state, _store=store, _client=client)
+
+    assert client.prompts == ["Use the resolved LLM-authored image prompt."]
+
+
+@pytest.mark.asyncio
 async def test_image_generator_populates_hook_image_for_show_realism_intro(tmp_path) -> None:
     store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
     client = FakeImageClient()
