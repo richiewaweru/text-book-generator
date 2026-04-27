@@ -140,27 +140,28 @@
 		<section class="generate-section">
 			<h2>Teacher Studio</h2>
 			<p>
-				The canonical lesson-creation flow now lives in the dedicated studio route. Open it to move
-				through intent capture, streamed planning, review, and live generation in one workspace.
+				The canonical lesson-creation flow now lives in the dedicated studio route. Open it to
+				capture intent, narrow the topic, choose the resource shape, and validate the brief before
+				generation.
 			</p>
 			<div class="studio-entry studio-entry-prominent">
 				<div class="studio-entry-copy">
 					<p class="studio-kicker">Canonical flow</p>
 					<h3>Create a lesson in Studio</h3>
 					<p>
-						Teachers now plan first, review explicitly, and watch sections generate live without
-						leaving the workspace.
+						Teachers now build a structured brief first, confirm the scope, and hand a cleaner
+						starting point into the generation system.
 					</p>
 					<div class="studio-features">
-						<span>Intent capture</span>
-						<span>Streamed planning</span>
-						<span>Editable review</span>
-						<span>Live generation</span>
+						<span>Topic narrowing</span>
+						<span>Learner context</span>
+						<span>Support selection</span>
+						<span>Brief validation</span>
 					</div>
 				</div>
 				<div class="studio-entry-actions">
 					<a href="/studio" class="studio-link">Open Studio</a>
-					<button class="ghost-link" onclick={() => goto('/studio')}>Resume planning</button>
+					<button class="ghost-link" onclick={() => goto('/studio')}>Resume brief</button>
 				</div>
 			</div>
 		</section>

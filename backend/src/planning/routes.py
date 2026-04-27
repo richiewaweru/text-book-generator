@@ -6,6 +6,7 @@ import logging
 import sys
 import uuid
 
+from pydantic_ai import Agent
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from core.rate_limit import limiter
@@ -13,6 +14,13 @@ from core.rate_limit import limiter
 import core.events as core_events
 from core.llm import build_model, run_llm
 from pipeline.contracts import get_contract, list_template_ids, validate_preset_for_template
+from pipeline.resources import get_resource_template, validate_brief
+from pipeline.types.teacher_brief import (
+    BriefValidationRequest,
+    BriefValidationResult,
+    TopicResolutionRequest,
+    TopicResolutionResult,
+)
 from pipeline.types.requests import (
     GenerationMode,
     SectionPlan,
@@ -33,7 +41,11 @@ from generation.dependencies import (
     get_report_repository,
 )
 from generation.service import enqueue_generation
-from planning.llm_config import get_planning_spec, get_planning_slot
+from planning.llm_config import (
+    PLANNING_TOPIC_RESOLUTION_CALLER,
+    get_planning_spec,
+    get_planning_slot,
+)
 from planning.dtos import BriefRequest, GenerationSpec
 from planning import PlanningService, PlanningTemplateContract, StudioBriefRequest
 from planning.models import PlanningGenerationSpec, PlanningSectionPlan
@@ -88,6 +100,61 @@ def _planning_live_safe_templates() -> list[PlanningTemplateContract]:
 
 def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _topic_resolution_system_prompt() -> str:
+    return "\n".join(
+        [
+            "You turn a teacher's raw topic into a tighter planning brief.",
+            "Return valid JSON only.",
+            "Infer a broad school subject, normalize the main topic, and propose 4 to 8 candidate subtopics.",
+            "Keep subtopic titles teacher-facing, short, and commonly taught.",
+            "Prefer age-appropriate subtopics when learner context is present.",
+            "Set needs_clarification=true only when the topic is too vague to narrow responsibly.",
+            "Do not invent niche or overly advanced subtopics when common classroom targets fit.",
+        ]
+    )
+
+
+def _topic_resolution_user_prompt(payload: TopicResolutionRequest) -> str:
+    return "\n".join(
+        [
+            f"Raw topic: {payload.raw_topic}",
+            f"Learner context: {payload.learner_context or 'none'}",
+            "Return:",
+            "- subject",
+            "- topic",
+            "- candidate_subtopics: 4 to 8 items with id, title, description, likely_grade_band",
+            "- needs_clarification",
+            "- clarification_message when needed",
+        ]
+    )
+
+
+async def _resolve_topic_with_llm(payload: TopicResolutionRequest) -> TopicResolutionResult:
+    trace_id = uuid.uuid4().hex
+    spec = get_planning_spec(PLANNING_TOPIC_RESOLUTION_CALLER)
+    slot = get_planning_slot(PLANNING_TOPIC_RESOLUTION_CALLER)
+    model = build_model(spec)
+    agent = Agent(
+        model=model,
+        output_type=TopicResolutionResult,
+        system_prompt=_topic_resolution_system_prompt(),
+    )
+    result = await run_llm(
+        caller=PLANNING_TOPIC_RESOLUTION_CALLER,
+        trace_id=trace_id,
+        generation_id=trace_id,
+        agent=agent,
+        model=model,
+        user_prompt=_topic_resolution_user_prompt(payload),
+        slot=slot,
+        spec=spec,
+    )
+    output = result.output
+    if output is None:
+        raise RuntimeError("Topic resolution returned no structured output.")
+    return output
 
 
 async def _load_profile(
@@ -277,6 +344,47 @@ async def create_brief(
             trace_id,
             TraceClosedEvent(trace_id=trace_id, source="planning"),
         )
+
+
+@router.post("/brief/resolve-topic", response_model=TopicResolutionResult)
+@limiter.limit("20/minute")
+async def resolve_topic(
+    request: Request,
+    payload: TopicResolutionRequest,
+    current_user: User = Depends(get_current_user),
+) -> TopicResolutionResult:
+    _ = (request, current_user)
+    try:
+        resolution = await _resolve_topic_with_llm(payload)
+    except Exception as exc:
+        logger.exception("Topic resolution failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Topic resolution failed. Please try again.",
+        ) from exc
+
+    deduped: list = []
+    seen_titles: set[str] = set()
+    for item in resolution.candidate_subtopics:
+        key = item.title.strip().lower()
+        if key in seen_titles:
+            continue
+        seen_titles.add(key)
+        deduped.append(item)
+        if len(deduped) == 8:
+            break
+
+    return resolution.model_copy(update={"candidate_subtopics": deduped})
+
+
+@router.post("/brief/validate", response_model=BriefValidationResult)
+async def validate_teacher_brief(
+    payload: BriefValidationRequest,
+    current_user: User = Depends(get_current_user),
+) -> BriefValidationResult:
+    _ = current_user
+    template = get_resource_template(payload.brief.resource_type)
+    return validate_brief(payload.brief, template)
 
 
 @router.post("/brief/stream")

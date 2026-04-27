@@ -6,7 +6,6 @@ import json
 import os
 import urllib.error
 from contextlib import contextmanager
-from unittest.mock import patch
 
 from pydantic_ai.models.test import TestModel
 

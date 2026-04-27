@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import sys
 
 import core.events as core_events
@@ -23,6 +22,12 @@ logger = logging.getLogger(__name__)
 _IMAGE_TIMEOUT_SECONDS = 45.0
 _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF = (1.0, 2.0)
+_LEGACY_PATCH_POINTS = (
+    get_image_client,
+    load_image_provider_spec,
+    resolve_gemini_image_api_key,
+    get_image_store,
+)
 
 
 def diag(tag: str, **fields) -> None:

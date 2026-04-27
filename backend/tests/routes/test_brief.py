@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from planning.models import PlanningGenerationSpec, PlanningTemplateContract, StudioBriefRequest
 from pipeline.types.requests import SectionPlan
+from pipeline.types.teacher_brief import TopicResolutionResult
 from planning.dtos import BriefRequest, GenerationSpec
 from generation.dtos.generation_request import GenerationAcceptedResponse
 from core.entities.student_profile import TeacherProfile
@@ -621,4 +622,84 @@ class TestBriefApi:
             )
 
         assert response.status_code == 422
+
+    async def test_resolve_topic_returns_structured_subtopics(self):
+        _install_overrides(TEST_PROFILE)
+
+        async def fake_run_pipeline_llm(**kwargs):
+            _ = kwargs
+            return SimpleNamespace(
+                output=TopicResolutionResult.model_validate(
+                    {
+                    "subject": "Math",
+                    "topic": "Algebra",
+                    "candidate_subtopics": [
+                        {
+                            "id": "two-step-equations",
+                            "title": "Solving two-step equations",
+                            "description": "Solve equations with two operations.",
+                            "likely_grade_band": "middle school",
+                        },
+                        {
+                            "id": "two-step-equations-duplicate",
+                            "title": "Solving two-step equations",
+                            "description": "Duplicate title that should be removed.",
+                            "likely_grade_band": "middle school",
+                        },
+                    ],
+                    "needs_clarification": False,
+                    "clarification_message": None,
+                    }
+                )
+            )
+
+        with (
+            patch.object(brief_routes, "build_model", return_value=object()),
+            patch.object(brief_routes, "get_planning_spec", return_value=SimpleNamespace()),
+            patch.object(brief_routes, "get_planning_slot", return_value=SimpleNamespace(value="fast")),
+            patch.object(brief_routes, "run_llm", side_effect=fake_run_pipeline_llm),
+            patch.object(brief_routes, "Agent", FakeAgent),
+        ):
+            async with _client() as client:
+                response = await client.post(
+                    "/api/v1/brief/resolve-topic",
+                    json={
+                        "raw_topic": "Algebra",
+                        "learner_context": "Grade 7 mixed levels",
+                    },
+                )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["subject"] == "Math"
+        assert payload["topic"] == "Algebra"
+        assert len(payload["candidate_subtopics"]) == 1
+        assert payload["candidate_subtopics"][0]["title"] == "Solving two-step equations"
+
+    async def test_validate_brief_returns_deterministic_blockers_and_warnings(self):
+        _install_overrides(TEST_PROFILE)
+
+        async with _client() as client:
+            response = await client.post(
+                "/api/v1/brief/validate",
+                json={
+                    "brief": {
+                        "subject": "Math",
+                        "topic": "Algebra",
+                        "subtopic": "Algebra",
+                        "learner_context": "Grade 7 students, mixed levels",
+                        "intended_outcome": "assess",
+                        "resource_type": "exit_ticket",
+                        "supports": ["worked_examples"],
+                        "depth": "deep",
+                    }
+                },
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["is_ready"] is False
+        assert any(message["field"] == "subtopic" for message in payload["blockers"])
+        assert any(message["field"] == "depth" for message in payload["warnings"])
+        assert any(message["field"] == "supports" for message in payload["warnings"])
 

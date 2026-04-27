@@ -49,6 +49,7 @@ event_bus = core_events.event_bus
 _SSE_KEEPALIVE_TIMEOUT_SECONDS = generation_service._SSE_KEEPALIVE_TIMEOUT_SECONDS
 _persist_failed_generation_state = generation_service._persist_failed_generation_state
 _generation_job_timeout = generation_service._generation_job_timeout
+_ASYNCIO_PATCH_POINT = asyncio
 
 
 class _PatchedPipelineEngine:

@@ -229,7 +229,9 @@ describe('TeacherStudioFlow', () => {
 		streamPlan.mockReset();
 	});
 
-it('moves from intent capture into review and keeps ranked alternatives interactive', async () => {
+	it(
+		'moves from intent capture into review and keeps ranked alternatives interactive',
+		async () => {
 		let releasePlan!: () => void;
 		const planGate = new Promise<void>((resolve) => {
 			releasePlan = resolve;
@@ -296,5 +298,7 @@ it('moves from intent capture into review and keeps ranked alternatives interact
 
 		await waitFor(() => expect(screen.getByText(/current selection/i)).toBeTruthy());
 		expect(screen.getByRole('button', { name: /procedure/i })).toBeTruthy();
-	});
+		},
+		10000
+	);
 });

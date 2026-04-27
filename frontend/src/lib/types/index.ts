@@ -8,6 +8,22 @@ import type {
 	ReadingLevel,
 	Tone
 } from './studio';
+import type {
+	BriefBuilderStep,
+	BriefValidationMessage,
+	BriefValidationRequest,
+	BriefValidationResult,
+	BriefValidationSuggestion,
+	BuilderWarning,
+	TeacherBrief,
+	TeacherBriefDepth,
+	TeacherBriefOutcome,
+	TeacherBriefResourceType,
+	TeacherBriefSupport,
+	TopicResolutionRequest,
+	TopicResolutionResult,
+	TopicResolutionSubtopic
+} from './brief';
 
 export type TeacherRole = 'teacher' | 'tutor' | 'homeschool' | 'instructor';
 export type GradeBand = 'primary' | 'middle' | 'high_school' | 'undergraduate' | 'adult';
@@ -561,6 +577,23 @@ export type GenerationStreamEvent =
 	| CompleteEvent
 	| GenerationFailedEvent
 	| ErrorEvent;
+
+export type {
+	BriefBuilderStep,
+	BriefValidationMessage,
+	BriefValidationRequest,
+	BriefValidationResult,
+	BriefValidationSuggestion,
+	BuilderWarning,
+	TeacherBrief,
+	TeacherBriefDepth,
+	TeacherBriefOutcome,
+	TeacherBriefResourceType,
+	TeacherBriefSupport,
+	TopicResolutionRequest,
+	TopicResolutionResult,
+	TopicResolutionSubtopic
+} from './brief';
 
 export type {
 	Brevity,

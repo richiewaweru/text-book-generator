@@ -15,8 +15,6 @@ from pipeline.prompts.content import (
     _visual_context_block,
     build_content_user_prompt,
     build_core_user_prompt,
-    build_enrichment_user_prompt,
-    build_practice_user_prompt,
 )
 from pipeline.prompts.curriculum import (
     build_curriculum_enrichment_system_prompt,

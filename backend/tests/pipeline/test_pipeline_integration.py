@@ -1402,7 +1402,6 @@ class TestRunPipelineStreamingEvents:
             SectionFinalEvent,
             SectionPartialEvent,
             SectionReadyEvent,
-            SectionStartedEvent,
         )
         from pipeline.runtime_context import get_runtime_context
 

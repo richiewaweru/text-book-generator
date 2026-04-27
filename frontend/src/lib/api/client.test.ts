@@ -217,7 +217,7 @@ describe('client API helpers', () => {
 
 	it('downloads the exported PDF and returns response metadata', async () => {
 		const fetchMock = vi.fn().mockResolvedValue(
-			new Response(new Blob(['pdf-bytes'], { type: 'application/pdf' }), {
+			new Response('pdf-bytes', {
 				status: 200,
 				headers: {
 					'Content-Type': 'application/pdf',
