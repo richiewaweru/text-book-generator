@@ -24,8 +24,8 @@ importers:
         specifier: ^0.16.22
         version: 0.16.45
       lectio:
-        specifier: ^0.3.4
-        version: 0.3.4(svelte@5.55.4(@typescript-eslint/types@8.57.2))
+        specifier: ^0.3.5
+        version: 0.3.5(svelte@5.55.4(@typescript-eslint/types@8.57.2))
       lucide-svelte:
         specifier: ^0.542.0
         version: 0.542.0(svelte@5.55.4(@typescript-eslint/types@8.57.2))
@@ -1189,8 +1189,8 @@ packages:
     resolution: {integrity: sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==}
     engines: {node: '>=6'}
 
-  lectio@0.3.4:
-    resolution: {integrity: sha512-fjqzeD9uylcK7vwLm1fqcIN0TAVF/XmYaOWQJcQAg1Lc8SnIAuX/cd7vJUjqPwttRl0XSbqVTDTI4CcXnXIV8w==}
+  lectio@0.3.5:
+    resolution: {integrity: sha512-q8EfdcAMyXP/1Ng3M2wYwaszmgHuvfphu7/VEIrsiGNILDkjKLeZzqW3TsPs/BzvRVf0rAZUlFsZoKCskWQFAw==}
     peerDependencies:
       svelte: ^5.0.0
 
@@ -2642,7 +2642,7 @@ snapshots:
 
   kleur@4.1.5: {}
 
-  lectio@0.3.4(svelte@5.55.4(@typescript-eslint/types@8.57.2)):
+  lectio@0.3.5(svelte@5.55.4(@typescript-eslint/types@8.57.2)):
     dependencies:
       '@types/dompurify': 3.2.0
       dompurify: 3.3.3
