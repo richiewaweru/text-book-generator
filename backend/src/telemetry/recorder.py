@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from pipeline.api import PipelineDocument, PipelineSectionReport
-from pipeline.contracts import get_optional_fields, get_required_fields
+from pipeline.contracts import get_section_field_for_component
 import core.events as core_events
 from pipeline.media.retry import is_media_block
 from pipeline.reporting import (
@@ -26,6 +26,34 @@ from pipeline.reporting import (
 from telemetry.ports.generation_report_repository import GenerationReportRepository
 
 logger = logging.getLogger(__name__)
+
+_TIMELINE_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "pipeline_start",
+        "curriculum_planned",
+        "section_started",
+        "section_attempt_started",
+        "llm_call_started",
+        "llm_call_succeeded",
+        "llm_call_failed",
+        "field_regen_outcome",
+        "section_retry_queued",
+        "section_failed",
+        "section_final",
+        "complete",
+    }
+)
+
+_TIMELINE_CONDITIONAL_TYPES: frozenset[str] = frozenset(
+    {
+        "image_outcome",
+        "diagram_outcome",
+        "media_plan_ready",
+        "interaction_outcome",
+    }
+)
+
+_SECTION_META_FIELDS: frozenset[str] = frozenset({"section_id", "template_id"})
 
 
 def _utc_now() -> datetime:
@@ -52,15 +80,9 @@ class GenerationReportRecorder:
         generation: Any,
         repository: GenerationReportRepository,
     ) -> None:
-        expected_components = sorted(
-            set(
-                get_required_fields(generation.requested_template_id)
-                + get_optional_fields(generation.requested_template_id)
-            )
-        )
         self._repository = repository
         self._generation = generation
-        self._expected_components = expected_components
+        self._plan_components: dict[str, list[str]] = {}
         self._report = GenerationReport(
             generation_id=generation.id,
             subject=generation.subject,
@@ -334,11 +356,14 @@ class GenerationReportRecorder:
         return _utc_now()
 
     def _append_timeline(self, payload: dict[str, Any]) -> None:
+        event_type = payload.get("type", "unknown")
+        if not self._should_include_in_timeline(event_type, payload):
+            return
         self._timeline_sequence += 1
         self._report.timeline.append(
             GenerationTimelineEvent(
                 sequence=self._timeline_sequence,
-                type=payload.get("type", "unknown"),
+                type=event_type,
                 timestamp=self._event_timestamp(payload),
                 node=self._caller(payload) or payload.get("node"),
                 section_id=payload.get("section_id"),
@@ -347,13 +372,44 @@ class GenerationReportRecorder:
             )
         )
 
+    def _should_include_in_timeline(self, event_type: str, payload: dict[str, Any]) -> bool:
+        if event_type in _TIMELINE_EVENT_TYPES:
+            return True
+        if event_type not in _TIMELINE_CONDITIONAL_TYPES:
+            return False
+        if event_type in {"image_outcome", "diagram_outcome"}:
+            return payload.get("outcome") != "skipped"
+        if event_type == "media_plan_ready":
+            return int(payload.get("slot_count", 0) or 0) > 0
+        if event_type == "interaction_outcome":
+            return payload.get("outcome") == "generated"
+        return False
+
+    def _resolve_planned_fields(self, section_id: str) -> list[str]:
+        planned_ids = self._plan_components.get(section_id, [])
+        resolved = []
+        for component_id in planned_ids:
+            field_name = get_section_field_for_component(component_id)
+            if field_name:
+                resolved.append(field_name)
+        return sorted(set(resolved))
+
+    def _refresh_section_expectations(self, section: GenerationReportSection) -> None:
+        section.expected_components = self._resolve_planned_fields(section.section_id)
+        if section.delivered_components:
+            delivered = set(section.delivered_components)
+            section.missing_components = [
+                component for component in section.expected_components if component not in delivered
+            ]
+        else:
+            section.missing_components = list(section.expected_components)
+
     def _ensure_section(self, section_id: str) -> GenerationReportSection:
         if section_id not in self._sections:
             self._sections[section_id] = GenerationReportSection(
                 section_id=section_id,
-                expected_components=list(self._expected_components),
-                missing_components=list(self._expected_components),
             )
+            self._refresh_section_expectations(self._sections[section_id])
         return self._sections[section_id]
 
     def _slot_set(self, store: dict[str, set[str]], section_id: str) -> set[str]:
@@ -410,6 +466,12 @@ class GenerationReportRecorder:
                 planner_counts.get(normalized.get("section_id", ""), 0),
             )
             outline.append(GenerationReportOutlineSection.model_validate(normalized))
+        self._plan_components = {
+            section.section_id: list(section.required_components)
+            for section in outline
+        }
+        for section_id in self._sections:
+            self._refresh_section_expectations(self._sections[section_id])
         self._report.runtime_curriculum_outline = outline
         self._report.planner_trace = GenerationPlannerTrace(
             path=payload["path"],
@@ -437,9 +499,7 @@ class GenerationReportRecorder:
         partial_payload = payload.get("section", {})
         delivered = self._delivered_components(partial_payload)
         section.delivered_components = delivered
-        section.missing_components = [
-            component for component in section.expected_components if component not in delivered
-        ]
+        self._refresh_section_expectations(section)
         section.final_error = None
         section.failure_detail = None
 
@@ -730,9 +790,7 @@ class GenerationReportRecorder:
         section.media_block_reason = None
         delivered = self._delivered_components(payload.get("section", {}))
         section.delivered_components = delivered
-        section.missing_components = [
-            component for component in section.expected_components if component not in delivered
-        ]
+        self._refresh_section_expectations(section)
 
     def _handle_section_final(self, payload: dict[str, Any]) -> None:
         # section_final marks the section entering final assembly.
@@ -760,9 +818,9 @@ class GenerationReportRecorder:
 
     def _delivered_components(self, section_payload: dict[str, Any]) -> list[str]:
         return sorted(
-            component
-            for component in self._expected_components
-            if section_payload.get(component)
+            field_name
+            for field_name, value in section_payload.items()
+            if field_name not in _SECTION_META_FIELDS and value
         )
 
     def _apply_document_snapshot(self, document: PipelineDocument) -> None:
@@ -789,9 +847,7 @@ class GenerationReportRecorder:
             section.status = "ready"
             section.completed_at = document.completed_at or section.completed_at or _utc_now()
             section.delivered_components = delivered
-            section.missing_components = [
-                component for component in section.expected_components if component not in delivered
-            ]
+            self._refresh_section_expectations(section)
             section.final_error = None
 
         for partial_section in document.partial_sections:
@@ -809,9 +865,7 @@ class GenerationReportRecorder:
             section.status = "running"
             section.completed_at = None
             section.delivered_components = delivered
-            section.missing_components = [
-                component for component in section.expected_components if component not in delivered
-            ]
+            self._refresh_section_expectations(section)
             for pending_asset in payload.get("pending_assets", []):
                 if pending_asset not in section.missing_components:
                     section.missing_components.append(pending_asset)

@@ -44,6 +44,7 @@ from pipeline.types.section_content import (
     PracticeProblem,
     SectionContent,
     SectionHeaderContent,
+    StudentTextboxContent,
     WhatNextContent,
 )
 from telemetry.dtos import GenerationReport
@@ -693,6 +694,197 @@ async def test_recorder_persists_runtime_outline_and_planner_trace() -> None:
     assert report.planner_trace.duplicate_term_warnings[0].startswith(
         "Duplicate term assignment in curriculum plan"
     )
+
+
+@pytest.mark.asyncio
+async def test_recorder_uses_plan_components_not_template_contract() -> None:
+    generation = _generation("gen-plan-components")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        CurriculumPlannedEvent(
+            generation_id=generation.id,
+            path="seeded_passthrough",
+            result="enriched",
+            runtime_curriculum_outline=[
+                {
+                    "section_id": "s-01",
+                    "title": "Practice section",
+                    "position": 1,
+                    "role": "practice",
+                    "focus": "Apply the concept.",
+                    "terms_to_define": [],
+                    "terms_assumed": [],
+                    "required_components": ["practice-stack", "student-textbox"],
+                }
+            ],
+            planner_trace_sections=[],
+        )
+    )
+    await recorder.apply_event(
+        SectionStartedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            title="Practice section",
+            position=1,
+        )
+    )
+    await recorder.apply_event(
+        SectionAttemptStartedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            attempt=1,
+            trigger="initial",
+        )
+    )
+
+    section = SectionContent(
+        section_id="s-01",
+        template_id="guided-concept-path",
+        header=SectionHeaderContent(
+            title="Practice section",
+            subject="Calculus",
+            grade_band="secondary",
+        ),
+        practice=PracticeContent(
+            problems=[
+                PracticeProblem(
+                    difficulty="warm",
+                    question="Practice question?",
+                    hints=[PracticeHint(level=1, text="Hint")],
+                )
+            ]
+        ),
+        student_textbox=StudentTextboxContent(
+            prompt="Write your answer.",
+            lines=4,
+        ),
+    )
+    await recorder.apply_event(
+        SectionReadyEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            section=section,
+            completed_sections=1,
+            total_sections=1,
+        )
+    )
+    await recorder.finalize_success(
+        document=_document(generation.id, [section]),
+        generation_time_seconds=5.0,
+    )
+
+    report = await repo.load_report(generation.id)
+    section_report = report.sections[0]
+    assert set(section_report.expected_components) == {"practice", "student_textbox"}
+    assert section_report.missing_components == []
+    assert "explanation" not in section_report.expected_components
+    assert "comparison_grid" not in section_report.expected_components
+    assert "worked_example" not in section_report.expected_components
+
+
+@pytest.mark.asyncio
+async def test_recorder_timeline_excludes_noise_events() -> None:
+    generation = _generation("gen-timeline-filter")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        PipelineStartEvent(
+            generation_id=generation.id,
+            section_count=1,
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+        )
+    )
+    await recorder.apply_event(
+        SectionStartedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            title="Section",
+            position=1,
+        )
+    )
+
+    await recorder.apply_event(
+        {
+            "type": "node_started",
+            "node": "schema_validator",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "attempt": 1,
+        }
+    )
+    await recorder.apply_event(
+        {
+            "type": "node_finished",
+            "node": "schema_validator",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "status": "succeeded",
+            "attempt": 1,
+            "latency_ms": 0.5,
+        }
+    )
+    await recorder.apply_event(
+        {
+            "type": "section_partial",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "status": "partial",
+            "pending_assets": [],
+        }
+    )
+    await recorder.apply_event(
+        {
+            "type": "media_plan_ready",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "slot_count": 0,
+        }
+    )
+    await recorder.apply_event(
+        {
+            "type": "image_outcome",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "outcome": "skipped",
+        }
+    )
+    await recorder.apply_event(
+        {
+            "type": "diagram_outcome",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "outcome": "skipped",
+        }
+    )
+
+    await recorder.finalize_failure(error="Test")
+    report = await repo.load_report(generation.id)
+    timeline_types = {item.type for item in report.timeline}
+
+    assert "pipeline_start" in timeline_types
+    assert "section_started" in timeline_types
+    assert "node_started" not in timeline_types
+    assert "node_finished" not in timeline_types
+    assert "section_partial" not in timeline_types
+
+    skipped_outcomes = [
+        item
+        for item in report.timeline
+        if item.type in ("image_outcome", "diagram_outcome")
+        and item.payload.get("outcome") == "skipped"
+    ]
+    assert skipped_outcomes == []
+
+    zero_slot_plans = [
+        item
+        for item in report.timeline
+        if item.type == "media_plan_ready" and item.payload.get("slot_count", 0) == 0
+    ]
+    assert zero_slot_plans == []
 
 
 @pytest.mark.asyncio

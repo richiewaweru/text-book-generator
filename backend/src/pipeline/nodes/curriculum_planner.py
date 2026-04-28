@@ -386,6 +386,7 @@ def _report_outline(sections: list[SectionPlan]) -> list[GenerationReportOutline
             terms_assumed=list(plan.terms_assumed),
             practice_target=plan.practice_target,
             visual_placements_count=count_visual_placements(plan),
+            required_components=list(plan.required_components),
         )
         for plan in sections
     ]

@@ -112,6 +112,7 @@ class GenerationReportOutlineSection(BaseModel):
     terms_assumed: list[str] = Field(default_factory=list)
     practice_target: str | None = None
     visual_placements_count: int = 0
+    required_components: list[str] = Field(default_factory=list)
 
 
 class GenerationPlannerTraceSection(BaseModel):

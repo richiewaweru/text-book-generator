@@ -532,7 +532,7 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
     assert "section_started" in timeline_types
     assert "llm_call_started" in timeline_types
     assert "llm_call_succeeded" in timeline_types
-    assert "interaction_outcome" in timeline_types
+    assert "interaction_outcome" not in timeline_types
     assert "media_plan_ready" in timeline_types
     assert "curriculum_planned" in timeline_types
     assert report_response.status_code == 200
