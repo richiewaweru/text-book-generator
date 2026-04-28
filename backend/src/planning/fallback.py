@@ -3,96 +3,115 @@ from __future__ import annotations
 from uuid import uuid4
 
 from planning.models import (
+    CompositionResult,
     GenerationDirectives,
     PlanningGenerationSpec,
     PlanningSectionPlan,
-    PlanningTemplateContract,
-    StudioBriefRequest,
+    PlanningSectionRole,
     TemplateDecision,
 )
+from planning.role_maps import ROLE_COMPONENT_MAP
+from pipeline.resources import ResourceTemplate
+from pipeline.types.requests import GenerationMode
+from pipeline.types.teacher_brief import TeacherBrief
+
+_RUNTIME_TEMPLATE_ID = "guided-concept-path"
+_RUNTIME_PRESET_ID = "blue-classroom"
 
 
-def _fallback_components(
-    contract: PlanningTemplateContract,
-    role: str,
-    defaults: tuple[str, ...],
-) -> list[str]:
-    if contract.section_role_defaults.get(role):
-        return list(contract.section_role_defaults[role])
-    pool = {*(contract.always_present or []), *(contract.available_components or [])}
-    return [component for component in defaults if component in pool]
+def _depth_to_mode(depth: str) -> GenerationMode:
+    if depth == "quick":
+        return GenerationMode.DRAFT
+    if depth == "deep":
+        return GenerationMode.STRICT
+    return GenerationMode.BALANCED
+
+
+def _fallback_sections(
+    *,
+    brief: TeacherBrief,
+    template: ResourceTemplate,
+    roles: list[PlanningSectionRole],
+) -> list[PlanningSectionPlan]:
+    depth_limit = template.depth_limits[brief.depth]
+    section_count = max(depth_limit.min_components, min(len(roles), depth_limit.max_components))
+    chosen_roles = roles[:section_count] or ["intro", "summary"]
+    if section_count == 1:
+        chosen_roles = ["summary"]
+    elif section_count >= 2 and chosen_roles[-1] != "summary":
+        chosen_roles[-1] = "summary"
+
+    sections: list[PlanningSectionPlan] = []
+    for order, role in enumerate(chosen_roles, start=1):
+        sections.append(
+            PlanningSectionPlan(
+                id=f"section-{uuid4().hex[:8]}",
+                order=order,
+                role=role,
+                title={
+                    "intro": f"Start {brief.subtopic}",
+                    "explain": f"Understand {brief.subtopic}",
+                    "practice": f"Practice {brief.subtopic}",
+                    "summary": f"Check {brief.subtopic}",
+                    "process": f"Steps in {brief.subtopic}",
+                    "compare": f"Compare {brief.subtopic}",
+                    "timeline": f"Timeline of {brief.subtopic}",
+                    "visual": f"See {brief.subtopic}",
+                    "discover": f"Explore {brief.subtopic}",
+                }[role],
+                objective=f"Support the {template.label.lower()} using a safe fallback structure.",
+                selected_components=list(ROLE_COMPONENT_MAP.get(role, ("explanation-block",)))[:2],
+                rationale=f"Fallback section for role {role}.",
+                practice_target="Confirm the learner can use the idea independently."
+                if role == "practice"
+                else None,
+            )
+        )
+    return sections
+
+
+def build_fallback_composition(
+    *,
+    brief: TeacherBrief,
+    template: ResourceTemplate,
+    roles: list[PlanningSectionRole],
+) -> CompositionResult:
+    return CompositionResult(
+        sections=_fallback_sections(brief=brief, template=template, roles=roles),
+        lesson_rationale=(
+            f"This fallback keeps the {template.label.lower()} compact and centered on {brief.subtopic}."
+        ),
+        warning="Planning used a deterministic fallback. Review the structure before generating.",
+    )
 
 
 def build_fallback_spec(
     *,
-    brief: StudioBriefRequest,
-    contract: PlanningTemplateContract,
+    brief: TeacherBrief,
+    template: ResourceTemplate,
+    roles: list[PlanningSectionRole],
+    directives: GenerationDirectives,
+    generation_id: str = "",
 ) -> PlanningGenerationSpec:
-    spec_id = uuid4().hex
+    composition = build_fallback_composition(brief=brief, template=template, roles=roles)
     return PlanningGenerationSpec(
-        id=spec_id,
-        template_id=contract.id,
-        mode=brief.mode,
+        id=generation_id or uuid4().hex,
+        template_id=_RUNTIME_TEMPLATE_ID,
+        preset_id=_RUNTIME_PRESET_ID,
+        mode=_depth_to_mode(brief.depth),
         template_decision=TemplateDecision(
-            chosen_id=contract.id,
-            chosen_name=contract.name,
-            rationale=f"{contract.name} is the safest default when planning needs to fall back.",
-            fit_score=0.5,
+            chosen_id=brief.resource_type,
+            chosen_name=template.label,
+            rationale=f"Teacher selected {template.label}.",
+            fit_score=1.0,
             alternatives=[],
         ),
-        lesson_rationale="This fallback keeps the lesson compact and easy to review before generation.",
-        directives=GenerationDirectives(
-            tone_profile=brief.preferences.tone,
-            reading_level=brief.preferences.reading_level,
-            explanation_style=brief.preferences.explanation_style,
-            example_style=brief.preferences.example_style,
-            scaffold_level="medium",
-            brevity=brief.preferences.brevity,
-        ),
-        committed_budgets=contract.component_budget,
-        sections=[
-            PlanningSectionPlan(
-                id="section-intro",
-                order=1,
-                role="intro",
-                title="Introduction",
-                objective="Set the lesson up clearly.",
-                selected_components=_fallback_components(
-                    contract,
-                    "intro",
-                    ("hook-hero", "callout-block", "key-fact"),
-                ),
-                rationale="Starts with a focused introduction.",
-            ),
-            PlanningSectionPlan(
-                id="section-explain",
-                order=2,
-                role="explain",
-                title="Explanation",
-                objective="Explain the central idea plainly.",
-                selected_components=_fallback_components(
-                    contract,
-                    "explain",
-                    ("explanation-block", "definition-card", "worked-example-card"),
-                ),
-                rationale="Provides the core explanation in the middle of the lesson.",
-            ),
-            PlanningSectionPlan(
-                id="section-summary",
-                order=3,
-                role="summary",
-                title="Summary",
-                objective="Close the lesson and point to what comes next.",
-                selected_components=_fallback_components(
-                    contract,
-                    "summary",
-                    ("summary-block", "what-next-bridge", "reflection-prompt"),
-                ),
-                rationale="Closes the arc cleanly.",
-            ),
-        ],
-        warning="Planning used defaults - please review and adjust before generating.",
-        source_brief_id=brief.source_brief_id(),
+        lesson_rationale=composition.lesson_rationale,
+        directives=directives,
+        committed_budgets={},
+        sections=composition.sections,
+        warning=composition.warning,
+        source_brief_id=uuid4().hex,
         source_brief=brief,
         status="draft",
     )

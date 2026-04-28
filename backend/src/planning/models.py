@@ -1,26 +1,12 @@
 from __future__ import annotations
 
 from typing import Literal
-from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-from pipeline.types.requests import BlockVisualPlacement, GenerationMode
 
-PlanningTopicType = Literal["concept", "process", "facts", "mixed"]
-PlanningLearningOutcome = Literal[
-    "understand-why",
-    "be-able-to-do",
-    "remember-terms",
-    "apply-to-new",
-]
-PlanningClassStyle = Literal[
-    "tries-before-told",
-    "needs-explanation-first",
-    "engages-with-visuals",
-    "responds-to-worked-examples",
-    "restless-without-activity",
-]
-PlanningFormat = Literal["printed-booklet", "screen-based", "both"]
+from pipeline.types.requests import BlockVisualPlacement, GenerationMode
+from pipeline.types.teacher_brief import TeacherBrief
+
 PlanningTone = Literal["supportive", "neutral", "rigorous"]
 PlanningReadingLevel = Literal["simple", "standard", "advanced"]
 PlanningExplanationStyle = Literal["concrete-first", "concept-first", "balanced"]
@@ -46,64 +32,7 @@ PlanningSectionRole = Literal[
     "discover",
 ]
 PlanningSpecStatus = Literal["draft", "reviewed", "committed"]
-
-
-class TeacherSignals(BaseModel):
-    topic_type: PlanningTopicType | None = None
-    learning_outcome: PlanningLearningOutcome | None = None
-    class_style: list[PlanningClassStyle] = Field(default_factory=list)
-    format: PlanningFormat | None = None
-
-    @field_validator("class_style")
-    @classmethod
-    def _limit_class_styles(cls, value: list[PlanningClassStyle]) -> list[PlanningClassStyle]:
-        seen = list(dict.fromkeys(value))
-        return seen[:3]
-
-
-class DeliveryPreferences(BaseModel):
-    tone: PlanningTone = "supportive"
-    reading_level: PlanningReadingLevel = "standard"
-    explanation_style: PlanningExplanationStyle = "balanced"
-    example_style: PlanningExampleStyle = "everyday"
-    brevity: PlanningBrevity = "balanced"
-
-
-class TeacherConstraints(BaseModel):
-    more_practice: bool = False
-    keep_short: bool = False
-    use_visuals: bool = False
-    print_first: bool = False
-
-
-class StudioBriefRequest(BaseModel):
-    intent: str = Field(min_length=1, max_length=200)
-    audience: str = Field(min_length=1, max_length=200)
-    prior_knowledge: str | None = Field(default="", max_length=1000)
-    extra_context: str | None = Field(default="", max_length=1000)
-    mode: GenerationMode = Field(default=GenerationMode.BALANCED)
-    signals: TeacherSignals = Field(default_factory=TeacherSignals)
-    preferences: DeliveryPreferences = Field(default_factory=DeliveryPreferences)
-    constraints: TeacherConstraints = Field(default_factory=TeacherConstraints)
-    forced_template_id: str | None = None
-
-    @field_validator("intent", "audience", "prior_knowledge", "extra_context")
-    @classmethod
-    def _trim_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return value.strip()
-
-    @model_validator(mode="after")
-    def _validate_required(self) -> "StudioBriefRequest":
-        if not self.intent:
-            raise ValueError("intent must not be empty.")
-        if not self.audience:
-            raise ValueError("audience must not be empty.")
-        return self
-
-    def source_brief_id(self) -> str:
-        return uuid4().hex
+PlanValidationSeverity = Literal["warning", "blocking"]
 
 
 class GenerationDirectives(BaseModel):
@@ -115,21 +44,11 @@ class GenerationDirectives(BaseModel):
     brevity: PlanningBrevity
 
 
-class NormalizedBrief(BaseModel):
-    brief: StudioBriefRequest
-    resolved_topic_type: PlanningTopicType
-    resolved_learning_outcome: PlanningLearningOutcome
-    resolved_format: PlanningFormat
-    directives: GenerationDirectives
-    scope_warning: str | None = None
-    keyword_profile: list[str] = Field(default_factory=list)
-
-
 class PlanningSignalAffinity(BaseModel):
-    topic_type: dict[PlanningTopicType, float] = Field(default_factory=dict)
-    learning_outcome: dict[PlanningLearningOutcome, float] = Field(default_factory=dict)
-    class_style: dict[PlanningClassStyle, float] = Field(default_factory=dict)
-    format: dict[PlanningFormat, float] = Field(default_factory=dict)
+    topic_type: dict[str, float] = Field(default_factory=dict)
+    learning_outcome: dict[str, float] = Field(default_factory=dict)
+    class_style: dict[str, float] = Field(default_factory=dict)
+    format: dict[str, float] = Field(default_factory=dict)
 
 
 class PlanningTemplateContract(BaseModel):
@@ -233,6 +152,31 @@ class PlanningSectionPlan(BaseModel):
         return value or None
 
 
+class CompositionResult(BaseModel):
+    sections: list[PlanningSectionPlan]
+    lesson_rationale: str
+    warning: str | None = None
+
+
+class PlanValidationIssue(BaseModel):
+    field: str | None = None
+    message: str
+    severity: PlanValidationSeverity = "blocking"
+
+    @field_validator("field", "message")
+    @classmethod
+    def _trim_issue_fields(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+class PlanValidationResult(BaseModel):
+    is_valid: bool
+    issues: list[PlanValidationIssue] = Field(default_factory=list)
+
+
 class PlanningGenerationSpec(BaseModel):
     id: str
     template_id: str
@@ -245,7 +189,7 @@ class PlanningGenerationSpec(BaseModel):
     sections: list[PlanningSectionPlan]
     warning: str | None = None
     source_brief_id: str
-    source_brief: StudioBriefRequest
+    source_brief: TeacherBrief
     status: PlanningSpecStatus = "draft"
 
     @model_validator(mode="after")
@@ -255,14 +199,3 @@ class PlanningGenerationSpec(BaseModel):
         if actual != expected:
             raise ValueError("Section order must be sequential starting at 1.")
         return self
-
-
-class PlanningRefinedSection(BaseModel):
-    title: str
-    rationale: str
-
-
-class PlanningRefinementOutput(BaseModel):
-    lesson_rationale: str
-    warning: str | None = None
-    sections: list[PlanningRefinedSection]

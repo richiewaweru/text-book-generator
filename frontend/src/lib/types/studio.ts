@@ -1,20 +1,7 @@
-import type { GenerationAccepted, GenerationDocument } from './index';
+import type { TeacherBrief } from './brief';
 
 export type StudioState = 'idle' | 'planning' | 'reviewing' | 'generating';
 export type GenerationMode = 'draft' | 'balanced' | 'strict';
-export type TopicType = 'concept' | 'process' | 'facts' | 'mixed';
-export type LearningOutcome =
-	| 'understand-why'
-	| 'be-able-to-do'
-	| 'remember-terms'
-	| 'apply-to-new';
-export type ClassStyle =
-	| 'tries-before-told'
-	| 'needs-explanation-first'
-	| 'engages-with-visuals'
-	| 'responds-to-worked-examples'
-	| 'restless-without-activity';
-export type LessonFormat = 'printed-booklet' | 'screen-based' | 'both';
 export type Tone = 'supportive' | 'neutral' | 'rigorous';
 export type ReadingLevel = 'simple' | 'standard' | 'advanced';
 export type ExplanationStyle = 'concrete-first' | 'concept-first' | 'balanced';
@@ -38,42 +25,6 @@ export type VisualIntent =
 	| 'compare_variants';
 export type VisualMode = 'image' | 'svg';
 export type PlanningStatus = 'draft' | 'reviewed' | 'committed';
-
-export interface TeacherSignals {
-	topic_type: TopicType | null;
-	learning_outcome: LearningOutcome | null;
-	class_style: ClassStyle[];
-	format: LessonFormat | null;
-}
-
-export interface DeliveryPreferences {
-	tone: Tone;
-	reading_level: ReadingLevel;
-	explanation_style: ExplanationStyle;
-	example_style: ExampleStyle;
-	brevity: Brevity;
-}
-
-export interface TeacherConstraints {
-	more_practice: boolean;
-	keep_short: boolean;
-	use_visuals: boolean;
-	print_first: boolean;
-}
-
-export interface StudioBriefRequest {
-	intent: string;
-	audience: string;
-	prior_knowledge: string;
-	extra_context: string;
-	mode: GenerationMode;
-	signals: TeacherSignals;
-	preferences: DeliveryPreferences;
-	constraints: TeacherConstraints;
-	forced_template_id?: string;
-}
-
-export type UserBriefDraft = StudioBriefRequest;
 
 export interface TemplateAlternative {
 	template_id: string;
@@ -132,6 +83,9 @@ export interface PlanningSectionPlan {
 	visual_policy: VisualPolicy | null;
 	generation_notes: SectionGenerationNotes | null;
 	rationale: string;
+	terms_to_define?: string[];
+	terms_assumed?: string[];
+	practice_target?: string | null;
 	visual_placements?: PlanningBlockVisualPlacement[];
 }
 
@@ -147,94 +101,6 @@ export interface PlanningGenerationSpec {
 	sections: PlanningSectionPlan[];
 	warning: string | null;
 	source_brief_id: string;
-	source_brief: StudioBriefRequest;
+	source_brief: TeacherBrief;
 	status: PlanningStatus;
-}
-
-export interface PlanDraft {
-	template_decision: TemplateDecision | null;
-	lesson_rationale: string;
-	warning: string | null;
-	sections: PlanningSectionPlan[];
-	is_complete: boolean;
-	error: string | null;
-}
-
-export interface StudioTemplateContract {
-	id: string;
-	name: string;
-	family: string;
-	intent: string;
-	tagline: string;
-	reading_style: string | null;
-	tags: string[];
-	best_for: string[];
-	not_ideal_for: string[];
-	learner_fit: string[];
-	subjects: string[];
-	interaction_level: string;
-	lesson_flow: string[];
-	required_components: string[];
-	optional_components: string[];
-	always_present: string[];
-	available_components: string[];
-	component_budget: Record<string, number>;
-	max_per_section: Record<string, number>;
-	default_behaviours: Record<string, string>;
-	section_role_defaults: Partial<Record<SectionRole, string[]>>;
-	signal_affinity: {
-		topic_type: Partial<Record<TopicType, number>>;
-		learning_outcome: Partial<Record<LearningOutcome, number>>;
-		class_style: Partial<Record<ClassStyle, number>>;
-		format: Partial<Record<LessonFormat, number>>;
-	};
-	layout_notes: string[];
-	responsive_rules: string[];
-	print_rules: string[];
-	allowed_presets: string[];
-	why_this_template_exists: string;
-	generation_guidance: Record<string, unknown>;
-}
-
-export interface PlanningTemplateSelectedEvent {
-	event: 'template_selected';
-	data: {
-		template_decision: TemplateDecision;
-		lesson_rationale: string;
-		warning: string | null;
-	};
-}
-
-export interface PlanningSectionPlannedEvent {
-	event: 'section_planned';
-	data: {
-		section: PlanningSectionPlan;
-	};
-}
-
-export interface PlanningCompleteEvent {
-	event: 'plan_complete';
-	data: {
-		spec: PlanningGenerationSpec;
-	};
-}
-
-export interface PlanningErrorEvent {
-	event: 'plan_error';
-	data: {
-		spec: PlanningGenerationSpec;
-		warning: string | null;
-	};
-}
-
-export type PlanningStreamEvent =
-	| PlanningTemplateSelectedEvent
-	| PlanningSectionPlannedEvent
-	| PlanningCompleteEvent
-	| PlanningErrorEvent;
-
-export interface StudioGenerationState {
-	accepted: GenerationAccepted | null;
-	document: GenerationDocument | null;
-	connectionBanner: string | null;
 }

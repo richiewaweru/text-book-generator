@@ -1,164 +1,49 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-import logging
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from planning.llm_config import (
-    PLANNING_BRIEF_INTERPRETER_CALLER,
+    PLANNING_SECTION_COMPOSER_CALLER,
     get_planning_slot,
 )
 from planning.models import (
-    NormalizedBrief,
+    CompositionResult,
+    GenerationDirectives,
     PlanningSectionPlan,
     PlanningSectionRole,
-    PlanningTemplateContract,
     SectionGenerationNotes,
 )
-
-logger = logging.getLogger(__name__)
-_ROLE_COMPONENT_FALLBACKS: dict[PlanningSectionRole, tuple[str, ...]] = {
-    "intro": ("hook-hero", "callout-block", "key-fact"),
-    "explain": ("explanation-block", "definition-card", "worked-example-card"),
-    "practice": ("practice-stack", "student-textbox", "short-answer", "fill-in-blank"),
-    "summary": ("summary-block", "what-next-bridge", "reflection-prompt"),
-    "process": ("process-steps", "worked-example-card", "explanation-block"),
-    "compare": ("comparison-grid", "definition-family", "insight-strip", "explanation-block"),
-    "timeline": ("timeline-block", "reflection-prompt", "explanation-block"),
-    "visual": ("diagram-block", "diagram-series", "diagram-compare", "explanation-block"),
-    "discover": ("simulation-block", "diagram-block", "callout-block", "explanation-block"),
-}
-
-_ROLE_TITLE_STEMS: dict[PlanningSectionRole, str] = {
-    "intro": "Start with the central idea",
-    "explain": "Build the explanation",
-    "practice": "Put the idea to work",
-    "summary": "Close and connect forward",
-    "process": "Walk through the method",
-    "compare": "Keep the distinctions visible",
-    "timeline": "Follow the sequence",
-    "visual": "Let the visual lead",
-    "discover": "Explore before formalising",
-}
+from planning.role_maps import ROLE_COMPONENT_MAP
+from pipeline.resources import ResourceTemplate
+from pipeline.types.teacher_brief import TeacherBrief
 
 
-class _SectionRolePlan(BaseModel):
-    roles: list[PlanningSectionRole] = Field(default_factory=list)
-
-
-def _section_count(brief: NormalizedBrief, contract: PlanningTemplateContract) -> int:
-    if brief.brief.constraints.keep_short:
-        return 3
-
-    count = 4
-    if brief.scope_warning:
-        count += 1
-    if brief.brief.constraints.more_practice:
-        count += 1
-    if contract.intent in {"teach-procedure", "teach-sequence", "compare-ideas"}:
-        count += 1
-    return max(3, min(5, count))
-
-
-def _role_sequence(
-    contract: PlanningTemplateContract,
-    count: int,
-    more_practice: bool,
-) -> list[PlanningSectionRole]:
-    if contract.intent == "compare-ideas":
-        core_role: PlanningSectionRole = "compare"
-    elif contract.intent == "teach-sequence":
-        core_role = "timeline"
-    elif contract.intent == "teach-procedure":
-        core_role = "process"
-    elif "discover" in contract.section_role_defaults:
-        core_role = "discover"
-    elif contract.intent == "explain-visually":
-        core_role = "visual"
-    else:
-        core_role = "explain"
-
-    if count <= 3:
-        return ["intro", core_role, "summary"]
-
-    if count == 4:
-        if core_role == "explain" or more_practice:
-            return ["intro", core_role, "practice", "summary"]
-        return ["intro", core_role, "explain", "summary"]
-
-    if core_role == "explain":
-        return ["intro", "explain", "explain", "practice", "summary"]
-    return ["intro", core_role, "explain", "practice", "summary"]
-
-
-def _role_components(
-    contract: PlanningTemplateContract,
+def _build_section(
+    *,
+    order: int,
     role: PlanningSectionRole,
-) -> list[str]:
-    direct = contract.section_role_defaults.get(role)
-    if direct:
-        return direct[:]
-    fallback = _ROLE_COMPONENT_FALLBACKS.get(role, ())
-    pool = {*(contract.always_present or []), *(contract.available_components or [])}
-    return [component for component in fallback if component in pool]
-
-
-def _remaining_budget(contract: PlanningTemplateContract) -> dict[str, int | None]:
-    available = {*(contract.always_present or []), *(contract.available_components or [])}
-    return {
-        component: contract.component_budget.get(component)
-        for component in available
-    }
-
-
-def _select_components_for_role(
-    contract: PlanningTemplateContract,
-    role: PlanningSectionRole,
-    remaining_budget: dict[str, int | None],
-) -> list[str]:
-    selected: list[str] = []
-    per_section_counts: dict[str, int] = {}
-    candidates = _role_components(contract, role)
-
-    for component in candidates:
-        if component not in contract.available_components and component not in contract.always_present:
-            continue
-        remaining = remaining_budget.get(component)
-        if remaining is not None and remaining <= 0:
-            continue
-        limit = contract.max_per_section.get(component)
-        if limit is not None and per_section_counts.get(component, 0) >= limit:
-            continue
-        selected.append(component)
-        per_section_counts[component] = per_section_counts.get(component, 0) + 1
-        if remaining is not None:
-            remaining_budget[component] = remaining - 1
-
-    return selected
-
-
-def _placeholder_title(role: PlanningSectionRole, order: int) -> str:
-    stem = _ROLE_TITLE_STEMS.get(role, f"Section {order}")
-    return stem if len(stem.split()) <= 8 else f"{role.replace('-', ' ').title()} {order}"
-
-
-def _objective(role: PlanningSectionRole, intent: str) -> str:
-    mapping = {
-        "intro": "Frame the lesson so the teacher and learners know what this section is trying to unlock.",
-        "explain": "Build the core explanation with enough clarity for the target audience.",
-        "practice": "Give the learner a chance to use the idea directly.",
-        "summary": "Close the section arc and point toward what comes next.",
-        "process": "Make the method feel sequential and repeatable.",
-        "compare": "Keep distinctions visible so the learner can classify confidently.",
-        "timeline": "Use chronology to show how one step leads to the next.",
-        "visual": "Let the visual anchor lead the understanding before extra prose adds detail.",
-        "discover": "Use guided exploration to reveal the pattern before formalising it.",
-    }
-    return mapping.get(role, f"Support the lesson's {intent} intent.")
+    components: list[str],
+    title: str,
+    objective: str,
+    rationale: str,
+) -> PlanningSectionPlan:
+    return PlanningSectionPlan(
+        id=f"section-{uuid4().hex[:8]}",
+        order=order,
+        role=role,
+        title=title,
+        objective=objective,
+        selected_components=components,
+        rationale=rationale,
+        generation_notes=_generation_notes(role),
+        practice_target="Check whether the learner can apply the idea independently."
+        if role == "practice"
+        else None,
+    )
 
 
 def _generation_notes(role: PlanningSectionRole) -> SectionGenerationNotes | None:
@@ -172,148 +57,190 @@ def _generation_notes(role: PlanningSectionRole) -> SectionGenerationNotes | Non
     return None
 
 
+def _section_objective(role: PlanningSectionRole, brief: TeacherBrief) -> str:
+    objectives = {
+        "intro": f"Open the {brief.subtopic} resource clearly and make the learning target obvious.",
+        "explain": f"Explain the core idea in {brief.subtopic} using accessible language.",
+        "practice": f"Let the learner use {brief.subtopic} independently or with light support.",
+        "summary": f"Close the resource by checking the main takeaway from {brief.subtopic}.",
+        "process": f"Break {brief.subtopic} into repeatable steps.",
+        "compare": f"Keep the important differences inside {brief.subtopic} visible.",
+        "timeline": f"Show the sequence or chronology inside {brief.subtopic}.",
+        "visual": f"Use a visual anchor to support understanding of {brief.subtopic}.",
+        "discover": f"Guide learners to notice the pattern inside {brief.subtopic}.",
+    }
+    return objectives[role]
+
+
+def _fallback_title(role: PlanningSectionRole, brief: TeacherBrief, order: int) -> str:
+    titles = {
+        "intro": f"Getting Started with {brief.subtopic}",
+        "explain": f"Understanding {brief.subtopic}",
+        "practice": f"Try {brief.subtopic}",
+        "summary": f"Check {brief.subtopic}",
+        "process": f"Steps for {brief.subtopic}",
+        "compare": f"Compare {brief.subtopic}",
+        "timeline": f"Sequence of {brief.subtopic}",
+        "visual": f"See {brief.subtopic}",
+        "discover": f"Explore {brief.subtopic}",
+    }
+    return titles.get(role, f"Section {order}")
+
+
+def build_deterministic_composition(
+    *,
+    brief: TeacherBrief,
+    template: ResourceTemplate,
+    roles: list[PlanningSectionRole],
+) -> CompositionResult:
+    depth_limit = template.depth_limits[brief.depth]
+    section_count = max(depth_limit.min_components, min(len(roles), depth_limit.max_components))
+    chosen_roles = roles[:section_count] or ["intro", "summary"]
+
+    sections = [
+        _build_section(
+            order=index,
+            role=role,
+            components=list(ROLE_COMPONENT_MAP.get(role, ("explanation-block",)))[:2],
+            title=_fallback_title(role, brief, index),
+            objective=_section_objective(role, brief),
+            rationale=f"This section uses the {role} role to support the {template.label} resource shape.",
+        )
+        for index, role in enumerate(chosen_roles, start=1)
+    ]
+    return CompositionResult(
+        sections=sections,
+        lesson_rationale=(
+            f"This {template.label.lower()} follows the selected {brief.resource_type} shape and "
+            f"keeps the focus on {brief.subtopic}."
+        ),
+        warning=None,
+    )
+
+
 def _system_prompt() -> str:
     return "\n".join(
         [
-            "You arrange a short lesson section flow for Teacher Studio.",
-            "Keep the section count fixed.",
-            "Return only valid JSON.",
-            "Schema fields:",
-            "- roles: ordered list of section roles",
-            "Allowed roles: intro, explain, practice, summary, process, compare, timeline, visual, discover",
-            "The first role should usually be intro and the final role should be summary.",
+            "You compose a reviewed classroom resource plan from a structured teacher brief.",
+            "Return JSON only.",
+            "Do not write lesson content.",
+            "Use only the allowed planning roles and allowed components for each role.",
+            "Keep section count within the stated depth limits.",
+            "Titles must be clear and student-facing.",
+            "Every section must include at least one selected component.",
         ]
+    )
+
+
+def _role_component_lines(roles: list[PlanningSectionRole]) -> str:
+    return "\n".join(
+        f"- {role}: {', '.join(ROLE_COMPONENT_MAP.get(role, ())) or 'none'}"
+        for role in roles
     )
 
 
 def _user_prompt(
-    brief: NormalizedBrief,
-    contract: PlanningTemplateContract,
     *,
-    count: int,
-) -> str:
-    available_roles = sorted(
-        {
-            "intro",
-            "summary",
-            *contract.section_role_defaults.keys(),
-            *(_ROLE_COMPONENT_FALLBACKS.keys()),
-        }
-    )
-    return "\n".join(
-        [
-            f"Intent: {brief.brief.intent}",
-            f"Topic type: {brief.resolved_topic_type}",
-            f"Learning outcome: {brief.resolved_learning_outcome}",
-            f"Template: {contract.name} ({contract.intent})",
-            f"Requested section count: {count}",
-            f"More practice: {brief.brief.constraints.more_practice}",
-            f"Use visuals: {brief.brief.constraints.use_visuals}",
-            f"Keep short: {brief.brief.constraints.keep_short}",
-            f"Template role defaults: {contract.section_role_defaults}",
-            f"Allowed roles: {', '.join(available_roles)}",
-            "Choose the most suitable ordered role sequence for this lesson.",
-        ]
-    )
-
-
-def _roles_are_usable(
+    brief: TeacherBrief,
+    template: ResourceTemplate,
     roles: list[PlanningSectionRole],
-    *,
-    count: int,
-    brief: NormalizedBrief,
-) -> bool:
-    if len(roles) != count:
-        return False
-    if not roles or roles[0] != "intro" or roles[-1] != "summary":
-        return False
-    if count > 3 and brief.brief.constraints.more_practice and "practice" not in roles:
-        return False
-    if brief.resolved_topic_type == "process" and not any(
-        role in {"process", "timeline"} for role in roles
-    ):
-        return False
-    return True
-
-
-async def _resolve_roles_with_llm(
-    brief: NormalizedBrief,
-    contract: PlanningTemplateContract,
-    *,
-    count: int,
-    model: Any | None,
-    run_llm_fn: Callable[..., Awaitable[Any]] | None,
-    generation_id: str,
-) -> list[PlanningSectionRole] | None:
-    if model is None or run_llm_fn is None:
-        return None
-
-    agent = Agent(
-        model=model,
-        output_type=_SectionRolePlan,
-        system_prompt=_system_prompt(),
-    )
-    user_prompt = _user_prompt(brief, contract, count=count)
-
-    for attempt in range(2):
-        try:
-            result = await run_llm_fn(
-                trace_id=generation_id,
-                caller=PLANNING_BRIEF_INTERPRETER_CALLER,
-                agent=agent,
-                model=model,
-                user_prompt=user_prompt,
-                slot=get_planning_slot(PLANNING_BRIEF_INTERPRETER_CALLER),
-            )
-            output = result.output
-            if output is None or not _roles_are_usable(output.roles, count=count, brief=brief):
-                raise ValueError("Planning section composer returned an unusable role sequence.")
-            return output.roles
-        except Exception as exc:
-            logger.warning("Planning section composer attempt %s failed: %s", attempt + 1, exc)
-
-    return None
+    directives: GenerationDirectives,
+    repair_instructions: list[str] | None,
+) -> str:
+    depth_limit = template.depth_limits[brief.depth]
+    parts = [
+        f"Subject: {brief.subject}",
+        f"Topic: {brief.topic}",
+        f"Subtopic: {brief.subtopic}",
+        f"Learner context: {brief.learner_context}",
+        f"Intended outcome: {brief.intended_outcome}",
+        f"Resource type: {brief.resource_type}",
+        f"Depth: {brief.depth}",
+        f"Supports: {', '.join(brief.supports) if brief.supports else 'none'}",
+        f"Teacher notes: {brief.teacher_notes or 'none'}",
+        f"Template label: {template.label}",
+        f"Template description: {template.description}",
+        f"Required obligations: {'; '.join(template.required_obligations) or 'none'}",
+        (
+            "Depth limits: "
+            f"min sections {depth_limit.min_components}, max sections {depth_limit.max_components}, "
+            f"target time {depth_limit.target_time_minutes}, "
+            f"question range {depth_limit.question_count_range or 'n/a'}"
+        ),
+        (
+            "Directives: "
+            f"tone={directives.tone_profile}, reading_level={directives.reading_level}, "
+            f"explanation_style={directives.explanation_style}, example_style={directives.example_style}, "
+            f"scaffold_level={directives.scaffold_level}, brevity={directives.brevity}"
+        ),
+        f"Resolved planning roles: {', '.join(roles)}",
+        "Role component map:",
+        _role_component_lines(roles),
+        "Return this JSON shape exactly:",
+        "{",
+        '  "lesson_rationale": "string",',
+        '  "warning": "string|null",',
+        '  "sections": [',
+        "    {",
+        '      "id": "section-unique",',
+        '      "order": 1,',
+        '      "role": "intro|explain|practice|summary|process|compare|timeline|visual|discover",',
+        '      "title": "string",',
+        '      "objective": "string",',
+        '      "focus_note": "string|null",',
+        '      "selected_components": ["component-id"],',
+        '      "rationale": "string",',
+        '      "terms_to_define": ["optional"],',
+        '      "terms_assumed": ["optional"],',
+        '      "practice_target": "string|null"',
+        "    }",
+        "  ]",
+        "}",
+    ]
+    if repair_instructions:
+        parts.extend(
+            [
+                "Repair instructions:",
+                *[f"- {instruction}" for instruction in repair_instructions],
+            ]
+        )
+    return "\n".join(parts)
 
 
 async def compose_sections(
-    brief: NormalizedBrief,
-    contract: PlanningTemplateContract,
+    brief: TeacherBrief,
+    template: ResourceTemplate,
+    roles: list[PlanningSectionRole],
+    directives: GenerationDirectives,
     *,
     model: Any | None = None,
     run_llm_fn: Callable[..., Awaitable[Any]] | None = None,
     generation_id: str = "",
-) -> list[PlanningSectionPlan]:
-    remaining_budget = _remaining_budget(contract)
-    count = _section_count(brief, contract)
-    fallback_roles = _role_sequence(
-        contract,
-        count,
-        brief.brief.constraints.more_practice,
-    )
-    roles = await _resolve_roles_with_llm(
-        brief,
-        contract,
-        count=count,
+    repair_instructions: list[str] | None = None,
+) -> CompositionResult:
+    if model is None or run_llm_fn is None:
+        return build_deterministic_composition(brief=brief, template=template, roles=roles)
+
+    agent = Agent(
         model=model,
-        run_llm_fn=run_llm_fn,
-        generation_id=generation_id,
+        output_type=CompositionResult,
+        system_prompt=_system_prompt(),
     )
-    if roles is None:
-        roles = fallback_roles
-
-    sections: list[PlanningSectionPlan] = []
-    for index, role in enumerate(roles, start=1):
-        sections.append(
-            PlanningSectionPlan(
-                id=f"section-{uuid4().hex[:8]}",
-                order=index,
-                role=role,
-                title=_placeholder_title(role, index),
-                objective=_objective(role, contract.intent),
-                selected_components=_select_components_for_role(contract, role, remaining_budget),
-                generation_notes=_generation_notes(role),
-                rationale=f"This section uses the {role} role to support the chosen {contract.name} lesson shape.",
-            )
-        )
-
-    return sections
+    result = await run_llm_fn(
+        trace_id=generation_id,
+        caller=PLANNING_SECTION_COMPOSER_CALLER,
+        agent=agent,
+        model=model,
+        user_prompt=_user_prompt(
+            brief=brief,
+            template=template,
+            roles=roles,
+            directives=directives,
+            repair_instructions=repair_instructions,
+        ),
+        slot=get_planning_slot(PLANNING_SECTION_COMPOSER_CALLER),
+    )
+    output = result.output
+    if output is None:
+        raise ValueError("Planning section composer returned no structured output.")
+    return output

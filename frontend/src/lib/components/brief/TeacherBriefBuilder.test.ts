@@ -3,7 +3,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { resolveTopic, validateTeacherBrief } = vi.hoisted(() => ({
+const { commitPlan, planFromBrief, resolveTopic, validateTeacherBrief } = vi.hoisted(() => ({
+	commitPlan: vi.fn(),
+	planFromBrief: vi.fn(),
 	resolveTopic: vi.fn(),
 	validateTeacherBrief: vi.fn()
 }));
@@ -13,6 +15,8 @@ const { getProfile } = vi.hoisted(() => ({
 }));
 
 vi.mock('$lib/api/teacher-brief', () => ({
+	commitPlan,
+	planFromBrief,
 	resolveTopic,
 	validateTeacherBrief
 }));
@@ -25,6 +29,8 @@ import TeacherBriefBuilder from './TeacherBriefBuilder.svelte';
 
 describe('TeacherBriefBuilder', () => {
 	beforeEach(() => {
+		commitPlan.mockReset();
+		planFromBrief.mockReset();
 		resolveTopic.mockReset();
 		validateTeacherBrief.mockReset();
 		getProfile.mockResolvedValue({
@@ -174,5 +180,102 @@ describe('TeacherBriefBuilder', () => {
 			).toBeTruthy()
 		);
 		expect(screen.queryAllByText(/Math -> Algebra -> Solving two-step equations/i)).toHaveLength(0);
+	});
+
+	it('hands a validated brief into planning and shows the review step', async () => {
+		resolveTopic.mockResolvedValue({
+			subject: 'Math',
+			topic: 'Algebra',
+			candidate_subtopics: [
+				{
+					id: 'two-step-equations',
+					title: 'Solving two-step equations',
+					description: 'Solve equations with two operations.',
+					likely_grade_band: 'middle school'
+				}
+			],
+			needs_clarification: false,
+			clarification_message: null
+		});
+		validateTeacherBrief.mockResolvedValue({
+			is_ready: true,
+			blockers: [],
+			warnings: [],
+			suggestions: []
+		});
+		planFromBrief.mockResolvedValue({
+			id: 'plan-1',
+			template_id: 'guided-concept-path',
+			preset_id: 'blue-classroom',
+			mode: 'balanced',
+			template_decision: {
+				chosen_id: 'worksheet',
+				chosen_name: 'Worksheet',
+				rationale: 'Teacher selected Worksheet.',
+				fit_score: 1,
+				alternatives: []
+			},
+			lesson_rationale: 'Move from explanation into guided practice.',
+			directives: {
+				tone_profile: 'supportive',
+				reading_level: 'standard',
+				explanation_style: 'balanced',
+				example_style: 'everyday',
+				scaffold_level: 'medium',
+				brevity: 'balanced'
+			},
+			committed_budgets: {},
+			sections: [
+				{
+					id: 'section-1',
+					order: 1,
+					role: 'intro',
+					title: 'Start with the idea',
+					objective: 'Open the resource clearly.',
+					focus_note: null,
+					selected_components: ['hook-hero'],
+					visual_policy: null,
+					generation_notes: null,
+					rationale: 'Open with a hook.'
+				}
+			],
+			warning: null,
+			source_brief_id: 'brief-1',
+			source_brief: {
+				subject: 'Math',
+				topic: 'Algebra',
+				subtopic: 'Solving two-step equations',
+				learner_context: 'Grade 7 mixed-ability class. Some learners struggle with word problems',
+				intended_outcome: 'practice',
+				resource_type: 'worksheet',
+				supports: ['worked_examples', 'step_by_step'],
+				depth: 'standard',
+				teacher_notes: ''
+			},
+			status: 'draft'
+		});
+
+		render(TeacherBriefBuilder);
+
+		await fireEvent.input(screen.getByLabelText(/what are you teaching today\?/i), {
+			target: { value: 'Algebra' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /find subtopics/i }));
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: /solving two-step equations/i })).toBeTruthy()
+		);
+		await fireEvent.click(screen.getByRole('button', { name: /solving two-step equations/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /practice a skill/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /worksheet/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /standard/i }));
+		await waitFor(() => expect(screen.getByRole('button', { name: /validate brief/i })).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: /validate brief/i }));
+		await waitFor(() => expect(screen.getByRole('button', { name: /build plan/i })).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: /build plan/i }));
+
+		await waitFor(() => expect(screen.getByText(/plan review/i)).toBeTruthy());
+		expect(planFromBrief).toHaveBeenCalled();
+		expect(screen.getByText(/start with the idea/i)).toBeTruthy();
 	});
 });

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
-	import { resolveTopic, validateTeacherBrief } from '$lib/api/teacher-brief';
+	import { commitPlan, planFromBrief, resolveTopic, validateTeacherBrief } from '$lib/api/teacher-brief';
 	import { getProfile } from '$lib/api/profile';
 	import {
 		briefSteps,
@@ -10,10 +10,14 @@
 		recommendSupports,
 		stepSummary
 	} from '$lib/brief/config';
+	import GenerationView from '$lib/components/studio/GenerationView.svelte';
+	import { resetGenerationState, setGenerationAccepted } from '$lib/stores/studio';
 	import type {
 		BriefBuilderStep,
 		BriefValidationResult,
 		BuilderWarning,
+		GenerationAccepted,
+		PlanningGenerationSpec,
 		TeacherBrief,
 		TeacherBriefSupport,
 		TopicResolutionSubtopic
@@ -24,11 +28,15 @@
 	import DepthStep from './DepthStep.svelte';
 	import LearnerContextStep from './LearnerContextStep.svelte';
 	import OutcomeStep from './OutcomeStep.svelte';
+	import PlanReviewStep from './PlanReviewStep.svelte';
 	import ResourceTypeStep from './ResourceTypeStep.svelte';
 	import SubtopicChoiceStep from './SubtopicChoiceStep.svelte';
 	import SupportsStep from './SupportsStep.svelte';
 	import TopicInputStep from './TopicInputStep.svelte';
 
+	type BuilderStage = 'building' | 'planning' | 'reviewing' | 'generating';
+
+	let stage = $state<BuilderStage>('building');
 	let active_step = $state<BriefBuilderStep>('topic');
 	let completed_steps = $state<BriefBuilderStep[]>([]);
 	let brief = $state<Partial<TeacherBrief>>({
@@ -47,6 +55,8 @@
 	let recommendedSupports = $state<TeacherBriefSupport[]>([]);
 	let topicStatusMessage = $state<string | null>(null);
 	let apiError = $state<string | null>(null);
+	let plannedSpec = $state<PlanningGenerationSpec | null>(null);
+	let acceptedGeneration = $state<GenerationAccepted | null>(null);
 
 	const learnerSummary = $derived(learnerText || selectedLearnerChips.join(', '));
 	const reviewReady = $derived(
@@ -60,6 +70,14 @@
 				brief.depth
 		)
 	);
+	const briefIsReady = $derived(Boolean(validationResult?.is_ready));
+
+	function resetPlanStage() {
+		stage = 'building';
+		plannedSpec = null;
+		acceptedGeneration = null;
+		resetGenerationState();
+	}
 
 	function clearValidation() {
 		validationResult = null;
@@ -81,6 +99,9 @@
 	function editStep(step: BriefBuilderStep) {
 		active_step = step;
 		clearValidation();
+		if (stage !== 'building') {
+			resetPlanStage();
+		}
 	}
 
 	function isVisible(step: BriefBuilderStep): boolean {
@@ -136,6 +157,7 @@
 			(step) => !['choose_subtopic', 'supports', 'review'].includes(step)
 		);
 		clearValidation();
+		resetPlanStage();
 	}
 
 	function nextStepAfterSubtopic(): BriefBuilderStep {
@@ -286,7 +308,40 @@
 		}
 	}
 
+	async function handlePlanFromBrief() {
+		if (!validationResult?.is_ready) return;
+		loading = true;
+		apiError = null;
+		stage = 'planning';
+		try {
+			plannedSpec = await planFromBrief(brief as TeacherBrief);
+			stage = 'reviewing';
+		} catch (error) {
+			stage = 'building';
+			apiError = error instanceof Error ? error.message : 'Planning failed.';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function handleCommit() {
+		if (!plannedSpec) return;
+		loading = true;
+		apiError = null;
+		try {
+			const accepted = await commitPlan(plannedSpec);
+			acceptedGeneration = accepted;
+			setGenerationAccepted(accepted);
+			stage = 'generating';
+		} catch (error) {
+			apiError = error instanceof Error ? error.message : 'Failed to start generation.';
+		} finally {
+			loading = false;
+		}
+	}
+
 	onMount(() => {
+		resetGenerationState();
 		void getProfile()
 			.then((profile) => {
 				if (learnerText.trim()) return;
@@ -304,166 +359,184 @@
 	});
 </script>
 
-<section class="builder-shell">
-	<header class="builder-header">
-		<div>
-			<p class="eyebrow">Studio</p>
-			<h1>Teacher brief builder</h1>
-			<p class="lede">
-				Capture the teaching intent first, narrow the topic, choose the resource shape, then
-				validate the brief before generation.
-			</p>
+{#if stage === 'reviewing' && plannedSpec}
+	<PlanReviewStep plan={plannedSpec} loading={loading} onBack={resetPlanStage} onCommit={handleCommit} />
+{:else if stage === 'generating' && acceptedGeneration}
+	<GenerationView accepted={acceptedGeneration} onReset={resetPlanStage} />
+{:else}
+	<section class="builder-shell">
+		<header class="builder-header">
+			<div>
+				<p class="eyebrow">Studio</p>
+				<h1>Teacher brief builder</h1>
+				<p class="lede">
+					Capture the teaching intent first, narrow the topic, choose the resource shape, then
+					validate the brief before generation.
+				</p>
+			</div>
+			<a href="/dashboard" class="dashboard-link">Back to dashboard</a>
+		</header>
+
+		{#if apiError}
+			<p class="notice notice-error" role="alert">{apiError}</p>
+		{/if}
+
+		{#if stage === 'planning'}
+			<p class="notice notice-info" role="status">Planning the reviewed resource structure...</p>
+		{/if}
+
+		<div class="builder-stack">
+			<BriefStepCard
+				title="Topic"
+				stepLabel="Step 1"
+				active={active_step === 'topic'}
+				completed={completed_steps.includes('topic')}
+				summary={stepSummary('topic', brief, learnerText, selectedLearnerChips)}
+				onEdit={() => editStep('topic')}
+			>
+				<TopicInputStep
+					value={rawTopic}
+					loading={loading && active_step === 'topic'}
+					statusMessage={topicStatusMessage}
+					onInput={handleTopicInput}
+					onSubmit={handleTopicSubmit}
+				/>
+			</BriefStepCard>
+
+			{#if isVisible('choose_subtopic')}
+				<BriefStepCard
+					title="Subtopic"
+					stepLabel="Step 2"
+					active={active_step === 'choose_subtopic'}
+					completed={completed_steps.includes('choose_subtopic')}
+					summary={stepSummary('choose_subtopic', brief, learnerText, selectedLearnerChips)}
+					onEdit={() => editStep('choose_subtopic')}
+				>
+					<SubtopicChoiceStep
+						options={suggestions.subtopics ?? []}
+						customValue={customSubtopic}
+						clarificationMessage={topicStatusMessage}
+						onSelect={handleSubtopicChoice}
+						onCustomChange={(value) => (customSubtopic = value)}
+						onUseCustom={handleUseCustomSubtopic}
+					/>
+				</BriefStepCard>
+			{/if}
+
+			{#if isVisible('learner_context')}
+				<BriefStepCard
+					title="Learner Context"
+					stepLabel="Step 3"
+					active={active_step === 'learner_context'}
+					completed={completed_steps.includes('learner_context')}
+					summary={stepSummary('learner_context', brief, learnerText, selectedLearnerChips)}
+					onEdit={() => editStep('learner_context')}
+				>
+					<LearnerContextStep
+						value={learnerText}
+						availableChips={[...learnerContextChips]}
+						selectedChips={selectedLearnerChips}
+						onInput={(value) => {
+							syncLearnerContext(value);
+							clearValidation();
+						}}
+						onToggleChip={toggleLearnerChip}
+						onContinue={continueLearnerContext}
+					/>
+				</BriefStepCard>
+			{/if}
+
+			{#if isVisible('intended_outcome')}
+				<BriefStepCard
+					title="Intended Outcome"
+					stepLabel="Step 4"
+					active={active_step === 'intended_outcome'}
+					completed={completed_steps.includes('intended_outcome')}
+					summary={stepSummary('intended_outcome', brief, learnerText, selectedLearnerChips)}
+					onEdit={() => editStep('intended_outcome')}
+				>
+					<OutcomeStep selected={brief.intended_outcome} onSelect={handleOutcomeSelect} />
+				</BriefStepCard>
+			{/if}
+
+			{#if isVisible('resource_type')}
+				<BriefStepCard
+					title="Resource Type"
+					stepLabel="Step 5"
+					active={active_step === 'resource_type'}
+					completed={completed_steps.includes('resource_type')}
+					summary={stepSummary('resource_type', brief, learnerText, selectedLearnerChips)}
+					onEdit={() => editStep('resource_type')}
+				>
+					<ResourceTypeStep selected={brief.resource_type} onSelect={handleResourceTypeSelect} />
+				</BriefStepCard>
+			{/if}
+
+			{#if isVisible('supports')}
+				<BriefStepCard
+					title="Supports"
+					stepLabel="Step 6"
+					active={active_step === 'supports'}
+					completed={completed_steps.includes('supports')}
+					summary={stepSummary('supports', brief, learnerText, selectedLearnerChips)}
+					onEdit={() => editStep('supports')}
+				>
+					<SupportsStep
+						selected={brief.supports ?? []}
+						recommended={recommendedSupports}
+						onToggle={toggleSupport}
+						onContinue={continueSupports}
+					/>
+				</BriefStepCard>
+			{/if}
+
+			{#if isVisible('depth')}
+				<BriefStepCard
+					title="Depth"
+					stepLabel="Step 7"
+					active={active_step === 'depth'}
+					completed={completed_steps.includes('depth')}
+					summary={stepSummary('depth', brief, learnerText, selectedLearnerChips)}
+					onEdit={() => editStep('depth')}
+				>
+					<DepthStep selected={brief.depth} onSelect={handleDepthSelect} />
+				</BriefStepCard>
+			{/if}
+
+			{#if isVisible('review')}
+				<BriefStepCard
+					title="Review Brief"
+					stepLabel="Step 8"
+					active={active_step === 'review'}
+					completed={completed_steps.includes('review')}
+					summary={stepSummary('review', brief, learnerText, selectedLearnerChips)}
+					onEdit={() => editStep('review')}
+				>
+					<BriefReviewCard
+						brief={brief}
+						learnerSummary={learnerSummary}
+						validationResult={validationResult}
+						warnings={warnings}
+						validating={loading && active_step === 'review'}
+						onValidate={handleValidate}
+						onNotesInput={(value) => {
+							brief = { ...brief, teacher_notes: value };
+							clearValidation();
+						}}
+					/>
+
+					{#if briefIsReady}
+						<div class="review-actions">
+							<button type="button" class="primary-action" onclick={handlePlanFromBrief} disabled={loading}>
+								{loading ? 'Planning resource...' : 'Build plan'}
+							</button>
+						</div>
+					{/if}
+				</BriefStepCard>
+			{/if}
 		</div>
-		<a href="/dashboard" class="dashboard-link">Back to dashboard</a>
-	</header>
-
-	{#if apiError}
-		<p class="notice notice-error" role="alert">{apiError}</p>
-	{/if}
-
-	<div class="builder-stack">
-		<BriefStepCard
-			title="Topic"
-			stepLabel="Step 1"
-			active={active_step === 'topic'}
-			completed={completed_steps.includes('topic')}
-			summary={stepSummary('topic', brief, learnerText, selectedLearnerChips)}
-			onEdit={() => editStep('topic')}
-		>
-			<TopicInputStep
-				value={rawTopic}
-				loading={loading && active_step === 'topic'}
-				statusMessage={topicStatusMessage}
-				onInput={handleTopicInput}
-				onSubmit={handleTopicSubmit}
-			/>
-		</BriefStepCard>
-
-		{#if isVisible('choose_subtopic')}
-			<BriefStepCard
-				title="Subtopic"
-				stepLabel="Step 2"
-				active={active_step === 'choose_subtopic'}
-				completed={completed_steps.includes('choose_subtopic')}
-				summary={stepSummary('choose_subtopic', brief, learnerText, selectedLearnerChips)}
-				onEdit={() => editStep('choose_subtopic')}
-			>
-				<SubtopicChoiceStep
-					options={suggestions.subtopics ?? []}
-					customValue={customSubtopic}
-					clarificationMessage={topicStatusMessage}
-					onSelect={handleSubtopicChoice}
-					onCustomChange={(value) => (customSubtopic = value)}
-					onUseCustom={handleUseCustomSubtopic}
-				/>
-			</BriefStepCard>
-		{/if}
-
-		{#if isVisible('learner_context')}
-			<BriefStepCard
-				title="Learner Context"
-				stepLabel="Step 3"
-				active={active_step === 'learner_context'}
-				completed={completed_steps.includes('learner_context')}
-				summary={stepSummary('learner_context', brief, learnerText, selectedLearnerChips)}
-				onEdit={() => editStep('learner_context')}
-			>
-				<LearnerContextStep
-					value={learnerText}
-					availableChips={[...learnerContextChips]}
-					selectedChips={selectedLearnerChips}
-					onInput={(value) => {
-						syncLearnerContext(value);
-						clearValidation();
-					}}
-					onToggleChip={toggleLearnerChip}
-					onContinue={continueLearnerContext}
-				/>
-			</BriefStepCard>
-		{/if}
-
-		{#if isVisible('intended_outcome')}
-			<BriefStepCard
-				title="Intended Outcome"
-				stepLabel="Step 4"
-				active={active_step === 'intended_outcome'}
-				completed={completed_steps.includes('intended_outcome')}
-				summary={stepSummary('intended_outcome', brief, learnerText, selectedLearnerChips)}
-				onEdit={() => editStep('intended_outcome')}
-			>
-				<OutcomeStep selected={brief.intended_outcome} onSelect={handleOutcomeSelect} />
-			</BriefStepCard>
-		{/if}
-
-		{#if isVisible('resource_type')}
-			<BriefStepCard
-				title="Resource Type"
-				stepLabel="Step 5"
-				active={active_step === 'resource_type'}
-				completed={completed_steps.includes('resource_type')}
-				summary={stepSummary('resource_type', brief, learnerText, selectedLearnerChips)}
-				onEdit={() => editStep('resource_type')}
-			>
-				<ResourceTypeStep selected={brief.resource_type} onSelect={handleResourceTypeSelect} />
-			</BriefStepCard>
-		{/if}
-
-		{#if isVisible('supports')}
-			<BriefStepCard
-				title="Supports"
-				stepLabel="Step 6"
-				active={active_step === 'supports'}
-				completed={completed_steps.includes('supports')}
-				summary={stepSummary('supports', brief, learnerText, selectedLearnerChips)}
-				onEdit={() => editStep('supports')}
-			>
-				<SupportsStep
-					selected={brief.supports ?? []}
-					recommended={recommendedSupports}
-					onToggle={toggleSupport}
-					onContinue={continueSupports}
-				/>
-			</BriefStepCard>
-		{/if}
-
-		{#if isVisible('depth')}
-			<BriefStepCard
-				title="Depth"
-				stepLabel="Step 7"
-				active={active_step === 'depth'}
-				completed={completed_steps.includes('depth')}
-				summary={stepSummary('depth', brief, learnerText, selectedLearnerChips)}
-				onEdit={() => editStep('depth')}
-			>
-				<DepthStep selected={brief.depth} onSelect={handleDepthSelect} />
-			</BriefStepCard>
-		{/if}
-
-		{#if isVisible('review')}
-			<BriefStepCard
-				title="Review Brief"
-				stepLabel="Step 8"
-				active={active_step === 'review'}
-				completed={completed_steps.includes('review')}
-				summary={stepSummary('review', brief, learnerText, selectedLearnerChips)}
-				onEdit={() => editStep('review')}
-			>
-				<BriefReviewCard
-					brief={brief}
-					learnerSummary={learnerSummary}
-					validationResult={validationResult}
-					warnings={warnings}
-					validating={loading && active_step === 'review'}
-					onValidate={handleValidate}
-					onNotesInput={(value) => {
-						brief = { ...brief, teacher_notes: value };
-						clearValidation();
-					}}
-				/>
-			</BriefStepCard>
-		{/if}
-	</div>
-</section>
+	</section>
+{/if}
 
 <style>
 	.builder-shell {
@@ -527,15 +600,40 @@
 		color: #7d3524;
 	}
 
+	.notice-info {
+		background: #eef8f4;
+		color: #0b6a52;
+	}
+
 	.builder-stack {
 		display: grid;
 		gap: 1rem;
+	}
+
+	.review-actions {
+		margin-top: 0.75rem;
+		display: flex;
+		justify-content: flex-end;
+	}
+
+	.primary-action {
+		border: 0;
+		border-radius: 999px;
+		background: #1d9e75;
+		color: white;
+		padding: 0.8rem 1.1rem;
+		font-weight: 700;
+		cursor: pointer;
 	}
 
 	@media (max-width: 720px) {
 		.builder-header {
 			flex-direction: column;
 			align-items: stretch;
+		}
+
+		.review-actions {
+			justify-content: stretch;
 		}
 	}
 </style>

@@ -108,30 +108,15 @@ function buildDetail(overrides: Record<string, unknown> = {}) {
 			warning: null,
 			source_brief_id: 'brief-1',
 			source_brief: {
-				intent: 'Teach fractions',
-				audience: 'Year 5',
-				prior_knowledge: '',
-				extra_context: '',
-				mode: 'balanced',
-				signals: {
-					topic_type: 'concept',
-					learning_outcome: 'understand-why',
-					class_style: [],
-					format: 'printed-booklet'
-				},
-				preferences: {
-					tone: 'supportive',
-					reading_level: 'standard',
-					explanation_style: 'balanced',
-					example_style: 'everyday',
-					brevity: 'balanced'
-				},
-				constraints: {
-					more_practice: false,
-					keep_short: false,
-					use_visuals: false,
-					print_first: true
-				}
+				subject: 'Math',
+				topic: 'Fractions',
+				subtopic: 'Understanding halves and quarters',
+				learner_context: 'Year 5',
+				intended_outcome: 'understand',
+				resource_type: 'worksheet',
+				supports: ['worked_examples'],
+				depth: 'standard',
+				teacher_notes: ''
 			},
 			status: 'committed'
 		},
@@ -288,7 +273,7 @@ describe('GenerationView', () => {
 		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
 		expect(screen.getByText('Live')).toBeTruthy();
-		expect(screen.getByText(/printed booklet/i)).toBeTruthy();
+		expect(screen.getByText(/worksheet \/ standard/i)).toBeTruthy();
 		expect(screen.getAllByText(/planned/i).length).toBeGreaterThan(0);
 
 		emitEvent('runtime_policy', {

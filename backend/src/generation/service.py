@@ -136,7 +136,11 @@ def _planning_spec_payload(generation: Generation) -> dict | None:
         if "mode" not in payload:
             payload["mode"] = generation.mode.value
         source_brief = payload.get("source_brief")
-        if isinstance(source_brief, dict) and "mode" not in source_brief:
+        if (
+            isinstance(source_brief, dict)
+            and "mode" not in source_brief
+            and "intent" in source_brief
+        ):
             source_brief["mode"] = generation.mode.value
         return payload
     except json.JSONDecodeError:
@@ -338,16 +342,21 @@ def _context_from_planning_spec(
     *,
     subject: str,
 ) -> str:
+    brief = spec.source_brief
     lines = [
-        subject,
-        f"Audience: {spec.source_brief.audience}",
+        f"Subject: {brief.subject}",
+        f"Topic: {brief.topic}",
+        f"Subtopic: {brief.subtopic}",
+        f"Audience: {brief.learner_context}",
+        f"Intended outcome: {brief.intended_outcome}",
+        f"Resource type: {brief.resource_type}",
+        f"Depth: {brief.depth}",
+        f"Supports: {', '.join(brief.supports) if brief.supports else 'none'}",
     ]
-    if spec.source_brief.prior_knowledge:
-        lines.append(f"Prior knowledge: {spec.source_brief.prior_knowledge}")
-    if spec.source_brief.extra_context:
-        lines.append(f"Additional context: {spec.source_brief.extra_context}")
+    if brief.teacher_notes:
+        lines.append(f"Teacher notes: {brief.teacher_notes}")
     lines.append("")
-    lines.append("Reviewed lesson plan:")
+    lines.append("Reviewed resource plan:")
     for section in spec.sections:
         suffix = f" [{section.role}]"
         summary = section.focus_note or section.objective or section.rationale
@@ -379,16 +388,31 @@ def _effective_generation_payload(
         )
 
     return (
-        req.subject or spec.source_brief.intent,
-        _context_from_generation_spec(
-            spec,
-            subject=req.subject or spec.source_brief.intent,
+        (
+            req.subject or spec.source_brief.subtopic
+            if isinstance(spec, PlanningGenerationSpec)
+            else req.subject or spec.source_brief.intent
+        ),
+        (
+            _context_from_planning_spec(
+                spec,
+                subject=req.subject or spec.source_brief.subtopic,
+            )
+            if isinstance(spec, PlanningGenerationSpec)
+            else _context_from_generation_spec(
+                spec,
+                subject=req.subject or spec.source_brief.intent,
+            )
         ),
         spec.mode,
         spec.template_id,
         spec.preset_id,
-        spec.section_count,
-        spec.sections,
+        len(spec.sections) if isinstance(spec, PlanningGenerationSpec) else spec.section_count,
+        (
+            _pipeline_sections_from_planning_spec(spec)
+            if isinstance(spec, PlanningGenerationSpec)
+            else spec.sections
+        ),
         spec.model_dump_json(),
     )
 

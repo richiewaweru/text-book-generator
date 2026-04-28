@@ -96,10 +96,9 @@
 
 	function resolveLessonFormat(spec: GenerationDetail['planning_spec']): string {
 		if (isStudioPlanningSpec(spec)) {
-			const format = spec.source_brief.signals.format;
-			if (format === 'printed-booklet') return 'Printed booklet';
-			if (format === 'screen-based') return 'Screen-based';
-			if (format === 'both') return 'Print + screen';
+			const resource = spec.source_brief.resource_type.replaceAll('_', ' ');
+			const depth = spec.source_brief.depth;
+			return `${resource} / ${depth}`;
 		}
 		return 'Live runtime';
 	}

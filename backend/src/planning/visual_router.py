@@ -9,18 +9,20 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from planning.llm_config import (
-    PLANNING_BRIEF_INTERPRETER_CALLER,
+    PLANNING_VISUAL_ROUTER_CALLER,
     get_planning_slot,
 )
 from planning.models import (
-    NormalizedBrief,
+    GenerationDirectives,
     PlanningSectionPlan,
-    PlanningTemplateContract,
     PlanningVisualIntent,
     PlanningVisualMode,
     VisualPolicy,
 )
+from planning.role_maps import ROLE_COMPONENT_MAP, VISUAL_COMPONENTS
+from pipeline.resources import ResourceTemplate
 from pipeline.types.requests import BlockVisualPlacement
+from pipeline.types.teacher_brief import TeacherBrief
 
 logger = logging.getLogger(__name__)
 _SPATIAL_HINTS = {
@@ -54,7 +56,6 @@ _SPATIAL_HINTS = {
     "solar",
     "galaxy",
 }
-
 _GRAPH_HINTS = {
     "graph",
     "plot",
@@ -110,12 +111,21 @@ class _VisualRoutingPlan(BaseModel):
     sections: list[_SectionVisualDecision] = Field(default_factory=list)
 
 
-def _classify_spatial(brief: NormalizedBrief) -> bool:
-    return any(keyword in _SPATIAL_HINTS for keyword in brief.keyword_profile)
+def _normalized_topic_terms(brief: TeacherBrief) -> set[str]:
+    terms = {
+        *brief.subject.lower().split(),
+        *brief.topic.lower().split(),
+        *brief.subtopic.lower().split(),
+    }
+    return {term.strip(" ,.;:!?") for term in terms if term}
 
 
-def _classify_graph(brief: NormalizedBrief) -> bool:
-    return any(keyword in _GRAPH_HINTS for keyword in brief.keyword_profile)
+def _classify_spatial(brief: TeacherBrief) -> bool:
+    return bool(_normalized_topic_terms(brief).intersection(_SPATIAL_HINTS))
+
+
+def _classify_graph(brief: TeacherBrief) -> bool:
+    return bool(_normalized_topic_terms(brief).intersection(_GRAPH_HINTS))
 
 
 def _visual_intent(section: PlanningSectionPlan) -> PlanningVisualIntent:
@@ -128,12 +138,12 @@ def _visual_intent(section: PlanningSectionPlan) -> PlanningVisualIntent:
     return "explain_structure"
 
 
-def _visual_mode(brief: NormalizedBrief, intent: str) -> PlanningVisualMode:
+def _visual_mode(brief: TeacherBrief, directives: GenerationDirectives, intent: str) -> PlanningVisualMode:
     if intent in {"show_realism", "demonstrate_process", "compare_variants"}:
         return "image"
-    if _classify_spatial(brief):
+    if _classify_spatial(brief) or _classify_graph(brief):
         return "image"
-    if _classify_graph(brief):
+    if directives.reading_level == "simple":
         return "image"
     return "svg"
 
@@ -141,19 +151,16 @@ def _visual_mode(brief: NormalizedBrief, intent: str) -> PlanningVisualMode:
 def _derive_visual_placements(
     *,
     section: PlanningSectionPlan,
-    contract: PlanningTemplateContract,
     intent: PlanningVisualIntent,
     should_visualize: bool,
 ) -> list[BlockVisualPlacement]:
     if not should_visualize:
         return []
 
-    available = set(contract.available_components)
     selected = set(section.selected_components)
+    available = set(ROLE_COMPONENT_MAP.get(section.role, ()))
 
-    if "diagram-compare" in selected or (
-        intent == "compare_variants" and "diagram-compare" in available
-    ):
+    if "diagram-compare" in selected or (intent == "compare_variants" and "diagram-compare" in available):
         return [
             BlockVisualPlacement(
                 block="explanation",
@@ -162,9 +169,7 @@ def _derive_visual_placements(
             )
         ]
 
-    if "diagram-series" in selected or (
-        intent == "demonstrate_process" and "diagram-series" in available
-    ):
+    if "diagram-series" in selected or (intent == "demonstrate_process" and "diagram-series" in available):
         return [
             BlockVisualPlacement(
                 block="explanation",
@@ -173,34 +178,31 @@ def _derive_visual_placements(
             )
         ]
 
-    if "diagram-block" in selected or "diagram-block" in available:
-        return [
-            BlockVisualPlacement(
-                block="explanation",
-                slot_type="diagram",
-                hint="Use an explanation-adjacent diagram.",
-            )
-        ]
-
-    return []
+    return [
+        BlockVisualPlacement(
+            block="explanation",
+            slot_type="diagram",
+            hint="Use an explanation-adjacent diagram.",
+        )
+    ]
 
 
 def _system_prompt() -> str:
     return "\n".join(
         [
-            "You decide visual intent for planned lesson sections.",
-            "Only set visuals when they help comprehension and the template supports them.",
+            "You decide where visuals are required in a classroom resource plan.",
             "Return valid JSON only.",
+            "Only require visuals when they materially improve comprehension and fit the section's selected components.",
             "Schema fields:",
-            "- sections [{ section_id, required, intent, mode }]",
-            "If required is false, intent and mode may be null.",
+            '- sections [{"section_id": "string", "required": true, "intent": "string|null", "mode": "string|null"}]',
         ]
     )
 
 
 def _user_prompt(
-    brief: NormalizedBrief,
-    contract: PlanningTemplateContract,
+    brief: TeacherBrief,
+    directives: GenerationDirectives,
+    template: ResourceTemplate,
     sections: list[PlanningSectionPlan],
 ) -> str:
     section_lines = "\n".join(
@@ -209,48 +211,30 @@ def _user_prompt(
     )
     return "\n".join(
         [
-            f"Intent: {brief.brief.intent}",
-            f"Topic type: {brief.resolved_topic_type}",
-            f"Learning outcome: {brief.resolved_learning_outcome}",
-            f"Use visuals: {brief.brief.constraints.use_visuals}",
-            f"Print first: {brief.brief.constraints.print_first}",
-            f"Keyword profile: {', '.join(brief.keyword_profile) or 'none'}",
-            f"Template: {contract.name} ({contract.intent})",
-            f"Available components: {', '.join(contract.available_components) or 'none'}",
+            f"Subject: {brief.subject}",
+            f"Topic: {brief.topic}",
+            f"Subtopic: {brief.subtopic}",
+            f"Learner context: {brief.learner_context}",
+            f"Supports: {', '.join(brief.supports) if brief.supports else 'none'}",
+            f"Resource type: {brief.resource_type}",
+            f"Visual limit for depth {brief.depth}: {template.visual_policy.max_visuals_by_depth[brief.depth]}",
+            f"Allow diagrams: {template.visual_policy.allow_diagrams}",
+            f"Allow images: {template.visual_policy.allow_images}",
+            (
+                "Directives: "
+                f"reading_level={directives.reading_level}, explanation_style={directives.explanation_style}, "
+                f"scaffold_level={directives.scaffold_level}"
+            ),
             "Sections:",
             section_lines,
         ]
     )
 
 
-def _fallback_decision(
-    brief: NormalizedBrief,
-    contract: PlanningTemplateContract,
-    section: PlanningSectionPlan,
-    *,
-    visual_supported: set[str],
-) -> _SectionVisualDecision:
-    should_visualize = bool(
-        visual_supported
-        and (
-            set(section.selected_components).intersection(visual_supported)
-            or brief.brief.constraints.use_visuals
-            or section.role in {"visual", "process", "compare", "discover"}
-        )
-    )
-    intent = _visual_intent(section)
-    mode = _visual_mode(brief, intent)
-    return _SectionVisualDecision(
-        section_id=section.id,
-        required=should_visualize,
-        intent=intent if should_visualize else None,
-        mode=mode if should_visualize else None,
-    )
-
-
 async def _resolve_with_llm(
-    brief: NormalizedBrief,
-    contract: PlanningTemplateContract,
+    brief: TeacherBrief,
+    directives: GenerationDirectives,
+    template: ResourceTemplate,
     sections: list[PlanningSectionPlan],
     *,
     model: Any | None,
@@ -265,71 +249,65 @@ async def _resolve_with_llm(
         output_type=_VisualRoutingPlan,
         system_prompt=_system_prompt(),
     )
-    user_prompt = _user_prompt(brief, contract, sections)
-
-    for attempt in range(2):
-        try:
-            result = await run_llm_fn(
-                trace_id=generation_id,
-                caller=PLANNING_BRIEF_INTERPRETER_CALLER,
-                agent=agent,
-                model=model,
-                user_prompt=user_prompt,
-                slot=get_planning_slot(PLANNING_BRIEF_INTERPRETER_CALLER),
-            )
-            output = result.output
-            if output is None or len(output.sections) != len(sections):
-                raise ValueError("Planning visual router returned an unexpected section count.")
-            decisions = {section.section_id: section for section in output.sections}
-            if len(decisions) != len(sections):
-                raise ValueError("Planning visual router returned duplicate section ids.")
-            missing_ids = [section.id for section in sections if section.id not in decisions]
-            if missing_ids:
-                raise ValueError(f"Planning visual router missed sections: {missing_ids!r}")
-            for decision in decisions.values():
-                if decision.required and (decision.intent is None or decision.mode is None):
-                    raise ValueError("Planning visual router omitted intent or mode for a required visual.")
-            return decisions
-        except Exception as exc:
-            logger.warning("Planning visual router attempt %s failed: %s", attempt + 1, exc)
-
-    return None
+    result = await run_llm_fn(
+        trace_id=generation_id,
+        caller=PLANNING_VISUAL_ROUTER_CALLER,
+        agent=agent,
+        model=model,
+        user_prompt=_user_prompt(brief, directives, template, sections),
+        slot=get_planning_slot(PLANNING_VISUAL_ROUTER_CALLER),
+    )
+    output = result.output
+    if output is None or len(output.sections) != len(sections):
+        return None
+    return {section.section_id: section for section in output.sections}
 
 
 async def route_visuals(
-    brief: NormalizedBrief,
-    contract: PlanningTemplateContract,
+    brief: TeacherBrief,
+    directives: GenerationDirectives,
+    template: ResourceTemplate,
     sections: list[PlanningSectionPlan],
     *,
     model: Any | None = None,
     run_llm_fn: Callable[..., Awaitable[Any]] | None = None,
     generation_id: str = "",
 ) -> list[PlanningSectionPlan]:
-    visual_components = {"diagram-block", "diagram-series", "diagram-compare", "simulation-block"}
-    visual_supported = visual_components.intersection(contract.available_components)
     llm_decisions = await _resolve_with_llm(
         brief,
-        contract,
+        directives,
+        template,
         sections,
         model=model,
         run_llm_fn=run_llm_fn,
         generation_id=generation_id,
     )
+    allow_visuals = "visuals" in brief.supports or template.visual_policy.allow_diagrams
+    max_visuals = template.visual_policy.max_visuals_by_depth[brief.depth]
+    committed_visuals = 0
 
     for section in sections:
-        decision = (
-            llm_decisions.get(section.id)
-            if llm_decisions is not None
-            else _fallback_decision(brief, contract, section, visual_supported=visual_supported)
+        decision = llm_decisions.get(section.id) if llm_decisions is not None else None
+        intent = (decision.intent if decision else None) or _visual_intent(section)
+        mode = (decision.mode if decision else None) or _visual_mode(brief, directives, intent)
+        component_visual = bool(set(section.selected_components).intersection(VISUAL_COMPONENTS))
+        role_visual = section.role in {"visual", "compare", "process", "discover"}
+        should_visualize = bool(
+            allow_visuals
+            and committed_visuals < max_visuals
+            and (
+                (decision.required if decision else False)
+                or component_visual
+                or role_visual
+            )
         )
-        intent = decision.intent or _visual_intent(section)
-        mode = decision.mode or _visual_mode(brief, intent)
         placements = _derive_visual_placements(
             section=section,
-            contract=contract,
             intent=intent,
-            should_visualize=bool(decision.required and visual_supported),
+            should_visualize=should_visualize,
         )
+        if placements:
+            committed_visuals += 1
         section.visual_placements = placements
         section.visual_policy = VisualPolicy(
             required=bool(placements),
