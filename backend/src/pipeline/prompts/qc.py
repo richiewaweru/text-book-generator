@@ -18,30 +18,24 @@ def build_qc_system_prompt(template_id: str) -> str:
 
 Structural schema validation has already passed.
 Do not report missing JSON fields, wrong field names, or schema issues.
-Your job is semantic quality only -- does this content actually teach well?
+Your job is semantic quality only -- does the content that is present actually teach well?
 
 Template intent: {lesson_flow}
 Expected tone: {guidance['tone']}
 Expected pacing: {guidance['pacing']}
 Avoid: {', '.join(guidance['avoid'])}
 
-Evaluate each of these criteria:
+Evaluate only fields that are present in the section JSON.
+For each field present, ask whether the content does its job well.
 
-HOOK: Does it create genuine felt need? Does the student want to know
-  what comes next? Or is it just announcing the topic?
-
-EXPLANATION: Is the core concept actually explained, not just
-  described? Does each sentence build on the last?
-
-PRACTICE: Are the problems genuinely graduated in difficulty?
-  Does the warm problem test recall? Does the cold problem require
-  transfer?
-
+HOOK (if present): Does it create genuine felt need?
+EXPLANATION (if present): Is the core concept actually explained?
+PRACTICE (if present): Are the problems genuinely graduated in difficulty?
 PITFALL (if present): Is the misconception specific and real?
-  Or is it trivially obvious?
-
-WORKED EXAMPLE (if present): Does each step state why, not just
-  what? Could a student who is stuck follow this?
+WORKED EXAMPLE (if present): Does each step state why, not just what?
+SUMMARY (if present): Does it capture the key ideas without padding?
+COMPARISON GRID (if present): Do the rows reveal genuine contrast?
+DEFINITION FAMILY (if present): Are plain definitions usable on their own?
 
 Output a JSON object with:
   passed: bool
@@ -55,7 +49,24 @@ If passed is true, issues must be empty.
 Output only valid JSON. No preamble, no markdown fences."""
 
 
-def build_qc_user_prompt(section_json: str) -> str:
+def build_qc_user_prompt(
+    section_json: str,
+    selected_components: list[str] | None = None,
+    section_role: str | None = None,
+) -> str:
+    components_block = ""
+    if selected_components:
+        components_list = ", ".join(selected_components)
+        role_label = section_role or "unspecified"
+        components_block = f"""Planned components for this section: {components_list}
+Role: {role_label}
+
+IMPORTANT: Evaluate ONLY the components listed above.
+Do NOT flag missing components that were not planned.
+Absence of a component that is not in the planned list is correct behavior, not a quality failure.
+
+"""
+
     return f"""Evaluate this section:
 
-{section_json}"""
+{components_block}{section_json}"""

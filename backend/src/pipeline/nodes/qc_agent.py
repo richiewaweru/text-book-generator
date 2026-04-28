@@ -117,6 +117,7 @@ async def qc_agent(
 
     section_id = state.current_section_id
     section = state.assembled_sections.get(section_id) if section_id else None
+    plan = state.current_section_plan
     if section_id is None or section is None:
         return {"completed_nodes": ["qc_agent"]}
 
@@ -141,7 +142,11 @@ async def qc_agent(
             node="qc_agent",
             agent=agent,
             model=model,
-            user_prompt=build_qc_user_prompt(section_json),
+            user_prompt=build_qc_user_prompt(
+                section_json=section_json,
+                selected_components=list(getattr(plan, "required_components", None) or []),
+                section_role=getattr(plan, "role", None),
+            ),
             section_id=section_id,
             generation_mode=state.request.mode,
             retry_policy=retry_policy,

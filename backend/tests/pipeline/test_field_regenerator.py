@@ -7,8 +7,9 @@ import pytest
 
 from pipeline.events import FieldRegenOutcomeEvent
 from pipeline.nodes.field_regenerator import field_regenerator
+from pipeline.prompts.field_regen import build_field_regen_system_prompt
 from pipeline.state import RerenderRequest, TextbookPipelineState
-from pipeline.types.requests import GenerationMode, PipelineRequest
+from pipeline.types.requests import GenerationMode, PipelineRequest, SectionPlan
 from pipeline.types.section_content import (
     CalloutBlockContent,
     ExplanationContent,
@@ -82,6 +83,47 @@ def _request() -> PipelineRequest:
     )
 
 
+def _section_plan(
+    *,
+    section_id: str = "s-01",
+    required_components: list[str] | None = None,
+) -> SectionPlan:
+    return SectionPlan(
+        section_id=section_id,
+        title=f"Section {section_id}",
+        position=1,
+        focus="Teach the core idea clearly.",
+        required_components=required_components
+        or [
+            "section-header",
+            "hook-hero",
+            "explanation-block",
+            "practice-stack",
+            "what-next-bridge",
+        ],
+    )
+
+
+def _component_for_field(field_name: str) -> str:
+    return {
+        "hook": "hook-hero",
+        "explanation": "explanation-block",
+        "practice": "practice-stack",
+        "what_next": "what-next-bridge",
+        "callout": "callout-block",
+        "summary": "summary-block",
+        "student_textbox": "student-textbox",
+        "short_answer": "short-answer",
+        "fill_in_blank": "fill-in-blank",
+        "definition": "definition-card",
+        "worked_example": "worked-example-card",
+        "key_fact": "key-fact",
+        "pitfall": "pitfall-alert",
+        "glossary": "glossary-strip",
+        "divider": "section-divider",
+    }[field_name]
+
+
 def _section(
     *,
     callout: CalloutBlockContent | None = None,
@@ -119,16 +161,59 @@ def _section(
     )
 
 
+def _section_with_existing_field(field_name: str) -> SectionContent:
+    section = _section()
+    updates = {
+        "callout": CalloutBlockContent(
+            variant="tip",
+            heading="Existing callout",
+            body="Existing callout body",
+        ),
+        "summary": SummaryBlockContent(
+            heading="Existing summary",
+            items=[SummaryItem(text="Existing summary item")],
+            closing="Existing closing",
+        ),
+        "student_textbox": StudentTextboxContent(
+            prompt="Existing reflection prompt.",
+            lines=3,
+        ),
+        "short_answer": ShortAnswerContent(
+            question="Existing short answer question.",
+            marks=1,
+        ),
+        "fill_in_blank": FillInBlankContent(
+            instruction="Existing fill in the blank.",
+            segments=[
+                FillInBlankSegment(text="Slope is", is_blank=False),
+                FillInBlankSegment(text="", is_blank=True, answer="rise over run"),
+            ],
+        ),
+        "key_fact": KeyFactContent(
+            fact="Existing key fact.",
+        ),
+        "divider": SectionDividerContent(
+            label="Existing divider",
+        ),
+    }
+    return section.model_copy(update={field_name: updates[field_name]})
+
+
 def _state(
     *,
     block_type: str = "explanation",
     section: SectionContent | None = None,
+    required_components: list[str] | None = None,
 ) -> TextbookPipelineState:
     section = section or _section()
     return TextbookPipelineState(
         request=_request(),
         contract=_contract(),
         current_section_id=section.section_id,
+        current_section_plan=_section_plan(
+            section_id=section.section_id,
+            required_components=required_components,
+        ),
         generated_sections={section.section_id: section},
         assembled_sections={section.section_id: section},
         rerender_requests={
@@ -164,6 +249,55 @@ def _stub_agent_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         "pipeline.nodes.field_regenerator.retry_policy_for_node",
         lambda *args, **kwargs: object(),
     )
+
+
+@pytest.mark.asyncio
+async def test_field_regenerator_skips_unplanned_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _state(
+        block_type="explanation",
+        required_components=["section-header", "hook-hero", "practice-stack"],
+    )
+    _capture_events(monkeypatch)
+    _stub_agent_dependencies(monkeypatch)
+
+    called = False
+
+    async def _run_llm(**kwargs):
+        nonlocal called
+        called = True
+        _ = kwargs
+        return SimpleNamespace(output="{}")
+
+    monkeypatch.setattr("pipeline.nodes.field_regenerator.run_llm", _run_llm)
+
+    result = await field_regenerator(state)
+
+    assert result == {"completed_nodes": ["field_regenerator"]}
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_field_regenerator_skips_absent_planned_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _state(
+        section=_section().model_copy(update={"explanation": None}),
+    )
+    _capture_events(monkeypatch)
+    _stub_agent_dependencies(monkeypatch)
+
+    called = False
+
+    async def _run_llm(**kwargs):
+        nonlocal called
+        called = True
+        _ = kwargs
+        return SimpleNamespace(output="{}")
+
+    monkeypatch.setattr("pipeline.nodes.field_regenerator.run_llm", _run_llm)
+
+    result = await field_regenerator(state)
+
+    assert result == {"completed_nodes": ["field_regenerator"]}
+    assert called is False
 
 
 @pytest.mark.asyncio
@@ -222,6 +356,82 @@ async def test_field_regenerator_emits_failure_outcome(monkeypatch: pytest.Monke
     assert event.field_name == "explanation"
     assert event.outcome == "failed"
     assert event.error_message == "Field regeneration failed: model unavailable"
+
+
+@pytest.mark.asyncio
+async def test_field_regenerator_uses_standard_model_for_complex_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state(block_type="explanation")
+    requested_nodes: list[str] = []
+    monkeypatch.setattr("pipeline.nodes.field_regenerator.Agent", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        "pipeline.nodes.field_regenerator.retry_policy_for_node",
+        lambda *args, **kwargs: object(),
+    )
+
+    def _model_for(node_name: str, *args, **kwargs):
+        _ = (args, kwargs)
+        requested_nodes.append(node_name)
+        return object()
+
+    async def _run_llm(**kwargs):
+        _ = kwargs
+        return SimpleNamespace(
+            output=json.dumps({"body": "Regenerated explanation", "emphasis": ["new key point"]})
+        )
+
+    monkeypatch.setattr("pipeline.nodes.field_regenerator.get_node_text_model", _model_for)
+    monkeypatch.setattr("pipeline.nodes.field_regenerator.run_llm", _run_llm)
+
+    await field_regenerator(state)
+
+    assert requested_nodes == ["content_generator"]
+
+
+@pytest.mark.asyncio
+async def test_field_regenerator_keeps_fast_model_for_simple_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state(block_type="hook")
+    requested_nodes: list[str] = []
+    monkeypatch.setattr("pipeline.nodes.field_regenerator.Agent", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        "pipeline.nodes.field_regenerator.retry_policy_for_node",
+        lambda *args, **kwargs: object(),
+    )
+
+    def _model_for(node_name: str, *args, **kwargs):
+        _ = (args, kwargs)
+        requested_nodes.append(node_name)
+        return object()
+
+    async def _run_llm(**kwargs):
+        _ = kwargs
+        return SimpleNamespace(
+            output=json.dumps(
+                {
+                    "headline": "A sharper hook",
+                    "body": "Start with the learner's curiosity.",
+                    "anchor": "derivatives",
+                }
+            )
+        )
+
+    monkeypatch.setattr("pipeline.nodes.field_regenerator.get_node_text_model", _model_for)
+    monkeypatch.setattr("pipeline.nodes.field_regenerator.run_llm", _run_llm)
+
+    await field_regenerator(state)
+
+    assert requested_nodes == ["field_regenerator"]
+
+
+def test_field_regen_system_prompt_includes_target_schema() -> None:
+    prompt = build_field_regen_system_prompt("guided-concept-path", "explanation")
+
+    assert "Target field schema:" in prompt
+    assert '"body"' in prompt
+    assert '"emphasis"' in prompt
 
 
 def test_section_content_accepts_callout_and_summary_blocks() -> None:
@@ -343,7 +553,11 @@ async def test_field_regenerator_supports_extended_retryable_fields(
     field_name: str,
     payload: dict,
 ) -> None:
-    state = _state(block_type=field_name)
+    state = _state(
+        block_type=field_name,
+        section=_section_with_existing_field(field_name),
+        required_components=["section-header", _component_for_field(field_name)],
+    )
     _capture_events(monkeypatch)
     _stub_agent_dependencies(monkeypatch)
 

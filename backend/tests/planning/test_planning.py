@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from planning.fallback import build_fallback_composition
 from planning.models import CompositionResult, PlanningSectionPlan
 from planning.plan_validator import validate_plan
 from planning.service import PlanningService, _resolve_directives, _resolve_roles
@@ -242,3 +243,76 @@ async def test_planning_service_uses_fallback_when_validation_stays_invalid() ->
     assert result.warning is not None
     assert result.template_id == "guided-concept-path"
     assert result.sections
+
+
+def test_fallback_distributes_subtopics_across_content_sections() -> None:
+    brief = build_brief(
+        resource_type="worksheet",
+        subtopics=[
+            "What is Photosynthesis?",
+            "Chlorophyll",
+            "Inputs and Outputs",
+        ],
+    )
+    template = get_resource_template(brief.resource_type)
+
+    result = build_fallback_composition(
+        brief=brief,
+        template=template,
+        roles=["intro", "explain", "visual", "practice", "summary"],
+    )
+
+    explain_section = result.sections[1]
+    visual_section = result.sections[2]
+    practice_section = result.sections[3]
+
+    assert explain_section.focus_note == "What is Photosynthesis? + Inputs and Outputs"
+    assert visual_section.focus_note == "Chlorophyll"
+    assert practice_section.practice_target == (
+        "Confirm the learner can apply: What is Photosynthesis? + Inputs and Outputs, "
+        "Chlorophyll."
+    )
+
+
+def test_fallback_warns_when_subtopics_are_condensed() -> None:
+    brief = build_brief(
+        resource_type="quick_explainer",
+        subtopics=[
+            "What is Photosynthesis?",
+            "Chlorophyll",
+            "Inputs and Outputs",
+            "The Role of Sunlight and Energy",
+        ],
+    )
+    template = get_resource_template(brief.resource_type)
+
+    result = build_fallback_composition(
+        brief=brief,
+        template=template,
+        roles=["intro", "explain", "visual", "summary"],
+    )
+
+    assert result.warning == (
+        "Planning used a deterministic fallback. 4 subtopics were condensed into 2 "
+        "content section(s). Review the structure before generating."
+    )
+    assert result.sections[1].title.endswith("What is Photosynthesis? + Inputs and Outputs")
+    assert result.sections[2].title.endswith("Chlorophyll + The Role of Sunlight and Energy")
+
+
+def test_fallback_keeps_single_subtopic_across_all_sections() -> None:
+    brief = build_brief(resource_type="quick_explainer")
+    template = get_resource_template(brief.resource_type)
+
+    result = build_fallback_composition(
+        brief=brief,
+        template=template,
+        roles=["intro", "explain", "summary"],
+    )
+
+    assert [section.focus_note for section in result.sections] == [
+        "Solving two-step equations",
+        "Solving two-step equations",
+        "Solving two-step equations",
+    ]
+    assert all("Solving two-step equations" in section.title for section in result.sections)

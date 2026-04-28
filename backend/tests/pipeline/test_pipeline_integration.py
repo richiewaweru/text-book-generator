@@ -1235,6 +1235,7 @@ class TestQCAgent:
         from pipeline.nodes import qc_agent as qca_mod
 
         calls = []
+        prompts = []
 
         class DummyAgent:
             def __init__(self, *args, **kwargs):
@@ -1243,6 +1244,7 @@ class TestQCAgent:
 
         async def fake_run_llm(**kwargs):
             calls.append(kwargs["section_id"])
+            prompts.append(kwargs["user_prompt"])
             return SimpleNamespace(
                 output=qca_mod.QCOutput(
                     passed=False,
@@ -1286,6 +1288,8 @@ class TestQCAgent:
         result = await qca_mod.qc_agent(state)
 
         assert calls == ["s-02"]
+        assert "Planned components for this section: section-header, hook-hero, explanation-block, practice-stack, what-next-bridge" in prompts[0]
+        assert "Role: develop" in prompts[0]
         assert result["qc_reports"]["s-01"].warnings == ["existing s-01 warning"]
         assert result["qc_reports"]["s-02"].warnings == [
             "capacity warning",
