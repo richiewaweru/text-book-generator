@@ -42,6 +42,8 @@ from pipeline.types.teacher_brief import (
     BriefReviewWarning,
     BriefValidationRequest,
     BriefValidationResult,
+    ClassProfile,
+    GRADE_BAND_BY_LEVEL,
     TeacherBrief,
     TopicResolutionRequest,
     TopicResolutionResult,
@@ -114,6 +116,17 @@ def _brief_review_user_prompt(brief: TeacherBrief) -> str:
             f"Subject: {brief.subject}",
             f"Topic: {brief.topic}",
             f"Subtopics: {', '.join(brief.subtopics)}",
+            f"Grade level: {brief.grade_level}",
+            f"Grade band: {brief.grade_band}",
+            (
+                "Class profile: "
+                f"reading={brief.class_profile.reading_level}, "
+                f"language={brief.class_profile.language_support}, "
+                f"confidence={brief.class_profile.confidence}, "
+                f"prior_knowledge={brief.class_profile.prior_knowledge}, "
+                f"pacing={brief.class_profile.pacing}, "
+                f"preferences={', '.join(brief.class_profile.learning_preferences) or 'none'}"
+            ),
             f"Learner context: {brief.learner_context}",
             f"Intended outcome: {brief.intended_outcome}",
             f"Resource type: {brief.resource_type}",
@@ -265,13 +278,45 @@ def _pipeline_sections_from_planning_spec(spec: PlanningGenerationSpec) -> list[
     return sections
 
 
+def _derive_learner_fit(profile: ClassProfile) -> str:
+    if (
+        profile.confidence == "low"
+        or profile.reading_level == "below_grade"
+        or profile.language_support in {"some_ell", "many_ell"}
+    ):
+        return "supported"
+    if profile.confidence == "high" and profile.reading_level == "above_grade":
+        return "advanced"
+    return "general"
+
+
+def _runtime_grade_band(brief: TeacherBrief) -> str:
+    detailed_band = GRADE_BAND_BY_LEVEL.get(brief.grade_level, "mixed")
+    if detailed_band in {"early_elementary", "upper_elementary"}:
+        return "primary"
+    if detailed_band in {"college", "adult"}:
+        return "advanced"
+    return "secondary"
+
+
 def _context_from_planning_spec(spec: PlanningGenerationSpec) -> str:
     brief = spec.source_brief
     lines = [
         f"Subject: {brief.subject}",
         f"Topic: {brief.topic}",
         f"Subtopics: {', '.join(brief.subtopics)}",
-        f"Audience: {brief.learner_context}",
+        f"Grade level: {brief.grade_level}",
+        f"Grade band: {brief.grade_band}",
+        f"Learner summary: {brief.learner_context}",
+        (
+            "Class profile: "
+            f"reading={brief.class_profile.reading_level}, "
+            f"language={brief.class_profile.language_support}, "
+            f"confidence={brief.class_profile.confidence}, "
+            f"prior_knowledge={brief.class_profile.prior_knowledge}, "
+            f"pacing={brief.class_profile.pacing}, "
+            f"preferences={', '.join(brief.class_profile.learning_preferences) or 'none'}"
+        ),
         f"Intended outcome: {brief.intended_outcome}",
         f"Resource type: {brief.resource_type}",
         f"Depth: {brief.depth}",
@@ -440,6 +485,8 @@ async def commit_brief(
 
     profile = await _load_profile(current_user, profile_repo)
     committed = spec.model_copy(update={"status": "committed"})
+    runtime_grade_band = _runtime_grade_band(committed.source_brief)
+    learner_fit = _derive_learner_fit(committed.source_brief.class_profile)
     return await enqueue_generation(
         current_user=current_user,
         profile=profile,
@@ -455,4 +502,6 @@ async def commit_brief(
         section_count=len(committed.sections),
         section_plans=_pipeline_sections_from_planning_spec(committed),
         planning_spec_json=committed.model_dump_json(),
+        grade_band=runtime_grade_band,
+        learner_fit=learner_fit,
     )

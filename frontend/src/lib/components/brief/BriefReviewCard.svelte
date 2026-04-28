@@ -1,5 +1,12 @@
 <script lang="ts">
-	import { depthOptions, outcomeOptions, resourceTypeOptions, supportOptions } from '$lib/brief/config';
+	import {
+		depthOptions,
+		gradeBandLabel,
+		gradeLevelLabel,
+		outcomeOptions,
+		resourceTypeOptions,
+		supportOptions
+	} from '$lib/brief/config';
 	import type {
 		BriefReviewWarning,
 		BriefValidationResult,
@@ -45,8 +52,28 @@
 			<strong>{brief.subtopics?.length ? brief.subtopics.join(', ') : 'Not set'}</strong>
 		</div>
 		<div>
+			<span>Grade level</span>
+			<strong>{brief.grade_level ? gradeLevelLabel(brief.grade_level) : 'Not set'}</strong>
+		</div>
+		<div>
+			<span>Grade band</span>
+			<strong>{brief.grade_band ? gradeBandLabel(brief.grade_band) : 'Not set'}</strong>
+		</div>
+		<div>
 			<span>Learners</span>
 			<strong>{learnerSummary || 'Not set'}</strong>
+		</div>
+		<div>
+			<span>Class profile</span>
+			<strong>
+				{#if brief.class_profile}
+					{brief.class_profile.reading_level.replaceAll('_', ' ')},
+					{brief.class_profile.language_support.replaceAll('_', ' ')},
+					{brief.class_profile.confidence.replaceAll('_', ' ')}
+				{:else}
+					Not set
+				{/if}
+			</strong>
 		</div>
 		<div>
 			<span>Outcome</span>

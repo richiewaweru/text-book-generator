@@ -27,6 +27,10 @@ def _depth_to_mode(depth: str) -> GenerationMode:
     return GenerationMode.BALANCED
 
 
+def _audience_prefix(brief: TeacherBrief) -> str:
+    return brief.grade_level.replace("_", " ").title()
+
+
 def _fallback_sections(
     *,
     brief: TeacherBrief,
@@ -50,19 +54,26 @@ def _fallback_sections(
                 order=order,
                 role=role,
                 title={
-                    "intro": f"Start {first_subtopic}",
-                    "explain": f"Understand {first_subtopic}",
-                    "practice": f"Practice {first_subtopic}",
-                    "summary": f"Check {first_subtopic}",
-                    "process": f"Steps in {first_subtopic}",
-                    "compare": f"Compare {first_subtopic}",
-                    "timeline": f"Timeline of {first_subtopic}",
-                    "visual": f"See {first_subtopic}",
-                    "discover": f"Explore {first_subtopic}",
+                    "intro": f"{_audience_prefix(brief)} start: {first_subtopic}",
+                    "explain": f"{_audience_prefix(brief)} understand {first_subtopic}",
+                    "practice": f"{_audience_prefix(brief)} practice {first_subtopic}",
+                    "summary": f"{_audience_prefix(brief)} check {first_subtopic}",
+                    "process": f"{_audience_prefix(brief)} steps in {first_subtopic}",
+                    "compare": f"{_audience_prefix(brief)} compare {first_subtopic}",
+                    "timeline": f"{_audience_prefix(brief)} timeline of {first_subtopic}",
+                    "visual": f"{_audience_prefix(brief)} see {first_subtopic}",
+                    "discover": f"{_audience_prefix(brief)} explore {first_subtopic}",
                 }[role],
-                objective=f"Support the {template.label.lower()} using a safe fallback structure.",
+                objective=(
+                    f"Support a {brief.grade_level.replace('_', ' ')} class with "
+                    f"{brief.class_profile.confidence} confidence and {brief.class_profile.pacing} pacing."
+                ),
                 selected_components=list(ROLE_COMPONENT_MAP.get(role, ("explanation-block",)))[:2],
-                rationale=f"Fallback section for role {role}.",
+                rationale=(
+                    f"Fallback section for role {role} tuned for "
+                    f"{brief.class_profile.reading_level} reading and "
+                    f"{brief.class_profile.prior_knowledge} prior knowledge."
+                ),
                 practice_target="Confirm the learner can use the idea independently."
                 if role == "practice"
                 else None,

@@ -30,12 +30,102 @@ TeacherBriefSupport = Literal[
     "challenge_questions",
 ]
 TeacherBriefDepth = Literal["quick", "standard", "deep"]
+TeacherGradeLevel = Literal[
+    "pre_k",
+    "kindergarten",
+    "grade_1",
+    "grade_2",
+    "grade_3",
+    "grade_4",
+    "grade_5",
+    "grade_6",
+    "grade_7",
+    "grade_8",
+    "grade_9",
+    "grade_10",
+    "grade_11",
+    "grade_12",
+    "college",
+    "adult",
+    "mixed",
+]
+TeacherGradeBand = Literal[
+    "early_elementary",
+    "upper_elementary",
+    "middle_school",
+    "high_school",
+    "college",
+    "adult",
+    "mixed",
+]
+ClassReadingLevel = Literal["below_grade", "on_grade", "above_grade", "mixed"]
+ClassLanguageSupport = Literal["none", "some_ell", "many_ell"]
+ClassConfidence = Literal["low", "mixed", "high"]
+ClassPriorKnowledge = Literal["new_topic", "some_background", "reviewing"]
+ClassPacing = Literal["short_chunks", "normal", "can_handle_longer"]
+ClassLearningPreference = Literal[
+    "visual",
+    "step_by_step",
+    "discussion",
+    "hands_on",
+    "independent",
+    "challenge",
+]
+
+GRADE_BAND_BY_LEVEL: dict[TeacherGradeLevel, TeacherGradeBand] = {
+    "pre_k": "early_elementary",
+    "kindergarten": "early_elementary",
+    "grade_1": "early_elementary",
+    "grade_2": "early_elementary",
+    "grade_3": "upper_elementary",
+    "grade_4": "upper_elementary",
+    "grade_5": "upper_elementary",
+    "grade_6": "middle_school",
+    "grade_7": "middle_school",
+    "grade_8": "middle_school",
+    "grade_9": "high_school",
+    "grade_10": "high_school",
+    "grade_11": "high_school",
+    "grade_12": "high_school",
+    "college": "college",
+    "adult": "adult",
+    "mixed": "mixed",
+}
+
+
+class ClassProfile(BaseModel):
+    reading_level: ClassReadingLevel = "mixed"
+    language_support: ClassLanguageSupport = "none"
+    confidence: ClassConfidence = "mixed"
+    prior_knowledge: ClassPriorKnowledge = "some_background"
+    pacing: ClassPacing = "normal"
+    learning_preferences: list[ClassLearningPreference] = Field(default_factory=list)
+    notes: str | None = Field(default=None, max_length=500)
+
+    @field_validator("notes")
+    @classmethod
+    def _trim_notes(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @field_validator("learning_preferences")
+    @classmethod
+    def _dedupe_learning_preferences(
+        cls,
+        value: list[ClassLearningPreference],
+    ) -> list[ClassLearningPreference]:
+        return list(dict.fromkeys(value))
 
 
 class TeacherBrief(BaseModel):
     subject: str = Field(min_length=1, max_length=120)
     topic: str = Field(min_length=1, max_length=160)
     subtopics: list[str] = Field(min_length=1, max_length=4)
+    grade_level: TeacherGradeLevel
+    grade_band: TeacherGradeBand
+    class_profile: ClassProfile = Field(default_factory=ClassProfile)
     learner_context: str = Field(min_length=1, max_length=1000)
     intended_outcome: TeacherBriefOutcome
     resource_type: TeacherBriefResourceType
@@ -73,6 +163,7 @@ class TeacherBrief(BaseModel):
                 raise ValueError(f"{field_name} must not be empty.")
         if not self.subtopics:
             raise ValueError("subtopics must not be empty.")
+        self.grade_band = GRADE_BAND_BY_LEVEL[self.grade_level]
         return self
 
 

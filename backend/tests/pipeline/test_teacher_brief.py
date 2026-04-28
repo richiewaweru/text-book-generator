@@ -11,6 +11,16 @@ def build_brief(**overrides) -> TeacherBrief:
         "subject": "Math",
         "topic": "Algebra",
         "subtopics": ["Solving two-step equations"],
+        "grade_level": "grade_7",
+        "grade_band": "adult",
+        "class_profile": {
+            "reading_level": "on_grade",
+            "language_support": "none",
+            "confidence": "mixed",
+            "prior_knowledge": "some_background",
+            "pacing": "normal",
+            "learning_preferences": ["visual"],
+        },
         "learner_context": "Grade 7 students, mixed levels",
         "intended_outcome": "practice",
         "resource_type": "worksheet",
@@ -84,6 +94,15 @@ def test_teacher_brief_trims_and_dedupes_values() -> None:
         subtopics=[" Solving two-step equations "],
         learner_context=" Grade 7 mixed ability ",
         supports=["worked_examples", "worked_examples", "visuals"],
+        class_profile={
+            "reading_level": "on_grade",
+            "language_support": "none",
+            "confidence": "mixed",
+            "prior_knowledge": "some_background",
+            "pacing": "normal",
+            "learning_preferences": ["visual", "visual", "step_by_step"],
+            "notes": " Needs chunked directions. ",
+        },
     )
 
     assert brief.subject == "Math"
@@ -92,3 +111,17 @@ def test_teacher_brief_trims_and_dedupes_values() -> None:
     assert brief.learner_context == "Grade 7 mixed ability"
     assert brief.teacher_notes == "Keep the examples short."
     assert brief.supports == ["worked_examples", "visuals"]
+    assert brief.grade_band == "middle_school"
+    assert brief.class_profile.learning_preferences == ["visual", "step_by_step"]
+    assert brief.class_profile.notes == "Needs chunked directions."
+
+
+def test_teacher_brief_requires_grade_level() -> None:
+    with pytest.raises(Exception):
+        build_brief(grade_level=None)  # type: ignore[arg-type]
+
+
+def test_teacher_brief_canonicalizes_grade_band_from_grade_level() -> None:
+    brief = build_brief(grade_level="grade_3", grade_band="adult")
+
+    assert brief.grade_band == "upper_elementary"

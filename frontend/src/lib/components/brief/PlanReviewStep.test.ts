@@ -53,6 +53,16 @@ describe('PlanReviewStep', () => {
 					subject: 'Math',
 					topic: 'Algebra',
 					subtopics: ['Solving two-step equations'],
+					grade_level: 'grade_7',
+					grade_band: 'middle_school',
+					class_profile: {
+						reading_level: 'below_grade',
+						language_support: 'some_ell',
+						confidence: 'low',
+						prior_knowledge: 'new_topic',
+						pacing: 'short_chunks',
+						learning_preferences: ['visual', 'step_by_step']
+					},
 					learner_context: 'Grade 7 mixed ability',
 					intended_outcome: 'practice',
 					resource_type: 'worksheet',
@@ -71,6 +81,8 @@ describe('PlanReviewStep', () => {
 		expect(screen.getByText(/start with the idea/i)).toBeTruthy();
 		expect(screen.getByText(/hook/i)).toBeTruthy();
 		expect(screen.getByText(/pipeline will not add extra components/i)).toBeTruthy();
+		expect(screen.getAllByText(/grade 7/i).length).toBeGreaterThan(0);
+		expect(screen.getByText(/class profile:/i)).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: /back/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /generate/i }));

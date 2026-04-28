@@ -65,7 +65,7 @@ export interface SectionGenerationNotes {
 }
 
 export interface PlanningBlockVisualPlacement {
-	block: 'hook' | 'explanation' | 'practice' | 'worked_example';
+	block: 'hook' | 'explanation' | 'practice' | 'worked_example' | 'section';
 	slot_type: 'diagram' | 'diagram_series' | 'diagram_compare';
 	sizing?: 'full' | 'compact';
 	hint?: string;

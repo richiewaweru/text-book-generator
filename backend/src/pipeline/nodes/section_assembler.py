@@ -38,6 +38,12 @@ def diag(tag: str, **fields) -> None:
 
 diag("BUILD_MARKER", file="section_assembler", version="diag_v1")
 
+_VISUAL_COMPONENT_IDS: frozenset[str] = frozenset({
+    "diagram-block",
+    "diagram-series",
+    "diagram-compare",
+})
+
 
 def _check_capacity(section_dict: dict) -> list[str]:
     # TODO: Replace with capacity warnings derived from Lectio component-registry.json.
@@ -109,6 +115,46 @@ def _has_content(value) -> bool:
     if isinstance(value, (str, list, dict, tuple, set)):
         return len(value) > 0
     return True
+
+
+def _incomplete_visual_fields(
+    section: object,
+    section_plan,
+) -> list[str]:
+    if section_plan is None:
+        return []
+
+    if getattr(section_plan, "visual_placements", None):
+        return []
+
+    selected = set(getattr(section_plan, "required_components", None) or [])
+    selected_visuals = selected & _VISUAL_COMPONENT_IDS
+    if not selected_visuals:
+        return []
+
+    incomplete: list[str] = []
+
+    if "diagram-series" in selected_visuals:
+        series = getattr(section, "diagram_series", None)
+        if series and series.diagrams:
+            has_media = any(step.image_url or step.svg_content for step in series.diagrams)
+            if not has_media:
+                incomplete.append("diagram_series_frames")
+
+    if "diagram-block" in selected_visuals:
+        diagram = getattr(section, "diagram", None)
+        if diagram and not (diagram.image_url or diagram.svg_content):
+            incomplete.append("diagram")
+
+    if "diagram-compare" in selected_visuals:
+        compare = getattr(section, "diagram_compare", None)
+        if compare and not (
+            compare.before_image_url or compare.before_svg
+            or compare.after_image_url or compare.after_svg
+        ):
+            incomplete.append("diagram_compare")
+
+    return incomplete
 
 
 def validate_section_against_manifest(
@@ -227,6 +273,34 @@ async def _assemble_section(
         return {
             "partial_sections": partials,
             "section_pending_assets": {section_id: pending_assets},
+            "section_lifecycle": lifecycle,
+            "completed_nodes": [node_name],
+        }
+
+    incomplete_visuals = _incomplete_visual_fields(section, typed.current_section_plan)
+    if incomplete_visuals:
+        force_console_log(
+            "FINALIZE",
+            "MEDIA_INCOMPLETE",
+            section_id=section_id,
+            incomplete_fields=incomplete_visuals,
+            reason="visual_placements empty - media pipeline did not run",
+        )
+        partials = dict(typed.partial_sections)
+        partials[section_id] = PartialSectionRecord(
+            section_id=section.section_id,
+            template_id=section.template_id,
+            content=section,
+            status="awaiting_assets",
+            visual_mode=None,
+            pending_assets=incomplete_visuals,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        lifecycle = dict(typed.section_lifecycle)
+        lifecycle[section_id] = "awaiting_assets"
+        return {
+            "partial_sections": partials,
+            "section_pending_assets": {section_id: incomplete_visuals},
             "section_lifecycle": lifecycle,
             "completed_nodes": [node_name],
         }

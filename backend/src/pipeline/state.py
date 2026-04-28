@@ -80,7 +80,7 @@ class StyleContext(BaseModel):
     learner_fit: str
 
     def diagram_complexity(self) -> str:
-        if self.grade_band == "primary" or self.learner_fit == "scaffolded":
+        if self.grade_band == "primary" or self.learner_fit == "supported":
             return "simplified"
         if self.grade_band == "advanced" or self.learner_fit == "advanced":
             return "detailed"

@@ -154,10 +154,22 @@ def _user_prompt(
     repair_instructions: list[str] | None,
 ) -> str:
     depth_limit = template.depth_limits[brief.depth]
+    class_profile = brief.class_profile
     parts = [
         f"Subject: {brief.subject}",
         f"Topic: {brief.topic}",
         f"Subtopics: {', '.join(brief.subtopics)}",
+        f"Grade level: {brief.grade_level}",
+        f"Grade band: {brief.grade_band}",
+        (
+            "Class profile: "
+            f"reading={class_profile.reading_level}, "
+            f"language={class_profile.language_support}, "
+            f"confidence={class_profile.confidence}, "
+            f"prior_knowledge={class_profile.prior_knowledge}, "
+            f"pacing={class_profile.pacing}, "
+            f"preferences={', '.join(class_profile.learning_preferences) or 'none'}"
+        ),
         f"Learner context: {brief.learner_context}",
         f"Intended outcome: {brief.intended_outcome}",
         f"Resource type: {brief.resource_type}",

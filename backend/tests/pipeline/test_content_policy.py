@@ -7,6 +7,7 @@ import pytest
 
 from generation import service as generation_service
 from planning import routes as planning_routes
+from planning import visual_router as visual_router_mod
 from planning.models import PlanningSectionPlan
 from pipeline.nodes import content_generator as content_generator_mod
 from pipeline.nodes import curriculum_planner as curriculum_planner_mod
@@ -448,6 +449,46 @@ async def test_curriculum_planner_fresh_path_routes_visual_placements_after_llm_
     assert len(planner_event.duplicate_term_warnings) == 1
     assert "visual_commitment" not in planner_event.runtime_curriculum_outline[0].model_dump()
     assert planner_event.planner_trace_sections[0].visual_placements_count == 1
+
+
+def test_visual_router_uses_section_block_for_visual_roles() -> None:
+    section = PlanningSectionPlan(
+        id="section-visual",
+        order=1,
+        role="visual",
+        title="Visual section",
+        selected_components=["diagram-series"],
+        rationale="Lead with the visual.",
+    )
+
+    placements = visual_router_mod._derive_visual_placements(
+        section=section,
+        intent="demonstrate_process",
+        should_visualize=True,
+    )
+
+    assert placements[0].block == "section"
+    assert placements[0].slot_type == "diagram_series"
+
+
+def test_visual_router_keeps_explanation_block_for_explain_roles() -> None:
+    section = PlanningSectionPlan(
+        id="section-explain",
+        order=1,
+        role="explain",
+        title="Explain section",
+        selected_components=["diagram-block"],
+        rationale="Support the text explanation.",
+    )
+
+    placements = visual_router_mod._derive_visual_placements(
+        section=section,
+        intent="explain_structure",
+        should_visualize=True,
+    )
+
+    assert placements[0].block == "explanation"
+    assert placements[0].slot_type == "diagram"
 
 
 def test_warn_duplicate_terms_logs_warning(caplog: pytest.LogCaptureFixture) -> None:

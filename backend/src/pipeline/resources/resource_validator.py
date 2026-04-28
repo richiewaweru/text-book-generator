@@ -121,6 +121,34 @@ def validate_brief(brief: TeacherBrief, template: ResourceTemplate) -> BriefVali
             )
         )
 
+    if brief.grade_level == "mixed":
+        warnings.append(
+            _message(
+                field="grade_level",
+                message="Mixed grade level can blur vocabulary and difficulty. Pick an exact grade when you can.",
+            )
+        )
+
+    if brief.class_profile.reading_level == "below_grade" and brief.depth == "deep":
+        warnings.append(
+            _message(
+                field="depth",
+                message="Deep depth may overwhelm a below-grade reading profile without extra scaffolding.",
+            )
+        )
+
+    if (
+        brief.class_profile.language_support == "many_ell"
+        and brief.resource_type in {"quiz", "exit_ticket"}
+        and brief.depth == "deep"
+    ):
+        warnings.append(
+            _message(
+                field="resource_type",
+                message="Deep assessment tasks may be too language-heavy for a class with many English learners.",
+            )
+        )
+
     if brief.depth == "quick" and len(brief.supports) > 3:
         warnings.append(
             _message(

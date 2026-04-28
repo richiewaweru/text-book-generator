@@ -25,10 +25,64 @@ export type TeacherBriefSupport =
 
 export type TeacherBriefDepth = 'quick' | 'standard' | 'deep';
 
+export type TeacherGradeLevel =
+	| 'pre_k'
+	| 'kindergarten'
+	| 'grade_1'
+	| 'grade_2'
+	| 'grade_3'
+	| 'grade_4'
+	| 'grade_5'
+	| 'grade_6'
+	| 'grade_7'
+	| 'grade_8'
+	| 'grade_9'
+	| 'grade_10'
+	| 'grade_11'
+	| 'grade_12'
+	| 'college'
+	| 'adult'
+	| 'mixed';
+
+export type TeacherGradeBand =
+	| 'early_elementary'
+	| 'upper_elementary'
+	| 'middle_school'
+	| 'high_school'
+	| 'college'
+	| 'adult'
+	| 'mixed';
+
+export type ClassReadingLevel = 'below_grade' | 'on_grade' | 'above_grade' | 'mixed';
+export type ClassLanguageSupport = 'none' | 'some_ell' | 'many_ell';
+export type ClassConfidence = 'low' | 'mixed' | 'high';
+export type ClassPriorKnowledge = 'new_topic' | 'some_background' | 'reviewing';
+export type ClassPacing = 'short_chunks' | 'normal' | 'can_handle_longer';
+export type ClassLearningPreference =
+	| 'visual'
+	| 'step_by_step'
+	| 'discussion'
+	| 'hands_on'
+	| 'independent'
+	| 'challenge';
+
+export interface ClassProfile {
+	reading_level: ClassReadingLevel;
+	language_support: ClassLanguageSupport;
+	confidence: ClassConfidence;
+	prior_knowledge: ClassPriorKnowledge;
+	pacing: ClassPacing;
+	learning_preferences: ClassLearningPreference[];
+	notes?: string | null;
+}
+
 export interface TeacherBrief {
 	subject: string;
 	topic: string;
 	subtopics: string[];
+	grade_level: TeacherGradeLevel;
+	grade_band: TeacherGradeBand;
+	class_profile: ClassProfile;
 	learner_context: string;
 	intended_outcome: TeacherBriefOutcome;
 	resource_type: TeacherBriefResourceType;
@@ -95,7 +149,8 @@ export interface BriefReviewResult {
 export type BriefBuilderStep =
 	| 'topic'
 	| 'choose_subtopic'
-	| 'learner_context'
+	| 'grade_level'
+	| 'class_profile'
 	| 'intended_outcome'
 	| 'resource_type'
 	| 'supports'

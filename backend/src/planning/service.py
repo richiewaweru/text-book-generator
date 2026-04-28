@@ -27,16 +27,6 @@ PlanningEvent = dict[str, object]
 PlanningEmitter = Callable[[PlanningEvent], Awaitable[None] | None]
 _RUNTIME_TEMPLATE_ID = "guided-concept-path"
 _RUNTIME_PRESET_ID = "blue-classroom"
-_STRUGGLING_MARKERS = (
-    "struggling",
-    "below grade",
-    "below-grade",
-    "low confidence",
-    "ell",
-    "esl",
-)
-
-
 def _depth_to_mode(depth: str) -> GenerationMode:
     if depth == "quick":
         return GenerationMode.DRAFT
@@ -45,19 +35,42 @@ def _depth_to_mode(depth: str) -> GenerationMode:
     return GenerationMode.BALANCED
 
 
-def _has_struggling_context(learner_context: str) -> bool:
-    normalized = learner_context.lower()
-    return any(marker in normalized for marker in _STRUGGLING_MARKERS)
-
-
 def _resolve_directives(brief: TeacherBrief) -> GenerationDirectives:
-    struggling = _has_struggling_context(brief.learner_context)
+    profile = brief.class_profile
+    reading_level = (
+        "simple"
+        if (
+            profile.reading_level == "below_grade"
+            or profile.language_support in {"some_ell", "many_ell"}
+            or "simpler_reading" in brief.supports
+        )
+        else "standard"
+    )
+    explanation_style = (
+        "concrete-first"
+        if (
+            profile.prior_knowledge == "new_topic"
+            or profile.confidence == "low"
+            or "step_by_step" in brief.supports
+        )
+        else "balanced"
+    )
+    scaffold_level = (
+        "high"
+        if (
+            profile.reading_level == "below_grade"
+            or profile.confidence == "low"
+            or profile.pacing == "short_chunks"
+            or "step_by_step" in brief.supports
+        )
+        else "medium"
+    )
     return GenerationDirectives(
         tone_profile="supportive",
-        reading_level="simple" if struggling else "standard",
-        explanation_style="concrete-first" if struggling else "balanced",
+        reading_level=reading_level,
+        explanation_style=explanation_style,
         example_style="everyday",
-        scaffold_level="high" if struggling or "step_by_step" in brief.supports else "medium",
+        scaffold_level=scaffold_level,
         brevity={
             "quick": "tight",
             "standard": "balanced",

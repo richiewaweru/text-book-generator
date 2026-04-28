@@ -10,9 +10,10 @@
 	} from '$lib/api/teacher-brief';
 	import { getProfile } from '$lib/api/profile';
 	import {
+		GRADE_BAND_BY_LEVEL,
 		briefSteps,
-		buildLearnerContext,
-		learnerContextChips,
+		buildLearnerSummary,
+		defaultClassProfile,
 		recommendSupports,
 		stepSummary
 	} from '$lib/brief/config';
@@ -23,17 +24,21 @@
 		BriefReviewWarning,
 		BriefValidationResult,
 		BuilderWarning,
+		ClassLearningPreference,
+		ClassProfile,
 		GenerationAccepted,
 		PlanningGenerationSpec,
 		TeacherBrief,
 		TeacherBriefSupport,
+		TeacherGradeLevel,
 		TopicResolutionSubtopic
 	} from '$lib/types';
 
 	import BriefReviewCard from './BriefReviewCard.svelte';
 	import BriefStepCard from './BriefStepCard.svelte';
+	import ClassProfileStep from './ClassProfileStep.svelte';
 	import DepthStep from './DepthStep.svelte';
-	import LearnerContextStep from './LearnerContextStep.svelte';
+	import GradeLevelStep from './GradeLevelStep.svelte';
 	import OutcomeStep from './OutcomeStep.svelte';
 	import PlanReviewStep from './PlanReviewStep.svelte';
 	import ResourceTypeStep from './ResourceTypeStep.svelte';
@@ -43,6 +48,14 @@
 
 	type BuilderStage = 'building' | 'planning' | 'reviewing' | 'generating';
 
+	const PROFILE_GRADE_LEVEL_MAP: Record<string, TeacherGradeLevel> = {
+		primary: 'grade_3',
+		middle: 'grade_7',
+		high_school: 'grade_10',
+		undergraduate: 'college',
+		adult: 'adult'
+	};
+
 	let stage = $state<BuilderStage>('building');
 	let active_step = $state<BriefBuilderStep>('topic');
 	let completed_steps = $state<BriefBuilderStep[]>([]);
@@ -50,7 +63,8 @@
 		subtopics: [],
 		supports: [],
 		depth: 'standard',
-		teacher_notes: ''
+		teacher_notes: '',
+		class_profile: { ...defaultClassProfile }
 	});
 	let suggestions = $state<{ subtopics?: TopicResolutionSubtopic[] }>({});
 	let warnings = $state<BuilderWarning[]>([]);
@@ -60,19 +74,20 @@
 	let rawTopic = $state('');
 	let customSubtopic = $state('');
 	let learnerText = $state('');
-	let selectedLearnerChips = $state<string[]>([]);
 	let recommendedSupports = $state<TeacherBriefSupport[]>([]);
 	let topicStatusMessage = $state<string | null>(null);
 	let apiError = $state<string | null>(null);
 	let plannedSpec = $state<PlanningGenerationSpec | null>(null);
 	let acceptedGeneration = $state<GenerationAccepted | null>(null);
 
-	const learnerSummary = $derived(learnerText || selectedLearnerChips.join(', '));
+	const learnerSummary = $derived(learnerText);
 	const reviewReady = $derived(
 		Boolean(
 			brief.subject &&
 				brief.topic &&
 				brief.subtopics?.length &&
+				brief.grade_level &&
+				brief.grade_band &&
 				brief.learner_context &&
 				brief.intended_outcome &&
 				brief.resource_type &&
@@ -80,6 +95,22 @@
 		)
 	);
 	const briefIsReady = $derived(Boolean(validationResult?.is_ready));
+
+	function currentClassProfile(): ClassProfile {
+		return { ...defaultClassProfile, ...(brief.class_profile ?? {}) };
+	}
+
+	function deriveRecommendedSupports(
+		nextResourceType = brief.resource_type,
+		nextOutcome = brief.intended_outcome,
+		nextProfile = currentClassProfile()
+	): TeacherBriefSupport[] {
+		return recommendSupports({
+			resourceType: nextResourceType,
+			intendedOutcome: nextOutcome,
+			classProfile: nextProfile
+		});
+	}
 
 	function resetPlanStage() {
 		stage = 'building';
@@ -93,6 +124,13 @@
 		warnings = [];
 		reviewWarnings = [];
 		apiError = null;
+	}
+
+	function clearValidationAndGeneratedState() {
+		clearValidation();
+		if (stage !== 'building') {
+			resetPlanStage();
+		}
 	}
 
 	function markStepCompleted(step: BriefBuilderStep) {
@@ -122,25 +160,39 @@
 		);
 	}
 
-	function syncLearnerContext(nextText: string, chips = selectedLearnerChips) {
-		learnerText = nextText;
-		brief = {
-			...brief,
-			learner_context: buildLearnerContext(nextText, chips)
-		};
-	}
+	function syncAudience({
+		gradeLevel = brief.grade_level,
+		classProfile = currentClassProfile(),
+		learnerSummaryOverride,
+		recomputeSupports = true
+	}: {
+		gradeLevel?: TeacherGradeLevel;
+		classProfile?: ClassProfile;
+		learnerSummaryOverride?: string;
+		recomputeSupports?: boolean;
+	}) {
+		const gradeBand = gradeLevel ? GRADE_BAND_BY_LEVEL[gradeLevel] : brief.grade_band;
+		const nextSummary =
+			learnerSummaryOverride ?? buildLearnerSummary({ gradeLevel, classProfile });
+		const supports = recomputeSupports
+			? deriveRecommendedSupports(brief.resource_type, brief.intended_outcome, classProfile)
+			: (brief.supports ?? []);
 
-	function updateSupportRecommendations() {
-		recommendedSupports = recommendSupports({
-			resourceType: brief.resource_type,
-			intendedOutcome: brief.intended_outcome,
-			learnerContext: learnerText,
-			learnerChips: selectedLearnerChips
-		});
+		learnerText = nextSummary;
+		recommendedSupports = deriveRecommendedSupports(
+			brief.resource_type,
+			brief.intended_outcome,
+			classProfile
+		);
 		brief = {
 			...brief,
-			supports: recommendedSupports
+			grade_level: gradeLevel,
+			grade_band: gradeBand,
+			class_profile: classProfile,
+			learner_context: nextSummary,
+			supports
 		};
+		clearValidationAndGeneratedState();
 	}
 
 	function resetSupportSelections() {
@@ -166,15 +218,11 @@
 		completed_steps = completed_steps.filter(
 			(step) => !['choose_subtopic', 'supports', 'review'].includes(step)
 		);
-		clearValidation();
-		resetPlanStage();
+		clearValidationAndGeneratedState();
 	}
 
 	function nextStepAfterSubtopic(): BriefBuilderStep {
-		if (!brief.learner_context) return 'learner_context';
-		if (!brief.intended_outcome) return 'intended_outcome';
-		if (!brief.resource_type) return 'resource_type';
-		return 'supports';
+		return 'grade_level';
 	}
 
 	function handleTopicInput(value: string) {
@@ -241,38 +289,58 @@
 		moveToStep('choose_subtopic', nextStepAfterSubtopic());
 	}
 
-	function toggleLearnerChip(chip: string) {
-		const nextChips = selectedLearnerChips.includes(chip)
-			? selectedLearnerChips.filter((item) => item !== chip)
-			: [...selectedLearnerChips, chip];
-		selectedLearnerChips = nextChips;
-		syncLearnerContext(learnerText, nextChips);
-		clearValidation();
+	function handleGradeLevelSelect(value: TeacherGradeLevel) {
+		syncAudience({
+			gradeLevel: value,
+			classProfile: currentClassProfile()
+		});
+		moveToStep('grade_level', 'class_profile');
 	}
 
-	function continueLearnerContext() {
+	function updateClassProfile(nextProfile: ClassProfile) {
+		syncAudience({
+			gradeLevel: brief.grade_level,
+			classProfile: nextProfile
+		});
+	}
+
+	function togglePreference(preference: ClassLearningPreference) {
+		const profile = currentClassProfile();
+		const nextPreferences = profile.learning_preferences.includes(preference)
+			? profile.learning_preferences.filter((item) => item !== preference)
+			: [...profile.learning_preferences, preference];
+		updateClassProfile({
+			...profile,
+			learning_preferences: nextPreferences
+		});
+	}
+
+	function continueClassProfile() {
 		if (!brief.learner_context?.trim()) return;
-		updateSupportRecommendations();
-		moveToStep('learner_context', 'intended_outcome');
+		moveToStep('class_profile', 'intended_outcome');
 	}
 
 	function handleOutcomeSelect(value: TeacherBrief['intended_outcome']) {
+		const nextProfile = currentClassProfile();
+		recommendedSupports = deriveRecommendedSupports(brief.resource_type, value, nextProfile);
 		brief = {
 			...brief,
-			intended_outcome: value
+			intended_outcome: value,
+			supports: recommendedSupports
 		};
-		updateSupportRecommendations();
-		clearValidation();
+		clearValidationAndGeneratedState();
 		moveToStep('intended_outcome', 'resource_type');
 	}
 
 	function handleResourceTypeSelect(value: TeacherBrief['resource_type']) {
+		const nextProfile = currentClassProfile();
+		recommendedSupports = deriveRecommendedSupports(value, brief.intended_outcome, nextProfile);
 		brief = {
 			...brief,
-			resource_type: value
+			resource_type: value,
+			supports: recommendedSupports
 		};
-		updateSupportRecommendations();
-		clearValidation();
+		clearValidationAndGeneratedState();
 		moveToStep('resource_type', 'supports');
 	}
 
@@ -371,14 +439,17 @@
 		resetGenerationState();
 		void getProfile()
 			.then((profile) => {
-				if (learnerText.trim()) return;
-				const seeded = [profile.default_audience_description, profile.classroom_context]
-					.filter(Boolean)
-					.join('. ')
-					.trim();
-				if (seeded) {
-					syncLearnerContext(seeded);
-				}
+				if (brief.grade_level) return;
+				const seededGradeLevel = PROFILE_GRADE_LEVEL_MAP[profile.default_grade_band];
+				const seededProfile = {
+					...currentClassProfile(),
+					notes: profile.classroom_context || currentClassProfile().notes
+				};
+				syncAudience({
+					gradeLevel: seededGradeLevel,
+					classProfile: seededProfile,
+					recomputeSupports: false
+				});
 			})
 			.catch(() => {
 				// The builder works without profile hydration.
@@ -397,8 +468,9 @@
 				<p class="eyebrow">Studio</p>
 				<h1>Teacher brief builder</h1>
 			<p class="lede">
-				Capture the teaching intent first, narrow the topic, choose the resource shape, then
-				review the brief, approve the frozen plan, and generate only the selected components.
+				Capture the teaching intent first, narrow the topic, profile the class, choose the
+				resource shape, then review the brief, approve the frozen plan, and generate only the
+				selected components.
 			</p>
 			</div>
 			<a href="/dashboard" class="dashboard-link">Back to dashboard</a>
@@ -418,7 +490,7 @@
 				stepLabel="Step 1"
 				active={active_step === 'topic'}
 				completed={completed_steps.includes('topic')}
-				summary={stepSummary('topic', brief, learnerText, selectedLearnerChips)}
+				summary={stepSummary('topic', brief, learnerText)}
 				onEdit={() => editStep('topic')}
 			>
 				<TopicInputStep
@@ -436,7 +508,7 @@
 					stepLabel="Step 2"
 					active={active_step === 'choose_subtopic'}
 					completed={completed_steps.includes('choose_subtopic')}
-					summary={stepSummary('choose_subtopic', brief, learnerText, selectedLearnerChips)}
+					summary={stepSummary('choose_subtopic', brief, learnerText)}
 					onEdit={() => editStep('choose_subtopic')}
 				>
 					<SubtopicChoiceStep
@@ -452,25 +524,56 @@
 				</BriefStepCard>
 			{/if}
 
-			{#if isVisible('learner_context')}
+			{#if isVisible('grade_level')}
 				<BriefStepCard
-					title="Learner Context"
+					title="Grade Level"
 					stepLabel="Step 3"
-					active={active_step === 'learner_context'}
-					completed={completed_steps.includes('learner_context')}
-					summary={stepSummary('learner_context', brief, learnerText, selectedLearnerChips)}
-					onEdit={() => editStep('learner_context')}
+					active={active_step === 'grade_level'}
+					completed={completed_steps.includes('grade_level')}
+					summary={stepSummary('grade_level', brief, learnerText)}
+					onEdit={() => editStep('grade_level')}
 				>
-					<LearnerContextStep
-						value={learnerText}
-						availableChips={[...learnerContextChips]}
-						selectedChips={selectedLearnerChips}
-						onInput={(value) => {
-							syncLearnerContext(value);
-							clearValidation();
-						}}
-						onToggleChip={toggleLearnerChip}
-						onContinue={continueLearnerContext}
+					<GradeLevelStep
+						selected={brief.grade_level}
+						derivedBand={brief.grade_band ?? null}
+						onSelect={handleGradeLevelSelect}
+					/>
+				</BriefStepCard>
+			{/if}
+
+			{#if isVisible('class_profile')}
+				<BriefStepCard
+					title="Class Profile"
+					stepLabel="Step 4"
+					active={active_step === 'class_profile'}
+					completed={completed_steps.includes('class_profile')}
+					summary={stepSummary('class_profile', brief, learnerText)}
+					onEdit={() => editStep('class_profile')}
+				>
+					<ClassProfileStep
+						profile={currentClassProfile()}
+						summary={learnerText}
+						onReadingLevelChange={(value) =>
+							updateClassProfile({ ...currentClassProfile(), reading_level: value })}
+						onLanguageSupportChange={(value) =>
+							updateClassProfile({ ...currentClassProfile(), language_support: value })}
+						onConfidenceChange={(value) =>
+							updateClassProfile({ ...currentClassProfile(), confidence: value })}
+						onPriorKnowledgeChange={(value) =>
+							updateClassProfile({ ...currentClassProfile(), prior_knowledge: value })}
+						onPacingChange={(value) =>
+							updateClassProfile({ ...currentClassProfile(), pacing: value })}
+						onPreferenceToggle={togglePreference}
+						onNotesInput={(value) =>
+							updateClassProfile({ ...currentClassProfile(), notes: value })}
+						onSummaryInput={(value) =>
+							syncAudience({
+								gradeLevel: brief.grade_level,
+								classProfile: currentClassProfile(),
+								learnerSummaryOverride: value,
+								recomputeSupports: false
+							})}
+						onContinue={continueClassProfile}
 					/>
 				</BriefStepCard>
 			{/if}
@@ -478,10 +581,10 @@
 			{#if isVisible('intended_outcome')}
 				<BriefStepCard
 					title="Intended Outcome"
-					stepLabel="Step 4"
+					stepLabel="Step 5"
 					active={active_step === 'intended_outcome'}
 					completed={completed_steps.includes('intended_outcome')}
-					summary={stepSummary('intended_outcome', brief, learnerText, selectedLearnerChips)}
+					summary={stepSummary('intended_outcome', brief, learnerText)}
 					onEdit={() => editStep('intended_outcome')}
 				>
 					<OutcomeStep selected={brief.intended_outcome} onSelect={handleOutcomeSelect} />
@@ -491,10 +594,10 @@
 			{#if isVisible('resource_type')}
 				<BriefStepCard
 					title="Resource Type"
-					stepLabel="Step 5"
+					stepLabel="Step 6"
 					active={active_step === 'resource_type'}
 					completed={completed_steps.includes('resource_type')}
-					summary={stepSummary('resource_type', brief, learnerText, selectedLearnerChips)}
+					summary={stepSummary('resource_type', brief, learnerText)}
 					onEdit={() => editStep('resource_type')}
 				>
 					<ResourceTypeStep selected={brief.resource_type} onSelect={handleResourceTypeSelect} />
@@ -504,10 +607,10 @@
 			{#if isVisible('supports')}
 				<BriefStepCard
 					title="Supports"
-					stepLabel="Step 6"
+					stepLabel="Step 7"
 					active={active_step === 'supports'}
 					completed={completed_steps.includes('supports')}
-					summary={stepSummary('supports', brief, learnerText, selectedLearnerChips)}
+					summary={stepSummary('supports', brief, learnerText)}
 					onEdit={() => editStep('supports')}
 				>
 					<SupportsStep
@@ -522,10 +625,10 @@
 			{#if isVisible('depth')}
 				<BriefStepCard
 					title="Depth"
-					stepLabel="Step 7"
+					stepLabel="Step 8"
 					active={active_step === 'depth'}
 					completed={completed_steps.includes('depth')}
-					summary={stepSummary('depth', brief, learnerText, selectedLearnerChips)}
+					summary={stepSummary('depth', brief, learnerText)}
 					onEdit={() => editStep('depth')}
 				>
 					<DepthStep selected={brief.depth} onSelect={handleDepthSelect} />
@@ -535,10 +638,10 @@
 			{#if isVisible('review')}
 				<BriefStepCard
 					title="Review Brief"
-					stepLabel="Step 8"
+					stepLabel="Step 9"
 					active={active_step === 'review'}
 					completed={completed_steps.includes('review')}
-					summary={stepSummary('review', brief, learnerText, selectedLearnerChips)}
+					summary={stepSummary('review', brief, learnerText)}
 					onEdit={() => editStep('review')}
 				>
 					<BriefReviewCard

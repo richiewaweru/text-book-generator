@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { gradeBandLabel, gradeLevelLabel } from '$lib/brief/config';
 	import type { PlanningGenerationSpec } from '$lib/types';
 
 	interface Props {
@@ -64,8 +65,23 @@
 		<div class="meta">
 			<span>{plan.source_brief.resource_type.replaceAll('_', ' ')}</span>
 			<span>{plan.source_brief.depth}</span>
+			<span>{gradeLevelLabel(plan.source_brief.grade_level)}</span>
+			<span>{gradeBandLabel(plan.source_brief.grade_band)}</span>
 		</div>
 	</header>
+
+	<div class="audience-card">
+		<strong>Audience</strong>
+		<p>{plan.source_brief.learner_context}</p>
+		<p>
+			Class profile:
+			{plan.source_brief.class_profile.reading_level.replaceAll('_', ' ')},
+			{plan.source_brief.class_profile.language_support.replaceAll('_', ' ')},
+			{plan.source_brief.class_profile.confidence.replaceAll('_', ' ')},
+			{plan.source_brief.class_profile.prior_knowledge.replaceAll('_', ' ')},
+			{plan.source_brief.class_profile.pacing.replaceAll('_', ' ')}
+		</p>
+	</div>
 
 	{#if plan.warning}
 		<p class="warning" role="status">{plan.warning}</p>
@@ -183,6 +199,20 @@
 		padding: 0.85rem 0.95rem;
 		background: #fff8e4;
 		color: #805d16;
+	}
+
+	.audience-card {
+		display: grid;
+		gap: 0.35rem;
+		border-radius: 1rem;
+		border: 1px solid rgba(36, 52, 63, 0.12);
+		background: #fffdf9;
+		padding: 1rem;
+	}
+
+	.audience-card p {
+		color: #625a50;
+		line-height: 1.55;
 	}
 
 	.section-grid {

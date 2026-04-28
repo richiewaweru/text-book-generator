@@ -63,6 +63,10 @@ _VISUAL_CONCRETE_HINTS = (
 )
 
 
+def _section_title(section: SectionContent, plan: SectionPlan) -> str:
+    return section_title(section, fallback=plan.title)
+
+
 def _slot_id(
     slot_type: SlotType,
     *,
@@ -150,32 +154,77 @@ def _base_avoid_list(preferred_render: VisualRender) -> list[str]:
     return avoid
 
 
+def _grade_style_suffix(style_context: StyleContext | None) -> str | None:
+    if style_context is None:
+        return None
+    if style_context.grade_band == "primary" or style_context.learner_fit == "supported":
+        return "Keep the composition simple, scaffolded, and easy to decode at a glance."
+    if style_context.grade_band == "advanced" or style_context.learner_fit == "advanced":
+        return "Allow more precise detail and denser structure where it improves accuracy."
+    return "Use a balanced classroom diagram style with clear grouping and labels."
+
+
+def _learner_fit_avoid_list(style_context: StyleContext | None) -> list[str]:
+    if style_context is None:
+        return []
+    if style_context.grade_band == "primary" or style_context.learner_fit == "supported":
+        return [
+            "dense labels",
+            "tiny annotations",
+            "abstract symbolism without anchors",
+            "busy backgrounds",
+        ]
+    if style_context.grade_band == "advanced" or style_context.learner_fit == "advanced":
+        return ["cartoon styling"]
+    return ["decorative clutter"]
+
+
+def _styled_goal(goal: str, style_context: StyleContext | None) -> str:
+    suffix = _grade_style_suffix(style_context)
+    if not suffix:
+        return goal
+    return f"{goal} {suffix}"
+
+
+def _merge_avoid_lists(*lists: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for values in lists:
+        for value in values:
+            key = value.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(value)
+    return merged
+
+
 def _single_caption(section: SectionContent, plan: SectionPlan) -> str:
     if section.diagram is not None:
         return section.diagram.caption
-    return f"Visual explanation for {section_title(section, fallback=plan.title)}."
+    return f"Visual explanation for {_section_title(section, plan)}."
 
 
-def _series_caption(section: SectionContent) -> str:
+def _series_caption(section: SectionContent, plan: SectionPlan) -> str:
     if section.diagram_series is not None and section.diagram_series.diagrams:
         return section.diagram_series.diagrams[0].caption
-    return f"Step-by-step sequence for {section_title(section)}."
+    return f"Step-by-step sequence for {_section_title(section, plan)}."
 
 
-def _compare_caption(section: SectionContent) -> str:
+def _compare_caption(section: SectionContent, plan: SectionPlan) -> str:
     if section.diagram_compare is not None:
         return section.diagram_compare.caption
-    return f"Before and after comparison for {section_title(section)}."
+    return f"Before and after comparison for {_section_title(section, plan)}."
 
 
-def _series_labels(section: SectionContent, concepts: list[str]) -> list[str]:
+def _series_labels(section: SectionContent, plan: SectionPlan, concepts: list[str]) -> list[str]:
     if section.diagram_series is not None and section.diagram_series.diagrams:
         return [step.step_label for step in section.diagram_series.diagrams]
     if section.process is not None and section.process.steps:
         return [step.action for step in section.process.steps[:4]]
     if concepts:
         return concepts[:4]
-    return [section_title(section), "Key step 2", "Key step 3"]
+    return [_section_title(section, plan), "Key step 2", "Key step 3"]
 
 
 def _dedupe_casefold(values: list[str]) -> list[str]:
@@ -238,6 +287,12 @@ def _normalise_brief(*parts: str | None) -> str | None:
     if not cleaned:
         return None
     return " ".join(cleaned)[:500]
+
+
+def _terms_from_plan(plan: SectionPlan) -> list[str]:
+    terms = list(getattr(plan, "terms_to_define", None) or [])
+    terms += list(getattr(plan, "terms_assumed", None) or [])
+    return terms[:6]
 
 
 def _extract_explanation_brief(section: SectionContent) -> str | None:
@@ -325,19 +380,20 @@ def _resolve_practice_problem_indices(
 def _placement_caption(
     placement: BlockVisualPlacement,
     section: SectionContent,
+    plan: SectionPlan,
     *,
     problem_index: int | None = None,
 ) -> str:
     if placement.block == "practice":
         label = f"practice problem {problem_index + 1}" if problem_index is not None else "practice problem"
-        return placement.hint.strip() or f"Supporting diagram for {label} in {section_title(section)}."
+        return placement.hint.strip() or f"Supporting diagram for {label} in {_section_title(section, plan)}."
     if placement.block == "worked_example":
-        return placement.hint.strip() or f"Supporting diagram for the worked example in {section_title(section)}."
+        return placement.hint.strip() or f"Supporting diagram for the worked example in {_section_title(section, plan)}."
     if placement.slot_type == "diagram_series":
-        return _series_caption(section)
+        return _series_caption(section, plan)
     if placement.slot_type == "diagram_compare":
-        return _compare_caption(section)
-    return placement.hint.strip() or f"Supporting diagram for {section_title(section)}."
+        return _compare_caption(section, plan)
+    return placement.hint.strip() or f"Supporting diagram for {_section_title(section, plan)}."
 
 
 def _build_single_slot(
@@ -345,6 +401,7 @@ def _build_single_slot(
     section: SectionContent,
     plan: SectionPlan,
     slot_type: SlotType,
+    style_context: StyleContext | None,
     sizing: str = "full",
     block_target: str | None = None,
     problem_index: int | None = None,
@@ -357,14 +414,20 @@ def _build_single_slot(
     must_include = [label] if block_target in {"practice", "worked_example"} and label else concepts[:4]
     tw, th = _target_dimensions(slot_type, 1, sizing=sizing)
     slot_id = _slot_id(slot_type, block_target=block_target, problem_index=problem_index)
-    title = section_title(section, fallback=plan.title)
+    title = _section_title(section, plan)
     frame = VisualFrame(
         slot_id=slot_id,
         index=0,
         label=label or title,
-        generation_goal=content_brief or f"Show the core idea of {title} clearly for learners.",
+        generation_goal=_styled_goal(
+            content_brief or f"Show the core idea of {title} clearly for learners.",
+            style_context,
+        ),
         must_include=must_include,
-        avoid=_base_avoid_list(preferred_render),
+        avoid=_merge_avoid_lists(
+            _base_avoid_list(preferred_render),
+            _learner_fit_avoid_list(style_context),
+        ),
         output_placeholders=_frame_output_placeholders(preferred_render, slot_type),
         target_w=tw,
         target_h=th,
@@ -390,25 +453,32 @@ def _build_series_slot(
     section: SectionContent,
     plan: SectionPlan,
     *,
+    style_context: StyleContext | None,
     sizing: str = "full",
     block_target: str | None = "explanation",
     content_brief: str | None = None,
 ) -> VisualSlot:
     preferred_render = _preferred_render_for_slot(plan, SlotType.DIAGRAM_SERIES)
     concepts = _key_concepts(section)
-    labels = _dedupe_casefold(_series_labels(section, concepts))
+    labels = _dedupe_casefold(_series_labels(section, plan, concepts))
     frame_count = len(labels)
     tw, th = _target_dimensions(SlotType.DIAGRAM_SERIES, frame_count, sizing=sizing)
     slot_id = _slot_id(SlotType.DIAGRAM_SERIES, block_target=block_target)
-    title = section_title(section, fallback=plan.title)
+    title = _section_title(section, plan)
     frames = [
         VisualFrame(
             slot_id=slot_id,
             index=index,
             label=label,
-            generation_goal=f"Show sequence step {index + 1} for {title}: {label}.",
+            generation_goal=_styled_goal(
+                f"Show sequence step {index + 1} for {title}: {label}.",
+                style_context,
+            ),
             must_include=[label] + ([concepts[index]] if index < len(concepts) else []),
-            avoid=_base_avoid_list(preferred_render),
+            avoid=_merge_avoid_lists(
+                _base_avoid_list(preferred_render),
+                _learner_fit_avoid_list(style_context),
+            ),
             output_placeholders=_frame_output_placeholders(preferred_render, SlotType.DIAGRAM_SERIES),
             target_w=tw,
             target_h=th,
@@ -425,7 +495,7 @@ def _build_series_slot(
         block_target=block_target,
         content_brief=content_brief,
         pedagogical_intent=_pedagogical_intent(plan),
-        caption=_series_caption(section),
+        caption=_series_caption(section, plan),
         reference_style=_reference_style(SlotType.DIAGRAM_SERIES),
         frames=frames,
         series_context=title,
@@ -436,6 +506,7 @@ def _build_compare_slot(
     section: SectionContent,
     plan: SectionPlan,
     *,
+    style_context: StyleContext | None,
     sizing: str = "full",
     block_target: str | None = "explanation",
     content_brief: str | None = None,
@@ -444,15 +515,21 @@ def _build_compare_slot(
     before_label, after_label = _compare_labels(section)
     tw, th = _target_dimensions(SlotType.DIAGRAM_COMPARE, 2, sizing=sizing)
     slot_id = _slot_id(SlotType.DIAGRAM_COMPARE, block_target=block_target)
-    title = section_title(section, fallback=plan.title)
+    title = _section_title(section, plan)
     frames = [
         VisualFrame(
             slot_id=slot_id,
             index=0,
             label=before_label,
-            generation_goal=f"Render the before state for {title}.",
+            generation_goal=_styled_goal(
+                f"Render the before state for {title}.",
+                style_context,
+            ),
             must_include=[before_label],
-            avoid=_base_avoid_list(preferred_render),
+            avoid=_merge_avoid_lists(
+                _base_avoid_list(preferred_render),
+                _learner_fit_avoid_list(style_context),
+            ),
             output_placeholders=_frame_output_placeholders(preferred_render, SlotType.DIAGRAM_COMPARE),
             target_w=tw,
             target_h=th,
@@ -461,9 +538,15 @@ def _build_compare_slot(
             slot_id=slot_id,
             index=1,
             label=after_label,
-            generation_goal=f"Render the after state for {title}.",
+            generation_goal=_styled_goal(
+                f"Render the after state for {title}.",
+                style_context,
+            ),
             must_include=[after_label],
-            avoid=_base_avoid_list(preferred_render),
+            avoid=_merge_avoid_lists(
+                _base_avoid_list(preferred_render),
+                _learner_fit_avoid_list(style_context),
+            ),
             output_placeholders=_frame_output_placeholders(preferred_render, SlotType.DIAGRAM_COMPARE),
             target_w=tw,
             target_h=th,
@@ -479,7 +562,7 @@ def _build_compare_slot(
         block_target=block_target,
         content_brief=content_brief,
         pedagogical_intent=_pedagogical_intent(plan),
-        caption=_compare_caption(section),
+        caption=_compare_caption(section, plan),
         reference_style=_reference_style(SlotType.DIAGRAM_COMPARE),
         frames=frames,
     )
@@ -489,7 +572,7 @@ def _build_simulation_slot(section: SectionContent, plan: SectionPlan) -> Visual
     visual_policy = _visual_policy(plan)
     preferred_render = _preferred_render_for_slot(plan, SlotType.SIMULATION)
     simulation_intent = getattr(visual_policy, "simulation_intent", None) or plan.practice_target
-    title = section_title(section, fallback=plan.title)
+    title = _section_title(section, plan)
     frame = VisualFrame(
         slot_id=_slot_id(SlotType.SIMULATION),
         index=0,
@@ -518,21 +601,267 @@ def _build_simulation_slot(section: SectionContent, plan: SectionPlan) -> Visual
     )
 
 
+def _build_section_series_slot(
+    *,
+    section: SectionContent,
+    plan: SectionPlan,
+    placement: BlockVisualPlacement,
+    style_context: StyleContext | None,
+) -> VisualSlot | None:
+    section_name = _section_title(section, plan)
+    preferred_render = _preferred_render_for_slot(plan, SlotType.DIAGRAM_SERIES)
+    slot_id = _slot_id(SlotType.DIAGRAM_SERIES, block_target="section")
+    series = section.diagram_series
+
+    if series and series.diagrams:
+        frame_count = len(series.diagrams)
+        tw, th = _target_dimensions(SlotType.DIAGRAM_SERIES, frame_count)
+        frames = [
+            VisualFrame(
+                slot_id=slot_id,
+                index=index,
+                label=step.step_label,
+                generation_goal=_styled_goal(step.caption, style_context),
+                must_include=_terms_from_plan(plan),
+                avoid=_merge_avoid_lists(
+                    _base_avoid_list(preferred_render),
+                    _learner_fit_avoid_list(style_context),
+                ),
+                output_placeholders=_frame_output_placeholders(
+                    preferred_render, SlotType.DIAGRAM_SERIES
+                ),
+                target_w=tw,
+                target_h=th,
+            )
+            for index, step in enumerate(series.diagrams)
+        ]
+        caption = series.title or section_name
+    else:
+        terms = _terms_from_plan(plan)
+        labels = _dedupe_casefold(terms[:4] or [section_name])
+        frame_count = len(labels)
+        tw, th = _target_dimensions(SlotType.DIAGRAM_SERIES, frame_count)
+        frames = [
+            VisualFrame(
+                slot_id=slot_id,
+                index=index,
+                label=label,
+                generation_goal=_styled_goal(
+                    f"Show {label} for {section_name}.",
+                    style_context,
+                ),
+                must_include=terms,
+                avoid=_merge_avoid_lists(
+                    _base_avoid_list(preferred_render),
+                    _learner_fit_avoid_list(style_context),
+                ),
+                output_placeholders=_frame_output_placeholders(
+                    preferred_render, SlotType.DIAGRAM_SERIES
+                ),
+                target_w=tw,
+                target_h=th,
+            )
+            for index, label in enumerate(labels)
+        ]
+        caption = section_name
+
+    if not frames:
+        return None
+
+    return VisualSlot(
+        slot_id=slot_id,
+        slot_type=SlotType.DIAGRAM_SERIES,
+        required=True,
+        preferred_render=preferred_render,
+        fallback_render=_fallback_render_for_slot(
+            SlotType.DIAGRAM_SERIES, preferred_render
+        ),
+        sizing=placement.sizing or "full",
+        block_target="section",
+        content_brief=placement.hint or None,
+        pedagogical_intent=_pedagogical_intent(plan),
+        caption=caption,
+        reference_style=_reference_style(SlotType.DIAGRAM_SERIES),
+        frames=frames,
+        series_context=section_name,
+    )
+
+
+def _build_section_diagram_slot(
+    *,
+    section: SectionContent,
+    plan: SectionPlan,
+    placement: BlockVisualPlacement,
+    style_context: StyleContext | None,
+) -> VisualSlot:
+    section_name = _section_title(section, plan)
+    preferred_render = _preferred_render_for_slot(plan, SlotType.DIAGRAM)
+    slot_id = _slot_id(SlotType.DIAGRAM, block_target="section")
+    tw, th = _target_dimensions(SlotType.DIAGRAM, 1)
+    diagram = section.diagram
+
+    if diagram:
+        generation_goal = diagram.alt_text or diagram.caption or section_name
+        caption = diagram.caption or section_name
+    else:
+        generation_goal = placement.hint or f"Show the key idea of {section_name}."
+        caption = section_name
+
+    frame = VisualFrame(
+        slot_id=slot_id,
+        index=0,
+        label=section_name,
+        generation_goal=_styled_goal(generation_goal, style_context),
+        must_include=_terms_from_plan(plan),
+        avoid=_merge_avoid_lists(
+            _base_avoid_list(preferred_render),
+            _learner_fit_avoid_list(style_context),
+        ),
+        output_placeholders=_frame_output_placeholders(
+            preferred_render, SlotType.DIAGRAM
+        ),
+        target_w=tw,
+        target_h=th,
+    )
+
+    return VisualSlot(
+        slot_id=slot_id,
+        slot_type=SlotType.DIAGRAM,
+        required=True,
+        preferred_render=preferred_render,
+        fallback_render=_fallback_render_for_slot(SlotType.DIAGRAM, preferred_render),
+        sizing=placement.sizing or "full",
+        block_target="section",
+        content_brief=placement.hint or generation_goal,
+        pedagogical_intent=_pedagogical_intent(plan),
+        caption=caption,
+        reference_style=_reference_style(SlotType.DIAGRAM),
+        frames=[frame],
+    )
+
+
+def _build_section_compare_slot(
+    *,
+    section: SectionContent,
+    plan: SectionPlan,
+    placement: BlockVisualPlacement,
+    style_context: StyleContext | None,
+) -> VisualSlot:
+    section_name = _section_title(section, plan)
+    preferred_render = _preferred_render_for_slot(plan, SlotType.DIAGRAM_COMPARE)
+    slot_id = _slot_id(SlotType.DIAGRAM_COMPARE, block_target="section")
+    tw, th = _target_dimensions(SlotType.DIAGRAM_COMPARE, 2)
+    compare = section.diagram_compare
+
+    if compare:
+        before_label = compare.before_label or "Before"
+        after_label = compare.after_label or "After"
+    else:
+        before_label, after_label = "Before", "After"
+
+    frames = [
+        VisualFrame(
+            slot_id=slot_id,
+            index=0,
+            label=before_label,
+            generation_goal=_styled_goal(
+                f"Show the before state: {before_label} for {section_name}.",
+                style_context,
+            ),
+            must_include=[before_label] + _terms_from_plan(plan)[:3],
+            avoid=_merge_avoid_lists(
+                _base_avoid_list(preferred_render),
+                _learner_fit_avoid_list(style_context),
+            ),
+            output_placeholders=_frame_output_placeholders(
+                preferred_render, SlotType.DIAGRAM_COMPARE
+            ),
+            target_w=tw,
+            target_h=th,
+        ),
+        VisualFrame(
+            slot_id=slot_id,
+            index=1,
+            label=after_label,
+            generation_goal=_styled_goal(
+                f"Show the after state: {after_label} for {section_name}.",
+                style_context,
+            ),
+            must_include=[after_label] + _terms_from_plan(plan)[:3],
+            avoid=_merge_avoid_lists(
+                _base_avoid_list(preferred_render),
+                _learner_fit_avoid_list(style_context),
+            ),
+            output_placeholders=_frame_output_placeholders(
+                preferred_render, SlotType.DIAGRAM_COMPARE
+            ),
+            target_w=tw,
+            target_h=th,
+        ),
+    ]
+
+    return VisualSlot(
+        slot_id=slot_id,
+        slot_type=SlotType.DIAGRAM_COMPARE,
+        required=True,
+        preferred_render=preferred_render,
+        fallback_render=_fallback_render_for_slot(
+            SlotType.DIAGRAM_COMPARE, preferred_render
+        ),
+        sizing=placement.sizing or "full",
+        block_target="section",
+        content_brief=placement.hint or None,
+        pedagogical_intent=_pedagogical_intent(plan),
+        caption=section_name,
+        reference_style=_reference_style(SlotType.DIAGRAM_COMPARE),
+        frames=frames,
+    )
+
+
 def _slots_from_visual_placements(
     *,
     section_plan: SectionPlan,
     section_content: SectionContent,
+    style_context: StyleContext | None,
 ) -> list[VisualSlot]:
     slots: list[VisualSlot] = []
     seen_slot_ids: set[str] = set()
 
     for placement in section_plan.visual_placements:
+        if placement.block == "section":
+            if placement.slot_type == "diagram_series":
+                slot = _build_section_series_slot(
+                    section=section_content,
+                    plan=section_plan,
+                    placement=placement,
+                    style_context=style_context,
+                )
+            elif placement.slot_type == "diagram_compare":
+                slot = _build_section_compare_slot(
+                    section=section_content,
+                    plan=section_plan,
+                    placement=placement,
+                    style_context=style_context,
+                )
+            else:
+                slot = _build_section_diagram_slot(
+                    section=section_content,
+                    plan=section_plan,
+                    placement=placement,
+                    style_context=style_context,
+                )
+            if slot is not None and slot.slot_id not in seen_slot_ids:
+                slots.append(slot)
+                seen_slot_ids.add(slot.slot_id)
+            continue
+
         if placement.block == "explanation":
             content_brief = _extract_explanation_brief(section_content)
             if placement.slot_type == "diagram_series":
                 slot = _build_series_slot(
                     section_content,
                     section_plan,
+                    style_context=style_context,
                     sizing=placement.sizing,
                     block_target="explanation",
                     content_brief=content_brief,
@@ -541,6 +870,7 @@ def _slots_from_visual_placements(
                 slot = _build_compare_slot(
                     section_content,
                     section_plan,
+                    style_context=style_context,
                     sizing=placement.sizing,
                     block_target="explanation",
                     content_brief=content_brief,
@@ -550,6 +880,7 @@ def _slots_from_visual_placements(
                     section=section_content,
                     plan=section_plan,
                     slot_type=SlotType.DIAGRAM,
+                    style_context=style_context,
                     sizing=placement.sizing,
                     block_target="explanation",
                     content_brief=content_brief,
@@ -566,6 +897,7 @@ def _slots_from_visual_placements(
                     section=section_content,
                     plan=section_plan,
                     slot_type=SlotType.DIAGRAM,
+                    style_context=style_context,
                     sizing=placement.sizing,
                     block_target="practice",
                     problem_index=problem_index,
@@ -576,6 +908,7 @@ def _slots_from_visual_placements(
                     caption=_placement_caption(
                         placement,
                         section_content,
+                        section_plan,
                         problem_index=problem_index,
                     ),
                     label=f"Practice problem {problem_index + 1}",
@@ -590,13 +923,14 @@ def _slots_from_visual_placements(
                 section=section_content,
                 plan=section_plan,
                 slot_type=SlotType.DIAGRAM,
+                style_context=style_context,
                 sizing=placement.sizing,
                 block_target="worked_example",
                 content_brief=_normalise_brief(
                     placement.hint,
                     _extract_worked_example_brief(section_content),
                 ),
-                caption=_placement_caption(placement, section_content),
+                caption=_placement_caption(placement, section_content, section_plan),
                 label="Worked example",
             )
             if slot.slot_id not in seen_slot_ids:
@@ -613,7 +947,6 @@ def media_planner(
     template_contract: TemplateContractSummary,
     style_context: StyleContext | None,
 ) -> MediaPlan:
-    _ = style_context
     slots: list[VisualSlot] = []
     notes: list[str] = []
 
@@ -622,6 +955,7 @@ def media_planner(
             _slots_from_visual_placements(
                 section_plan=section_plan,
                 section_content=section_content,
+                style_context=style_context,
             )
         )
         if not slots:

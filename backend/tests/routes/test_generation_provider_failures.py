@@ -130,6 +130,88 @@ class StaticProfileRepo:
         return self.profile
 
 
+def _planning_spec(*, section_count: int = 2) -> dict:
+    sections = [
+        {
+            "id": f"section-{index}",
+            "order": index,
+            "role": role,
+            "title": title,
+            "objective": objective,
+            "focus_note": objective,
+            "selected_components": components,
+            "visual_policy": None,
+            "generation_notes": None,
+            "rationale": objective,
+        }
+        for index, (role, title, objective, components) in enumerate(
+            [
+                (
+                    "intro",
+                    "Limits first look",
+                    "Introduce the idea of approaching a value.",
+                    ["hook-hero", "explanation-block"],
+                ),
+                (
+                    "practice",
+                    "Check understanding",
+                    "Use practice to reinforce the concept.",
+                    ["practice-stack", "what-next-bridge"],
+                ),
+            ][:section_count],
+            start=1,
+        )
+    ]
+    return {
+        "id": "plan-provider-failure",
+        "template_id": "guided-concept-path",
+        "preset_id": "blue-classroom",
+        "mode": "balanced",
+        "template_decision": {
+            "chosen_id": "worksheet",
+            "chosen_name": "Worksheet",
+            "rationale": "Teacher selected Worksheet.",
+            "fit_score": 1.0,
+            "alternatives": [],
+        },
+        "lesson_rationale": "Move from explanation into guided practice.",
+        "directives": {
+            "tone_profile": "supportive",
+            "reading_level": "standard",
+            "explanation_style": "balanced",
+            "example_style": "everyday",
+            "scaffold_level": "medium",
+            "brevity": "balanced",
+        },
+        "committed_budgets": {},
+        "sections": sections,
+        "warning": None,
+        "source_brief_id": "brief-provider-failure",
+        "source_brief": {
+            "subject": "Mathematics",
+            "topic": "Limits",
+            "subtopics": ["Understanding limits"],
+            "grade_level": "grade_11",
+            "grade_band": "adult",
+            "class_profile": {
+                "reading_level": "on_grade",
+                "language_support": "none",
+                "confidence": "mixed",
+                "prior_knowledge": "some_background",
+                "pacing": "normal",
+                "learning_preferences": [],
+            },
+            "learner_context": "High school calculus students",
+            "intended_outcome": "understand",
+            "resource_type": "worksheet",
+            "supports": [],
+            "depth": "standard",
+            "teacher_notes": None,
+        },
+        "status": "draft",
+    }
+
+
 @asynccontextmanager
 async def _client(app):
     async with app.router.lifespan_context(app):
@@ -176,20 +258,14 @@ async def test_create_generation_marks_provider_configuration_failures_as_provid
         ):
             async with _client(app) as client:
                 response = await client.post(
-                    "/api/v1/generations",
-                    json={
-                        "subject": "Calculus",
-                        "context": "Explain limits",
-                        "template_id": "guided-concept-path",
-                        "preset_id": "blue-classroom",
-                        "section_count": 2,
-                    },
+                    "/api/v1/brief/commit",
+                    json=_planning_spec(section_count=2),
                 )
                 await asyncio.sleep(0.05)
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 202
+    assert response.status_code == 200
     generation = await generation_repo.find_by_id(response.json()["generation_id"])
     assert generation is not None
     assert generation.status == "failed"

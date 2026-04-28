@@ -111,6 +111,16 @@ function buildDetail(overrides: Record<string, unknown> = {}) {
 				subject: 'Math',
 				topic: 'Fractions',
 				subtopics: ['Understanding halves and quarters'],
+				grade_level: 'grade_5',
+				grade_band: 'upper_elementary',
+				class_profile: {
+					reading_level: 'below_grade',
+					language_support: 'some_ell',
+					confidence: 'mixed',
+					prior_knowledge: 'some_background',
+					pacing: 'short_chunks',
+					learning_preferences: ['visual']
+				},
 				learner_context: 'Year 5',
 				intended_outcome: 'understand',
 				resource_type: 'worksheet',
@@ -274,6 +284,8 @@ describe('GenerationView', () => {
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
 		expect(screen.getByText('Live')).toBeTruthy();
 		expect(screen.getByText(/worksheet \/ standard/i)).toBeTruthy();
+		expect(screen.getByText(/grade 5/i)).toBeTruthy();
+		expect(screen.getByText(/below grade/i)).toBeTruthy();
 		expect(screen.getAllByText(/planned/i).length).toBeGreaterThan(0);
 
 		emitEvent('runtime_policy', {

@@ -60,7 +60,7 @@ class SectionVisualPolicy(BaseModel):
 
 
 class BlockVisualPlacement(BaseModel):
-    block: Literal["hook", "explanation", "practice", "worked_example"]
+    block: Literal["hook", "explanation", "practice", "worked_example", "section"]
     slot_type: Literal["diagram", "diagram_series", "diagram_compare"] = "diagram"
     sizing: Literal["full", "compact"] = "full"
     hint: str = ""

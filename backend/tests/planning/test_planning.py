@@ -15,6 +15,16 @@ def build_brief(**overrides) -> TeacherBrief:
         "subject": "Math",
         "topic": "Algebra",
         "subtopics": ["Solving two-step equations"],
+        "grade_level": "grade_7",
+        "grade_band": "adult",
+        "class_profile": {
+            "reading_level": "on_grade",
+            "language_support": "none",
+            "confidence": "mixed",
+            "prior_knowledge": "some_background",
+            "pacing": "normal",
+            "learning_preferences": ["visual"],
+        },
         "learner_context": "Grade 7 mixed levels",
         "intended_outcome": "practice",
         "resource_type": "worksheet",
@@ -59,11 +69,17 @@ def build_sections() -> list[PlanningSectionPlan]:
     ]
 
 
-def test_resolve_directives_uses_struggling_reader_markers() -> None:
+def test_resolve_directives_uses_class_profile_signals() -> None:
     directives = _resolve_directives(
         build_brief(
-            learner_context="Grade 7 students, low confidence and below grade reading",
-            supports=["step_by_step"],
+            class_profile={
+                "reading_level": "below_grade",
+                "language_support": "many_ell",
+                "confidence": "low",
+                "prior_knowledge": "new_topic",
+                "pacing": "short_chunks",
+                "learning_preferences": ["step_by_step"],
+            },
             depth="quick",
         )
     )

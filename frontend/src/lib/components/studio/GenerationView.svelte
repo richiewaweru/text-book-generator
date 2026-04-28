@@ -6,6 +6,7 @@
 		getGenerationDetail,
 		getGenerationDocument
 	} from '$lib/api/client';
+	import { gradeBandLabel, gradeLevelLabel } from '$lib/brief/config';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import {
 		applyGenerationStreamEvent,
@@ -73,6 +74,9 @@
 	const showFullLesson = $derived(detail?.status === 'completed' || detail?.status === 'partial');
 	const runtimeSectionsTotal = $derived(
 		runtimeProgress?.sections_total ?? plannedSections ?? sectionSlots.length
+	);
+	const planningBrief = $derived(
+		isStudioPlanningSpec(detail?.planning_spec) ? detail?.planning_spec.source_brief : null
 	);
 	const terminalSummary = $derived.by(() => {
 		if (!detail) return null;
@@ -638,6 +642,39 @@
 						</div>
 					</div>
 				</section>
+
+				{#if planningBrief}
+					<section class="rail-card">
+						<p class="rail-label">Audience</p>
+						<div class="meta-list audience-list">
+							<div>
+								<span>Grade level</span>
+								<strong>{gradeLevelLabel(planningBrief.grade_level)}</strong>
+							</div>
+							<div>
+								<span>Grade band</span>
+								<strong>{gradeBandLabel(planningBrief.grade_band)}</strong>
+							</div>
+							<div>
+								<span>Reading</span>
+								<strong>{planningBrief.class_profile.reading_level.replaceAll('_', ' ')}</strong>
+							</div>
+							<div>
+								<span>Language</span>
+								<strong>{planningBrief.class_profile.language_support.replaceAll('_', ' ')}</strong>
+							</div>
+							<div>
+								<span>Confidence</span>
+								<strong>{planningBrief.class_profile.confidence.replaceAll('_', ' ')}</strong>
+							</div>
+							<div>
+								<span>Pacing</span>
+								<strong>{planningBrief.class_profile.pacing.replaceAll('_', ' ')}</strong>
+							</div>
+						</div>
+						<p class="audience-summary">{planningBrief.learner_context}</p>
+					</section>
+				{/if}
 			</aside>
 
 			<section class="viewer">
@@ -929,6 +966,10 @@
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
+	.audience-list {
+		grid-template-columns: 1fr;
+	}
+
 	.meta-list div {
 		display: grid;
 		gap: 0.2rem;
@@ -1013,6 +1054,12 @@
 		height: 0.55rem;
 		background: #1d9e75;
 		animation: pulse 1.2s ease-in-out infinite;
+	}
+
+	.audience-summary {
+		margin: 0;
+		color: #625a50;
+		line-height: 1.55;
 	}
 
 	@keyframes pulse {

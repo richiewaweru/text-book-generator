@@ -60,11 +60,9 @@ from pipeline.types.requests import (
     count_visual_placements,
     needs_diagram_from_placements,
 )
-from planning.dtos import GenerationSpec
 from planning.models import PlanningGenerationSpec, PlanningSectionPlan
 from generation.dtos import (
     GenerationAcceptedResponse,
-    GenerationRequest,
     GenerationReport,
 )
 from generation.entities.generation import Generation
@@ -75,7 +73,6 @@ from generation.ports.generation_report_repository import (
     GenerationReportRepository,
 )
 from generation.ports.generation_repository import GenerationRepository
-from core.ports.student_profile_repository import StudentProfileRepository
 from core.ports.user_repository import UserRepository
 from generation.failure import classify_generation_failure
 from generation.logging import GenerationLogger
@@ -85,7 +82,6 @@ from generation.dependencies import (
     get_report_repository,
 )
 from core.dependencies import (
-    get_student_profile_repository,
     get_user_repository,
 )
 from generation.recovery import (
@@ -307,43 +303,26 @@ def _pipeline_sections_from_planning_spec(spec: PlanningGenerationSpec) -> list[
     return sections
 
 
-def _context_from_generation_spec(
-    spec: GenerationSpec,
-    *,
-    subject: str,
-) -> str:
-    lines = [
-        subject,
-        f"Audience: {spec.source_brief.audience}",
-    ]
-    if spec.source_brief.extra_context:
-        lines.append(f"Additional context: {spec.source_brief.extra_context}")
-    lines.append("")
-    lines.append("Reviewed lesson plan:")
-    for section in spec.sections:
-        suffix = f" [{section.role}]" if section.role else ""
-        lines.append(
-            f"Section {section.position}: {section.title}{suffix} - {section.focus}"
-        )
-        if section.continuity_notes:
-            lines.append(f"Continuity: {section.continuity_notes}")
-    if spec.warning:
-        lines.append("")
-        lines.append(f"Planning warning: {spec.warning}")
-    return "\n".join(lines)
-
-
 def _context_from_planning_spec(
     spec: PlanningGenerationSpec,
-    *,
-    subject: str,
 ) -> str:
     brief = spec.source_brief
     lines = [
         f"Subject: {brief.subject}",
         f"Topic: {brief.topic}",
         f"Subtopics: {', '.join(brief.subtopics)}",
-        f"Audience: {brief.learner_context}",
+        f"Grade level: {brief.grade_level}",
+        f"Grade band: {brief.grade_band}",
+        f"Learner summary: {brief.learner_context}",
+        (
+            "Class profile: "
+            f"reading={brief.class_profile.reading_level}, "
+            f"language={brief.class_profile.language_support}, "
+            f"confidence={brief.class_profile.confidence}, "
+            f"prior_knowledge={brief.class_profile.prior_knowledge}, "
+            f"pacing={brief.class_profile.pacing}, "
+            f"preferences={', '.join(brief.class_profile.learning_preferences) or 'none'}"
+        ),
         f"Intended outcome: {brief.intended_outcome}",
         f"Resource type: {brief.resource_type}",
         f"Depth: {brief.depth}",
@@ -361,56 +340,6 @@ def _context_from_planning_spec(
         lines.append("")
         lines.append(f"Planning warning: {spec.warning}")
     return "\n".join(lines)
-
-
-def _effective_generation_spec(req: GenerationRequest) -> GenerationSpec | None:
-    return req.generation_spec
-
-
-def _effective_generation_payload(
-    req: GenerationRequest,
-) -> tuple[str, str, GenerationMode, str, str, int, list | None, str | None]:
-    spec = _effective_generation_spec(req)
-    if spec is None:
-        return (
-            req.subject,
-            req.context,
-            req.mode,
-            req.template_id,
-            req.preset_id,
-            req.section_count,
-            None,
-            None,
-        )
-
-    return (
-        (
-            req.subject or spec.source_brief.subtopics[0]
-            if isinstance(spec, PlanningGenerationSpec)
-            else req.subject or spec.source_brief.intent
-        ),
-        (
-            _context_from_planning_spec(
-                spec,
-                subject=req.subject or spec.source_brief.subtopics[0],
-            )
-            if isinstance(spec, PlanningGenerationSpec)
-            else _context_from_generation_spec(
-                spec,
-                subject=req.subject or spec.source_brief.intent,
-            )
-        ),
-        spec.mode,
-        spec.template_id,
-        spec.preset_id,
-        len(spec.sections) if isinstance(spec, PlanningGenerationSpec) else spec.section_count,
-        (
-            _pipeline_sections_from_planning_spec(spec)
-            if isinstance(spec, PlanningGenerationSpec)
-            else spec.sections
-        ),
-        spec.model_dump_json(),
-    )
 
 
 def _progress_updates_for_event(event: dict) -> list[dict]:
@@ -1493,6 +1422,8 @@ async def enqueue_generation(
     section_count: int,
     section_plans: list | None,
     planning_spec_json: str | None,
+    grade_band: str | None = None,
+    learner_fit: str | None = None,
 ) -> GenerationAcceptedResponse:
     _validate_template_and_preset(template_id, preset_id)
     if profile is None:
@@ -1546,11 +1477,11 @@ async def enqueue_generation(
         generation_id=generation_id,
         subject=subject,
         context=context,
-        grade_band=_grade_band(profile),
+        grade_band=grade_band or _grade_band(profile),
         mode=mode,
         template_id=template_id,
         preset_id=preset_id,
-        learner_fit="general",
+        learner_fit=learner_fit or "general",
         section_count=section_count,
         section_plans=section_plans,
     )
@@ -1584,46 +1515,6 @@ async def enqueue_generation(
         document_url=document_url,
         report_url=report_url,
     )
-
-
-@router.post("/generations", status_code=202, response_model=GenerationAcceptedResponse)
-async def create_generation(
-    req: GenerationRequest,
-    current_user: User = Depends(get_current_user),
-    profile_repo: StudentProfileRepository = Depends(get_student_profile_repository),
-    gen_repo: GenerationRepository = Depends(get_generation_repository),
-    document_repo: DocumentRepository = Depends(get_document_repository),
-    report_repo: GenerationReportRepository = Depends(get_report_repository),
-):
-    (
-        effective_subject,
-        effective_context,
-        effective_mode,
-        effective_template_id,
-        effective_preset_id,
-        effective_section_count,
-        effective_section_plans,
-        planning_spec_json,
-    ) = _effective_generation_payload(req)
-
-    profile = await profile_repo.find_by_user_id(current_user.id)
-    return await enqueue_generation(
-        current_user=current_user,
-        profile=profile,
-        gen_repo=gen_repo,
-        document_repo=document_repo,
-        report_repo=report_repo,
-        subject=effective_subject,
-        context=effective_context,
-        mode=effective_mode,
-        template_id=effective_template_id,
-        preset_id=effective_preset_id,
-        section_count=effective_section_count,
-        section_plans=effective_section_plans,
-        planning_spec_json=planning_spec_json,
-    )
-
-
 @router.get("/generations")
 async def list_generations(
     current_user: User = Depends(get_current_user),

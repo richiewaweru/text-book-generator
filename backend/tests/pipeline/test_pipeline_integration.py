@@ -29,6 +29,8 @@ from pipeline.state import (
 )
 from pipeline.types.requests import BlockVisualPlacement, PipelineRequest, SectionPlan, SectionVisualPolicy
 from pipeline.types.section_content import (
+    DiagramSeriesContent,
+    DiagramSeriesStep,
     ExplanationContent,
     HookHeroContent,
     PracticeContent,
@@ -1060,6 +1062,80 @@ class TestSectionAssembler:
         assert result["section_pending_assets"]["s-01"] == []
         assert result["section_lifecycle"]["s-01"] == "final"
         assert "section_assembler" in result["completed_nodes"]
+
+    async def test_section_assembler_routes_media_incomplete_series_to_partial(self):
+        from pipeline.nodes.section_assembler import section_assembler
+
+        state = _base_state(
+            current_section_id="s-01",
+            current_section_plan=_plan("s-01").model_copy(
+                update={
+                    "required_components": ["diagram-series"],
+                    "visual_placements": [],
+                }
+            ),
+            generated_sections={
+                "s-01": _section("s-01").model_copy(
+                    update={
+                        "diagram_series": DiagramSeriesContent(
+                            title="Parts of a seed",
+                            diagrams=[
+                                DiagramSeriesStep(
+                                    step_label="Seed coat",
+                                    caption="Outer layer.",
+                                ),
+                                DiagramSeriesStep(
+                                    step_label="Embryo",
+                                    caption="Inner structure.",
+                                ),
+                            ],
+                        )
+                    }
+                )
+            },
+        )
+
+        result = await section_assembler(state)
+
+        assert "assembled_sections" not in result
+        assert "s-01" in result["partial_sections"]
+        assert result["section_pending_assets"]["s-01"] == ["diagram_series_frames"]
+        assert result["section_lifecycle"]["s-01"] == "awaiting_assets"
+
+    async def test_section_assembler_allows_series_with_real_media_when_visual_pipeline_is_empty(self):
+        from pipeline.nodes.section_assembler import section_assembler
+
+        state = _base_state(
+            current_section_id="s-01",
+            current_section_plan=_plan("s-01").model_copy(
+                update={
+                    "required_components": ["diagram-series"],
+                    "visual_placements": [],
+                }
+            ),
+            generated_sections={
+                "s-01": _section("s-01").model_copy(
+                    update={
+                        "diagram_series": DiagramSeriesContent(
+                            title="Parts of a seed",
+                            diagrams=[
+                                DiagramSeriesStep(
+                                    step_label="Seed coat",
+                                    caption="Outer layer.",
+                                    image_url="https://example.com/seed-coat.png",
+                                ),
+                            ],
+                        )
+                    }
+                )
+            },
+        )
+
+        result = await section_assembler(state)
+
+        assert "s-01" in result["assembled_sections"]
+        assert result["section_pending_assets"]["s-01"] == []
+        assert result["section_lifecycle"]["s-01"] == "final"
 
     async def test_final_section_assembler_defers_while_placed_visual_is_pending(self):
         from pipeline.nodes.section_assembler import section_assembler

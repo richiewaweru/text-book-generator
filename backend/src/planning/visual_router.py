@@ -159,30 +159,31 @@ def _derive_visual_placements(
 
     selected = set(section.selected_components)
     available = set(ROLE_COMPONENT_MAP.get(section.role, ()))
+    block_target = "section" if section.role in {"visual", "discover"} else "explanation"
 
     if "diagram-compare" in selected or (intent == "compare_variants" and "diagram-compare" in available):
         return [
             BlockVisualPlacement(
-                block="explanation",
+                block=block_target,
                 slot_type="diagram_compare",
-                hint="Use an explanation-adjacent comparison visual.",
+                hint="Use a comparison visual." if block_target == "section" else "Use an explanation-adjacent comparison visual.",
             )
         ]
 
     if "diagram-series" in selected or (intent == "demonstrate_process" and "diagram-series" in available):
         return [
             BlockVisualPlacement(
-                block="explanation",
+                block=block_target,
                 slot_type="diagram_series",
-                hint="Use an explanation-adjacent sequence visual.",
+                hint="Use a sequence visual." if block_target == "section" else "Use an explanation-adjacent sequence visual.",
             )
         ]
 
     return [
         BlockVisualPlacement(
-            block="explanation",
+            block=block_target,
             slot_type="diagram",
-            hint="Use an explanation-adjacent diagram.",
+            hint="Use a supporting diagram." if block_target == "section" else "Use an explanation-adjacent diagram.",
         )
     ]
 

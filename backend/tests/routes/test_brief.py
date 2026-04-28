@@ -16,7 +16,7 @@ from generation.dependencies import (
     get_generation_repository,
     get_report_repository,
 )
-from generation.dtos.generation_request import GenerationAcceptedResponse
+from generation.dtos.generation_response import GenerationAcceptedResponse
 from pipeline.types.requests import SectionPlan
 from pipeline.types.teacher_brief import BriefReviewResult, TeacherBrief, TopicResolutionResult
 from planning.models import PlanningGenerationSpec
@@ -110,6 +110,16 @@ def _teacher_brief() -> TeacherBrief:
         subject="Science",
         topic="Ecosystems",
         subtopics=["Food webs in river ecosystems"],
+        grade_level="grade_9",
+        grade_band="adult",
+        class_profile={
+            "reading_level": "below_grade",
+            "language_support": "some_ell",
+            "confidence": "low",
+            "prior_knowledge": "new_topic",
+            "pacing": "short_chunks",
+            "learning_preferences": ["visual", "step_by_step"],
+        },
         learner_context="Year 9 mixed ability learners",
         intended_outcome="understand",
         resource_type="worksheet",
@@ -235,6 +245,10 @@ class TestBriefApi:
         assert response.json()["generation_id"] == "gen-123"
         assert captured["subject"] == "Food webs in river ecosystems"
         assert "Resource type: worksheet" in str(captured["context"])
+        assert "Grade level: grade_9" in str(captured["context"])
+        assert "Class profile: reading=below_grade" in str(captured["context"])
+        assert captured["grade_band"] == "secondary"
+        assert captured["learner_fit"] == "supported"
         assert '"status":"committed"' in captured["planning_spec_json"]
 
     async def test_commit_brief_rejects_invalid_template_preset_combination(self):
@@ -316,6 +330,16 @@ class TestBriefApi:
                         "subject": "Math",
                         "topic": "Algebra",
                         "subtopics": ["Algebra"],
+                        "grade_level": "mixed",
+                        "grade_band": "adult",
+                        "class_profile": {
+                            "reading_level": "below_grade",
+                            "language_support": "many_ell",
+                            "confidence": "low",
+                            "prior_knowledge": "new_topic",
+                            "pacing": "short_chunks",
+                            "learning_preferences": ["step_by_step"],
+                        },
                         "learner_context": "Grade 7 students, mixed levels",
                         "intended_outcome": "assess",
                         "resource_type": "exit_ticket",
@@ -329,6 +353,7 @@ class TestBriefApi:
         payload = response.json()
         assert payload["is_ready"] is False
         assert any(message["field"] == "subtopics" for message in payload["blockers"])
+        assert any(message["field"] == "grade_level" for message in payload["warnings"])
         assert any(message["field"] == "depth" for message in payload["warnings"])
 
     async def test_review_brief_returns_pedagogical_warnings(self):
