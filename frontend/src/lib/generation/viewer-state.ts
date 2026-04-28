@@ -415,7 +415,7 @@ export function buildSectionSlots(
 			.filter((section) => !manifestIds.has(section.section_id))
 			.map((section, index) => ({
 				section_id: section.section_id,
-				title: section.header.title,
+				title: section.header?.title ?? section.section_id,
 				position: manifest.length + index + 1,
 				status: 'unplanned_output' as const,
 				section,
@@ -427,7 +427,7 @@ export function buildSectionSlots(
 			.filter((section) => !manifestIds.has(section.section_id))
 			.map((section, index) => ({
 				section_id: section.section_id,
-				title: section.content.header.title,
+				title: section.content.header?.title ?? section.section_id,
 				position: manifest.length + orphanReady.length + index + 1,
 				status: 'unplanned_output' as const,
 				section: null,
@@ -477,9 +477,9 @@ export function buildSectionSlots(
 		return {
 			section_id: ready?.section_id ?? failed?.section_id ?? partial?.section_id ?? `pending-${index + 1}`,
 			title:
-				ready?.header.title ??
+				ready?.header?.title ??
 				failed?.title ??
-				partial?.content.header.title ??
+				partial?.content.header?.title ??
 				`Section ${index + 1}`,
 			position: index + 1,
 			status,

@@ -10,6 +10,7 @@
 	let { generationId, section }: Props = $props();
 
 	const isInteractive = $derived(!!section.simulation);
+const sectionTitle = $derived(section.header?.title ?? 'Interactive section');
 	const sectionUrl = $derived.by(() => {
 		if (typeof window === 'undefined') {
 			return '';
@@ -34,7 +35,7 @@
 		</div>
 		<div class="qr-copy">
 			<p class="qr-label">Interactive simulation</p>
-			<h4>{section.header.title}</h4>
+			<h4>{sectionTitle}</h4>
 			<p>Scan to open and interact with this simulation in your browser.</p>
 			<p class="qr-url">{sectionUrl}</p>
 		</div>

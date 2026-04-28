@@ -73,6 +73,22 @@ class PracticeSolution(BaseModel):
     approach: str
     answer: str
     worked: Optional[str] = None
+class DiagramContent(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    svg_content: Optional[str] = None
+    image_url: Optional[str] = None
+    caption: str
+    zoom_label: Optional[str] = None
+    alt_text: str
+    callouts: Optional[list[DiagramCallout]] = None
+    figure_number: Optional[float] = None
+class DiagramCallout(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    id: str
+    x: float
+    y: float
+    label: str
+    explanation: str
 class WhatNextContent(BaseModel):
     model_config = ConfigDict(extra='forbid')
     body: str
@@ -134,22 +150,6 @@ class ProcessStepItem(BaseModel):
     input: Optional[str] = None
     output: Optional[str] = None
     warning: Optional[str] = None
-class DiagramContent(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    svg_content: Optional[str] = None
-    image_url: Optional[str] = None
-    caption: str
-    zoom_label: Optional[str] = None
-    alt_text: str
-    callouts: Optional[list[DiagramCallout]] = None
-    figure_number: Optional[float] = None
-class DiagramCallout(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    id: str
-    x: float
-    y: float
-    label: str
-    explanation: str
 class DiagramCompareContent(BaseModel):
     model_config = ConfigDict(extra='forbid')
     before_svg: Optional[str] = None
@@ -277,7 +277,7 @@ class SimulationContent(BaseModel):
     explanation: Optional[str] = None
 class InteractionSpec(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    type: str
+    type: SimulationType
     goal: str
     anchor_content: dict[str, Any]
     context: InteractionContext
@@ -404,6 +404,8 @@ PracticeContent.model_rebuild()
 PracticeProblem.model_rebuild()
 PracticeHint.model_rebuild()
 PracticeSolution.model_rebuild()
+DiagramContent.model_rebuild()
+DiagramCallout.model_rebuild()
 WhatNextContent.model_rebuild()
 PrerequisiteContent.model_rebuild()
 PrerequisiteItem.model_rebuild()
@@ -413,8 +415,6 @@ WorkedExampleContent.model_rebuild()
 WorkedStep.model_rebuild()
 ProcessContent.model_rebuild()
 ProcessStepItem.model_rebuild()
-DiagramContent.model_rebuild()
-DiagramCallout.model_rebuild()
 DiagramCompareContent.model_rebuild()
 DiagramSeriesContent.model_rebuild()
 DiagramSeriesStep.model_rebuild()

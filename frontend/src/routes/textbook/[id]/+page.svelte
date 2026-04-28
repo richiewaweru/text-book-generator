@@ -179,7 +179,7 @@
 			map.set(item.section_id, item.title);
 		}
 		for (const section of nextDocument.sections) {
-			map.set(section.section_id, section.header.title);
+			map.set(section.section_id, section.header?.title ?? section.section_id);
 		}
 		for (const failed of nextDocument.failed_sections) {
 			map.set(failed.section_id, failed.title);
