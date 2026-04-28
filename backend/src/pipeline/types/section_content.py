@@ -352,11 +352,11 @@ class SectionContent(BaseModel):
     model_config = ConfigDict(extra='forbid')
     section_id: str
     template_id: str
-    header: SectionHeaderContent
-    hook: HookHeroContent
-    explanation: ExplanationContent
-    practice: PracticeContent
-    what_next: WhatNextContent
+    header: Optional[SectionHeaderContent] = None
+    hook: Optional[HookHeroContent] = None
+    explanation: Optional[ExplanationContent] = None
+    practice: Optional[PracticeContent] = None
+    what_next: Optional[WhatNextContent] = None
     prerequisites: Optional[PrerequisiteContent] = None
     definition: Optional[DefinitionContent] = None
     definition_family: Optional[DefinitionFamilyContent] = None

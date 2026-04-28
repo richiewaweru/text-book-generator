@@ -5,7 +5,14 @@
 		type TemplateDefinition
 	} from 'lectio';
 	import TemplatePreviewOverlay from '$lib/components/TemplatePreviewOverlay.svelte';
-	import type { GenerationRequest } from '$lib/types';
+
+	type LegacyGenerationRequest = {
+		subject: string;
+		context: string;
+		template_id: string;
+		preset_id: string;
+		section_count?: number;
+	};
 
 	const LIVE_PRESET_ID = 'blue-classroom';
 	const livePresets = basePresets.filter((preset) => preset.id === LIVE_PRESET_ID);
@@ -21,7 +28,7 @@
 	let previewTemplateId = $state<string | null>(null);
 
 	interface Props {
-		onsubmit: (request: GenerationRequest) => void;
+		onsubmit: (request: LegacyGenerationRequest) => void;
 		disabled?: boolean;
 	}
 

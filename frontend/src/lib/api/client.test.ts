@@ -21,9 +21,7 @@ import {
 	buildApiUrl,
 	buildGenerationEventsUrl,
 	downloadGenerationPdf,
-	getGenerationDocument,
-	planBrief,
-	startGeneration
+	getGenerationDocument
 } from './client';
 
 describe('client API helpers', () => {
@@ -51,109 +49,6 @@ describe('client API helpers', () => {
 		const init = fetchMock.mock.calls[0][1] as RequestInit;
 		const headers = new Headers(init.headers);
 		expect(headers.get('Authorization')).toBe('Bearer test-token');
-	});
-
-	it('submits template and preset ids with generation requests', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(
-			new Response(
-				JSON.stringify({
-					generation_id: 'gen-123',
-					status: 'pending',
-					events_url: '/api/v1/generations/gen-123/events',
-					document_url: '/api/v1/generations/gen-123/document'
-				}),
-				{
-					status: 202,
-					headers: { 'Content-Type': 'application/json' }
-				}
-			)
-		);
-		vi.stubGlobal('fetch', fetchMock);
-
-		await startGeneration({
-			subject: 'calculus',
-			context: 'integration practice',
-			mode: 'strict',
-			template_id: 'guided-concept-path',
-			preset_id: 'blue-classroom',
-			section_count: 4,
-			generation_spec: {
-				template_id: 'guided-concept-path',
-				preset_id: 'blue-classroom',
-				mode: 'strict',
-				section_count: 4,
-				sections: [],
-				warning: null,
-				rationale: 'Reviewed plan',
-				source_brief: {
-					intent: 'Teach derivatives',
-					audience: 'Year 10 mixed ability',
-					mode: 'strict',
-					extra_context: 'Use concrete examples.'
-				}
-			}
-		});
-
-		const init = fetchMock.mock.calls[0][1] as RequestInit;
-		expect(init.body).toContain('"template_id":"guided-concept-path"');
-		expect(init.body).toContain('"preset_id":"blue-classroom"');
-		expect(init.body).toContain('"mode":"strict"');
-		expect(init.body).toContain('"generation_spec"');
-	});
-
-	it('submits a structured brief planning request', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(
-			new Response(
-				JSON.stringify({
-					template_id: 'guided-concept-path',
-					preset_id: 'blue-classroom',
-					mode: 'balanced',
-					section_count: 3,
-					sections: [
-						{
-							section_id: 's-01',
-							position: 1,
-							title: 'Start with the problem',
-							focus: 'Frame the concept in a concrete situation.',
-							role: null,
-							required_components: [],
-							optional_components: [],
-							interaction_policy: null,
-							diagram_policy: null,
-							enrichment_enabled: false,
-							continuity_notes: null
-						}
-					],
-					warning: null,
-					rationale: 'This template balances structure and flexibility for first exposure.',
-					source_brief: {
-						intent: 'Teach derivatives',
-						audience: 'Year 10 mixed ability',
-						mode: 'balanced',
-						extra_context: 'Use concrete examples.'
-					}
-				}),
-				{
-					status: 200,
-					headers: { 'Content-Type': 'application/json' }
-				}
-			)
-		);
-		vi.stubGlobal('fetch', fetchMock);
-
-		await planBrief({
-			intent: 'Teach derivatives',
-			audience: 'Year 10 mixed ability',
-			mode: 'balanced',
-			extra_context: 'Use concrete examples.'
-		});
-
-		const init = fetchMock.mock.calls[0][1] as RequestInit;
-		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/brief');
-		expect(init.body).toContain('"intent":"Teach derivatives"');
-		expect(init.body).toContain('"audience":"Year 10 mixed ability"');
-		expect(init.body).toContain('"mode":"balanced"');
-		expect(init.body).toContain('"extra_context":"Use concrete examples."');
 	});
 
 	it('loads the structured document endpoint', async () => {

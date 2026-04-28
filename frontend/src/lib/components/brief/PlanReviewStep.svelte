@@ -34,14 +34,32 @@
 	function labelForComponent(component: string): string {
 		return COMPONENT_LABELS[component] ?? component.replaceAll('-', ' ');
 	}
+
+	function conflictingVisualTargets(): string[] {
+		return plan.sections.flatMap((section) => {
+			const seen = new Set<string>();
+			const conflicts = new Set<string>();
+			for (const placement of section.visual_placements ?? []) {
+				const key = `${placement.block}`;
+				if (seen.has(key)) {
+					conflicts.add(`Section ${section.order} has conflicting visual placements for ${placement.block}.`);
+				}
+				seen.add(key);
+			}
+			return [...conflicts];
+		});
+	}
+
+	const visualConflicts = $derived(conflictingVisualTargets());
 </script>
 
 <section class="review-shell">
 	<header class="review-header">
 		<div>
 			<p class="eyebrow">Plan Review</p>
-			<h2>{plan.source_brief.subtopic}</h2>
+			<h2>{plan.source_brief.subtopics.join(', ')}</h2>
 			<p class="lede">{plan.lesson_rationale}</p>
+			<p class="contract-copy">This is the exact plan that will be generated. The pipeline will not add extra components after this step.</p>
 		</div>
 		<div class="meta">
 			<span>{plan.source_brief.resource_type.replaceAll('_', ' ')}</span>
@@ -51,6 +69,14 @@
 
 	{#if plan.warning}
 		<p class="warning" role="status">{plan.warning}</p>
+	{/if}
+
+	{#if visualConflicts.length > 0}
+		<div class="warning" role="alert">
+			{#each visualConflicts as conflict}
+				<p>{conflict}</p>
+			{/each}
+		</div>
 	{/if}
 
 	<div class="section-grid">
@@ -67,13 +93,20 @@
 						<span class="chip">{labelForComponent(component)}</span>
 					{/each}
 				</div>
+				{#if section.visual_placements?.length}
+					<div class="placement-list">
+						{#each section.visual_placements as placement}
+							<span class="chip">Visual: {placement.block} / {placement.slot_type}</span>
+						{/each}
+					</div>
+				{/if}
 			</article>
 		{/each}
 	</div>
 
 	<div class="actions">
 		<button type="button" class="secondary" onclick={onBack} disabled={loading}>Back</button>
-		<button type="button" class="primary" onclick={onCommit} disabled={loading}>
+		<button type="button" class="primary" onclick={onCommit} disabled={loading || visualConflicts.length > 0}>
 			{loading ? 'Starting generation...' : 'Generate'}
 		</button>
 	</div>
@@ -116,8 +149,16 @@
 		line-height: 1.6;
 	}
 
+	.contract-copy {
+		margin-top: 0.65rem;
+		max-width: 62ch;
+		color: #4f5c65;
+		line-height: 1.55;
+	}
+
 	.meta,
-	.chip-row {
+	.chip-row,
+	.placement-list {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;

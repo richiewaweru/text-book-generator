@@ -124,8 +124,8 @@ class GenerationPlannerTraceSection(BaseModel):
 
 
 class GenerationPlannerTrace(BaseModel):
-    path: Literal["fresh", "seeded_enrichment"]
-    result: Literal["planned", "enriched", "fallback"]
+    path: Literal["fresh", "seeded_enrichment", "seeded_passthrough"]
+    result: Literal["planned", "enriched", "fallback", "seeded_passthrough"]
     duplicate_term_warnings: list[str] = Field(default_factory=list)
     sections: list[GenerationPlannerTraceSection] = Field(default_factory=list)
 

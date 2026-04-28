@@ -10,6 +10,9 @@ import type {
 } from './studio';
 import type {
 	BriefBuilderStep,
+	BriefReviewRequest,
+	BriefReviewResult,
+	BriefReviewWarning,
 	BriefValidationMessage,
 	BriefValidationRequest,
 	BriefValidationResult,
@@ -84,13 +87,6 @@ export interface TeacherProfileUpsertRequest {
 	delivery_preferences: TeacherDeliveryPreferences;
 }
 
-export interface BriefRequest {
-	intent: string;
-	audience: string;
-	extra_context: string;
-	mode?: GenerationMode;
-}
-
 export interface OutlineSection {
 	section_id: string;
 	position: number;
@@ -106,29 +102,6 @@ export interface SectionPlan extends OutlineSection {
 	diagram_policy: string | null;
 	enrichment_enabled: boolean;
 	continuity_notes: string | null;
-}
-
-export interface GenerationSpec {
-	template_id: string;
-	preset_id: string;
-	mode: GenerationMode;
-	section_count: number;
-	sections: SectionPlan[];
-	warning: string | null;
-	rationale: string;
-	source_brief: BriefRequest;
-}
-
-export type BriefResponse = GenerationSpec;
-
-export interface GenerationRequest {
-	subject: string;
-	context: string;
-	mode?: GenerationMode;
-	template_id: string;
-	preset_id: string;
-	section_count?: number;
-	generation_spec?: GenerationSpec | null;
 }
 
 export interface GenerationAccepted {
@@ -184,7 +157,7 @@ export interface GenerationDetail {
 	created_at: string | null;
 	completed_at: string | null;
 	document_path: string | null;
-	planning_spec: GenerationSpec | PlanningGenerationSpec | null;
+	planning_spec: PlanningGenerationSpec | null;
 }
 
 export interface PipelineSectionManifestItem {
@@ -580,6 +553,9 @@ export type GenerationStreamEvent =
 
 export type {
 	BriefBuilderStep,
+	BriefReviewRequest,
+	BriefReviewResult,
+	BriefReviewWarning,
 	BriefValidationMessage,
 	BriefValidationRequest,
 	BriefValidationResult,

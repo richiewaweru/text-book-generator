@@ -30,7 +30,7 @@ from pipeline.api import (
     PipelinePartialSectionEntry,
     PipelineSectionManifestItem,
 )
-from pipeline.contracts import get_contract, validate_preset_for_template
+from pipeline.contracts import get_contract
 from pipeline.events import (
     CompleteEvent,
     ErrorEvent,
@@ -225,10 +225,9 @@ def _generation_urls(generation_id: str) -> tuple[str, str, str]:
 def _pipeline_section_from_planning(
     section: PlanningSectionPlan,
     *,
-    always_present: list[str],
     generation_mode: GenerationMode,
 ) -> SectionPlan:
-    selected = list(dict.fromkeys([*always_present, *section.selected_components]))
+    selected = list(dict.fromkeys(section.selected_components))
     bridges_from = None
     bridges_to = None
     needs_diagram = needs_diagram_from_placements(section)
@@ -293,12 +292,9 @@ def _pipeline_section_from_planning(
 
 
 def _pipeline_sections_from_planning_spec(spec: PlanningGenerationSpec) -> list[SectionPlan]:
-    contract = get_contract(spec.template_id)
-    always_present = contract.always_present or contract.required_components
     sections = [
         _pipeline_section_from_planning(
             section,
-            always_present=always_present,
             generation_mode=spec.mode,
         )
         for section in spec.sections
@@ -346,7 +342,7 @@ def _context_from_planning_spec(
     lines = [
         f"Subject: {brief.subject}",
         f"Topic: {brief.topic}",
-        f"Subtopic: {brief.subtopic}",
+        f"Subtopics: {', '.join(brief.subtopics)}",
         f"Audience: {brief.learner_context}",
         f"Intended outcome: {brief.intended_outcome}",
         f"Resource type: {brief.resource_type}",
@@ -389,14 +385,14 @@ def _effective_generation_payload(
 
     return (
         (
-            req.subject or spec.source_brief.subtopic
+            req.subject or spec.source_brief.subtopics[0]
             if isinstance(spec, PlanningGenerationSpec)
             else req.subject or spec.source_brief.intent
         ),
         (
             _context_from_planning_spec(
                 spec,
-                subject=req.subject or spec.source_brief.subtopic,
+                subject=req.subject or spec.source_brief.subtopics[0],
             )
             if isinstance(spec, PlanningGenerationSpec)
             else _context_from_generation_spec(
@@ -1474,7 +1470,7 @@ def _validate_template_and_preset(template_id: str, preset_id: str) -> None:
         get_contract(template_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not validate_preset_for_template(template_id, preset_id):
+    if not (template_id == "guided-concept-path" and preset_id == "blue-classroom"):
         raise HTTPException(
             status_code=400,
             detail=f"Preset '{preset_id}' is not allowed for template '{template_id}'",

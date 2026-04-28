@@ -45,9 +45,9 @@ def _suggestion(field: str, suggestion: str) -> ValidationSuggestion:
     return ValidationSuggestion(field=field, suggestion=suggestion)
 
 
-def _subtopic_is_too_broad(brief: TeacherBrief) -> bool:
-    normalized_subtopic = _normalize_text(brief.subtopic)
-    normalized_topic = _normalize_text(brief.topic)
+def _subtopic_is_too_broad(subtopic: str, *, topic: str) -> bool:
+    normalized_subtopic = _normalize_text(subtopic)
+    normalized_topic = _normalize_text(topic)
     if normalized_subtopic == normalized_topic:
         return True
     if len(normalized_subtopic.split()) < 2:
@@ -82,17 +82,20 @@ def validate_brief(brief: TeacherBrief, template: ResourceTemplate) -> BriefVali
             )
         )
 
-    if _subtopic_is_too_broad(brief):
+    broad_subtopics = [
+        subtopic for subtopic in brief.subtopics if _subtopic_is_too_broad(subtopic, topic=brief.topic)
+    ]
+    if broad_subtopics:
         blockers.append(
             _message(
-                field="subtopic",
-                message="Pick a narrower subtopic before generation. The current focus is still too broad.",
+                field="subtopics",
+                message="Pick narrower subtopics before generation. At least one selected focus is still too broad.",
             )
         )
         suggestions.append(
             _suggestion(
-                "subtopic",
-                "Make the subtopic specific enough to teach in one resource, such as one skill, comparison, or question.",
+                "subtopics",
+                "Make each subtopic specific enough to teach in one resource, such as one skill, comparison, or question.",
             )
         )
 

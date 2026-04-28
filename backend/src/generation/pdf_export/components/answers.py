@@ -7,6 +7,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
+from pipeline.section_content_helpers import practice_problems, section_title
 from pipeline.types.section_content import SectionContent
 
 
@@ -21,26 +22,26 @@ class AnswerEntry:
 def extract_answer_entries(sections: list[SectionContent]) -> list[AnswerEntry]:
     entries: list[AnswerEntry] = []
     for section in sections:
-        section_title = section.header.title
+        title = section_title(section)
 
         if section.quiz is not None:
             for option in section.quiz.options:
                 if option.correct:
                     entries.append(
                         AnswerEntry(
-                            section_title=section_title,
+                            section_title=title,
                             prompt=section.quiz.question,
                             answer=option.text,
                             explanation=option.explanation,
                         )
                     )
 
-        for index, problem in enumerate(section.practice.problems, start=1):
+        for index, problem in enumerate(practice_problems(section), start=1):
             if problem.solution is None:
                 continue
             entries.append(
                 AnswerEntry(
-                    section_title=section_title,
+                    section_title=title,
                     prompt=f"Practice {index}: {problem.question}",
                     answer=problem.solution.answer,
                     explanation=problem.solution.approach,
@@ -50,7 +51,7 @@ def extract_answer_entries(sections: list[SectionContent]) -> list[AnswerEntry]:
         if section.worked_example is not None and section.worked_example.answer:
             entries.append(
                 AnswerEntry(
-                    section_title=section_title,
+                    section_title=title,
                     prompt=section.worked_example.title,
                     answer=section.worked_example.answer,
                     explanation=section.worked_example.conclusion,

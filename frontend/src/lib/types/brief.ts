@@ -28,7 +28,7 @@ export type TeacherBriefDepth = 'quick' | 'standard' | 'deep';
 export interface TeacherBrief {
 	subject: string;
 	topic: string;
-	subtopic: string;
+	subtopics: string[];
 	learner_context: string;
 	intended_outcome: TeacherBriefOutcome;
 	resource_type: TeacherBriefResourceType;
@@ -76,6 +76,20 @@ export interface BriefValidationResult {
 
 export interface BriefValidationRequest {
 	brief: TeacherBrief;
+}
+
+export interface BriefReviewRequest {
+	brief: TeacherBrief;
+}
+
+export interface BriefReviewWarning {
+	message: string;
+	suggestion?: string | null;
+}
+
+export interface BriefReviewResult {
+	coherent: boolean;
+	warnings: BriefReviewWarning[];
 }
 
 export type BriefBuilderStep =

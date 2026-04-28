@@ -3,25 +3,29 @@
 
 	interface Props {
 		options: TopicResolutionSubtopic[];
+		selected: string[];
 		customValue: string;
 		clarificationMessage?: string | null;
-		onSelect: (value: string) => void;
+		onToggle: (value: string) => void;
 		onCustomChange: (value: string) => void;
-		onUseCustom: () => void;
+		onAddCustom: () => void;
+		onContinue: () => void;
 	}
 
 	let {
 		options,
+		selected,
 		customValue,
 		clarificationMessage = null,
-		onSelect,
+		onToggle,
 		onCustomChange,
-		onUseCustom
+		onAddCustom,
+		onContinue
 	}: Props = $props();
 </script>
 
 <div class="subtopics">
-	<p class="helper">Choose the exact focus for this resource.</p>
+	<p class="helper">Choose 1 to 4 subtopics for this resource. The plan will consolidate them if the depth budget is tight.</p>
 
 	{#if clarificationMessage}
 		<p class="clarification">{clarificationMessage}</p>
@@ -29,7 +33,13 @@
 
 	<div class="grid">
 		{#each options as option}
-			<button type="button" class="option-card" onclick={() => onSelect(option.title)}>
+			<button
+				type="button"
+				class:selected={selected.includes(option.title)}
+				class="option-card"
+				aria-pressed={selected.includes(option.title)}
+				onclick={() => onToggle(option.title)}
+			>
 				<strong>{option.title}</strong>
 				<span>{option.description}</span>
 				{#if option.likely_grade_band}
@@ -41,7 +51,7 @@
 
 	<div class="custom">
 		<label class="field">
-			<span>Or type your own subtopic</span>
+			<span>Or add your own subtopic</span>
 			<input
 				type="text"
 				value={customValue}
@@ -49,9 +59,14 @@
 				oninput={(event) => onCustomChange((event.currentTarget as HTMLInputElement).value)}
 			/>
 		</label>
-		<button type="button" class="secondary" onclick={onUseCustom} disabled={!customValue.trim()}>
-			Use custom subtopic
-		</button>
+		<div class="actions">
+			<button type="button" class="secondary" onclick={onAddCustom} disabled={!customValue.trim() || selected.length >= 4}>
+				Add custom subtopic
+			</button>
+			<button type="button" class="primary" onclick={onContinue} disabled={selected.length === 0}>
+				Continue
+			</button>
+		</div>
 	</div>
 </div>
 
@@ -90,6 +105,12 @@
 		cursor: pointer;
 	}
 
+	.option-card.selected {
+		border-color: rgba(29, 158, 117, 0.28);
+		background: #eaf7f2;
+		color: #085041;
+	}
+
 	.option-card span,
 	.option-card small {
 		color: #655c52;
@@ -109,18 +130,34 @@
 		background: #fffdf9;
 	}
 
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+	}
+
+	.primary,
 	.secondary {
 		justify-self: start;
 		border: 0;
 		border-radius: 999px;
-		background: #2f4858;
-		color: white;
 		padding: 0.75rem 1rem;
 		font-weight: 700;
 		cursor: pointer;
 	}
 
-	.secondary:disabled {
+	.primary {
+		background: #1d9e75;
+		color: white;
+	}
+
+	.secondary {
+		background: #2f4858;
+		color: white;
+	}
+
+	.secondary:disabled,
+	.primary:disabled {
 		opacity: 0.55;
 		cursor: default;
 	}

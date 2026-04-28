@@ -58,14 +58,14 @@ function buildDetail(overrides: Record<string, unknown> = {}) {
 		created_at: '2026-03-23T00:00:00Z',
 		completed_at: null,
 		document_path: 'memory://gen-123',
-		planning_spec: {
-			id: 'plan-1',
-			template_id: 'guided-concept-path',
-			preset_id: 'blue-classroom',
-			template_decision: {
-				chosen_id: 'guided-concept-path',
-				chosen_name: 'Guided Concept Path',
-				rationale: 'Best fit.',
+			planning_spec: {
+				id: 'plan-1',
+				template_id: 'guided-concept-path',
+				preset_id: 'blue-classroom',
+				template_decision: {
+					chosen_id: 'worksheet',
+					chosen_name: 'Worksheet',
+					rationale: 'Best fit.',
 				fit_score: 0.92,
 				alternatives: []
 			},
@@ -110,7 +110,7 @@ function buildDetail(overrides: Record<string, unknown> = {}) {
 			source_brief: {
 				subject: 'Math',
 				topic: 'Fractions',
-				subtopic: 'Understanding halves and quarters',
+				subtopics: ['Understanding halves and quarters'],
 				learner_context: 'Year 5',
 				intended_outcome: 'understand',
 				resource_type: 'worksheet',
@@ -329,6 +329,8 @@ describe('GenerationView', () => {
 		);
 		expect(screen.getByText(/4 sections \/ 2 media \/ 4 qc/i)).toBeTruthy();
 		expect(screen.getByText(/390s/i)).toBeTruthy();
+		expect(screen.getByText(/render shell/i)).toBeTruthy();
+		expect(screen.getByText(/repairs/i)).toBeTruthy();
 
 		emitEvent('section_started', {
 			type: 'section_started',

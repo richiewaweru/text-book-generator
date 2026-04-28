@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
-	import { commitPlan, planFromBrief, resolveTopic, validateTeacherBrief } from '$lib/api/teacher-brief';
+	import {
+		commitPlan,
+		planFromBrief,
+		resolveTopic,
+		reviewTeacherBrief,
+		validateTeacherBrief
+	} from '$lib/api/teacher-brief';
 	import { getProfile } from '$lib/api/profile';
 	import {
 		briefSteps,
@@ -14,6 +20,7 @@
 	import { resetGenerationState, setGenerationAccepted } from '$lib/stores/studio';
 	import type {
 		BriefBuilderStep,
+		BriefReviewWarning,
 		BriefValidationResult,
 		BuilderWarning,
 		GenerationAccepted,
@@ -40,6 +47,7 @@
 	let active_step = $state<BriefBuilderStep>('topic');
 	let completed_steps = $state<BriefBuilderStep[]>([]);
 	let brief = $state<Partial<TeacherBrief>>({
+		subtopics: [],
 		supports: [],
 		depth: 'standard',
 		teacher_notes: ''
@@ -48,6 +56,7 @@
 	let warnings = $state<BuilderWarning[]>([]);
 	let loading = $state(false);
 	let validationResult = $state<BriefValidationResult | null>(null);
+	let reviewWarnings = $state<BriefReviewWarning[]>([]);
 	let rawTopic = $state('');
 	let customSubtopic = $state('');
 	let learnerText = $state('');
@@ -63,7 +72,7 @@
 		Boolean(
 			brief.subject &&
 				brief.topic &&
-				brief.subtopic &&
+				brief.subtopics?.length &&
 				brief.learner_context &&
 				brief.intended_outcome &&
 				brief.resource_type &&
@@ -82,6 +91,7 @@
 	function clearValidation() {
 		validationResult = null;
 		warnings = [];
+		reviewWarnings = [];
 		apiError = null;
 	}
 
@@ -147,7 +157,7 @@
 			...brief,
 			subject: '',
 			topic: '',
-			subtopic: '',
+			subtopics: [],
 			supports: []
 		};
 		suggestions = {};
@@ -189,7 +199,7 @@
 				...brief,
 				subject: result.subject,
 				topic: result.topic,
-				subtopic: '',
+				subtopics: [],
 				supports: []
 			};
 			suggestions = { subtopics: result.candidate_subtopics };
@@ -205,19 +215,30 @@
 		}
 	}
 
-	function handleSubtopicChoice(value: string) {
+	function handleSubtopicToggle(value: string) {
+		const current = brief.subtopics ?? [];
+		const selected = current.includes(value)
+			? current.filter((item) => item !== value)
+			: current.length < 4
+				? [...current, value]
+				: current;
 		brief = {
 			...brief,
-			subtopic: value
+			subtopics: selected
 		};
-		customSubtopic = value;
-		resetSupportSelections();
-		moveToStep('choose_subtopic', nextStepAfterSubtopic());
+		clearValidation();
 	}
 
-	function handleUseCustomSubtopic() {
+	function handleAddCustomSubtopic() {
 		if (!customSubtopic.trim()) return;
-		handleSubtopicChoice(customSubtopic.trim());
+		handleSubtopicToggle(customSubtopic.trim());
+		customSubtopic = '';
+	}
+
+	function continueSubtopics() {
+		if (!(brief.subtopics?.length)) return;
+		resetSupportSelections();
+		moveToStep('choose_subtopic', nextStepAfterSubtopic());
 	}
 
 	function toggleLearnerChip(chip: string) {
@@ -300,6 +321,12 @@
 					severity: 'warning' as const
 				}))
 			];
+			if (result.is_ready) {
+				const review = await reviewTeacherBrief({
+					brief: brief as TeacherBrief
+				});
+				reviewWarnings = review.warnings;
+			}
 			markStepCompleted('review');
 		} catch (error) {
 			apiError = error instanceof Error ? error.message : 'Brief validation failed.';
@@ -369,10 +396,10 @@
 			<div>
 				<p class="eyebrow">Studio</p>
 				<h1>Teacher brief builder</h1>
-				<p class="lede">
-					Capture the teaching intent first, narrow the topic, choose the resource shape, then
-					validate the brief before generation.
-				</p>
+			<p class="lede">
+				Capture the teaching intent first, narrow the topic, choose the resource shape, then
+				review the brief, approve the frozen plan, and generate only the selected components.
+			</p>
 			</div>
 			<a href="/dashboard" class="dashboard-link">Back to dashboard</a>
 		</header>
@@ -382,7 +409,7 @@
 		{/if}
 
 		{#if stage === 'planning'}
-			<p class="notice notice-info" role="status">Planning the reviewed resource structure...</p>
+			<p class="notice notice-info" role="status">Building a component plan from your brief...</p>
 		{/if}
 
 		<div class="builder-stack">
@@ -414,11 +441,13 @@
 				>
 					<SubtopicChoiceStep
 						options={suggestions.subtopics ?? []}
+						selected={brief.subtopics ?? []}
 						customValue={customSubtopic}
 						clarificationMessage={topicStatusMessage}
-						onSelect={handleSubtopicChoice}
+						onToggle={handleSubtopicToggle}
 						onCustomChange={(value) => (customSubtopic = value)}
-						onUseCustom={handleUseCustomSubtopic}
+						onAddCustom={handleAddCustomSubtopic}
+						onContinue={continueSubtopics}
 					/>
 				</BriefStepCard>
 			{/if}
@@ -517,6 +546,7 @@
 						learnerSummary={learnerSummary}
 						validationResult={validationResult}
 						warnings={warnings}
+						reviewWarnings={reviewWarnings}
 						validating={loading && active_step === 'review'}
 						onValidate={handleValidate}
 						onNotesInput={(value) => {

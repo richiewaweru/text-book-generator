@@ -258,8 +258,8 @@ export function stepSummary(
 	switch (step) {
 		case 'topic':
 		case 'choose_subtopic':
-			if (brief.subject && brief.topic && brief.subtopic) {
-				return `${brief.subject} -> ${brief.topic} -> ${brief.subtopic}`;
+			if (brief.subject && brief.topic && brief.subtopics?.length) {
+				return `${brief.subject} -> ${brief.topic} -> ${brief.subtopics.join(', ')}`;
 			}
 			if (brief.subject && brief.topic) {
 				return `${brief.subject} -> ${brief.topic}`;

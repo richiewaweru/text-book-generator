@@ -13,6 +13,7 @@ from planning.role_maps import (
     ROLE_COMPONENT_MAP,
     VISUAL_COMPONENTS,
 )
+from pipeline.contracts import get_section_field_for_component
 from pipeline.resources import ResourceTemplate
 from pipeline.types.requests import count_visual_placements
 from pipeline.types.teacher_brief import TeacherBrief
@@ -140,8 +141,26 @@ def validate_plan(
             )
 
         allowed_components = set(ROLE_COMPONENT_MAP.get(section.role, ()))
+        hallucinated_components = [
+            component
+            for component in section.selected_components
+            if get_section_field_for_component(component) is None
+        ]
+        if hallucinated_components:
+            issues.append(
+                _issue(
+                    "selected_components",
+                    (
+                        f"Section {section.order} selects unknown components: "
+                        f"{', '.join(hallucinated_components)}."
+                    ),
+                )
+            )
+
         invalid_components = [
-            component for component in section.selected_components if component not in allowed_components
+            component
+            for component in section.selected_components
+            if component not in allowed_components and component not in hallucinated_components
         ]
         if invalid_components:
             issues.append(

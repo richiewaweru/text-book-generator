@@ -10,7 +10,7 @@ def build_brief(**overrides) -> TeacherBrief:
     payload = {
         "subject": "Math",
         "topic": "Algebra",
-        "subtopic": "Solving two-step equations",
+        "subtopics": ["Solving two-step equations"],
         "learner_context": "Grade 7 students, mixed levels",
         "intended_outcome": "practice",
         "resource_type": "worksheet",
@@ -56,12 +56,12 @@ def test_quick_explainer_rejects_practice_outcome() -> None:
 
 
 def test_validator_blocks_broad_subtopic() -> None:
-    brief = build_brief(subtopic="Algebra")
+    brief = build_brief(subtopics=["Algebra"])
 
     result = validate_brief(brief, get_resource_template(brief.resource_type))
 
     assert result.is_ready is False
-    assert any(message.field == "subtopic" for message in result.blockers)
+    assert any(message.field == "subtopics" for message in result.blockers)
 
 
 def test_validator_warns_about_worked_examples_in_exit_tickets() -> None:
@@ -81,14 +81,14 @@ def test_teacher_brief_trims_and_dedupes_values() -> None:
     brief = build_brief(
         subject=" Math ",
         topic=" Algebra ",
-        subtopic=" Solving two-step equations ",
+        subtopics=[" Solving two-step equations "],
         learner_context=" Grade 7 mixed ability ",
         supports=["worked_examples", "worked_examples", "visuals"],
     )
 
     assert brief.subject == "Math"
     assert brief.topic == "Algebra"
-    assert brief.subtopic == "Solving two-step equations"
+    assert brief.subtopics == ["Solving two-step equations"]
     assert brief.learner_context == "Grade 7 mixed ability"
     assert brief.teacher_notes == "Keep the examples short."
     assert brief.supports == ["worked_examples", "visuals"]

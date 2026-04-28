@@ -11,6 +11,12 @@ from pipeline.media.types import (
     VisualRender,
     VisualSlot,
 )
+from pipeline.section_content_helpers import (
+    explanation_body,
+    explanation_emphasis,
+    practice_problems,
+    section_title,
+)
 from pipeline.state import StyleContext
 from pipeline.types.requests import BlockVisualPlacement, SectionPlan
 from pipeline.types.section_content import SectionContent, WorkedExampleContent
@@ -57,16 +63,6 @@ _VISUAL_CONCRETE_HINTS = (
 )
 
 
-def _all_contract_components(contract: TemplateContractSummary) -> set[str]:
-    return (
-        set(getattr(contract, "required_components", []) or [])
-        | set(getattr(contract, "optional_components", []) or [])
-        | set(getattr(contract, "always_present", []) or [])
-        | set(getattr(contract, "available_components", []) or [])
-        | set(getattr(contract, "contextually_present", []) or [])
-    )
-
-
 def _slot_id(
     slot_type: SlotType,
     *,
@@ -86,9 +82,11 @@ def _visual_policy(plan: SectionPlan):
     return getattr(plan, "visual_policy", None)
 
 def _simulation_allowed(plan: SectionPlan, contract: TemplateContractSummary) -> bool:
+    _ = contract
     if plan.interaction_policy == "disabled":
         return False
-    return "simulation-block" in _all_contract_components(contract)
+    selected = set(plan.required_components) | set(plan.optional_components)
+    return "simulation-block" in selected
 
 
 def _preferred_render_for_slot(
@@ -130,7 +128,7 @@ def _key_concepts(section: SectionContent) -> list[str]:
     concepts: list[str] = []
     if section.definition is not None:
         concepts.append(section.definition.term)
-    concepts.extend(section.explanation.emphasis[:3])
+    concepts.extend(explanation_emphasis(section)[:3])
     if section.process is not None:
         concepts.extend(step.action for step in section.process.steps[:3])
     return [concept for concept in concepts if concept]
@@ -155,19 +153,19 @@ def _base_avoid_list(preferred_render: VisualRender) -> list[str]:
 def _single_caption(section: SectionContent, plan: SectionPlan) -> str:
     if section.diagram is not None:
         return section.diagram.caption
-    return f"Visual explanation for {section.header.title}."
+    return f"Visual explanation for {section_title(section, fallback=plan.title)}."
 
 
 def _series_caption(section: SectionContent) -> str:
     if section.diagram_series is not None and section.diagram_series.diagrams:
         return section.diagram_series.diagrams[0].caption
-    return f"Step-by-step sequence for {section.header.title}."
+    return f"Step-by-step sequence for {section_title(section)}."
 
 
 def _compare_caption(section: SectionContent) -> str:
     if section.diagram_compare is not None:
         return section.diagram_compare.caption
-    return f"Before and after comparison for {section.header.title}."
+    return f"Before and after comparison for {section_title(section)}."
 
 
 def _series_labels(section: SectionContent, concepts: list[str]) -> list[str]:
@@ -177,7 +175,7 @@ def _series_labels(section: SectionContent, concepts: list[str]) -> list[str]:
         return [step.action for step in section.process.steps[:4]]
     if concepts:
         return concepts[:4]
-    return [section.header.title, "Key step 2", "Key step 3"]
+    return [section_title(section), "Key step 2", "Key step 3"]
 
 
 def _dedupe_casefold(values: list[str]) -> list[str]:
@@ -215,7 +213,8 @@ def _frame_output_placeholders(preferred_render: VisualRender, slot_type: SlotTy
 
 
 def _simulation_print_translation(plan: SectionPlan, contract: TemplateContractSummary) -> str:
-    if "diagram-block" in _all_contract_components(contract):
+    selected = set(plan.required_components) | set(plan.optional_components)
+    if "diagram-block" in selected:
         return "static_diagram"
     return "hide"
 
@@ -247,16 +246,17 @@ def _extract_explanation_brief(section: SectionContent) -> str | None:
         definition_bits.append(section.definition.term)
         definition_bits.append(section.definition.plain)
     return _normalise_brief(
-        section.explanation.body,
-        "Key ideas: " + ", ".join(section.explanation.emphasis[:3]) if section.explanation.emphasis else None,
+        explanation_body(section),
+        "Key ideas: " + ", ".join(explanation_emphasis(section)[:3]) if explanation_emphasis(section) else None,
         "Definition context: " + " ".join(definition_bits) if definition_bits else None,
     )
 
 
 def _practice_problem_text(section: SectionContent, problem_index: int) -> tuple[str | None, str | None, str | None]:
-    if problem_index < 0 or problem_index >= len(section.practice.problems):
+    problems = practice_problems(section)
+    if problem_index < 0 or problem_index >= len(problems):
         return None, None, None
-    problem = section.practice.problems[problem_index]
+    problem = problems[problem_index]
     first_hint = problem.hints[0].text if problem.hints else None
     return problem.context, problem.question, first_hint
 
@@ -294,7 +294,7 @@ def _resolve_practice_problem_indices(
     placement: BlockVisualPlacement,
     section: SectionContent,
 ) -> list[int]:
-    problems = section.practice.problems
+    problems = practice_problems(section)
     if placement.problem_indices is not None:
         seen: set[int] = set()
         ordered: list[int] = []
@@ -330,14 +330,14 @@ def _placement_caption(
 ) -> str:
     if placement.block == "practice":
         label = f"practice problem {problem_index + 1}" if problem_index is not None else "practice problem"
-        return placement.hint.strip() or f"Supporting diagram for {label} in {section.header.title}."
+        return placement.hint.strip() or f"Supporting diagram for {label} in {section_title(section)}."
     if placement.block == "worked_example":
-        return placement.hint.strip() or f"Supporting diagram for the worked example in {section.header.title}."
+        return placement.hint.strip() or f"Supporting diagram for the worked example in {section_title(section)}."
     if placement.slot_type == "diagram_series":
         return _series_caption(section)
     if placement.slot_type == "diagram_compare":
         return _compare_caption(section)
-    return placement.hint.strip() or f"Supporting diagram for {section.header.title}."
+    return placement.hint.strip() or f"Supporting diagram for {section_title(section)}."
 
 
 def _build_single_slot(
@@ -357,11 +357,12 @@ def _build_single_slot(
     must_include = [label] if block_target in {"practice", "worked_example"} and label else concepts[:4]
     tw, th = _target_dimensions(slot_type, 1, sizing=sizing)
     slot_id = _slot_id(slot_type, block_target=block_target, problem_index=problem_index)
+    title = section_title(section, fallback=plan.title)
     frame = VisualFrame(
         slot_id=slot_id,
         index=0,
-        label=label or section.header.title,
-        generation_goal=content_brief or f"Show the core idea of {section.header.title} clearly for learners.",
+        label=label or title,
+        generation_goal=content_brief or f"Show the core idea of {title} clearly for learners.",
         must_include=must_include,
         avoid=_base_avoid_list(preferred_render),
         output_placeholders=_frame_output_placeholders(preferred_render, slot_type),
@@ -399,12 +400,13 @@ def _build_series_slot(
     frame_count = len(labels)
     tw, th = _target_dimensions(SlotType.DIAGRAM_SERIES, frame_count, sizing=sizing)
     slot_id = _slot_id(SlotType.DIAGRAM_SERIES, block_target=block_target)
+    title = section_title(section, fallback=plan.title)
     frames = [
         VisualFrame(
             slot_id=slot_id,
             index=index,
             label=label,
-            generation_goal=f"Show sequence step {index + 1} for {section.header.title}: {label}.",
+            generation_goal=f"Show sequence step {index + 1} for {title}: {label}.",
             must_include=[label] + ([concepts[index]] if index < len(concepts) else []),
             avoid=_base_avoid_list(preferred_render),
             output_placeholders=_frame_output_placeholders(preferred_render, SlotType.DIAGRAM_SERIES),
@@ -426,7 +428,7 @@ def _build_series_slot(
         caption=_series_caption(section),
         reference_style=_reference_style(SlotType.DIAGRAM_SERIES),
         frames=frames,
-        series_context=section.header.title,
+        series_context=title,
     )
 
 
@@ -442,12 +444,13 @@ def _build_compare_slot(
     before_label, after_label = _compare_labels(section)
     tw, th = _target_dimensions(SlotType.DIAGRAM_COMPARE, 2, sizing=sizing)
     slot_id = _slot_id(SlotType.DIAGRAM_COMPARE, block_target=block_target)
+    title = section_title(section, fallback=plan.title)
     frames = [
         VisualFrame(
             slot_id=slot_id,
             index=0,
             label=before_label,
-            generation_goal=f"Render the before state for {section.header.title}.",
+            generation_goal=f"Render the before state for {title}.",
             must_include=[before_label],
             avoid=_base_avoid_list(preferred_render),
             output_placeholders=_frame_output_placeholders(preferred_render, SlotType.DIAGRAM_COMPARE),
@@ -458,7 +461,7 @@ def _build_compare_slot(
             slot_id=slot_id,
             index=1,
             label=after_label,
-            generation_goal=f"Render the after state for {section.header.title}.",
+            generation_goal=f"Render the after state for {title}.",
             must_include=[after_label],
             avoid=_base_avoid_list(preferred_render),
             output_placeholders=_frame_output_placeholders(preferred_render, SlotType.DIAGRAM_COMPARE),
@@ -486,11 +489,12 @@ def _build_simulation_slot(section: SectionContent, plan: SectionPlan) -> Visual
     visual_policy = _visual_policy(plan)
     preferred_render = _preferred_render_for_slot(plan, SlotType.SIMULATION)
     simulation_intent = getattr(visual_policy, "simulation_intent", None) or plan.practice_target
+    title = section_title(section, fallback=plan.title)
     frame = VisualFrame(
         slot_id=_slot_id(SlotType.SIMULATION),
         index=0,
-        label=section.header.title,
-        generation_goal=f"Represent an interactive view for {section.header.title}.",
+        label=title,
+        generation_goal=f"Represent an interactive view for {title}.",
         must_include=_key_concepts(section)[:4],
         avoid=["unexplained controls"],
         output_placeholders=_frame_output_placeholders(preferred_render, SlotType.SIMULATION),
@@ -502,7 +506,7 @@ def _build_simulation_slot(section: SectionContent, plan: SectionPlan) -> Visual
         preferred_render=preferred_render,
         fallback_render=_fallback_render_for_slot(SlotType.SIMULATION, preferred_render),
         pedagogical_intent=_pedagogical_intent(plan),
-        caption=f"Interactive exploration for {section.header.title}.",
+        caption=f"Interactive exploration for {title}.",
         reference_style=_reference_style(SlotType.SIMULATION),
         frames=[frame],
         simulation_intent=simulation_intent,

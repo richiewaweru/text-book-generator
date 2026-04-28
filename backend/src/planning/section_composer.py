@@ -58,31 +58,33 @@ def _generation_notes(role: PlanningSectionRole) -> SectionGenerationNotes | Non
 
 
 def _section_objective(role: PlanningSectionRole, brief: TeacherBrief) -> str:
+    joined_subtopics = ", ".join(brief.subtopics)
     objectives = {
-        "intro": f"Open the {brief.subtopic} resource clearly and make the learning target obvious.",
-        "explain": f"Explain the core idea in {brief.subtopic} using accessible language.",
-        "practice": f"Let the learner use {brief.subtopic} independently or with light support.",
-        "summary": f"Close the resource by checking the main takeaway from {brief.subtopic}.",
-        "process": f"Break {brief.subtopic} into repeatable steps.",
-        "compare": f"Keep the important differences inside {brief.subtopic} visible.",
-        "timeline": f"Show the sequence or chronology inside {brief.subtopic}.",
-        "visual": f"Use a visual anchor to support understanding of {brief.subtopic}.",
-        "discover": f"Guide learners to notice the pattern inside {brief.subtopic}.",
+        "intro": f"Open the {joined_subtopics} resource clearly and make the learning target obvious.",
+        "explain": f"Explain the core idea in {joined_subtopics} using accessible language.",
+        "practice": f"Let the learner use {joined_subtopics} independently or with light support.",
+        "summary": f"Close the resource by checking the main takeaway from {joined_subtopics}.",
+        "process": f"Break {joined_subtopics} into repeatable steps.",
+        "compare": f"Keep the important differences inside {joined_subtopics} visible.",
+        "timeline": f"Show the sequence or chronology inside {joined_subtopics}.",
+        "visual": f"Use a visual anchor to support understanding of {joined_subtopics}.",
+        "discover": f"Guide learners to notice the pattern inside {joined_subtopics}.",
     }
     return objectives[role]
 
 
 def _fallback_title(role: PlanningSectionRole, brief: TeacherBrief, order: int) -> str:
+    first_subtopic = brief.subtopics[0]
     titles = {
-        "intro": f"Getting Started with {brief.subtopic}",
-        "explain": f"Understanding {brief.subtopic}",
-        "practice": f"Try {brief.subtopic}",
-        "summary": f"Check {brief.subtopic}",
-        "process": f"Steps for {brief.subtopic}",
-        "compare": f"Compare {brief.subtopic}",
-        "timeline": f"Sequence of {brief.subtopic}",
-        "visual": f"See {brief.subtopic}",
-        "discover": f"Explore {brief.subtopic}",
+        "intro": f"Getting Started with {first_subtopic}",
+        "explain": f"Understanding {first_subtopic}",
+        "practice": f"Try {first_subtopic}",
+        "summary": f"Check {first_subtopic}",
+        "process": f"Steps for {first_subtopic}",
+        "compare": f"Compare {first_subtopic}",
+        "timeline": f"Sequence of {first_subtopic}",
+        "visual": f"See {first_subtopic}",
+        "discover": f"Explore {first_subtopic}",
     }
     return titles.get(role, f"Section {order}")
 
@@ -112,7 +114,7 @@ def build_deterministic_composition(
         sections=sections,
         lesson_rationale=(
             f"This {template.label.lower()} follows the selected {brief.resource_type} shape and "
-            f"keeps the focus on {brief.subtopic}."
+            f"keeps the focus on {', '.join(brief.subtopics)}."
         ),
         warning=None,
     )
@@ -128,6 +130,10 @@ def _system_prompt() -> str:
             "Keep section count within the stated depth limits.",
             "Titles must be clear and student-facing.",
             "Every section must include at least one selected component.",
+            "Each section should explain one focused idea.",
+            "Do not create thin sections that cannot stand alone.",
+            "Depth controls the section budget: quick=2-3, standard=3-5, deep=5-7.",
+            "If multiple subtopics do not fit cleanly, consolidate related ones and explain that in warning.",
         ]
     )
 
@@ -151,7 +157,7 @@ def _user_prompt(
     parts = [
         f"Subject: {brief.subject}",
         f"Topic: {brief.topic}",
-        f"Subtopic: {brief.subtopic}",
+        f"Subtopics: {', '.join(brief.subtopics)}",
         f"Learner context: {brief.learner_context}",
         f"Intended outcome: {brief.intended_outcome}",
         f"Resource type: {brief.resource_type}",

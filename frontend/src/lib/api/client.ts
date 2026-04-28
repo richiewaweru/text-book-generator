@@ -1,11 +1,7 @@
 import type {
-	BriefRequest,
-	BriefResponse,
-	GenerationAccepted,
 	GenerationDetail,
 	GenerationDocument,
 	GenerationHistoryItem,
-	GenerationRequest,
 	PDFExportRequest
 } from '$lib/types';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
@@ -28,26 +24,6 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 		headers.set('Authorization', `Bearer ${token}`);
 	}
 	return fetch(buildApiUrl(path), { ...init, headers });
-}
-
-export async function startGeneration(request: GenerationRequest): Promise<GenerationAccepted> {
-	const response = await apiFetch('/api/v1/generations', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(request)
-	});
-	await ensureOk(response, 'Generation failed.');
-	return response.json();
-}
-
-export async function planBrief(request: BriefRequest): Promise<BriefResponse> {
-	const response = await apiFetch('/api/v1/brief', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(request)
-	});
-	await ensureOk(response, 'Brief planning failed.');
-	return response.json();
 }
 
 export async function getGenerations(limit = 20, offset = 0): Promise<GenerationHistoryItem[]> {

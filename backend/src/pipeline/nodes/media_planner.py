@@ -7,6 +7,7 @@ from pipeline.media.prompts.intelligent_image_prompt import (
 )
 from pipeline.media.planner.media_planner import media_planner as build_media_plan
 from pipeline.media.types import SlotType, VisualRender
+from pipeline.section_content_helpers import section_title
 from pipeline.state import TextbookPipelineState
 
 
@@ -90,7 +91,7 @@ async def media_planner(
     await _resolve_static_slot_prompts(
         typed,
         sid=sid,
-        section_title=section.header.title,
+        section_title=section_title(section, fallback=typed.current_section_plan.title),
         plan=plan,
         model_overrides=model_overrides,
     )

@@ -3,10 +3,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { commitPlan, planFromBrief, resolveTopic, validateTeacherBrief } = vi.hoisted(() => ({
+const { commitPlan, planFromBrief, resolveTopic, reviewTeacherBrief, validateTeacherBrief } = vi.hoisted(() => ({
 	commitPlan: vi.fn(),
 	planFromBrief: vi.fn(),
 	resolveTopic: vi.fn(),
+	reviewTeacherBrief: vi.fn(),
 	validateTeacherBrief: vi.fn()
 }));
 
@@ -18,6 +19,7 @@ vi.mock('$lib/api/teacher-brief', () => ({
 	commitPlan,
 	planFromBrief,
 	resolveTopic,
+	reviewTeacherBrief,
 	validateTeacherBrief
 }));
 
@@ -32,6 +34,7 @@ describe('TeacherBriefBuilder', () => {
 		commitPlan.mockReset();
 		planFromBrief.mockReset();
 		resolveTopic.mockReset();
+		reviewTeacherBrief.mockReset();
 		validateTeacherBrief.mockReset();
 		getProfile.mockResolvedValue({
 			id: 'profile-1',
@@ -81,9 +84,9 @@ describe('TeacherBriefBuilder', () => {
 		});
 		validateTeacherBrief.mockResolvedValue({
 			is_ready: false,
-			blockers: [{ field: 'subtopic', message: 'Pick a narrower subtopic before generation.' }],
+			blockers: [{ field: 'subtopics', message: 'Pick narrower subtopics before generation.' }],
 			warnings: [{ field: 'supports', message: 'Too many supports may crowd a quick resource.' }],
-			suggestions: [{ field: 'subtopic', suggestion: 'Tighten the subtopic to one teachable skill.' }]
+			suggestions: [{ field: 'subtopics', suggestion: 'Tighten each subtopic to one teachable skill.' }]
 		});
 
 		render(TeacherBriefBuilder);
@@ -97,6 +100,7 @@ describe('TeacherBriefBuilder', () => {
 			expect(screen.getByRole('button', { name: /solving two-step equations/i })).toBeTruthy()
 		);
 		await fireEvent.click(screen.getByRole('button', { name: /solving two-step equations/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /practice a skill/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /worksheet/i }));
 
@@ -118,8 +122,8 @@ describe('TeacherBriefBuilder', () => {
 		await waitFor(() =>
 			expect(screen.getByText(/needs edits before generation/i)).toBeTruthy()
 		);
-		expect(screen.getByText(/Pick a narrower subtopic before generation/i)).toBeTruthy();
-		expect(screen.getByText(/Tighten the subtopic to one teachable skill/i)).toBeTruthy();
+		expect(screen.getByText(/Pick narrower subtopics before generation/i)).toBeTruthy();
+		expect(screen.getByText(/Tighten each subtopic to one teachable skill/i)).toBeTruthy();
 	}, 10000);
 
 	it('resets the narrowed path when the topic changes', async () => {
@@ -164,6 +168,7 @@ describe('TeacherBriefBuilder', () => {
 			expect(screen.getByRole('button', { name: /solving two-step equations/i })).toBeTruthy()
 		);
 		await fireEvent.click(screen.getByRole('button', { name: /solving two-step equations/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
 		await waitFor(() =>
 			expect(screen.getAllByText(/Math -> Algebra -> Solving two-step equations/i)).toHaveLength(2)
@@ -202,6 +207,10 @@ describe('TeacherBriefBuilder', () => {
 			blockers: [],
 			warnings: [],
 			suggestions: []
+		});
+		reviewTeacherBrief.mockResolvedValue({
+			coherent: true,
+			warnings: []
 		});
 		planFromBrief.mockResolvedValue({
 			id: 'plan-1',
@@ -244,7 +253,7 @@ describe('TeacherBriefBuilder', () => {
 			source_brief: {
 				subject: 'Math',
 				topic: 'Algebra',
-				subtopic: 'Solving two-step equations',
+				subtopics: ['Solving two-step equations'],
 				learner_context: 'Grade 7 mixed-ability class. Some learners struggle with word problems',
 				intended_outcome: 'practice',
 				resource_type: 'worksheet',
@@ -265,6 +274,7 @@ describe('TeacherBriefBuilder', () => {
 			expect(screen.getByRole('button', { name: /solving two-step equations/i })).toBeTruthy()
 		);
 		await fireEvent.click(screen.getByRole('button', { name: /solving two-step equations/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /practice a skill/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /worksheet/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));

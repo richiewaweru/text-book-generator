@@ -551,20 +551,14 @@ async def curriculum_planner(
 
     if state.request.section_plans:
         outline = _outline_from_request(state)
-        outline, planner_result = await _enrich_seeded_outline(
-            state,
-            outline,
-            model=model,
-            retry_policy=retry_policy,
-        )
-        outline = _route_visual_placements(state, outline)
+        planner_result = "seeded_passthrough"
         duplicate_term_warnings = _warn_duplicate_terms(
             outline,
             state.request.generation_id or "",
         )
         _publish_curriculum_planned(
             state.request.generation_id or "",
-            path="seeded_enrichment",
+            path="seeded_passthrough",
             result=planner_result,
             sections=outline,
             duplicate_term_warnings=duplicate_term_warnings,

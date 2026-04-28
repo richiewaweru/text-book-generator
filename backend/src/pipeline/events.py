@@ -45,8 +45,8 @@ class SectionStartedEvent(BaseModel):
 class CurriculumPlannedEvent(BaseModel):
     type: Literal["curriculum_planned"] = "curriculum_planned"
     generation_id: str
-    path: Literal["fresh", "seeded_enrichment"]
-    result: Literal["planned", "enriched", "fallback"]
+    path: Literal["fresh", "seeded_enrichment", "seeded_passthrough"]
+    result: Literal["planned", "enriched", "fallback", "seeded_passthrough"]
     duplicate_term_warnings: list[str] = Field(default_factory=list)
     runtime_curriculum_outline: list[GenerationReportOutlineSection] = Field(
         default_factory=list

@@ -107,6 +107,13 @@ def _plan(sid: str = "s-01", position: int = 1) -> SectionPlan:
         title=f"Test Section {sid}",
         position=position,
         focus="Test focus",
+        required_components=[
+            "section-header",
+            "hook-hero",
+            "explanation-block",
+            "practice-stack",
+            "what-next-bridge",
+        ],
     )
 
 
@@ -170,6 +177,16 @@ def _base_state(**overrides) -> TextbookPipelineState:
         style_context=_style_context(),
     )
     defaults.update(overrides)
+    if defaults.get("current_section_plan") is None and defaults.get("current_section_id") is not None:
+        current_section_id = defaults["current_section_id"]
+        defaults["current_section_plan"] = next(
+            (
+                plan
+                for plan in defaults.get("curriculum_outline", [])
+                if getattr(plan, "section_id", None) == current_section_id
+            ),
+            _plan(current_section_id),
+        )
     return TextbookPipelineState(**defaults)
 
 

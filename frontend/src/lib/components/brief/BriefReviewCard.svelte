@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { depthOptions, outcomeOptions, resourceTypeOptions, supportOptions } from '$lib/brief/config';
 	import type {
+		BriefReviewWarning,
 		BriefValidationResult,
 		BuilderWarning,
 		TeacherBrief
@@ -11,6 +12,7 @@
 		learnerSummary: string;
 		validationResult: BriefValidationResult | null;
 		warnings: BuilderWarning[];
+		reviewWarnings: BriefReviewWarning[];
 		validating?: boolean;
 		onValidate: () => void;
 		onNotesInput: (value: string) => void;
@@ -21,6 +23,7 @@
 		learnerSummary,
 		validationResult,
 		warnings,
+		reviewWarnings,
 		validating = false,
 		onValidate,
 		onNotesInput
@@ -38,8 +41,8 @@
 			<strong>{brief.topic ?? 'Not set'}</strong>
 		</div>
 		<div>
-			<span>Subtopic</span>
-			<strong>{brief.subtopic ?? 'Not set'}</strong>
+			<span>Subtopics</span>
+			<strong>{brief.subtopics?.length ? brief.subtopics.join(', ') : 'Not set'}</strong>
 		</div>
 		<div>
 			<span>Learners</span>
@@ -91,7 +94,7 @@
 
 	{#if validationResult}
 		<div class:ready={validationResult.is_ready} class="validation-card">
-			<strong>{validationResult.is_ready ? 'Ready for generation' : 'Needs edits before generation'}</strong>
+		<strong>{validationResult.is_ready ? 'Ready for plan build' : 'Needs edits before generation'}</strong>
 		</div>
 	{/if}
 
@@ -101,6 +104,20 @@
 				<div class:blocking={warning.severity === 'blocking'} class="alert">
 					<strong>{warning.severity === 'blocking' ? 'Blocker' : 'Warning'}</strong>
 					<p>{warning.message}</p>
+				</div>
+			{/each}
+		</div>
+	{/if}
+
+	{#if reviewWarnings.length > 0}
+		<div class="alerts">
+			{#each reviewWarnings as warning}
+				<div class="alert">
+					<strong>Pedagogical review</strong>
+					<p>{warning.message}</p>
+					{#if warning.suggestion}
+						<p>{warning.suggestion}</p>
+					{/if}
 				</div>
 			{/each}
 		</div>

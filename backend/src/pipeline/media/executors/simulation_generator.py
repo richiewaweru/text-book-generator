@@ -24,6 +24,7 @@ from pipeline.media.runtime_events import (
 )
 from pipeline.media.types import SlotType, VisualFrameResult, VisualFrameResultStatus
 from pipeline.providers.registry import get_node_text_model
+from pipeline.section_content_helpers import explanation_body, hook_headline, section_title
 from pipeline.state import PipelineError, TextbookPipelineState
 from pipeline.types.section_content import (
     InteractionContext,
@@ -86,8 +87,8 @@ def build_interaction_spec(
         type=simulation_type or slot.simulation_type or "graph_slider",
         goal=simulation_goal or slot.simulation_goal or slot.simulation_intent or slot.pedagogical_intent,
         anchor_content={
-            "headline": section.hook.headline,
-            "body": section.explanation.body[:280],
+            "headline": hook_headline(section),
+            "body": explanation_body(section)[:280],
             "anchor_block": slot.anchor_block or "explanation",
         },
         context=InteractionContext(
@@ -171,7 +172,7 @@ async def _generate_simulation_markup(
             section_id=state.current_section_id,
             generation_mode=state.request.mode,
             user_prompt=build_simulation_prompt(
-                section_title=section.header.title,
+                section_title=section_title(section, fallback=getattr(state.current_section_plan, "title", None)),
                 slot=slot,
                 frame=frame,
             ),
@@ -203,7 +204,7 @@ async def _generate_simulation_markup(
         simulation_goal=parsed.goal,
     )
     explanation = parsed.explanation or (
-        f"Interactive view for {section.header.title}. "
+        f"Interactive view for {section_title(section, fallback=getattr(state.current_section_plan, 'title', None))}. "
         f"Use it to explore {spec.goal.lower()} step by step."
     )
     return spec, parsed.html_content, explanation
@@ -269,15 +270,6 @@ async def simulation_generator(
     generation_id = typed.request.generation_id or ""
 
     if sid is None or section is None:
-        return {"completed_nodes": ["interaction_generator"]}
-
-    has_contract_slot = "simulation-block" in (
-        set(typed.contract.required_components)
-        | set(typed.contract.optional_components)
-        | set(getattr(typed.contract, "contextually_present", []) or [])
-    )
-    if not has_contract_slot:
-        _publish_interaction_outcome(generation_id, sid, "skipped", skip_reason="no_slot")
         return {"completed_nodes": ["interaction_generator"]}
 
     media_plan = typed.media_plans.get(sid)

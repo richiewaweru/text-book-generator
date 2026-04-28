@@ -27,7 +27,7 @@ from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_report_repository import GenerationReportRepository
 from generation.ports.generation_repository import GenerationRepository
 from generation.service import enqueue_generation
-from pipeline.contracts import get_contract, validate_preset_for_template
+from pipeline.contracts import validate_preset_for_template as _legacy_validate_preset_for_template
 from pipeline.resources import get_resource_template, validate_brief
 from pipeline.types.requests import (
     GenerationMode,
@@ -37,6 +37,9 @@ from pipeline.types.requests import (
     needs_diagram_from_placements,
 )
 from pipeline.types.teacher_brief import (
+    BriefReviewRequest,
+    BriefReviewResult,
+    BriefReviewWarning,
     BriefValidationRequest,
     BriefValidationResult,
     TeacherBrief,
@@ -45,6 +48,7 @@ from pipeline.types.teacher_brief import (
 )
 from planning import PlanningService
 from planning.llm_config import (
+    PLANNING_BRIEF_REVIEW_CALLER,
     PLANNING_SECTION_COMPOSER_CALLER,
     PLANNING_TOPIC_RESOLUTION_CALLER,
     get_planning_slot,
@@ -92,6 +96,37 @@ def _topic_resolution_user_prompt(payload: TopicResolutionRequest) -> str:
     )
 
 
+def _brief_review_system_prompt() -> str:
+    return "\n".join(
+        [
+            "You review a structured teacher brief for pedagogical coherence.",
+            "Return valid JSON only.",
+            "Warnings are advisory, never blocking.",
+            "Look for tensions between subtopic count, depth, supports, resource type, intended outcome, and teacher notes.",
+            "Keep warnings concise and practical.",
+        ]
+    )
+
+
+def _brief_review_user_prompt(brief: TeacherBrief) -> str:
+    return "\n".join(
+        [
+            f"Subject: {brief.subject}",
+            f"Topic: {brief.topic}",
+            f"Subtopics: {', '.join(brief.subtopics)}",
+            f"Learner context: {brief.learner_context}",
+            f"Intended outcome: {brief.intended_outcome}",
+            f"Resource type: {brief.resource_type}",
+            f"Supports: {', '.join(brief.supports) if brief.supports else 'none'}",
+            f"Depth: {brief.depth}",
+            f"Teacher notes: {brief.teacher_notes or 'none'}",
+            "Return:",
+            "- coherent: boolean",
+            "- warnings: [{ message, suggestion }]",
+        ]
+    )
+
+
 async def _resolve_topic_with_llm(payload: TopicResolutionRequest) -> TopicResolutionResult:
     trace_id = uuid.uuid4().hex
     spec = get_planning_spec(PLANNING_TOPIC_RESOLUTION_CALLER)
@@ -118,6 +153,32 @@ async def _resolve_topic_with_llm(payload: TopicResolutionRequest) -> TopicResol
     return output
 
 
+async def _review_brief_with_llm(brief: TeacherBrief) -> BriefReviewResult:
+    trace_id = uuid.uuid4().hex
+    spec = get_planning_spec(PLANNING_BRIEF_REVIEW_CALLER)
+    slot = get_planning_slot(PLANNING_BRIEF_REVIEW_CALLER)
+    model = build_model(spec)
+    agent = Agent(
+        model=model,
+        output_type=BriefReviewResult,
+        system_prompt=_brief_review_system_prompt(),
+    )
+    result = await run_llm(
+        caller=PLANNING_BRIEF_REVIEW_CALLER,
+        trace_id=trace_id,
+        generation_id=trace_id,
+        agent=agent,
+        model=model,
+        user_prompt=_brief_review_user_prompt(brief),
+        slot=slot,
+        spec=spec,
+    )
+    output = result.output
+    if output is None:
+        raise RuntimeError("Brief review returned no structured output.")
+    return output
+
+
 async def _load_profile(
     user: User,
     profile_repo: StudentProfileRepository,
@@ -128,10 +189,9 @@ async def _load_profile(
 def _pipeline_section_from_planning(
     section: PlanningSectionPlan,
     *,
-    always_present: list[str],
     generation_mode: GenerationMode,
 ) -> SectionPlan:
-    selected = list(dict.fromkeys([*always_present, *section.selected_components]))
+    selected = list(dict.fromkeys(section.selected_components))
     needs_diagram = needs_diagram_from_placements(section)
     needs_worked_example = any(component == "worked-example-card" for component in selected)
     interaction_required = any(component == "simulation-block" for component in selected)
@@ -190,12 +250,9 @@ def _pipeline_section_from_planning(
 
 
 def _pipeline_sections_from_planning_spec(spec: PlanningGenerationSpec) -> list[SectionPlan]:
-    contract = get_contract(spec.template_id)
-    always_present = contract.always_present or contract.required_components
     sections = [
         _pipeline_section_from_planning(
             section,
-            always_present=always_present,
             generation_mode=spec.mode,
         )
         for section in spec.sections
@@ -213,7 +270,7 @@ def _context_from_planning_spec(spec: PlanningGenerationSpec) -> str:
     lines = [
         f"Subject: {brief.subject}",
         f"Topic: {brief.topic}",
-        f"Subtopic: {brief.subtopic}",
+        f"Subtopics: {', '.join(brief.subtopics)}",
         f"Audience: {brief.learner_context}",
         f"Intended outcome: {brief.intended_outcome}",
         f"Resource type: {brief.resource_type}",
@@ -236,6 +293,15 @@ def _context_from_planning_spec(spec: PlanningGenerationSpec) -> str:
         lines.append(f"Planning warning: {spec.warning}")
 
     return "\n".join(lines)
+
+
+def validate_render_shell(template_id: str, preset_id: str) -> bool:
+    return template_id == "guided-concept-path" and preset_id == "blue-classroom"
+
+
+def validate_preset_for_template(template_id: str, preset_id: str) -> bool:
+    _ = _legacy_validate_preset_for_template
+    return validate_render_shell(template_id, preset_id)
 
 
 @router.post("/brief/resolve-topic", response_model=TopicResolutionResult)
@@ -277,6 +343,38 @@ async def validate_teacher_brief(
     _ = current_user
     template = get_resource_template(payload.brief.resource_type)
     return validate_brief(payload.brief, template)
+
+
+@router.post("/brief/review", response_model=BriefReviewResult)
+async def review_teacher_brief(
+    payload: BriefReviewRequest,
+    current_user: User = Depends(get_current_user),
+) -> BriefReviewResult:
+    _ = current_user
+    try:
+        review = await _review_brief_with_llm(payload.brief)
+    except Exception:
+        logger.exception("TeacherBrief pedagogical review failed")
+        warnings: list[BriefReviewWarning] = []
+        if len(payload.brief.subtopics) >= 3 and payload.brief.depth == "quick":
+            warnings.append(
+                BriefReviewWarning(
+                    message="Several subtopics with quick depth will likely force very shallow coverage.",
+                    suggestion="Use standard depth or reduce the selected subtopics.",
+                )
+            )
+        if payload.brief.resource_type in {"quiz", "exit_ticket"} and any(
+            support in payload.brief.supports for support in {"worked_examples", "step_by_step"}
+        ):
+            warnings.append(
+                BriefReviewWarning(
+                    message="Scaffold-heavy supports can make this resource feel more like teaching than checking.",
+                    suggestion="Switch resource type or remove the extra scaffolds.",
+                )
+            )
+        return BriefReviewResult(coherent=len(warnings) == 0, warnings=warnings)
+
+    return review
 
 
 @router.post("/brief/plan", response_model=PlanningGenerationSpec)
@@ -349,7 +447,7 @@ async def commit_brief(
         gen_repo=gen_repo,
         document_repo=document_repo,
         report_repo=report_repo,
-        subject=committed.source_brief.subtopic,
+        subject=committed.source_brief.subtopics[0],
         context=_context_from_planning_spec(committed),
         mode=committed.mode,
         template_id=committed.template_id,

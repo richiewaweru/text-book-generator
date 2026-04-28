@@ -15,7 +15,7 @@ vi.mock('$lib/stores/auth', () => ({
 	}
 }));
 
-import { commitPlan, planFromBrief } from './teacher-brief';
+import { commitPlan, planFromBrief, reviewTeacherBrief } from './teacher-brief';
 
 describe('teacher brief API helpers', () => {
 	afterEach(() => {
@@ -54,7 +54,7 @@ describe('teacher brief API helpers', () => {
 					source_brief: {
 						subject: 'Math',
 						topic: 'Algebra',
-						subtopic: 'Solving two-step equations',
+						subtopics: ['Solving two-step equations'],
 						learner_context: 'Grade 7 mixed ability',
 						intended_outcome: 'practice',
 						resource_type: 'worksheet',
@@ -72,7 +72,7 @@ describe('teacher brief API helpers', () => {
 		await planFromBrief({
 			subject: 'Math',
 			topic: 'Algebra',
-			subtopic: 'Solving two-step equations',
+			subtopics: ['Solving two-step equations'],
 			learner_context: 'Grade 7 mixed ability',
 			intended_outcome: 'practice',
 			resource_type: 'worksheet',
@@ -83,6 +83,35 @@ describe('teacher brief API helpers', () => {
 
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/brief/plan');
 		expect((fetchMock.mock.calls[0][1] as RequestInit).body).toContain('"resource_type":"worksheet"');
+	});
+
+	it('posts TeacherBriefs to /api/v1/brief/review', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					coherent: false,
+					warnings: [{ message: 'Quick depth may be too shallow.', suggestion: 'Use standard depth.' }]
+				}),
+				{ status: 200, headers: { 'Content-Type': 'application/json' } }
+			)
+		);
+		vi.stubGlobal('fetch', fetchMock);
+
+		await reviewTeacherBrief({
+			brief: {
+				subject: 'Math',
+				topic: 'Algebra',
+				subtopics: ['Solving two-step equations', 'Solving one-step equations'],
+				learner_context: 'Grade 7 mixed ability',
+				intended_outcome: 'practice',
+				resource_type: 'worksheet',
+				supports: ['worked_examples'],
+				depth: 'quick',
+				teacher_notes: ''
+			}
+		});
+
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/brief/review');
 	});
 
 	it('posts reviewed specs to /api/v1/brief/commit', async () => {
@@ -127,7 +156,7 @@ describe('teacher brief API helpers', () => {
 			source_brief: {
 				subject: 'Math',
 				topic: 'Algebra',
-				subtopic: 'Solving two-step equations',
+				subtopics: ['Solving two-step equations'],
 				learner_context: 'Grade 7 mixed ability',
 				intended_outcome: 'practice',
 				resource_type: 'worksheet',

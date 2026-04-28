@@ -14,23 +14,20 @@ from pipeline.prompts.content import (
     _section_plan_policy_block,
     _visual_context_block,
     build_content_user_prompt,
-    build_core_user_prompt,
 )
 from pipeline.prompts.curriculum import (
     build_curriculum_enrichment_system_prompt,
     build_curriculum_system_prompt,
 )
 from pipeline.state import TextbookPipelineState
-from pipeline.types.content_phases import CoreContent, EnrichmentPhaseContent, PracticePhaseContent
 from pipeline.types.requests import BlockVisualPlacement, GenerationMode, PipelineRequest, SectionPlan
 from pipeline.types.section_content import (
     DefinitionContent,
     ExplanationContent,
-    HookHeroContent,
     PracticeContent,
     PracticeHint,
     PracticeProblem,
-    SectionHeaderContent,
+    SectionContent,
     WhatNextContent,
 )
 from pipeline.types.template_contract import GenerationGuidance, TemplateContractSummary
@@ -183,12 +180,10 @@ def test_planning_to_pipeline_adapters_forward_placement_fields() -> None:
 
     planning_route_plan = planning_routes._pipeline_section_from_planning(
         planning_section,
-        always_present=[],
         generation_mode=GenerationMode.BALANCED,
     )
     generation_service_plan = generation_service._pipeline_section_from_planning(
         planning_section,
-        always_present=[],
         generation_mode=GenerationMode.BALANCED,
     )
 
@@ -221,12 +216,10 @@ def test_planning_to_pipeline_adapters_derive_needs_diagram_only_from_placements
 
     planning_route_plan = planning_routes._pipeline_section_from_planning(
         planning_section,
-        always_present=[],
         generation_mode=GenerationMode.BALANCED,
     )
     generation_service_plan = generation_service._pipeline_section_from_planning(
         planning_section,
-        always_present=[],
         generation_mode=GenerationMode.BALANCED,
     )
 
@@ -275,7 +268,7 @@ def test_policy_block_reports_visual_placement_count() -> None:
 
 
 def test_visual_context_block_for_core_without_placements_forbids_visual_references() -> None:
-    visual = _visual_context_block(_section_plan(), phase="core")
+    visual = _visual_context_block(_section_plan())
     assert "NO diagram or visual element" in visual
     assert "Do NOT reference" in visual
 
@@ -306,17 +299,7 @@ def test_visual_context_uses_placements_for_core_and_monolithic_prompts(
         learner_fit="general",
         template_id="guided-concept-path",
     )
-    core = build_core_user_prompt(
-        section_plan=plan,
-        subject="Science",
-        context="Photosynthesis",
-        grade_band="secondary",
-        learner_fit="general",
-        template_id="guided-concept-path",
-    )
-
     assert expected in monolithic
-    assert expected in core
 
 
 def test_visual_context_block_targets_only_selected_practice_problems() -> None:
@@ -332,7 +315,7 @@ def test_visual_context_block_targets_only_selected_practice_problems() -> None:
         ]
     )
 
-    visual = _visual_context_block(plan, phase="practice")
+    visual = _visual_context_block(plan)
 
     assert "problems 1 and 3" in visual
     assert "Only those specific problems may say 'the diagram'" in visual
@@ -345,7 +328,7 @@ def test_visual_context_block_forbids_practice_references_when_section_diagram_i
         ]
     )
 
-    visual = _visual_context_block(plan, phase="practice")
+    visual = _visual_context_block(plan)
 
     assert "appears elsewhere in the section" in visual
     assert "Describe every scenario in words" in visual
@@ -363,14 +346,14 @@ def test_visual_context_block_allows_only_worked_example_visual_references_in_en
         ]
     )
 
-    visual = _visual_context_block(plan, phase="enrichment")
+    visual = _visual_context_block(plan)
 
     assert "worked example may include its own compact diagram" in visual
-    assert "All other enrichment content must avoid visual references." in visual
+    assert "All other content must avoid visual references." in visual
 
 
 @pytest.mark.asyncio
-async def test_curriculum_planner_enriches_seeded_outline_and_routes_visual_placements(monkeypatch) -> None:
+async def test_curriculum_planner_seeded_outline_passes_through_without_rerouting(monkeypatch) -> None:
     outline = [
         _section_plan(
             section_id="s-01",
@@ -378,6 +361,7 @@ async def test_curriculum_planner_enriches_seeded_outline_and_routes_visual_plac
             position=1,
             role="intro",
             required_components=["diagram-block"],
+            visual_placements=[],
         ),
         _section_plan(
             section_id="s-02",
@@ -385,55 +369,32 @@ async def test_curriculum_planner_enriches_seeded_outline_and_routes_visual_plac
             position=2,
             role="process",
             required_components=["diagram-series"],
+            visual_placements=[],
         ),
     ]
     state = _base_state(
         request=_request(section_plans=outline),
         current_section_plan=None,
     )
-
-    async def fake_run_llm(**kwargs):
-        return SimpleNamespace(
-            output=curriculum_planner_mod.CurriculumEnrichmentOutput(
-                sections=[
-                    curriculum_planner_mod.SectionPlanEnrichment(
-                        section_id="s-01",
-                        terms_to_define=["chlorophyll"],
-                        terms_assumed=[],
-                        practice_target="name chlorophyll and what it does",
-                    ),
-                    curriculum_planner_mod.SectionPlanEnrichment(
-                        section_id="s-02",
-                        terms_to_define=[],
-                        terms_assumed=["chlorophyll"],
-                        practice_target="apply chlorophyll knowledge to explain leaf colour",
-                    ),
-                ]
-            )
-        )
-
-    monkeypatch.setattr(curriculum_planner_mod, "Agent", FakeAgent)
-    monkeypatch.setattr(curriculum_planner_mod, "run_llm", fake_run_llm)
-    monkeypatch.setattr(curriculum_planner_mod, "get_node_text_model", lambda *args, **kwargs: "fast-model")
     published_events: list[object] = []
     monkeypatch.setattr(
         curriculum_planner_mod,
         "publish_runtime_event",
         lambda generation_id, event: published_events.append(event),
     )
+    monkeypatch.setattr(curriculum_planner_mod, "get_node_text_model", lambda *args, **kwargs: object())
 
     result = await curriculum_planner_mod.curriculum_planner(state)
 
     enriched = result["curriculum_outline"]
-    assert enriched[0].terms_to_define == ["chlorophyll"]
-    assert enriched[1].terms_assumed == ["chlorophyll"]
-    assert enriched[0].visual_placements[0].slot_type == "diagram"
-    assert enriched[1].visual_placements[0].slot_type == "diagram_series"
-    assert enriched[0].needs_diagram is True
-    assert enriched[1].needs_diagram is True
+    assert enriched[0].visual_placements == []
+    assert enriched[1].visual_placements == []
+    assert enriched[0].required_components == ["diagram-block"]
+    assert enriched[1].required_components == ["diagram-series"]
     planner_event = next(event for event in published_events if event.type == "curriculum_planned")
     assert "visual_commitment" not in planner_event.runtime_curriculum_outline[0].model_dump()
-    assert planner_event.planner_trace_sections[0].visual_placements_count == 1
+    assert planner_event.path == "seeded_passthrough"
+    assert planner_event.planner_trace_sections[0].visual_placements_count == 0
 
 
 @pytest.mark.asyncio
@@ -508,57 +469,34 @@ async def test_phased_content_generator_includes_phase_aware_visual_context_in_p
 
     async def fake_run_llm(**kwargs):
         captured_prompts[kwargs["node"]] = kwargs["user_prompt"]
-        node = kwargs["node"]
-        if node == "content_generator_core":
-            return SimpleNamespace(
-                output=CoreContent(
-                    section_id="s-01",
-                    template_id="guided-concept-path",
-                    header=SectionHeaderContent(
-                        title="Photosynthesis basics",
-                        subject="Science",
-                        grade_band="secondary",
-                    ),
-                    hook=HookHeroContent(
-                        headline="Why leaves matter",
-                        body="Leaves capture light energy.",
-                        anchor="photosynthesis",
-                    ),
-                    explanation=ExplanationContent(
-                        body="Plants use chlorophyll to capture light.",
-                        emphasis=["chlorophyll"],
-                    ),
-                )
+        return SimpleNamespace(
+            output=SectionContent(
+                section_id="s-01",
+                template_id="guided-concept-path",
+                explanation=ExplanationContent(
+                    body="Plants use chlorophyll to capture light.",
+                    emphasis=["chlorophyll"],
+                ),
+                practice=PracticeContent(
+                    problems=[
+                        PracticeProblem(
+                            difficulty="warm",
+                            question="Why would a shaded leaf make less food?",
+                            hints=[PracticeHint(level=1, text="Think about light capture.")],
+                        )
+                    ]
+                ),
+                what_next=WhatNextContent(
+                    body="Next we connect this to plant structure.",
+                    next="Plant structure",
+                ),
+                definition=DefinitionContent(
+                    term="chlorophyll",
+                    formal="A pigment that absorbs light energy in photosynthesis.",
+                    plain="The green substance that helps plants capture light.",
+                ),
             )
-        if node == "content_generator_practice":
-            return SimpleNamespace(
-                output=PracticePhaseContent(
-                    practice=PracticeContent(
-                        problems=[
-                            PracticeProblem(
-                                difficulty="warm",
-                                question="Why would a shaded leaf make less food?",
-                                hints=[PracticeHint(level=1, text="Think about light capture.")],
-                            )
-                        ]
-                    ),
-                    what_next=WhatNextContent(
-                        body="Next we connect this to plant structure.",
-                        next="Plant structure",
-                    ),
-                )
-            )
-        if node == "content_generator_enrichment":
-            return SimpleNamespace(
-                output=EnrichmentPhaseContent(
-                    definition=DefinitionContent(
-                        term="chlorophyll",
-                        formal="A pigment that absorbs light energy in photosynthesis.",
-                        plain="The green substance that helps plants capture light.",
-                    )
-                )
-            )
-        raise AssertionError(f"Unexpected node {node}")
+        )
 
     monkeypatch.setattr(content_generator_mod, "Agent", FakeAgent)
     monkeypatch.setattr(content_generator_mod, "run_llm", fake_run_llm)
@@ -581,8 +519,8 @@ async def test_phased_content_generator_includes_phase_aware_visual_context_in_p
     result = await content_generator_mod.content_generator(state)
 
     assert "content_generator" in result["completed_nodes"]
-    assert "appears elsewhere in the section" in captured_prompts["content_generator_practice"]
-    assert "Describe every scenario in words" in captured_prompts["content_generator_practice"]
+    assert "appears elsewhere in the section" in captured_prompts["content_generator"]
+    assert "Describe every scenario in words" in captured_prompts["content_generator"]
     assert "practice_target: apply chlorophyll knowledge to explain light capture" in captured_prompts[
-        "content_generator_practice"
+        "content_generator"
     ]

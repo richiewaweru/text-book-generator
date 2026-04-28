@@ -276,6 +276,7 @@ def test_media_planner_represents_simulation_separately() -> None:
             position=1,
             focus="Let learners manipulate the idea.",
             interaction_policy="required",
+            required_components=["simulation-block"],
             visual_policy=SectionVisualPolicy(simulation_intent="Explore the changing slope."),
         ),
         section_content=_section(),
@@ -286,6 +287,24 @@ def test_media_planner_represents_simulation_separately() -> None:
     simulation_slot = next(slot for slot in plan.slots if slot.slot_type.value == "simulation")
     assert simulation_slot.preferred_render.value == "html_simulation"
     assert simulation_slot.simulation_intent == "Explore the changing slope."
+
+
+def test_media_planner_does_not_add_simulation_when_not_selected() -> None:
+    plan = media_planner(
+        section_plan=SectionPlan(
+            section_id="s-01",
+            title="Interactive view",
+            position=1,
+            focus="Let learners manipulate the idea.",
+            interaction_policy="required",
+            required_components=[],
+        ),
+        section_content=_section(),
+        template_contract=_contract(optional=["simulation-block"]),
+        style_context=_style_context(),
+    )
+
+    assert [slot.slot_type.value for slot in plan.slots] == []
 
 
 def test_media_planner_builds_compact_practice_slot_from_explicit_problem_indices() -> None:

@@ -115,7 +115,7 @@ def _normalized_topic_terms(brief: TeacherBrief) -> set[str]:
     terms = {
         *brief.subject.lower().split(),
         *brief.topic.lower().split(),
-        *brief.subtopic.lower().split(),
+        *" ".join(brief.subtopics).lower().split(),
     }
     return {term.strip(" ,.;:!?") for term in terms if term}
 
@@ -213,7 +213,7 @@ def _user_prompt(
         [
             f"Subject: {brief.subject}",
             f"Topic: {brief.topic}",
-            f"Subtopic: {brief.subtopic}",
+            f"Subtopics: {', '.join(brief.subtopics)}",
             f"Learner context: {brief.learner_context}",
             f"Supports: {', '.join(brief.supports) if brief.supports else 'none'}",
             f"Resource type: {brief.resource_type}",

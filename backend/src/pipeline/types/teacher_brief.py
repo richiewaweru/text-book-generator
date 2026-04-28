@@ -35,7 +35,7 @@ TeacherBriefDepth = Literal["quick", "standard", "deep"]
 class TeacherBrief(BaseModel):
     subject: str = Field(min_length=1, max_length=120)
     topic: str = Field(min_length=1, max_length=160)
-    subtopic: str = Field(min_length=1, max_length=200)
+    subtopics: list[str] = Field(min_length=1, max_length=4)
     learner_context: str = Field(min_length=1, max_length=1000)
     intended_outcome: TeacherBriefOutcome
     resource_type: TeacherBriefResourceType
@@ -43,12 +43,21 @@ class TeacherBrief(BaseModel):
     depth: TeacherBriefDepth
     teacher_notes: str | None = Field(default=None, max_length=1000)
 
-    @field_validator("subject", "topic", "subtopic", "learner_context", "teacher_notes")
+    @field_validator("subject", "topic", "learner_context", "teacher_notes")
     @classmethod
     def _trim_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         return value.strip()
+
+    @field_validator("subtopics")
+    @classmethod
+    def _normalize_subtopics(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value if item and item.strip()]
+        deduped = list(dict.fromkeys(normalized))
+        if not deduped:
+            raise ValueError("subtopics must include at least one subtopic.")
+        return deduped
 
     @field_validator("supports")
     @classmethod
@@ -59,9 +68,11 @@ class TeacherBrief(BaseModel):
 
     @model_validator(mode="after")
     def _validate_required_text(self) -> "TeacherBrief":
-        for field_name in ("subject", "topic", "subtopic", "learner_context"):
+        for field_name in ("subject", "topic", "learner_context"):
             if not getattr(self, field_name):
                 raise ValueError(f"{field_name} must not be empty.")
+        if not self.subtopics:
+            raise ValueError("subtopics must not be empty.")
         return self
 
 
@@ -137,3 +148,25 @@ class BriefValidationResult(BaseModel):
     blockers: list[ValidationMessage] = Field(default_factory=list)
     warnings: list[ValidationMessage] = Field(default_factory=list)
     suggestions: list[ValidationSuggestion] = Field(default_factory=list)
+
+
+class BriefReviewRequest(BaseModel):
+    brief: TeacherBrief
+
+
+class BriefReviewWarning(BaseModel):
+    message: str = Field(min_length=1, max_length=280)
+    suggestion: str | None = Field(default=None, max_length=280)
+
+    @field_validator("message", "suggestion")
+    @classmethod
+    def _trim_review_warning(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+class BriefReviewResult(BaseModel):
+    coherent: bool
+    warnings: list[BriefReviewWarning] = Field(default_factory=list)

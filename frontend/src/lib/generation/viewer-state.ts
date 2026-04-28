@@ -25,7 +25,8 @@ export type ViewerSectionStatus =
 	| 'partially_ready'
 	| 'blocked_by_required_media'
 	| 'ready'
-	| 'failed';
+	| 'failed'
+	| 'unplanned_output';
 
 export interface ViewerSectionSignal {
 	status: ViewerSectionStatus;
@@ -416,7 +417,7 @@ export function buildSectionSlots(
 				section_id: section.section_id,
 				title: section.header.title,
 				position: manifest.length + index + 1,
-				status: 'ready' as const,
+				status: 'unplanned_output' as const,
 				section,
 				partial: null,
 				failure: null,
@@ -428,7 +429,7 @@ export function buildSectionSlots(
 				section_id: section.section_id,
 				title: section.content.header.title,
 				position: manifest.length + orphanReady.length + index + 1,
-				status: sectionSignals[section.section_id]?.status ?? derivePartialSlotStatus(section),
+				status: 'unplanned_output' as const,
 				section: null,
 				partial: section,
 				failure: null,
@@ -440,7 +441,7 @@ export function buildSectionSlots(
 				section_id: section.section_id,
 				title: section.title,
 				position: manifest.length + orphanReady.length + orphanPartial.length + index + 1,
-				status: 'failed' as const,
+				status: 'unplanned_output' as const,
 				section: null,
 				partial: null,
 				failure: section,

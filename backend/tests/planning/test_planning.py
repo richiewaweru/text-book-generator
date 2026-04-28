@@ -14,7 +14,7 @@ def build_brief(**overrides) -> TeacherBrief:
     payload = {
         "subject": "Math",
         "topic": "Algebra",
-        "subtopic": "Solving two-step equations",
+        "subtopics": ["Solving two-step equations"],
         "learner_context": "Grade 7 mixed levels",
         "intended_outcome": "practice",
         "resource_type": "worksheet",
@@ -116,6 +116,32 @@ def test_validate_plan_rejects_invalid_components() -> None:
     assert any("not allowed for role" in issue.message for issue in result.issues)
 
 
+def test_validate_plan_rejects_hallucinated_components() -> None:
+    brief = build_brief()
+    template = get_resource_template(brief.resource_type)
+    invalid_sections = [
+        PlanningSectionPlan(
+            id="section-1",
+            order=1,
+            role="practice",
+            title="Bad practice",
+            objective="Practice.",
+            selected_components=["vocabulary-matcher"],
+            rationale="Hallucinated component.",
+        )
+    ]
+
+    result = validate_plan(
+        brief=brief,
+        template=template,
+        sections=invalid_sections,
+        roles=["intro", "practice", "summary"],
+    )
+
+    assert result.is_valid is False
+    assert any("unknown components" in issue.message for issue in result.issues)
+
+
 async def test_planning_service_retries_then_preserves_runtime_template_id() -> None:
     brief = build_brief()
     valid_composition = CompositionResult(
@@ -162,7 +188,7 @@ async def test_planning_service_retries_then_preserves_runtime_template_id() -> 
     assert "repair_instructions" in calls[1]
     assert result.template_id == "guided-concept-path"
     assert result.template_decision.chosen_id == brief.resource_type
-    assert result.source_brief.subtopic == brief.subtopic
+    assert result.source_brief.subtopics == brief.subtopics
 
 
 async def test_planning_service_uses_fallback_when_validation_stays_invalid() -> None:

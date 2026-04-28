@@ -42,6 +42,7 @@ def _fallback_sections(
         chosen_roles[-1] = "summary"
 
     sections: list[PlanningSectionPlan] = []
+    first_subtopic = brief.subtopics[0]
     for order, role in enumerate(chosen_roles, start=1):
         sections.append(
             PlanningSectionPlan(
@@ -49,15 +50,15 @@ def _fallback_sections(
                 order=order,
                 role=role,
                 title={
-                    "intro": f"Start {brief.subtopic}",
-                    "explain": f"Understand {brief.subtopic}",
-                    "practice": f"Practice {brief.subtopic}",
-                    "summary": f"Check {brief.subtopic}",
-                    "process": f"Steps in {brief.subtopic}",
-                    "compare": f"Compare {brief.subtopic}",
-                    "timeline": f"Timeline of {brief.subtopic}",
-                    "visual": f"See {brief.subtopic}",
-                    "discover": f"Explore {brief.subtopic}",
+                    "intro": f"Start {first_subtopic}",
+                    "explain": f"Understand {first_subtopic}",
+                    "practice": f"Practice {first_subtopic}",
+                    "summary": f"Check {first_subtopic}",
+                    "process": f"Steps in {first_subtopic}",
+                    "compare": f"Compare {first_subtopic}",
+                    "timeline": f"Timeline of {first_subtopic}",
+                    "visual": f"See {first_subtopic}",
+                    "discover": f"Explore {first_subtopic}",
                 }[role],
                 objective=f"Support the {template.label.lower()} using a safe fallback structure.",
                 selected_components=list(ROLE_COMPONENT_MAP.get(role, ("explanation-block",)))[:2],
@@ -79,7 +80,7 @@ def build_fallback_composition(
     return CompositionResult(
         sections=_fallback_sections(brief=brief, template=template, roles=roles),
         lesson_rationale=(
-            f"This fallback keeps the {template.label.lower()} compact and centered on {brief.subtopic}."
+            f"This fallback keeps the {template.label.lower()} compact and centered on {', '.join(brief.subtopics)}."
         ),
         warning="Planning used a deterministic fallback. Review the structure before generating.",
     )

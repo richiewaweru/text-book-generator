@@ -10,6 +10,8 @@ PLANNING_VISUAL_ROUTER_CALLER = "visual_router"
 PLANNING_VISUAL_ROUTER_SLOT = ModelSlot.STANDARD
 PLANNING_TOPIC_RESOLUTION_CALLER = "topic_resolution"
 PLANNING_TOPIC_RESOLUTION_SLOT = ModelSlot.FAST
+PLANNING_BRIEF_REVIEW_CALLER = "brief_review"
+PLANNING_BRIEF_REVIEW_SLOT = ModelSlot.FAST
 
 PLANNING_MODEL_SPECS: dict[str, tuple[ModelSlot, ModelSpec]] = {
     PLANNING_SECTION_COMPOSER_CALLER: (
@@ -28,6 +30,13 @@ PLANNING_MODEL_SPECS: dict[str, tuple[ModelSlot, ModelSpec]] = {
     ),
     PLANNING_TOPIC_RESOLUTION_CALLER: (
         PLANNING_TOPIC_RESOLUTION_SLOT,
+        ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
+    ),
+    PLANNING_BRIEF_REVIEW_CALLER: (
+        PLANNING_BRIEF_REVIEW_SLOT,
         ModelSpec(
             family=ModelFamily.ANTHROPIC,
             model_name="claude-haiku-4-5-20251001",

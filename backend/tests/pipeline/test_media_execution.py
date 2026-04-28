@@ -122,6 +122,18 @@ def _section() -> SectionContent:
 
 def _base_state(*, media_plan: MediaPlan, contract: TemplateContractSummary | None = None) -> TextbookPipelineState:
     section = _section()
+    slot_types = {slot.slot_type.value for slot in media_plan.slots}
+    required_components = [
+        "section-header",
+        "hook-hero",
+        "explanation-block",
+        "practice-stack",
+        "what-next-bridge",
+    ]
+    if "diagram" in slot_types:
+        required_components.append("diagram-block")
+    if "simulation" in slot_types:
+        required_components.append("simulation-block")
     section_plan = SectionPlan(
         section_id=section.section_id,
         title=section.header.title,
@@ -129,7 +141,7 @@ def _base_state(*, media_plan: MediaPlan, contract: TemplateContractSummary | No
         focus="Make the concept visible.",
         needs_diagram=True,
         interaction_policy="required",
-        required_components=["diagram-block", "simulation-block"],
+        required_components=required_components,
     )
     return TextbookPipelineState(
         request=_request(),
@@ -424,7 +436,13 @@ async def test_section_assembler_writes_compact_practice_diagram_to_target_probl
     state.current_section_plan = state.current_section_plan.model_copy(
         update={
             "needs_diagram": False,
-            "required_components": [],
+            "required_components": [
+                "section-header",
+                "hook-hero",
+                "explanation-block",
+                "practice-stack",
+                "what-next-bridge",
+            ],
             "visual_placements": [
                 BlockVisualPlacement(
                     block="practice",
@@ -485,7 +503,14 @@ async def test_section_assembler_writes_compact_worked_example_diagram() -> None
     state.current_section_plan = state.current_section_plan.model_copy(
         update={
             "needs_diagram": False,
-            "required_components": [],
+            "required_components": [
+                "section-header",
+                "hook-hero",
+                "explanation-block",
+                "practice-stack",
+                "what-next-bridge",
+                "worked-example-card",
+            ],
             "visual_placements": [
                 BlockVisualPlacement(
                     block="worked_example",

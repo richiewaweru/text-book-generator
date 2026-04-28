@@ -13,7 +13,7 @@
 </script>
 
 <div class="supports-step">
-	<p class="helper">Choose any supports you want to keep. Recommended supports are pre-selected.</p>
+	<p class="helper">Supports help the planner choose components before generation. Recommended supports fit this resource shape, but you can still customize them.</p>
 	<div class="chips">
 		{#each supportOptions as option}
 			<button

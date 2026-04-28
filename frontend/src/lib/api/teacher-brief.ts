@@ -1,5 +1,7 @@
 import { ensureOk } from '$lib/api/errors';
 import type {
+	BriefReviewRequest,
+	BriefReviewResult,
 	BriefValidationRequest,
 	BriefValidationResult,
 	GenerationAccepted,
@@ -32,6 +34,18 @@ export async function validateTeacherBrief(
 		body: JSON.stringify(request)
 	});
 	await ensureOk(response, 'Brief validation failed.');
+	return response.json();
+}
+
+export async function reviewTeacherBrief(
+	request: BriefReviewRequest
+): Promise<BriefReviewResult> {
+	const response = await apiFetch('/api/v1/brief/review', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(request)
+	});
+	await ensureOk(response, 'Brief review failed.');
 	return response.json();
 }
 

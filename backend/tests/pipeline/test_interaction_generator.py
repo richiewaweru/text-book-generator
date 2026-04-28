@@ -228,7 +228,7 @@ def _mock_simulation_llm(monkeypatch: pytest.MonkeyPatch, *, output: str) -> Non
     [
         (_state(interaction_policy="disabled", composition=_composition()), "policy_disabled"),
         (_state(interaction_level="low", composition=_composition()), "low_interaction_level"),
-        (_state(with_slot=False, composition=_composition()), "no_slot"),
+        (_state(with_slot=False, composition=_composition()), "no_plan"),
         (_state(composition=None), "no_plan"),
     ],
 )

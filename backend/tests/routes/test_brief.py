@@ -18,7 +18,7 @@ from generation.dependencies import (
 )
 from generation.dtos.generation_request import GenerationAcceptedResponse
 from pipeline.types.requests import SectionPlan
-from pipeline.types.teacher_brief import TeacherBrief, TopicResolutionResult
+from pipeline.types.teacher_brief import BriefReviewResult, TeacherBrief, TopicResolutionResult
 from planning.models import PlanningGenerationSpec
 from planning import routes as brief_routes
 
@@ -109,7 +109,7 @@ def _teacher_brief() -> TeacherBrief:
     return TeacherBrief(
         subject="Science",
         topic="Ecosystems",
-        subtopic="Food webs in river ecosystems",
+        subtopics=["Food webs in river ecosystems"],
         learner_context="Year 9 mixed ability learners",
         intended_outcome="understand",
         resource_type="worksheet",
@@ -190,7 +190,7 @@ class TestBriefApi:
         assert response.status_code == 200
         payload = response.json()
         assert payload["template_id"] == "guided-concept-path"
-        assert payload["source_brief"]["subtopic"] == "Food webs in river ecosystems"
+        assert payload["source_brief"]["subtopics"] == ["Food webs in river ecosystems"]
         assert payload["template_decision"]["chosen_id"] == "worksheet"
 
     async def test_commit_brief_starts_generation_with_teacher_brief_context(self):
@@ -315,7 +315,7 @@ class TestBriefApi:
                     "brief": {
                         "subject": "Math",
                         "topic": "Algebra",
-                        "subtopic": "Algebra",
+                        "subtopics": ["Algebra"],
                         "learner_context": "Grade 7 students, mixed levels",
                         "intended_outcome": "assess",
                         "resource_type": "exit_ticket",
@@ -328,5 +328,34 @@ class TestBriefApi:
         assert response.status_code == 200
         payload = response.json()
         assert payload["is_ready"] is False
-        assert any(message["field"] == "subtopic" for message in payload["blockers"])
+        assert any(message["field"] == "subtopics" for message in payload["blockers"])
         assert any(message["field"] == "depth" for message in payload["warnings"])
+
+    async def test_review_brief_returns_pedagogical_warnings(self):
+        _install_overrides(TEST_PROFILE)
+
+        async def fake_review(brief):
+            _ = brief
+            return BriefReviewResult.model_validate(
+                {
+                    "coherent": False,
+                    "warnings": [
+                        {
+                            "message": "Several subtopics with quick depth will be very shallow.",
+                            "suggestion": "Use standard depth or fewer subtopics.",
+                        }
+                    ],
+                }
+            )
+
+        with patch.object(brief_routes, "_review_brief_with_llm", side_effect=fake_review):
+            async with _client() as client:
+                response = await client.post(
+                    "/api/v1/brief/review",
+                    json={"brief": _teacher_brief().model_dump(mode="json")},
+                )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["coherent"] is False
+        assert payload["warnings"][0]["suggestion"] == "Use standard depth or fewer subtopics."
