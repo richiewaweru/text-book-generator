@@ -5,17 +5,31 @@
 	interface Props {
 		selected?: TeacherGradeLevel;
 		derivedBand?: TeacherGradeBand | null;
+		defaultGradeBandHint?: string | null;
+		statusMessage?: string | null;
+		loading?: boolean;
 		onSelect: (value: TeacherGradeLevel) => void;
 	}
 
-	let { selected, derivedBand = null, onSelect }: Props = $props();
+	let {
+		selected,
+		derivedBand = null,
+		defaultGradeBandHint = null,
+		statusMessage = null,
+		loading = false,
+		onSelect
+	}: Props = $props();
 </script>
 
 <div class="grade-step">
 	<p class="helper">
-		Choose the main grade level for this resource. The planner will derive the grade band from
-		that selection and keep it attached to the generation metadata.
+		Choose the main grade level for this resource. The planner will use this to choose
+		grade-appropriate subtopics.
 	</p>
+
+	{#if defaultGradeBandHint}
+		<p class="hint">Your profile default is {defaultGradeBandHint}. Choose the exact grade for this resource.</p>
+	{/if}
 
 	<div class="grid">
 		{#each gradeLevelOptions as option}
@@ -24,6 +38,7 @@
 				class:selected={selected === option.value}
 				class="option-card"
 				aria-pressed={selected === option.value}
+				disabled={loading}
 				onclick={() => onSelect(option.value)}
 			>
 				<strong>{option.label}</strong>
@@ -34,8 +49,12 @@
 
 	{#if selected && derivedBand}
 		<p class="band-summary" aria-live="polite">
-			Runtime band: <strong>{gradeBandLabel(derivedBand)}</strong>
+			Derived band: <strong>{gradeBandLabel(derivedBand)}</strong>
 		</p>
+	{/if}
+
+	{#if statusMessage}
+		<p class="status" aria-live="polite">{statusMessage}</p>
 	{/if}
 </div>
 
@@ -46,14 +65,25 @@
 	}
 
 	.helper,
-	.band-summary {
+	.hint,
+	.band-summary,
+	.status {
 		margin: 0;
 		color: #655c52;
 		line-height: 1.5;
 	}
 
+	.hint {
+		color: #4f5c65;
+	}
+
 	.band-summary strong {
 		color: #1d1b17;
+	}
+
+	.status {
+		color: #085041;
+		font-weight: 600;
 	}
 
 	.grid {
@@ -77,6 +107,11 @@
 		border-color: rgba(29, 158, 117, 0.28);
 		background: #eaf7f2;
 		color: #085041;
+	}
+
+	.option-card:disabled {
+		opacity: 0.65;
+		cursor: default;
 	}
 
 	.option-card span {

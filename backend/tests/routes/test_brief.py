@@ -18,7 +18,12 @@ from generation.dependencies import (
 )
 from generation.dtos.generation_response import GenerationAcceptedResponse
 from pipeline.types.requests import SectionPlan
-from pipeline.types.teacher_brief import BriefReviewResult, TeacherBrief, TopicResolutionResult
+from pipeline.types.teacher_brief import (
+    BriefReviewResult,
+    TeacherBrief,
+    TopicResolutionRequest,
+    TopicResolutionResult,
+)
 from planning.models import PlanningGenerationSpec
 from planning import routes as brief_routes
 
@@ -177,6 +182,28 @@ def _planning_spec() -> PlanningGenerationSpec:
 
 
 class TestBriefApi:
+    def test_topic_resolution_prompt_includes_grade_fields(self):
+        prompt = brief_routes._topic_resolution_user_prompt(
+            TopicResolutionRequest(
+                raw_topic="Algebra",
+                grade_level="grade_10",
+                grade_band="high_school",
+                learner_context="Grade 10 learners",
+                class_profile={
+                    "reading_level": "on_grade",
+                    "language_support": "none",
+                    "confidence": "mixed",
+                    "prior_knowledge": "some_background",
+                    "pacing": "normal",
+                    "learning_preferences": ["visual"],
+                },
+            )
+        )
+
+        assert "Grade level: grade_10" in prompt
+        assert "Grade band: high_school" in prompt
+        assert "Class profile: reading=on_grade" in prompt
+
     async def test_plan_from_brief_returns_planning_generation_spec(self):
         _install_overrides(TEST_PROFILE)
         spec = _planning_spec()
@@ -311,7 +338,20 @@ class TestBriefApi:
             async with _client() as client:
                 response = await client.post(
                     "/api/v1/brief/resolve-topic",
-                    json={"raw_topic": "Algebra", "learner_context": "Grade 7 mixed levels"},
+                    json={
+                        "raw_topic": "Algebra",
+                        "grade_level": "grade_7",
+                        "grade_band": "middle_school",
+                        "learner_context": "Grade 7 mixed levels",
+                        "class_profile": {
+                            "reading_level": "mixed",
+                            "language_support": "none",
+                            "confidence": "mixed",
+                            "prior_knowledge": "some_background",
+                            "pacing": "normal",
+                            "learning_preferences": [],
+                        },
+                    },
                 )
 
         assert response.status_code == 200

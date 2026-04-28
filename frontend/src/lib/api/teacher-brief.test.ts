@@ -15,7 +15,7 @@ vi.mock('$lib/stores/auth', () => ({
 	}
 }));
 
-import { commitPlan, planFromBrief, reviewTeacherBrief } from './teacher-brief';
+import { commitPlan, planFromBrief, resolveTopic, reviewTeacherBrief } from './teacher-brief';
 
 describe('teacher brief API helpers', () => {
 	afterEach(() => {
@@ -103,6 +103,41 @@ describe('teacher brief API helpers', () => {
 
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/brief/plan');
 		expect((fetchMock.mock.calls[0][1] as RequestInit).body).toContain('"resource_type":"worksheet"');
+	});
+
+	it('posts grade-aware topic resolution requests to /api/v1/brief/resolve-topic', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					subject: 'Math',
+					topic: 'Algebra',
+					candidate_subtopics: [],
+					needs_clarification: false,
+					clarification_message: null
+				}),
+				{ status: 200, headers: { 'Content-Type': 'application/json' } }
+			)
+		);
+		vi.stubGlobal('fetch', fetchMock);
+
+		await resolveTopic({
+			raw_topic: 'Algebra',
+			grade_level: 'grade_10',
+			grade_band: 'high_school',
+			learner_context: 'Grade 10 algebra learners',
+			class_profile: {
+				reading_level: 'on_grade',
+				language_support: 'none',
+				confidence: 'mixed',
+				prior_knowledge: 'some_background',
+				pacing: 'normal',
+				learning_preferences: ['visual']
+			}
+		});
+
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/brief/resolve-topic');
+		expect((fetchMock.mock.calls[0][1] as RequestInit).body).toContain('"grade_level":"grade_10"');
+		expect((fetchMock.mock.calls[0][1] as RequestInit).body).toContain('"grade_band":"high_school"');
 	});
 
 	it('posts TeacherBriefs to /api/v1/brief/review', async () => {

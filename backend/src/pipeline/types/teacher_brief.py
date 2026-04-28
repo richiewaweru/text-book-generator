@@ -169,7 +169,10 @@ class TeacherBrief(BaseModel):
 
 class TopicResolutionRequest(BaseModel):
     raw_topic: str = Field(min_length=1, max_length=200)
+    grade_level: TeacherGradeLevel
+    grade_band: TeacherGradeBand
     learner_context: str | None = Field(default=None, max_length=1000)
+    class_profile: ClassProfile | None = None
 
     @field_validator("raw_topic", "learner_context")
     @classmethod

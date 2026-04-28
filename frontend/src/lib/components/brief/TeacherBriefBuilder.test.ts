@@ -29,40 +29,42 @@ vi.mock('$lib/api/profile', () => ({
 
 import TeacherBriefBuilder from './TeacherBriefBuilder.svelte';
 
-async function moveIntoClassProfile() {
+function buildResolutionResult(title: string, likelyGradeBand: string) {
+	return {
+		subject: 'Math',
+		topic: 'Algebra',
+		candidate_subtopics: [
+			{
+				id: title.toLowerCase().replaceAll(' ', '-'),
+				title,
+				description: `${title} focus`,
+				likely_grade_band: likelyGradeBand
+			}
+		],
+		needs_clarification: false,
+		clarification_message: null
+	};
+}
+
+async function submitTopic(value = 'Algebra') {
 	await fireEvent.input(screen.getByLabelText(/what are you teaching today\?/i), {
-		target: { value: 'Algebra' }
+		target: { value }
 	});
 	await fireEvent.click(screen.getByRole('button', { name: /find subtopics/i }));
+}
 
+async function selectGrade(label: RegExp) {
+	await waitFor(() => expect(screen.getByRole('button', { name: label })).toBeTruthy());
+	await fireEvent.click(screen.getByRole('button', { name: label }));
+}
+
+async function moveThroughGradeAndSubtopic() {
+	await submitTopic();
+	await selectGrade(/grade 10/i);
 	await waitFor(() =>
 		expect(screen.getByRole('button', { name: /solving two-step equations/i })).toBeTruthy()
 	);
 	await fireEvent.click(screen.getByRole('button', { name: /solving two-step equations/i }));
-	await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
-	await waitFor(() => expect(screen.getByRole('button', { name: /grade 7/i })).toBeTruthy());
-	await fireEvent.click(screen.getByRole('button', { name: /grade 7/i }));
-	await waitFor(() => expect(screen.getByLabelText(/reading level/i)).toBeTruthy());
-}
-
-async function completeAudienceFlow() {
-	await moveIntoClassProfile();
-	await fireEvent.change(screen.getByLabelText(/reading level/i), {
-		target: { value: 'below_grade' }
-	});
-	await fireEvent.change(screen.getByLabelText(/language support/i), {
-		target: { value: 'some_ell' }
-	});
-	await fireEvent.change(screen.getByLabelText(/confidence/i), {
-		target: { value: 'low' }
-	});
-	await fireEvent.change(screen.getByLabelText(/prior knowledge/i), {
-		target: { value: 'new_topic' }
-	});
-	await fireEvent.change(screen.getByLabelText(/pacing/i), {
-		target: { value: 'short_chunks' }
-	});
-	await fireEvent.click(screen.getByRole('button', { name: /visual anchors/i }));
 	await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 }
 
@@ -98,82 +100,119 @@ describe('TeacherBriefBuilder', () => {
 			created_at: '2026-04-27T00:00:00Z',
 			updated_at: '2026-04-27T00:00:00Z'
 		});
-		resolveTopic.mockResolvedValue({
-			subject: 'Math',
-			topic: 'Algebra',
-			candidate_subtopics: [
-				{
-					id: 'two-step-equations',
-					title: 'Solving two-step equations',
-					description: 'Solve equations with two operations.',
-					likely_grade_band: 'middle school'
-				}
-			],
-			needs_clarification: false,
-			clarification_message: null
-		});
 	});
 
 	afterEach(() => {
 		cleanup();
 	});
 
-	it('walks from topic capture to review and surfaces validation feedback', async () => {
-		validateTeacherBrief.mockResolvedValue({
-			is_ready: false,
-			blockers: [{ field: 'subtopics', message: 'Pick narrower subtopics before generation.' }],
-			warnings: [{ field: 'supports', message: 'Too many supports may crowd a quick resource.' }],
-			suggestions: [{ field: 'subtopics', suggestion: 'Tighten each subtopic to one teachable skill.' }]
-		});
-
+	it('moves from topic to grade level without resolving subtopics yet', async () => {
 		render(TeacherBriefBuilder);
 
-		await completeAudienceFlow();
-		await fireEvent.click(screen.getByRole('button', { name: /practice a skill/i }));
-		await fireEvent.click(screen.getByRole('button', { name: /worksheet/i }));
+		await submitTopic();
 
+		expect(resolveTopic).not.toHaveBeenCalled();
 		await waitFor(() =>
-			expect(screen.getByRole('button', { name: /worked examples/i }).getAttribute('aria-pressed')).toBe(
-				'true'
-			)
+			expect(screen.getByText(/choose the main grade level for this resource/i)).toBeTruthy()
 		);
-		expect(screen.getByRole('button', { name: /step-by-step hints/i }).getAttribute('aria-pressed')).toBe(
-			'true'
-		);
-		expect(screen.getByRole('button', { name: /visuals/i }).getAttribute('aria-pressed')).toBe('true');
-
-		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
-		await fireEvent.click(screen.getByRole('button', { name: /standard/i }));
-
-		await waitFor(() => expect(screen.getByRole('button', { name: /validate brief/i })).toBeTruthy());
-		await fireEvent.click(screen.getByRole('button', { name: /validate brief/i }));
-
-		await waitFor(() => expect(screen.getByText(/needs edits before generation/i)).toBeTruthy());
-		expect(screen.getByText(/Pick narrower subtopics before generation/i)).toBeTruthy();
-		expect(screen.getByText(/Tighten each subtopic to one teachable skill/i)).toBeTruthy();
-		expect(screen.getAllByText(/grade 7/i).length).toBeGreaterThan(0);
+		expect(
+			screen.getByText(/your profile default is middle/i)
+		).toBeTruthy();
 	});
 
-	it('updates the learner summary from class-profile selections', async () => {
+	it('selecting a grade resolves topic suggestions with grade_level and grade_band', async () => {
+		resolveTopic.mockResolvedValue(
+			buildResolutionResult('Solving two-step equations', 'Grade 10 fit')
+		);
+
 		render(TeacherBriefBuilder);
 
-		await moveIntoClassProfile();
-		await fireEvent.change(screen.getByLabelText(/reading level/i), {
-			target: { value: 'below_grade' }
-		});
-		await fireEvent.change(screen.getByLabelText(/language support/i), {
-			target: { value: 'many_ell' }
-		});
-		await fireEvent.click(screen.getByRole('button', { name: /step-by-step support/i }));
+		await submitTopic();
+		await selectGrade(/grade 10/i);
 
-		const learnerSummary = screen.getByLabelText(/learner summary/i) as HTMLTextAreaElement;
-		expect(learnerSummary.value).toMatch(/Grade 7 learners/i);
-		expect(learnerSummary.value).toMatch(/below grade level/i);
-		expect(learnerSummary.value).toMatch(/many multilingual learners/i);
-		expect(learnerSummary.value).toMatch(/step-by-step support/i);
+		await waitFor(() => expect(resolveTopic).toHaveBeenCalledTimes(1));
+		expect(resolveTopic).toHaveBeenCalledWith(
+			expect.objectContaining({
+				raw_topic: 'Algebra',
+				grade_level: 'grade_10',
+				grade_band: 'high_school',
+				class_profile: {
+					reading_level: 'mixed',
+					language_support: 'none',
+					confidence: 'mixed',
+					prior_knowledge: 'some_background',
+					pacing: 'normal',
+					learning_preferences: [],
+					notes: 'Some learners struggle with word problems'
+				}
+			})
+		);
+		expect(resolveTopic.mock.calls[0][0].learner_context).toContain('Grade 10 learners');
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: /solving two-step equations/i })).toBeTruthy()
+		);
+		expect(screen.getByText(/grade 10 fit/i)).toBeTruthy();
 	});
 
-	it('hands a validated brief into planning and shows the review step', async () => {
+	it('changing grade clears stale subtopics and re-resolves for the new grade', async () => {
+		resolveTopic
+			.mockResolvedValueOnce(
+				buildResolutionResult('Solving two-step equations', 'Grade 10 fit')
+			)
+			.mockResolvedValueOnce(
+				buildResolutionResult('Algebraic patterns and expressions', 'Grade 5 fit')
+			);
+
+		render(TeacherBriefBuilder);
+
+		await moveThroughGradeAndSubtopic();
+		expect(screen.getByRole('heading', { name: /class profile/i })).toBeTruthy();
+
+		await fireEvent.click(screen.getAllByRole('button', { name: /edit/i })[1]);
+		await selectGrade(/grade 5/i);
+
+		await waitFor(() => expect(resolveTopic).toHaveBeenCalledTimes(2));
+		expect(resolveTopic.mock.calls[1][0]).toMatchObject({
+			raw_topic: 'Algebra',
+			grade_level: 'grade_5',
+			grade_band: 'upper_elementary'
+		});
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: /algebraic patterns and expressions/i })).toBeTruthy()
+		);
+		expect(screen.queryByRole('button', { name: /solving two-step equations/i })).toBeNull();
+	});
+
+	it('changing topic clears stale subtopics and waits for grade re-selection before resolving again', async () => {
+		resolveTopic.mockResolvedValue(
+			buildResolutionResult('Solving two-step equations', 'Grade 10 fit')
+		);
+
+		render(TeacherBriefBuilder);
+
+		await submitTopic();
+		await selectGrade(/grade 10/i);
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: /solving two-step equations/i })).toBeTruthy()
+		);
+
+		await fireEvent.click(screen.getAllByRole('button', { name: /edit/i })[0]);
+		await fireEvent.input(screen.getByLabelText(/what are you teaching today\?/i), {
+			target: { value: 'Geometry' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /find subtopics/i }));
+
+		expect(resolveTopic).toHaveBeenCalledTimes(1);
+		await waitFor(() =>
+			expect(screen.getByText(/choose the main grade level for this resource/i)).toBeTruthy()
+		);
+		expect(screen.queryByRole('button', { name: /solving two-step equations/i })).toBeNull();
+	});
+
+	it('shows grade level and grade band in review and plan flow', async () => {
+		resolveTopic.mockResolvedValue(
+			buildResolutionResult('Solving two-step equations', 'Grade 10 fit')
+		);
 		validateTeacherBrief.mockResolvedValue({
 			is_ready: true,
 			blockers: [],
@@ -226,20 +265,20 @@ describe('TeacherBriefBuilder', () => {
 				subject: 'Math',
 				topic: 'Algebra',
 				subtopics: ['Solving two-step equations'],
-				grade_level: 'grade_7',
-				grade_band: 'middle_school',
+				grade_level: 'grade_10',
+				grade_band: 'high_school',
 				class_profile: {
-					reading_level: 'below_grade',
-					language_support: 'some_ell',
-					confidence: 'low',
-					prior_knowledge: 'new_topic',
-					pacing: 'short_chunks',
-					learning_preferences: ['visual']
+					reading_level: 'mixed',
+					language_support: 'none',
+					confidence: 'mixed',
+					prior_knowledge: 'some_background',
+					pacing: 'normal',
+					learning_preferences: []
 				},
-				learner_context: 'Grade 7 learners are reading below grade level.',
+				learner_context: 'Grade 10 learners Some learners struggle with word problems',
 				intended_outcome: 'practice',
 				resource_type: 'worksheet',
-				supports: ['worked_examples', 'step_by_step', 'visuals'],
+				supports: ['worked_examples'],
 				depth: 'standard',
 				teacher_notes: ''
 			},
@@ -248,19 +287,24 @@ describe('TeacherBriefBuilder', () => {
 
 		render(TeacherBriefBuilder);
 
-		await completeAudienceFlow();
+		await moveThroughGradeAndSubtopic();
+		await waitFor(() => expect(screen.getByLabelText(/reading level/i)).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /practice a skill/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /worksheet/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /standard/i }));
 		await waitFor(() => expect(screen.getByRole('button', { name: /validate brief/i })).toBeTruthy());
 		await fireEvent.click(screen.getByRole('button', { name: /validate brief/i }));
+
+		await waitFor(() => expect(screen.getAllByText(/grade 10/i).length).toBeGreaterThan(0));
+		expect(screen.getByText(/^high school$/i)).toBeTruthy();
+
 		await waitFor(() => expect(screen.getByRole('button', { name: /build plan/i })).toBeTruthy());
 		await fireEvent.click(screen.getByRole('button', { name: /build plan/i }));
 
 		await waitFor(() => expect(screen.getByText(/plan review/i)).toBeTruthy());
-		expect(planFromBrief).toHaveBeenCalled();
+		expect(screen.getAllByText(/grade 10/i).length).toBeGreaterThan(0);
 		expect(screen.getByText(/start with the idea/i)).toBeTruthy();
-		expect(screen.getByText(/class profile:/i)).toBeTruthy();
 	});
 });

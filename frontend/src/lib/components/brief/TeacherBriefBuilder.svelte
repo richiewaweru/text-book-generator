@@ -48,14 +48,6 @@
 
 	type BuilderStage = 'building' | 'planning' | 'reviewing' | 'generating';
 
-	const PROFILE_GRADE_LEVEL_MAP: Record<string, TeacherGradeLevel> = {
-		primary: 'grade_3',
-		middle: 'grade_7',
-		high_school: 'grade_10',
-		undergraduate: 'college',
-		adult: 'adult'
-	};
-
 	let stage = $state<BuilderStage>('building');
 	let active_step = $state<BriefBuilderStep>('topic');
 	let completed_steps = $state<BriefBuilderStep[]>([]);
@@ -76,6 +68,7 @@
 	let learnerText = $state('');
 	let recommendedSupports = $state<TeacherBriefSupport[]>([]);
 	let topicStatusMessage = $state<string | null>(null);
+	let profileGradeBandHint = $state<string | null>(null);
 	let apiError = $state<string | null>(null);
 	let plannedSpec = $state<PlanningGenerationSpec | null>(null);
 	let acceptedGeneration = $state<GenerationAccepted | null>(null);
@@ -131,6 +124,13 @@
 		if (stage !== 'building') {
 			resetPlanStage();
 		}
+	}
+
+	function titleCase(value: string): string {
+		return value
+			.split('_')
+			.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+			.join(' ');
 	}
 
 	function markStepCompleted(step: BriefBuilderStep) {
@@ -195,6 +195,21 @@
 		clearValidationAndGeneratedState();
 	}
 
+	function clearSubtopicResolutionState() {
+		suggestions = {};
+		customSubtopic = '';
+		topicStatusMessage = null;
+		brief = {
+			...brief,
+			subject: '',
+			topic: '',
+			subtopics: []
+		};
+		completed_steps = completed_steps.filter(
+			(step) => !['choose_subtopic', 'review'].includes(step)
+		);
+	}
+
 	function resetSupportSelections() {
 		recommendedSupports = [];
 		brief = {
@@ -205,24 +220,8 @@
 	}
 
 	function resetAfterTopicChange() {
-		brief = {
-			...brief,
-			subject: '',
-			topic: '',
-			subtopics: [],
-			supports: []
-		};
-		suggestions = {};
-		customSubtopic = '';
-		recommendedSupports = [];
-		completed_steps = completed_steps.filter(
-			(step) => !['choose_subtopic', 'supports', 'review'].includes(step)
-		);
+		clearSubtopicResolutionState();
 		clearValidationAndGeneratedState();
-	}
-
-	function nextStepAfterSubtopic(): BriefBuilderStep {
-		return 'grade_level';
 	}
 
 	function handleTopicInput(value: string) {
@@ -232,35 +231,18 @@
 		}
 	}
 
-	async function handleTopicSubmit() {
+	function handleTopicSubmit() {
 		if (!rawTopic.trim()) return;
-		loading = true;
+		const normalizedRawTopic = rawTopic.trim();
 		apiError = null;
-		topicStatusMessage = 'Finding the main ideas teachers usually teach under this topic...';
-		clearValidation();
-		try {
-			const result = await resolveTopic({
-				raw_topic: rawTopic.trim(),
-				learner_context: brief.learner_context || undefined
-			});
-			brief = {
-				...brief,
-				subject: result.subject,
-				topic: result.topic,
-				subtopics: [],
-				supports: []
-			};
-			suggestions = { subtopics: result.candidate_subtopics };
-			customSubtopic = '';
-			recommendedSupports = [];
-			topicStatusMessage = result.clarification_message ?? null;
-			moveToStep('topic', 'choose_subtopic');
-		} catch (error) {
-			apiError = error instanceof Error ? error.message : 'Topic resolution failed.';
-			topicStatusMessage = null;
-		} finally {
-			loading = false;
-		}
+		rawTopic = normalizedRawTopic;
+		clearSubtopicResolutionState();
+		brief = {
+			...brief,
+			topic: normalizedRawTopic
+		};
+		clearValidationAndGeneratedState();
+		moveToStep('topic', 'grade_level');
 	}
 
 	function handleSubtopicToggle(value: string) {
@@ -286,15 +268,59 @@
 	function continueSubtopics() {
 		if (!(brief.subtopics?.length)) return;
 		resetSupportSelections();
-		moveToStep('choose_subtopic', nextStepAfterSubtopic());
+		moveToStep('choose_subtopic', 'class_profile');
 	}
 
-	function handleGradeLevelSelect(value: TeacherGradeLevel) {
+	async function handleGradeLevelSelect(value: TeacherGradeLevel) {
+		const nextProfile = currentClassProfile();
+		const nextGradeBand = GRADE_BAND_BY_LEVEL[value];
+		const nextSummary = buildLearnerSummary({
+			gradeLevel: value,
+			classProfile: nextProfile
+		});
+
 		syncAudience({
 			gradeLevel: value,
-			classProfile: currentClassProfile()
+			classProfile: nextProfile,
+			learnerSummaryOverride: nextSummary
 		});
-		moveToStep('grade_level', 'class_profile');
+		clearSubtopicResolutionState();
+
+		if (!rawTopic.trim()) {
+			return;
+		}
+
+		loading = true;
+		apiError = null;
+		topicStatusMessage = 'Finding grade-appropriate subtopics...';
+		try {
+			const result = await resolveTopic({
+				raw_topic: rawTopic.trim(),
+				grade_level: value,
+				grade_band: nextGradeBand,
+				learner_context: nextSummary || undefined,
+				class_profile: nextProfile
+			});
+			brief = {
+				...brief,
+				subject: result.subject,
+				topic: result.topic,
+				subtopics: [],
+				grade_level: value,
+				grade_band: nextGradeBand,
+				class_profile: nextProfile,
+				learner_context: nextSummary
+			};
+			suggestions = { subtopics: result.candidate_subtopics };
+			customSubtopic = '';
+			topicStatusMessage = result.clarification_message ?? null;
+			moveToStep('grade_level', 'choose_subtopic');
+		} catch (error) {
+			apiError = error instanceof Error ? error.message : 'Topic resolution failed.';
+			topicStatusMessage = null;
+		} finally {
+			loading = false;
+		}
 	}
 
 	function updateClassProfile(nextProfile: ClassProfile) {
@@ -439,17 +465,15 @@
 		resetGenerationState();
 		void getProfile()
 			.then((profile) => {
-				if (brief.grade_level) return;
-				const seededGradeLevel = PROFILE_GRADE_LEVEL_MAP[profile.default_grade_band];
-				const seededProfile = {
-					...currentClassProfile(),
-					notes: profile.classroom_context || currentClassProfile().notes
+				profileGradeBandHint = titleCase(profile.default_grade_band);
+				if (currentClassProfile().notes?.trim()) return;
+				brief = {
+					...brief,
+					class_profile: {
+						...currentClassProfile(),
+						notes: profile.classroom_context || currentClassProfile().notes
+					}
 				};
-				syncAudience({
-					gradeLevel: seededGradeLevel,
-					classProfile: seededProfile,
-					recomputeSupports: false
-				});
 			})
 			.catch(() => {
 				// The builder works without profile hydration.
@@ -502,10 +526,30 @@
 				/>
 			</BriefStepCard>
 
+			{#if isVisible('grade_level')}
+				<BriefStepCard
+					title="Grade Level"
+					stepLabel="Step 2"
+					active={active_step === 'grade_level'}
+					completed={completed_steps.includes('grade_level')}
+					summary={stepSummary('grade_level', brief, learnerText)}
+					onEdit={() => editStep('grade_level')}
+				>
+					<GradeLevelStep
+						selected={brief.grade_level}
+						derivedBand={brief.grade_band ?? null}
+						defaultGradeBandHint={profileGradeBandHint}
+						statusMessage={loading && active_step === 'grade_level' ? topicStatusMessage : null}
+						loading={loading && active_step === 'grade_level'}
+						onSelect={handleGradeLevelSelect}
+					/>
+				</BriefStepCard>
+			{/if}
+
 			{#if isVisible('choose_subtopic')}
 				<BriefStepCard
 					title="Subtopic"
-					stepLabel="Step 2"
+					stepLabel="Step 3"
 					active={active_step === 'choose_subtopic'}
 					completed={completed_steps.includes('choose_subtopic')}
 					summary={stepSummary('choose_subtopic', brief, learnerText)}
@@ -515,28 +559,12 @@
 						options={suggestions.subtopics ?? []}
 						selected={brief.subtopics ?? []}
 						customValue={customSubtopic}
+						selectedGradeLevel={brief.grade_level}
 						clarificationMessage={topicStatusMessage}
 						onToggle={handleSubtopicToggle}
 						onCustomChange={(value) => (customSubtopic = value)}
 						onAddCustom={handleAddCustomSubtopic}
 						onContinue={continueSubtopics}
-					/>
-				</BriefStepCard>
-			{/if}
-
-			{#if isVisible('grade_level')}
-				<BriefStepCard
-					title="Grade Level"
-					stepLabel="Step 3"
-					active={active_step === 'grade_level'}
-					completed={completed_steps.includes('grade_level')}
-					summary={stepSummary('grade_level', brief, learnerText)}
-					onEdit={() => editStep('grade_level')}
-				>
-					<GradeLevelStep
-						selected={brief.grade_level}
-						derivedBand={brief.grade_band ?? null}
-						onSelect={handleGradeLevelSelect}
 					/>
 				</BriefStepCard>
 			{/if}

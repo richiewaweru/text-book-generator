@@ -93,7 +93,10 @@ export interface TeacherBrief {
 
 export interface TopicResolutionRequest {
 	raw_topic: string;
+	grade_level: TeacherGradeLevel;
+	grade_band: TeacherGradeBand;
 	learner_context?: string;
+	class_profile?: ClassProfile;
 }
 
 export interface TopicResolutionSubtopic {
@@ -148,8 +151,8 @@ export interface BriefReviewResult {
 
 export type BriefBuilderStep =
 	| 'topic'
-	| 'choose_subtopic'
 	| 'grade_level'
+	| 'choose_subtopic'
 	| 'class_profile'
 	| 'intended_outcome'
 	| 'resource_type'

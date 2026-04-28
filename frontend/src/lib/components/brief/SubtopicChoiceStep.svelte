@@ -1,10 +1,12 @@
 <script lang="ts">
-	import type { TopicResolutionSubtopic } from '$lib/types';
+	import { gradeLevelLabel } from '$lib/brief/config';
+	import type { TeacherGradeLevel, TopicResolutionSubtopic } from '$lib/types';
 
 	interface Props {
 		options: TopicResolutionSubtopic[];
 		selected: string[];
 		customValue: string;
+		selectedGradeLevel?: TeacherGradeLevel;
 		clarificationMessage?: string | null;
 		onToggle: (value: string) => void;
 		onCustomChange: (value: string) => void;
@@ -16,12 +18,30 @@
 		options,
 		selected,
 		customValue,
+		selectedGradeLevel,
 		clarificationMessage = null,
 		onToggle,
 		onCustomChange,
 		onAddCustom,
 		onContinue
 	}: Props = $props();
+
+	function badgeLabel(option: TopicResolutionSubtopic): string | null {
+		if (!option.likely_grade_band) return null;
+		if (!selectedGradeLevel || selectedGradeLevel === 'mixed') {
+			return option.likely_grade_band;
+		}
+		const normalized = option.likely_grade_band.toLowerCase();
+		if (
+			normalized.includes('fit') ||
+			normalized.includes('review') ||
+			normalized.includes('challenge') ||
+			normalized.includes('prerequisite')
+		) {
+			return option.likely_grade_band;
+		}
+		return `${gradeLevelLabel(selectedGradeLevel)} fit`;
+	}
 </script>
 
 <div class="subtopics">
@@ -42,8 +62,8 @@
 			>
 				<strong>{option.title}</strong>
 				<span>{option.description}</span>
-				{#if option.likely_grade_band}
-					<small>{option.likely_grade_band}</small>
+				{#if badgeLabel(option)}
+					<small>{badgeLabel(option)}</small>
 				{/if}
 			</button>
 		{/each}

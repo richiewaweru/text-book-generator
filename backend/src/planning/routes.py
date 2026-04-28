@@ -76,7 +76,12 @@ def _topic_resolution_system_prompt() -> str:
             "Return valid JSON only.",
             "Infer a broad school subject, normalize the main topic, and propose 4 to 8 candidate subtopics.",
             "Keep subtopic titles teacher-facing, short, and commonly taught.",
-            "Prefer age-appropriate subtopics when learner context is present.",
+            "Always calibrate the topic breakdown to the selected grade level and grade band.",
+            "When a specific grade is selected, avoid broad grade-range framing in the suggestions.",
+            "Use likely_grade_band as a short teacher-facing fit label such as 'Grade 10 fit', 'Good review', 'Challenge option', or 'Prerequisite review'.",
+            "Only use broad grade ranges when grade_level is mixed.",
+            "Do not suggest material that is clearly too advanced or too basic unless you frame it as review, prerequisite, or challenge.",
+            "Prefer age-appropriate subtopics when learner context or class profile is present.",
             "Set needs_clarification=true only when the topic is too vague to narrow responsibly.",
             "Do not invent niche or overly advanced subtopics when common classroom targets fit.",
         ]
@@ -84,10 +89,31 @@ def _topic_resolution_system_prompt() -> str:
 
 
 def _topic_resolution_user_prompt(payload: TopicResolutionRequest) -> str:
+    class_profile = payload.class_profile
+    class_profile_summary = (
+        "none"
+        if class_profile is None
+        else (
+            f"reading={class_profile.reading_level}, "
+            f"language={class_profile.language_support}, "
+            f"confidence={class_profile.confidence}, "
+            f"prior_knowledge={class_profile.prior_knowledge}, "
+            f"pacing={class_profile.pacing}, "
+            f"preferences={', '.join(class_profile.learning_preferences) or 'none'}"
+        )
+    )
     return "\n".join(
         [
             f"Raw topic: {payload.raw_topic}",
+            f"Grade level: {payload.grade_level}",
+            f"Grade band: {payload.grade_band}",
             f"Learner context: {payload.learner_context or 'none'}",
+            f"Class profile: {class_profile_summary}",
+            (
+                "Grade guidance: "
+                "If grade_level is mixed, broad ranges are acceptable. "
+                "Otherwise, keep the breakdown anchored to the exact selected grade."
+            ),
             "Return:",
             "- subject",
             "- topic",

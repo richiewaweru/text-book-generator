@@ -18,8 +18,8 @@ import type {
 
 export const briefSteps: BriefBuilderStep[] = [
 	'topic',
-	'choose_subtopic',
 	'grade_level',
+	'choose_subtopic',
 	'class_profile',
 	'intended_outcome',
 	'resource_type',
