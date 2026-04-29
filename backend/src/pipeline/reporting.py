@@ -71,6 +71,12 @@ class MediaDecisionTrace(BaseModel):
         "image_generator",
         "interaction_generator",
     ] | None = None
+    svg_generation_mode: str | None = None
+    model_slot: str | None = None
+    diagram_kind: str | None = None
+    sanitized: bool = False
+    intent_validated: bool = False
+    svg_failure_reason: str | None = None
     status: Literal["planned", "generated", "failed", "skipped"] = "planned"
 
 
@@ -182,6 +188,12 @@ class GenerationReportSummary(BaseModel):
     svg_attempted_slots: int = 0
     svg_success_slots: int = 0
     svg_failed_slots: int = 0
+    raw_svg_generation_count: int = 0
+    svg_sanitizer_failure_count: int = 0
+    svg_validation_failure_count: int = 0
+    svg_intent_retry_count: int = 0
+    svg_generation_model_slot: str | None = None
+    svg_diagram_kind_counts: dict[str, int] = Field(default_factory=dict)
     image_attempted_slots: int = 0
     image_success_slots: int = 0
     image_failed_slots: int = 0

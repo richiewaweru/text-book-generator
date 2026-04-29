@@ -64,19 +64,21 @@ def test_diagram_prompt_uses_slot_and_frame_contract() -> None:
     assert "Must include: slope, rise over run" in prompt
 
 
-def test_diagram_system_prompt_includes_safe_zone_and_type_guard() -> None:
+def test_diagram_system_prompt_includes_raw_svg_contract_and_security_rules() -> None:
     prompt = build_diagram_system_prompt(_style_context())
 
-    assert "SAFE ZONE" in prompt
-    assert "Valid placement range: x 40-560, y 50-360." in prompt
-    assert "Do not use \"concept-map\" for mathematical, spatial, or graphical content." in prompt
+    assert "You generate raw SVG diagrams" in prompt
+    assert 'viewBox="0 0 600 400"' in prompt
+    assert "svg_content, caption, alt_text, diagram_kind, self_check" in prompt
+    assert "Do not use script" in prompt
+    assert "javascript: URLs" in prompt
+    assert "not a process flowchart" in prompt
 
 
-def test_diagram_system_prompt_uses_compact_coordinate_space() -> None:
+def test_diagram_system_prompt_uses_compact_guidance() -> None:
     prompt = build_diagram_system_prompt(_style_context(), sizing="compact")
 
-    assert "Use a 400x300 coordinate space." in prompt
-    assert "2-4 elements only" in prompt
+    assert "Keep compact diagrams focused" in prompt
 
 
 def test_image_prompts_consume_frame_data_only() -> None:
@@ -200,6 +202,35 @@ def test_build_image_generation_prompt_prefers_frame_goal_for_section_slot() -> 
     assert "coordinate plane" in prompt
     assert "Use a sequence visual" not in prompt
     assert "Clean educational illustration, moderate detail" in prompt
+
+
+def test_build_diagram_user_prompt_prefers_frame_goal_for_section_slot() -> None:
+    slot = VisualSlot(
+        slot_id="section-diagram-series",
+        slot_type="diagram_series",
+        required=True,
+        preferred_render="svg",
+        block_target="section",
+        content_brief="Use a sequence visual.",
+        pedagogical_intent="Show positive slope.",
+        caption="Positive and Negative Slopes",
+        frames=[],
+    )
+    frame = VisualFrame(
+        slot_id="section-diagram-series",
+        index=0,
+        label="Step 1",
+        generation_goal="A coordinate plane showing a rising line labeled slope=3/4.",
+    )
+
+    prompt = build_diagram_user_prompt(
+        section_title="See Positive and Negative Slopes",
+        slot=slot,
+        frame=frame,
+    )
+
+    assert "coordinate plane" in prompt
+    assert "Use a sequence visual" not in prompt
 
 
 def test_build_image_generation_prompt_wraps_override_brief() -> None:

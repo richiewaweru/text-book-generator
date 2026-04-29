@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from html import escape
 
 from core.config import settings as app_settings
@@ -29,6 +30,8 @@ from pipeline.media.prompts.diagram_prompts import (
     build_diagram_system_prompt,
     build_diagram_user_prompt,
 )
+from pipeline.media.svg_sanitizer import sanitize_svg
+from pipeline.media.svg_validator import validate_svg_basic, validate_svg_intent
 from pipeline.media.slot_state import section_level_visual_slots, visual_mode
 from pipeline.media.types import SlotType, VisualFrame, VisualSlot
 from pipeline.providers.registry import get_node_text_model
@@ -60,6 +63,14 @@ class DiagramOutput(BaseModel):
     spec: DiagramSpec
     caption: str
     alt_text: str
+
+
+class RawSvgDiagramOutput(BaseModel):
+    svg_content: str
+    caption: str
+    alt_text: str
+    diagram_kind: str | None = None
+    self_check: list[str] = Field(default_factory=list)
 
 
 class DiagramElement(BaseModel):
@@ -145,6 +156,26 @@ def _safe_section_title(section, plan) -> str:
     if plan is not None and getattr(plan, "title", None):
         return plan.title
     return "Visual section"
+
+
+def _raw_svg_diagrams_enabled() -> bool:
+    return os.getenv("PIPELINE_RAW_SVG_DIAGRAMS", "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
+def _primary_visual_brief(
+    *,
+    section_title: str,
+    slot: VisualSlot,
+    frame: VisualFrame,
+) -> str:
+    if slot.block_target in {None, "section"}:
+        return frame.generation_goal or slot.content_brief or section_title
+    return slot.content_brief or frame.generation_goal or section_title
 
 
 def _terms_from_plan_for_diagram(plan) -> list[str]:
@@ -326,18 +357,129 @@ async def _generate_diagram_output(
     return result.output
 
 
-def _diagram_defaults(section, output: DiagramOutput) -> DiagramContent:
+async def _generate_raw_svg_output(
+    state: TextbookPipelineState,
+    *,
+    slot: VisualSlot,
+    frame: VisualFrame,
+    section_title: str,
+    model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
+) -> RawSvgDiagramOutput:
+    model = get_node_text_model(
+        "diagram_generator",
+        model_overrides=model_overrides,
+        generation_mode=state.request.mode,
+    )
+    agent = Agent(
+        model=model,
+        output_type=RawSvgDiagramOutput,
+        system_prompt=build_diagram_system_prompt(state.style_context, sizing=slot.sizing),
+    )
+    timeout_policy = timeout_policy_from_config(config)
+    retry_policy = retry_policy_for_node(config, "diagram_generator")
+    if timeout_policy is None or retry_policy is None:
+        policy = resolve_runtime_policy_bundle(app_settings, state.request.mode)
+        timeout_policy = timeout_policy or policy.timeouts
+        retry_policy = retry_policy or policy.retries.for_node("diagram_generator")
+
+    result = await asyncio.wait_for(
+        run_llm(
+            generation_id=state.request.generation_id or "",
+            node="diagram_generator",
+            agent=agent,
+            model=model,
+            user_prompt=build_diagram_user_prompt(
+                section_title=section_title,
+                slot=slot,
+                frame=frame,
+            ),
+            generation_mode=state.request.mode,
+            retry_policy=retry_policy,
+        ),
+        timeout=timeout_policy.diagram_node_budget_seconds,
+    )
+    return result.output
+
+
+def _safe_raw_svg(
+    output: RawSvgDiagramOutput,
+    *,
+    section_title: str,
+    slot: VisualSlot,
+    frame: VisualFrame,
+) -> str:
+    safe_svg = sanitize_svg(output.svg_content)
+    validate_svg_basic(safe_svg)
+    validate_svg_intent(
+        safe_svg,
+        _primary_visual_brief(
+            section_title=section_title,
+            slot=slot,
+            frame=frame,
+        ),
+    )
+    return safe_svg
+
+
+async def _generate_diagram_svg_output(
+    state: TextbookPipelineState,
+    *,
+    slot: VisualSlot,
+    frame: VisualFrame,
+    section_title: str,
+    model_overrides: dict | None = None,
+    config: RunnableConfig | None = None,
+) -> RawSvgDiagramOutput:
+    if _raw_svg_diagrams_enabled():
+        output = await _generate_raw_svg_output(
+            state,
+            slot=slot,
+            frame=frame,
+            section_title=section_title,
+            model_overrides=model_overrides,
+            config=config,
+        )
+        return output.model_copy(
+            update={
+                "svg_content": _safe_raw_svg(
+                    output,
+                    section_title=section_title,
+                    slot=slot,
+                    frame=frame,
+                )
+            }
+        )
+
+    legacy_output = await _generate_diagram_output(
+        state,
+        slot=slot,
+        frame=frame,
+        section_title=section_title,
+        model_overrides=model_overrides,
+        config=config,
+    )
+    return RawSvgDiagramOutput(
+        svg_content=_render_spec_svg(legacy_output.spec),
+        caption=legacy_output.caption,
+        alt_text=legacy_output.alt_text,
+        diagram_kind=legacy_output.spec.type,
+        self_check=["Generated through legacy DiagramSpec renderer."],
+    )
+
+
+def _diagram_defaults(section, output: RawSvgDiagramOutput) -> DiagramContent:
     existing = section.diagram
     if existing is not None:
         return existing.model_copy(
             update={
-                "svg_content": _render_spec_svg(output.spec),
+                "svg_content": output.svg_content,
                 "caption": output.caption,
                 "alt_text": output.alt_text,
             }
         )
     return DiagramContent(
-        svg_content=_render_spec_svg(output.spec),
+        svg_content=output.svg_content,
         caption=output.caption,
         alt_text=output.alt_text,
     )
@@ -409,7 +551,7 @@ async def _write_single_diagram(
         ],
     )
     frame = slot.frames[0]
-    output = await _generate_diagram_output(
+    output = await _generate_diagram_svg_output(
         state,
         slot=slot,
         frame=frame,
@@ -477,7 +619,7 @@ async def _write_series_diagrams(
                 avoid=["text overlays"],
             )
 
-        output = await _generate_diagram_output(
+        output = await _generate_diagram_svg_output(
             state,
             slot=slot,
             frame=frame,
@@ -489,7 +631,7 @@ async def _write_series_diagrams(
             step.model_copy(
                 update={
                     "caption": step.caption or output.caption,
-                    "svg_content": _render_spec_svg(output.spec),
+                    "svg_content": output.svg_content,
                 }
             )
         )
@@ -542,7 +684,7 @@ async def _write_compare_diagrams(
 
     if not (before_svg or "").strip():
         before_frame = slot.frames[0]
-        before_output = await _generate_diagram_output(
+        before_output = await _generate_diagram_svg_output(
             state,
             slot=slot,
             frame=before_frame,
@@ -550,11 +692,11 @@ async def _write_compare_diagrams(
             model_overrides=model_overrides,
             config=config,
         )
-        before_svg = _render_spec_svg(before_output.spec)
+        before_svg = before_output.svg_content
 
     if not (after_svg or "").strip():
         after_frame = slot.frames[1]
-        after_output = await _generate_diagram_output(
+        after_output = await _generate_diagram_svg_output(
             state,
             slot=slot,
             frame=after_frame,
@@ -562,7 +704,7 @@ async def _write_compare_diagrams(
             model_overrides=model_overrides,
             config=config,
         )
-        after_svg = _render_spec_svg(after_output.spec)
+        after_svg = after_output.svg_content
 
     return section.model_copy(
         update={

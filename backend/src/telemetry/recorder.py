@@ -461,6 +461,20 @@ class GenerationReportRecorder:
             if decision.executor_selected == executor:
                 section.media_decisions[index] = decision.model_copy(update={"status": status})
 
+    def _svg_metadata_update(self, payload: dict[str, Any]) -> dict[str, Any]:
+        update: dict[str, Any] = {}
+        for key in (
+            "svg_generation_mode",
+            "model_slot",
+            "diagram_kind",
+            "sanitized",
+            "intent_validated",
+            "svg_failure_reason",
+        ):
+            if key in payload:
+                update[key] = payload.get(key)
+        return update
+
     def _ensure_node(
         self,
         *,
@@ -825,9 +839,11 @@ class GenerationReportRecorder:
         )
         decision = self._decision_for_slot(section, slot_id)
         if decision is not None:
+            update = {"status": "generated"}
+            update.update(self._svg_metadata_update(payload))
             self._upsert_media_decision(
                 section,
-                decision.model_copy(update={"status": "generated"}),
+                decision.model_copy(update=update),
             )
 
     def _handle_media_slot_failed(self, payload: dict[str, Any]) -> None:
@@ -845,9 +861,11 @@ class GenerationReportRecorder:
         )
         decision = self._decision_for_slot(section, slot_id)
         if decision is not None:
+            update = {"status": "failed"}
+            update.update(self._svg_metadata_update(payload))
             self._upsert_media_decision(
                 section,
-                decision.model_copy(update={"status": "failed"}),
+                decision.model_copy(update=update),
             )
         if payload.get("slot_type") in {"simulation", "simulation_block"}:
             section.simulation_outcome = "failed"
@@ -1240,6 +1258,38 @@ class GenerationReportRecorder:
             if decision.executor_selected == "diagram_generator"
             and decision.status == "failed"
         )
+        raw_svg_decisions = [
+            decision
+            for decision in all_media_decisions
+            if decision.executor_selected == "diagram_generator"
+            and decision.svg_generation_mode == "raw_svg"
+        ]
+        summary.raw_svg_generation_count = sum(
+            1 for decision in raw_svg_decisions if decision.status in {"generated", "failed"}
+        )
+        summary.svg_sanitizer_failure_count = sum(
+            1 for decision in raw_svg_decisions if decision.svg_failure_reason == "sanitizer"
+        )
+        summary.svg_validation_failure_count = sum(
+            1 for decision in raw_svg_decisions if decision.svg_failure_reason == "validation"
+        )
+        summary.svg_intent_retry_count = sum(
+            1 for decision in raw_svg_decisions if decision.svg_failure_reason == "intent"
+        )
+        model_slots = sorted(
+            {
+                decision.model_slot
+                for decision in raw_svg_decisions
+                if decision.model_slot
+            }
+        )
+        summary.svg_generation_model_slot = ",".join(model_slots) if model_slots else None
+        kind_counts: dict[str, int] = {}
+        for decision in raw_svg_decisions:
+            if decision.status != "generated" or not decision.diagram_kind:
+                continue
+            kind_counts[decision.diagram_kind] = kind_counts.get(decision.diagram_kind, 0) + 1
+        summary.svg_diagram_kind_counts = kind_counts
         summary.image_attempted_slots = sum(
             1
             for decision in all_media_decisions

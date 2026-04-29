@@ -10,6 +10,8 @@ from pipeline.media.assembly import (
     build_slot_result,
     frame_result_key,
 )
+from pipeline.media.svg_sanitizer import SvgSanitizationError
+from pipeline.media.svg_validator import SvgIntentValidationError, SvgValidationError
 from pipeline.media.runtime_events import (
     emit_frame_failed,
     emit_frame_ready,
@@ -23,6 +25,20 @@ from pipeline.media.types import (
 )
 from pipeline.section_content_helpers import section_title
 from pipeline.state import PipelineError, TextbookPipelineState
+
+
+def _svg_generation_mode(legacy) -> str:
+    return "raw_svg" if legacy._raw_svg_diagrams_enabled() else "legacy_spec"
+
+
+def _svg_failure_reason(exc: Exception) -> str:
+    if isinstance(exc, SvgSanitizationError):
+        return "sanitizer"
+    if isinstance(exc, SvgIntentValidationError):
+        return "intent"
+    if isinstance(exc, SvgValidationError):
+        return "validation"
+    return "generation"
 
 
 def _static_svg_slots(state: TextbookPipelineState) -> list:
@@ -47,7 +63,7 @@ async def _generate_frame(
     model_overrides: dict | None,
     config: RunnableConfig | None,
 ) -> VisualFrameResult:
-    output = await legacy._generate_diagram_output(
+    output = await legacy._generate_diagram_svg_output(
         state,
         slot=slot,
         frame=frame,
@@ -61,7 +77,12 @@ async def _generate_frame(
         label=frame.label,
         render=slot.preferred_render,
         status=VisualFrameResultStatus.GENERATED,
-        svg_content=legacy._render_spec_svg(output.spec),
+        svg_content=output.svg_content,
+        svg_generation_mode=_svg_generation_mode(legacy),
+        model_slot="standard",
+        diagram_kind=output.diagram_kind,
+        sanitized=legacy._raw_svg_diagrams_enabled(),
+        intent_validated=legacy._raw_svg_diagrams_enabled(),
         alt_text=output.alt_text,
         explanation=output.caption,
     )
@@ -145,7 +166,7 @@ async def diagram_generator(
                 frame=frame,
             )
             try:
-                slot_frame_results[frame_result_key(frame)] = await _generate_frame(
+                generated_frame = await _generate_frame(
                     legacy=legacy,
                     state=typed,
                     slot=slot,
@@ -154,29 +175,36 @@ async def diagram_generator(
                     model_overrides=model_overrides,
                     config=config,
                 )
+                slot_frame_results[frame_result_key(frame)] = generated_frame
                 emit_frame_ready(
                     generation_id=generation_id,
                     section_id=sid,
                     slot=slot,
                     frame=frame,
+                    frame_result=generated_frame,
                 )
             except asyncio.TimeoutError:
                 saw_timeout = True
                 message = "Diagram generation timed out for this frame."
-                slot_frame_results[frame_result_key(frame)] = VisualFrameResult(
+                failed_frame = VisualFrameResult(
                     slot_id=slot.slot_id,
                     frame_index=frame.index,
                     label=frame.label,
                     render=slot.preferred_render,
                     status=VisualFrameResultStatus.FAILED,
+                    svg_generation_mode=_svg_generation_mode(legacy),
+                    model_slot="standard",
+                    svg_failure_reason="timeout",
                     error_message=message,
                 )
+                slot_frame_results[frame_result_key(frame)] = failed_frame
                 emit_frame_failed(
                     generation_id=generation_id,
                     section_id=sid,
                     slot=slot,
                     frame=frame,
                     error=message,
+                    frame_result=failed_frame,
                 )
                 errors.append(
                     PipelineError(
@@ -188,20 +216,27 @@ async def diagram_generator(
                 )
             except Exception as exc:
                 message = f"Diagram generation failed for frame {frame.index}: {exc}"
-                slot_frame_results[frame_result_key(frame)] = VisualFrameResult(
+                failed_frame = VisualFrameResult(
                     slot_id=slot.slot_id,
                     frame_index=frame.index,
                     label=frame.label,
                     render=slot.preferred_render,
                     status=VisualFrameResultStatus.FAILED,
+                    svg_generation_mode=_svg_generation_mode(legacy),
+                    model_slot="standard",
+                    sanitized=False,
+                    intent_validated=False,
+                    svg_failure_reason=_svg_failure_reason(exc),
                     error_message=message,
                 )
+                slot_frame_results[frame_result_key(frame)] = failed_frame
                 emit_frame_failed(
                     generation_id=generation_id,
                     section_id=sid,
                     slot=slot,
                     frame=frame,
                     error=message,
+                    frame_result=failed_frame,
                 )
                 errors.append(
                     PipelineError(
@@ -239,6 +274,7 @@ async def diagram_generator(
             ready_frames=slot_result.completed_frames,
             total_frames=slot_result.total_frames,
             error=slot_result.error_message,
+            frame_results=slot_frame_results,
         )
 
     lifecycle = "generated" if all(result.ready for result in section_slot_results.values()) else "partial"

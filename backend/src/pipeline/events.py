@@ -322,6 +322,12 @@ class MediaFrameReadyEvent(BaseModel):
     frame_index: int
     render: str | None = None
     label: str | None = None
+    svg_generation_mode: str | None = None
+    model_slot: str | None = None
+    diagram_kind: str | None = None
+    sanitized: bool | None = None
+    intent_validated: bool | None = None
+    svg_failure_reason: str | None = None
     ready_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -338,6 +344,12 @@ class MediaFrameFailedEvent(BaseModel):
     render: str | None = None
     label: str | None = None
     error: str | None = None
+    svg_generation_mode: str | None = None
+    model_slot: str | None = None
+    diagram_kind: str | None = None
+    sanitized: bool | None = None
+    intent_validated: bool | None = None
+    svg_failure_reason: str | None = None
     failed_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -351,6 +363,12 @@ class MediaSlotReadyEvent(BaseModel):
     slot_type: str
     ready_frames: int
     total_frames: int
+    svg_generation_mode: str | None = None
+    model_slot: str | None = None
+    diagram_kind: str | None = None
+    sanitized: bool | None = None
+    intent_validated: bool | None = None
+    svg_failure_reason: str | None = None
     ready_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -365,6 +383,12 @@ class MediaSlotFailedEvent(BaseModel):
     ready_frames: int
     total_frames: int
     error: str | None = None
+    svg_generation_mode: str | None = None
+    model_slot: str | None = None
+    diagram_kind: str | None = None
+    sanitized: bool | None = None
+    intent_validated: bool | None = None
+    svg_failure_reason: str | None = None
     failed_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

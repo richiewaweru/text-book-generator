@@ -24,7 +24,7 @@ NODE_MODEL_SLOTS: dict[str, ModelSlot] = {
     "content_generator_core": ModelSlot.STANDARD,
     "content_generator_practice": ModelSlot.STANDARD,
     "content_generator_enrichment": ModelSlot.STANDARD,
-    "diagram_generator": ModelSlot.FAST,
+    "diagram_generator": ModelSlot.STANDARD,
     "intelligent_image_prompt": ModelSlot.FAST,
     "interaction_generator": ModelSlot.STANDARD,
     "qc_agent": ModelSlot.FAST,

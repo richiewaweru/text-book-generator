@@ -611,6 +611,11 @@ async def test_recorder_tracks_media_slot_metrics_and_required_media_blocks() ->
             slot_type="diagram",
             ready_frames=1,
             total_frames=1,
+            svg_generation_mode="raw_svg",
+            model_slot="standard",
+            diagram_kind="coordinate_slope",
+            sanitized=True,
+            intent_validated=True,
         )
     )
     await recorder.apply_event(
@@ -661,7 +666,110 @@ async def test_recorder_tracks_media_slot_metrics_and_required_media_blocks() ->
     assert report.summary.media_frame_retry_count == 1
     assert report.summary.planned_svg_slots == 1
     assert report.summary.planned_simulation_slots == 1
+    assert report.summary.raw_svg_generation_count == 1
+    assert report.summary.svg_generation_model_slot == "standard"
+    assert report.summary.svg_diagram_kind_counts == {"coordinate_slope": 1}
     assert report.summary.simulation_failure_count == 1
+
+
+@pytest.mark.asyncio
+async def test_recorder_tracks_raw_svg_failure_metadata() -> None:
+    generation = _generation("gen-raw-svg-report")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        MediaPlanReadyEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_count=3,
+            slots=[
+                {
+                    "slot_id": "diagram-good",
+                    "slot_type": "diagram",
+                    "preferred_render_initial": "svg",
+                    "preferred_render_final": "svg",
+                    "decision_source": "slot_type_default",
+                },
+                {
+                    "slot_id": "diagram-intent",
+                    "slot_type": "diagram",
+                    "preferred_render_initial": "svg",
+                    "preferred_render_final": "svg",
+                    "decision_source": "slot_type_default",
+                },
+                {
+                    "slot_id": "diagram-validation",
+                    "slot_type": "diagram",
+                    "preferred_render_initial": "svg",
+                    "preferred_render_final": "svg",
+                    "decision_source": "slot_type_default",
+                },
+            ],
+        )
+    )
+    await recorder.apply_event(
+        MediaSlotReadyEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_id="diagram-good",
+            slot_type="diagram",
+            ready_frames=1,
+            total_frames=1,
+            svg_generation_mode="raw_svg",
+            model_slot="standard",
+            diagram_kind="coordinate_slope",
+            sanitized=True,
+            intent_validated=True,
+        )
+    )
+    await recorder.apply_event(
+        MediaSlotFailedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_id="diagram-intent",
+            slot_type="diagram",
+            ready_frames=0,
+            total_frames=1,
+            error="SVG appears to be a flowchart.",
+            svg_generation_mode="raw_svg",
+            model_slot="standard",
+            sanitized=True,
+            intent_validated=False,
+            svg_failure_reason="intent",
+        )
+    )
+    await recorder.apply_event(
+        MediaSlotFailedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_id="diagram-validation",
+            slot_type="diagram",
+            ready_frames=0,
+            total_frames=1,
+            error="SVG has no visible elements.",
+            svg_generation_mode="raw_svg",
+            model_slot="standard",
+            sanitized=True,
+            intent_validated=False,
+            svg_failure_reason="validation",
+        )
+    )
+
+    report = await repo.load_report(generation.id)
+    section = report.sections[0]
+    assert [decision.status for decision in section.media_decisions] == [
+        "generated",
+        "failed",
+        "failed",
+    ]
+    assert section.media_decisions[1].svg_failure_reason == "intent"
+    assert report.summary.raw_svg_generation_count == 3
+    assert report.summary.svg_success_slots == 1
+    assert report.summary.svg_failed_slots == 2
+    assert report.summary.svg_intent_retry_count == 1
+    assert report.summary.svg_validation_failure_count == 1
+    assert report.summary.svg_sanitizer_failure_count == 0
 
 
 @pytest.mark.asyncio

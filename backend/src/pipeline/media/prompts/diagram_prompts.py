@@ -43,51 +43,41 @@ Complexity: {detail}"""
 
 def build_diagram_system_prompt(ctx: StyleContext, *, sizing: str = "full") -> str:
     style_instruction = build_diagram_style_instruction(ctx)
-    coordinate_space = "400x300" if sizing == "compact" else "600x400"
-    safe_zone = "x 30-370, y 40-260." if sizing == "compact" else "x 40-560, y 50-360."
-    default_element_size = "90x48" if sizing == "compact" else "120x60"
     compact_guidance = (
-        "- Keep the layout compact: 2-4 elements only, one focal relationship, minimal ornament."
+        "- Keep compact diagrams focused: one focal relationship, minimal ornament, readable labels."
         if sizing == "compact"
         else "- Use the full canvas deliberately for clear spacing and label readability."
     )
 
-    return f"""You design diagrams for educational content by outputting structured JSON specs.
-The specs are rendered client-side and you do NOT generate SVG or HTML.
+    return f"""You generate raw SVG diagrams for educational textbook sections.
+You receive a visual brief and must create the clearest possible classroom diagram.
 
 {style_instruction}
 
-Diagram types:
-- "process-flow": steps connected by arrows (horizontal or vertical)
-- "hierarchy": parent-child tree structure
-- "compare": side-by-side comparison layout
-- "cycle": circular process with repeating steps
-- "concept-map": vocabulary terms or concept relationships only
-
-Diagram type selection rules:
-- Use "concept-map" only for vocabulary or term-relationship content.
-- Do not use "concept-map" for mathematical, spatial, or graphical content.
-- If the intent involves coordinates, axes, measurement, or physical space, do not represent it as a concept-map.
-
-Element placement:
-- Use a {coordinate_space} coordinate space.
-- SAFE ZONE: every edge of every element must stay inside the canvas bounds.
-- Valid placement range: {safe_zone}
-- Never place elements outside the safe zone.
-- Default element size: {default_element_size}. Adjust for label length.
-- Shapes: "rect", "circle", "diamond", "rounded-rect"
-- Set emphasis=true for the most important element(s)
+SVG rules:
+- Output a complete <svg>...</svg> in svg_content.
+- Use viewBox="0 0 600 400".
+- You may use: svg, g, defs, marker, path, line, polyline, polygon, rect, circle, ellipse, text, tspan, title, desc.
+- Do not use script, foreignObject, iframe, object, embed, canvas, video, audio, or image.
+- Do not use external images, external links, href/xlink:href to remote resources, event handlers, or javascript: URLs.
+- Do not use style values containing url(...).
+- Keep labels readable and inside the canvas.
+- Prefer clear instructional diagrams over decorative art.
 {compact_guidance}
 
-Connections:
-- Use from_id/to_id referencing element ids
-- Styles: "solid" for primary flow, "dashed" for optional/conditional, "arrow" (default) for directed
+Pedagogy rules:
+- If the brief asks for slope, gradient, rise/run, coordinate, graph, grid, or line: draw a real coordinate/grid-style diagram, not a process flowchart.
+- For slope diagrams, include axes or a grid, a slanted line, rise/run markers, and readable labels.
+- If the brief asks for comparison: use clear side-by-side visual contrast.
+- If the brief asks for process: use ordered arrows and labels.
+- If the brief asks for science structures: draw labeled parts.
+- If the brief asks for measurement: show measurement arrows and values.
 
 Caption: max 60 words, plain language.
 alt_text: max 80 words, describes the diagram for screen readers.
 
 Output a JSON object with exactly these fields:
-  spec (object with type, title, elements, connections, layout_hint), caption, alt_text
+  svg_content, caption, alt_text, diagram_kind, self_check
 
 Output only valid JSON. No preamble, no markdown fences."""
 
@@ -100,7 +90,11 @@ def build_diagram_user_prompt(
 ) -> str:
     must_include = ", ".join(frame.must_include) if frame.must_include else "None"
     avoid = ", ".join(frame.avoid) if frame.avoid else "None"
-    primary_brief = slot.content_brief or frame.generation_goal
+    section_target = slot.block_target in {None, "section"}
+    if section_target:
+        primary_brief = frame.generation_goal or slot.content_brief or section_title
+    else:
+        primary_brief = slot.content_brief or frame.generation_goal or section_title
     return f"""Section: {section_title}
 Slot type: {slot.slot_type.value}
 Sizing: {slot.sizing}
@@ -113,5 +107,5 @@ Reference style: {slot.reference_style.value}
 Must include: {must_include}
 Avoid: {avoid}
 
-Generate a structured diagram spec that makes the planned concept visually clear.
+Generate raw SVG that makes the planned concept visually clear.
 Keep the result aligned to the slot intent and frame scope only."""

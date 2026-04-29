@@ -16,7 +16,7 @@ from pipeline.media.types import (
     VisualSlot,
     VisualSlotResult,
 )
-from pipeline.nodes.diagram_generator import _series_seed_steps
+from pipeline.nodes.diagram_generator import RawSvgDiagramOutput, _series_seed_steps
 from pipeline.nodes.diagram_generator import diagram_generator as diagram_node
 from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.nodes.section_assembler import section_assembler
@@ -428,6 +428,101 @@ async def test_graph_visible_diagram_node_delegates_to_media_executor(monkeypatc
     result = await diagram_node(_base_state(media_plan=MediaPlan(section_id="s-01", slots=[])))
 
     assert result["marker"] == "delegated"
+
+
+@pytest.mark.asyncio
+async def test_diagram_generator_writes_raw_svg_to_diagram_series(monkeypatch) -> None:
+    monkeypatch.delenv("PIPELINE_RAW_SVG_DIAGRAMS", raising=False)
+    slot = VisualSlot(
+        slot_id="diagram-series",
+        slot_type="diagram_series",
+        required=True,
+        preferred_render="svg",
+        block_target="section",
+        pedagogical_intent="Show slope visually.",
+        caption="Slope diagrams.",
+        frames=[
+            VisualFrame(
+                slot_id="diagram-series",
+                index=0,
+                label="Slope 3",
+                generation_goal="Draw a coordinate grid with a line showing slope 3.",
+            )
+        ],
+    )
+    state = _base_state(media_plan=MediaPlan(section_id="s-01", slots=[slot]))
+
+    async def fake_raw_output(*args, **kwargs):
+        _ = (args, kwargs)
+        return RawSvgDiagramOutput(
+            svg_content=(
+                '<svg viewBox="0 0 600 400">'
+                '<line x1="80" y1="330" x2="520" y2="70" />'
+                '<text x="110" y="120">slope 3</text>'
+                "</svg>"
+            ),
+            caption="A line rises three units for each unit of run.",
+            alt_text="Coordinate graph with a rising line labeled slope 3.",
+            diagram_kind="coordinate_slope",
+        )
+
+    monkeypatch.setattr("pipeline.nodes.diagram_generator._generate_raw_svg_output", fake_raw_output)
+
+    result = await diagram_node(state)
+
+    series = result["generated_sections"]["s-01"].diagram_series
+    frame = result["media_frame_results"]["s-01"]["diagram-series"]["0"]
+    assert series is not None
+    assert series.diagrams[0].svg_content.startswith("<svg")
+    assert "slope 3" in series.diagrams[0].svg_content
+    assert frame.svg_generation_mode == "raw_svg"
+    assert frame.model_slot == "standard"
+    assert frame.diagram_kind == "coordinate_slope"
+    assert frame.sanitized is True
+    assert frame.intent_validated is True
+
+
+@pytest.mark.asyncio
+async def test_diagram_generator_rejects_unsafe_raw_svg_as_recoverable_failure(monkeypatch) -> None:
+    monkeypatch.delenv("PIPELINE_RAW_SVG_DIAGRAMS", raising=False)
+    slot = VisualSlot(
+        slot_id="diagram-series",
+        slot_type="diagram_series",
+        required=True,
+        preferred_render="svg",
+        block_target="section",
+        pedagogical_intent="Show slope visually.",
+        caption="Slope diagrams.",
+        frames=[
+            VisualFrame(
+                slot_id="diagram-series",
+                index=0,
+                label="Slope 3",
+                generation_goal="Draw a coordinate grid with a line showing slope 3.",
+            )
+        ],
+    )
+    state = _base_state(media_plan=MediaPlan(section_id="s-01", slots=[slot]))
+
+    async def fake_raw_output(*args, **kwargs):
+        _ = (args, kwargs)
+        return RawSvgDiagramOutput(
+            svg_content='<svg viewBox="0 0 600 400"><script>alert(1)</script></svg>',
+            caption="Unsafe diagram.",
+            alt_text="Unsafe diagram.",
+            diagram_kind="coordinate_slope",
+        )
+
+    monkeypatch.setattr("pipeline.nodes.diagram_generator._generate_raw_svg_output", fake_raw_output)
+
+    result = await diagram_node(state)
+
+    frame = result["media_frame_results"]["s-01"]["diagram-series"]["0"]
+    assert frame.status == VisualFrameResultStatus.FAILED
+    assert frame.svg_generation_mode == "raw_svg"
+    assert frame.svg_failure_reason == "sanitizer"
+    assert result["errors"][0].recoverable is True
+    assert "banned SVG tag" in result["errors"][0].message
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,12 @@ class VisualFrameResult(BaseModel):
     render: VisualRender | None = None
     status: VisualFrameResultStatus = VisualFrameResultStatus.PENDING
     svg_content: str | None = None
+    svg_generation_mode: str | None = None
+    model_slot: str | None = None
+    diagram_kind: str | None = None
+    sanitized: bool = False
+    intent_validated: bool = False
+    svg_failure_reason: str | None = None
     image_url: str | None = None
     html_content: str | None = None
     diagram_spec: dict[str, Any] | None = None
