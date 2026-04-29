@@ -274,6 +274,24 @@ def test_visual_context_block_for_core_without_placements_forbids_visual_referen
     assert "Do NOT reference" in visual
 
 
+def test_visual_context_block_mode2_series_gives_caption_brief_instruction() -> None:
+    plan = _section_plan(
+        visual_placements=[
+            BlockVisualPlacement(
+                block="section",
+                slot_type="diagram_series",
+                hint="Full-section sequence visual.",
+            )
+        ]
+    )
+
+    visual = _visual_context_block(plan)
+
+    assert "IS the diagram series" in visual
+    assert "caption IS the diagram instruction" in visual
+    assert "NO diagram" not in visual
+
+
 @pytest.mark.parametrize(
     ("slot_type", "expected"),
     [
@@ -399,6 +417,47 @@ async def test_curriculum_planner_seeded_outline_passes_through_without_reroutin
 
 
 @pytest.mark.asyncio
+async def test_curriculum_planner_seeded_outline_reports_existing_visual_placements(monkeypatch) -> None:
+    outline = [
+        _section_plan(
+            section_id="s-01",
+            title="See plants",
+            position=1,
+            role="visual",
+            required_components=["diagram-series"],
+            visual_placements=[
+                BlockVisualPlacement(
+                    block="section",
+                    slot_type="diagram_series",
+                    hint="Full-section sequence visual.",
+                )
+            ],
+        )
+    ]
+    state = _base_state(
+        request=_request(section_plans=outline),
+        current_section_plan=None,
+    )
+    published_events: list[object] = []
+    monkeypatch.setattr(
+        curriculum_planner_mod,
+        "publish_runtime_event",
+        lambda generation_id, event: published_events.append(event),
+    )
+    monkeypatch.setattr(curriculum_planner_mod, "get_node_text_model", lambda *args, **kwargs: object())
+
+    await curriculum_planner_mod.curriculum_planner(state)
+
+    planner_event = next(event for event in published_events if event.type == "curriculum_planned")
+    assert planner_event.path == "seeded_passthrough"
+    assert planner_event.runtime_curriculum_outline[0].visual_placements_count == 1
+    assert planner_event.planner_trace_sections[0].visual_placements_count == 1
+    assert planner_event.planner_trace_sections[0].visual_placements_summary == [
+        "section:diagram_series"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_curriculum_planner_fresh_path_routes_visual_placements_after_llm_output(monkeypatch) -> None:
     state = _base_state(
         request=_request(section_plans=None),
@@ -449,6 +508,9 @@ async def test_curriculum_planner_fresh_path_routes_visual_placements_after_llm_
     assert len(planner_event.duplicate_term_warnings) == 1
     assert "visual_commitment" not in planner_event.runtime_curriculum_outline[0].model_dump()
     assert planner_event.planner_trace_sections[0].visual_placements_count == 1
+    assert planner_event.planner_trace_sections[0].visual_placements_summary == [
+        "explanation:diagram"
+    ]
 
 
 def test_visual_router_uses_section_block_for_visual_roles() -> None:

@@ -674,6 +674,7 @@ async def test_recorder_persists_runtime_outline_and_planner_trace() -> None:
                     "role": "intro",
                     "rationale_summary": "Introduce slope as the steepness of a line.",
                     "visual_placements_count": 1,
+                    "visual_placements_summary": ["explanation:diagram"],
                 }
             ],
         )
@@ -691,6 +692,10 @@ async def test_recorder_persists_runtime_outline_and_planner_trace() -> None:
         "Introduce slope as the steepness of a line."
     )
     assert report.planner_trace.sections[0].visual_placements_count == 1
+    assert report.planner_trace.sections[0].visual_placements_summary == [
+        "explanation:diagram"
+    ]
+    assert report.summary.sections_with_planned_visuals == 1
     assert report.planner_trace.duplicate_term_warnings[0].startswith(
         "Duplicate term assignment in curriculum plan"
     )
@@ -1066,4 +1071,3 @@ async def test_wait_for_idle_times_out_and_drains_pending_queue() -> None:
 
     assert recorder.dropped_event_count == 1
     assert recorder.diagnostics_degraded is True
-

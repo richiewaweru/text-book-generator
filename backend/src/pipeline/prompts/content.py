@@ -93,6 +93,37 @@ def _visual_context_block(section_plan: SectionPlan) -> str:
             "Do NOT reference a diagram, image, or simulation."
         )
 
+    section_placements = [
+        placement for placement in section_plan.visual_placements if placement.block == "section"
+    ]
+    if section_placements:
+        slot_type = section_placements[0].slot_type
+        if slot_type == "diagram_series":
+            return (
+                "Visual context:\n"
+                "This section's primary content IS the diagram series. "
+                "Each step_label and caption you write will become an image generation prompt. "
+                "Write captions as precise visual descriptions of what the image must show. "
+                "Be specific: name the objects, their positions, labels, and relationships. "
+                "Do NOT write prose that says 'see the diagram'. "
+                "The caption IS the diagram instruction."
+            )
+        if slot_type == "diagram_compare":
+            return (
+                "Visual context:\n"
+                "This section's primary content IS a comparison diagram. "
+                "The before_label and after_label you write will become image prompts. "
+                "Write them as precise visual descriptions. "
+                "Be specific about what each state shows and how they differ visually."
+            )
+        return (
+            "Visual context:\n"
+            "This section's primary content IS a diagram. "
+            "The caption and alt_text you write will become the image generation prompt. "
+            "Write them as precise visual descriptions of what the image must show. "
+            "Name the objects, labels, and relationships explicitly."
+        )
+
     explanation_lines: list[str] = []
     practice_lines: list[str] = []
     worked_example_lines: list[str] = []

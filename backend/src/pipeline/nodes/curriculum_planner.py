@@ -401,6 +401,10 @@ def _planner_trace_sections(sections: list[SectionPlan]) -> list[GenerationPlann
             role=plan.role,
             rationale_summary=plan.focus,
             visual_placements_count=count_visual_placements(plan),
+            visual_placements_summary=[
+                f"{placement.block}:{placement.slot_type}"
+                for placement in plan.visual_placements
+            ],
         )
         for plan in sections
     ]

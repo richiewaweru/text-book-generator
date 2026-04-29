@@ -122,6 +122,7 @@ class GenerationPlannerTraceSection(BaseModel):
     role: str
     rationale_summary: str
     visual_placements_count: int = 0
+    visual_placements_summary: list[str] = Field(default_factory=list)
 
 
 class GenerationPlannerTrace(BaseModel):
@@ -137,6 +138,7 @@ class GenerationReportSummary(BaseModel):
     missing_sections: int = 0
     failed_sections: int = 0
     stalled_sections: int = 0
+    sections_with_planned_visuals: int = 0
     retry_count: int = 0
     llm_transport_retries: int = 0
     validation_repair_attempts: int = 0

@@ -11,6 +11,7 @@ from planning.models import (
     TemplateDecision,
 )
 from planning.role_maps import ROLE_COMPONENT_MAP
+from planning.visual_router import _derive_visual_placements, _visual_intent
 from pipeline.resources import ResourceTemplate
 from pipeline.types.requests import GenerationMode
 from pipeline.types.teacher_brief import TeacherBrief
@@ -229,6 +230,38 @@ def build_fallback_composition(
     )
 
 
+def _apply_fallback_visual_placements(
+    sections: list[PlanningSectionPlan],
+    brief: TeacherBrief,
+) -> list[PlanningSectionPlan]:
+    if "visuals" not in brief.supports:
+        return sections
+
+    routed: list[PlanningSectionPlan] = []
+    for section in sections:
+        selected = set(section.selected_components)
+        has_visual_component = bool(
+            selected.intersection({"diagram-block", "diagram-series", "diagram-compare"})
+        )
+        if not has_visual_component:
+            routed.append(section)
+            continue
+
+        routed.append(
+            section.model_copy(
+                update={
+                    "visual_placements": _derive_visual_placements(
+                        section=section,
+                        intent=_visual_intent(section),
+                        should_visualize=True,
+                    )
+                }
+            )
+        )
+
+    return routed
+
+
 def build_fallback_spec(
     *,
     brief: TeacherBrief,
@@ -238,6 +271,7 @@ def build_fallback_spec(
     generation_id: str = "",
 ) -> PlanningGenerationSpec:
     composition = build_fallback_composition(brief=brief, template=template, roles=roles)
+    sections = _apply_fallback_visual_placements(composition.sections, brief)
     return PlanningGenerationSpec(
         id=generation_id or uuid4().hex,
         template_id=_RUNTIME_TEMPLATE_ID,
@@ -253,7 +287,7 @@ def build_fallback_spec(
         lesson_rationale=composition.lesson_rationale,
         directives=directives,
         committed_budgets={},
-        sections=composition.sections,
+        sections=sections,
         warning=composition.warning,
         source_brief_id=uuid4().hex,
         source_brief=brief,

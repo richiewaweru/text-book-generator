@@ -966,6 +966,11 @@ class GenerationReportRecorder:
         summary.stalled_sections = sum(
             1 for section in self._sections.values() if section.status == "stalled"
         )
+        summary.sections_with_planned_visuals = sum(
+            1
+            for section in self._report.runtime_curriculum_outline
+            if section.visual_placements_count > 0
+        )
         summary.retry_count = sum(len(section.queued_retries) for section in self._sections.values())
         summary.validation_repair_attempts = sum(
             section.validation_repair_attempts for section in self._sections.values()
@@ -1250,4 +1255,3 @@ class GenerationReportRecorder:
             self._report.summary.field_regen_count,
             self._report.summary.field_regen_success_count,
         )
-

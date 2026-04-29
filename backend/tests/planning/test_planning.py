@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from planning.fallback import build_fallback_composition
+from planning.fallback import build_fallback_composition, build_fallback_spec
 from planning.models import CompositionResult, PlanningSectionPlan
 from planning.plan_validator import validate_plan
 from planning.service import PlanningService, _resolve_directives, _resolve_roles
@@ -316,3 +316,25 @@ def test_fallback_keeps_single_subtopic_across_all_sections() -> None:
         "Solving two-step equations",
     ]
     assert all("Solving two-step equations" in section.title for section in result.sections)
+
+
+def test_fallback_spec_sets_visual_placements_for_visual_role_sections() -> None:
+    brief = build_brief(
+        supports=["visuals"],
+        resource_type="worksheet",
+    )
+    template = get_resource_template(brief.resource_type)
+
+    spec = build_fallback_spec(
+        brief=brief,
+        template=template,
+        roles=["intro", "visual", "summary"],
+        directives=_resolve_directives(brief),
+    )
+
+    visual_sections = [section for section in spec.sections if section.role == "visual"]
+
+    assert visual_sections
+    for section in visual_sections:
+        assert section.visual_placements
+        assert all(placement.block == "section" for placement in section.visual_placements)

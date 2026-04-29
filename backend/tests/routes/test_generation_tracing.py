@@ -431,6 +431,7 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
                         "terms_to_define": ["slope"],
                         "terms_assumed": [],
                         "practice_target": "identify slope as a measure of steepness",
+                        "visual_placements_count": 1,
                     }
                 ],
                 planner_trace_sections=[
@@ -441,6 +442,7 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
                         "role": "intro",
                         "rationale_summary": "Introduce slope as steepness on a graph.",
                         "visual_placements_count": 1,
+                        "visual_placements_summary": ["explanation:diagram"],
                     }
                 ],
             ),
@@ -547,4 +549,7 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
     assert "visual_commitment" not in report_response.json()["runtime_curriculum_outline"][0]
     assert report_response.json()["planner_trace"]["result"] == "enriched"
     assert report_response.json()["planner_trace"]["sections"][0]["visual_placements_count"] == 1
-
+    assert report_response.json()["planner_trace"]["sections"][0]["visual_placements_summary"] == [
+        "explanation:diagram"
+    ]
+    assert report_response.json()["summary"]["sections_with_planned_visuals"] == 1
