@@ -45,6 +45,7 @@ class VisualSlot(BaseModel):
     problem_index: int | None = None
     content_brief: str | None = None
     generation_prompt: str | None = None
+    render_decision: dict[str, str | bool | None] | None = None
     pedagogical_intent: str
     caption: str
     reference_style: ReferenceStyle = ReferenceStyle.STANDARD

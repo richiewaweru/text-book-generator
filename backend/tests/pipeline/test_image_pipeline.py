@@ -721,7 +721,9 @@ async def test_image_generator_uses_resolved_generation_prompt_when_available(tm
 
     await image_generator(state, _store=store, _client=client)
 
-    assert client.prompts == ["Use the resolved LLM-authored image prompt."]
+    assert len(client.prompts) == 1
+    assert "Content brief: Use the resolved LLM-authored image prompt." in client.prompts[0]
+    assert "Requirements:" in client.prompts[0]
 
 
 @pytest.mark.asyncio

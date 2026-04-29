@@ -1,6 +1,7 @@
 from .generation_report import (
     GenerationPlannerTrace,
     GenerationPlannerTraceSection,
+    MediaDecisionTrace,
     GenerationReport,
     GenerationReportFieldRegenAttempt,
     GenerationReportLLMAttempt,
@@ -15,6 +16,7 @@ from .generation_report import (
 __all__ = [
     "GenerationPlannerTrace",
     "GenerationPlannerTraceSection",
+    "MediaDecisionTrace",
     "GenerationReport",
     "GenerationReportFieldRegenAttempt",
     "GenerationReportLLMAttempt",

@@ -14,6 +14,7 @@ separate graph node.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from langchain_core.runnables.config import RunnableConfig
 
@@ -36,6 +37,7 @@ from pipeline.nodes.section_assembler import section_assembler
 from pipeline.nodes.section_runner import _run_parallel_phase, run_section_steps
 from pipeline.runtime_context import get_runtime_context
 from pipeline.runtime_diagnostics import publish_runtime_event
+from pipeline.media.types import SlotType, VisualRender
 from pipeline.media.slot_state import pending_required_slot_ids, visual_mode
 from pipeline.state import PartialSectionRecord, TextbookPipelineState, merge_state_updates
 
@@ -51,6 +53,65 @@ async def _run_interaction_path(
         state,
         model_overrides=model_overrides,
     )
+
+
+def _media_plan_event_slots(typed: TextbookPipelineState) -> list[dict[str, str | bool | None]]:
+    sid = typed.current_section_id
+    plan = typed.media_plans.get(sid) if sid else None
+    if plan is None:
+        return []
+    slots: list[dict[str, str | bool | None]] = []
+    for slot in plan.slots:
+        decision = slot.render_decision or {}
+        slots.append(
+            {
+                "slot_id": slot.slot_id,
+                "slot_type": slot.slot_type.value,
+                "preferred_render_initial": str(
+                    decision.get("preferred_render_initial") or slot.preferred_render.value
+                ),
+                "preferred_render_final": str(
+                    decision.get("preferred_render_final") or slot.preferred_render.value
+                ),
+                "fallback_render": decision.get("fallback_render")
+                or (slot.fallback_render.value if slot.fallback_render else None),
+                "decision_source": str(decision.get("decision_source") or "slot_type_default"),
+                "decision_reason": decision.get("decision_reason"),
+                "intelligent_prompt_resolved": bool(
+                    decision.get("intelligent_prompt_resolved", False)
+                ),
+            }
+        )
+    return slots
+
+
+def _required_media_executors(typed: TextbookPipelineState) -> list[tuple[str, Any]]:
+    """Return only the media executors needed by the current section's planned slots."""
+    sid = typed.current_section_id
+    plan = typed.media_plans.get(sid) if sid else None
+
+    if plan is None or not plan.slots:
+        return []
+
+    static_slot_types = {SlotType.DIAGRAM, SlotType.DIAGRAM_SERIES, SlotType.DIAGRAM_COMPARE}
+    needs_diagram = any(
+        slot.slot_type in static_slot_types and slot.preferred_render == VisualRender.SVG
+        for slot in plan.slots
+    )
+    needs_image = any(
+        slot.slot_type in static_slot_types and slot.preferred_render == VisualRender.IMAGE
+        for slot in plan.slots
+    )
+    needs_simulation = any(slot.slot_type == SlotType.SIMULATION for slot in plan.slots)
+
+    executors: list[tuple[str, Any]] = []
+    if needs_diagram:
+        executors.append(("diagram_generator", diagram_generator))
+    if needs_image:
+        executors.append(("image_generator", image_generator))
+    if needs_simulation:
+        executors.append(("interaction_generator", interaction_generator))
+    return executors
 
 
 async def _start_section_flow(
@@ -288,6 +349,7 @@ async def process_section(
                     generation_id=typed.request.generation_id or "",
                     section_id=section_id,
                     slot_count=len(typed.media_plans[section_id].slots),
+                    slots=_media_plan_event_slots(typed),
                 ),
             )
 
@@ -303,16 +365,16 @@ async def process_section(
 
         initial_pending_assets = list(typed.section_pending_assets.get(section_id, []))
 
-        phase3 = await _run_parallel_phase(
-            typed,
-            steps=[
-                ("diagram_generator", diagram_generator),
-                ("image_generator", image_generator),
-                ("interaction_generator", interaction_generator),
-            ],
-            model_overrides=model_overrides,
-            config=config,
-        )
+        required_executors = _required_media_executors(typed)
+        if required_executors:
+            phase3 = await _run_parallel_phase(
+                typed,
+                steps=required_executors,
+                model_overrides=model_overrides,
+                config=config,
+            )
+        else:
+            phase3 = {"completed_nodes": []}
         merge_state_updates(raw_state, phase3)
         typed = TextbookPipelineState.parse(raw_state)
 

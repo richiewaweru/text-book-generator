@@ -22,6 +22,7 @@ from pipeline.reporting import (
     GenerationReportSection,
     GenerationReportSummary,
     GenerationTimelineEvent,
+    MediaDecisionTrace,
 )
 from telemetry.ports.generation_report_repository import GenerationReportRepository
 
@@ -103,6 +104,7 @@ class GenerationReportRecorder:
         self._image_slot_ids: set[tuple[str, str]] = set()
         self._svg_slot_ids: set[tuple[str, str]] = set()
         self._prompt_builder_slot_ids: set[tuple[str, str]] = set()
+        self._sections_without_media_ids: set[str] = set()
         self._timeline_sequence = 0
         self._queue: asyncio.Queue | None = None
         self._consumer: asyncio.Task | None = None
@@ -415,6 +417,50 @@ class GenerationReportRecorder:
     def _slot_set(self, store: dict[str, set[str]], section_id: str) -> set[str]:
         return store.setdefault(section_id, set())
 
+    def _executor_for_media_slot(self, slot_type: str | None, render: str | None) -> str | None:
+        if slot_type == "simulation":
+            return "interaction_generator"
+        if slot_type in {"diagram", "diagram_compare", "diagram_series"}:
+            if render == "svg":
+                return "diagram_generator"
+            if render == "image":
+                return "image_generator"
+        return None
+
+    def _decision_for_slot(
+        self,
+        section: GenerationReportSection,
+        slot_id: str,
+    ) -> MediaDecisionTrace | None:
+        return next(
+            (decision for decision in section.media_decisions if decision.slot_id == slot_id),
+            None,
+        )
+
+    def _upsert_media_decision(
+        self,
+        section: GenerationReportSection,
+        decision: MediaDecisionTrace,
+    ) -> None:
+        for index, existing in enumerate(section.media_decisions):
+            if existing.slot_id == decision.slot_id:
+                section.media_decisions[index] = existing.model_copy(
+                    update=decision.model_dump(exclude_none=True)
+                )
+                return
+        section.media_decisions.append(decision)
+
+    def _set_media_decision_status(
+        self,
+        section: GenerationReportSection,
+        *,
+        executor: str,
+        status: str,
+    ) -> None:
+        for index, decision in enumerate(section.media_decisions):
+            if decision.executor_selected == executor:
+                section.media_decisions[index] = decision.model_copy(update={"status": status})
+
     def _ensure_node(
         self,
         *,
@@ -647,7 +693,54 @@ class GenerationReportRecorder:
 
     def _handle_media_plan_ready(self, payload: dict[str, Any]) -> None:
         section = self._ensure_section(payload["section_id"])
-        section.media_slots_planned = max(section.media_slots_planned, payload.get("slot_count", 0))
+        section_id = payload["section_id"]
+        slot_count = payload.get("slot_count", 0)
+        section.media_slots_planned = max(section.media_slots_planned, slot_count)
+        slots = list(payload.get("slots", []) or [])
+        if slot_count == 0 or not slots:
+            if slot_count == 0:
+                self._sections_without_media_ids.add(section_id)
+            return
+        self._sections_without_media_ids.discard(section_id)
+        for slot in slots:
+            slot_id = str(slot.get("slot_id") or "")
+            if not slot_id:
+                continue
+            slot_type = str(slot.get("slot_type") or "")
+            final_render = str(slot.get("preferred_render_final") or "")
+            self._slot_set(self._planned_media_slots, section_id).add(slot_id)
+            slot_key = (section_id, slot_id)
+            if final_render == "image":
+                self._image_slot_ids.add(slot_key)
+                self._svg_slot_ids.discard(slot_key)
+            elif final_render == "svg":
+                self._svg_slot_ids.add(slot_key)
+                self._image_slot_ids.discard(slot_key)
+            if slot.get("decision_source") == "intelligent_image_prompt":
+                self._prompt_builder_slot_ids.add(slot_key)
+            self._upsert_media_decision(
+                section,
+                MediaDecisionTrace(
+                    slot_id=slot_id,
+                    slot_type=slot_type,
+                    preferred_render_initial=str(
+                        slot.get("preferred_render_initial") or final_render
+                    ),
+                    preferred_render_final=final_render,
+                    fallback_render=slot.get("fallback_render"),
+                    decision_source=str(slot.get("decision_source") or "slot_type_default"),
+                    decision_reason=slot.get("decision_reason"),
+                    intelligent_prompt_resolved=bool(
+                        slot.get("intelligent_prompt_resolved", False)
+                    ),
+                    executor_selected=self._executor_for_media_slot(slot_type, final_render),
+                    status="planned",
+                ),
+            )
+        section.media_slots_planned = max(
+            section.media_slots_planned,
+            len(self._planned_media_slots.get(section_id, set())),
+        )
 
     def _handle_visual_placements_committed(self, payload: dict[str, Any]) -> None:
         section = self._ensure_section(payload["section_id"])
@@ -671,6 +764,43 @@ class GenerationReportRecorder:
             self._image_slot_ids.discard(slot_key)
         if payload.get("decided_by") == "intelligent_image_prompt":
             self._prompt_builder_slot_ids.add(slot_key)
+        existing = self._decision_for_slot(section, slot_id)
+        if existing is not None:
+            self._upsert_media_decision(
+                section,
+                existing.model_copy(
+                    update={
+                        "preferred_render_initial": payload.get(
+                            "preferred_render_initial",
+                            existing.preferred_render_initial,
+                        ),
+                        "preferred_render_final": payload.get(
+                            "preferred_render_final",
+                            render_mode,
+                        ),
+                        "fallback_render": payload.get(
+                            "fallback_render",
+                            existing.fallback_render,
+                        ),
+                        "decision_source": payload.get("decided_by")
+                        or existing.decision_source,
+                        "decision_reason": payload.get(
+                            "decision_reason",
+                            existing.decision_reason,
+                        ),
+                        "intelligent_prompt_resolved": bool(
+                            payload.get(
+                                "intelligent_prompt_resolved",
+                                existing.intelligent_prompt_resolved,
+                            )
+                        ),
+                        "executor_selected": self._executor_for_media_slot(
+                            existing.slot_type,
+                            payload.get("preferred_render_final") or render_mode,
+                        ),
+                    }
+                ),
+            )
 
     def _handle_simulation_type_selected(self, payload: dict[str, Any]) -> None:
         section = self._ensure_section(payload["section_id"])
@@ -693,6 +823,12 @@ class GenerationReportRecorder:
             section.media_slots_planned,
             len(self._planned_media_slots[section_id]),
         )
+        decision = self._decision_for_slot(section, slot_id)
+        if decision is not None:
+            self._upsert_media_decision(
+                section,
+                decision.model_copy(update={"status": "generated"}),
+            )
 
     def _handle_media_slot_failed(self, payload: dict[str, Any]) -> None:
         section_id = payload.get("section_id")
@@ -707,6 +843,12 @@ class GenerationReportRecorder:
             section.media_slots_planned,
             len(self._planned_media_slots[section_id]),
         )
+        decision = self._decision_for_slot(section, slot_id)
+        if decision is not None:
+            self._upsert_media_decision(
+                section,
+                decision.model_copy(update={"status": "failed"}),
+            )
         if payload.get("slot_type") in {"simulation", "simulation_block"}:
             section.simulation_outcome = "failed"
             section.simulation_failure_reason = payload.get("error")
@@ -737,6 +879,19 @@ class GenerationReportRecorder:
     def _handle_diagram_outcome(self, payload: dict[str, Any]) -> None:
         section = self._ensure_section(payload["section_id"])
         section.diagram_outcome = payload.get("outcome")
+        outcome = payload.get("outcome")
+        if outcome == "success":
+            self._set_media_decision_status(
+                section,
+                executor="diagram_generator",
+                status="generated",
+            )
+        elif outcome in {"timeout", "error"}:
+            self._set_media_decision_status(
+                section,
+                executor="diagram_generator",
+                status="failed",
+            )
 
     def _handle_image_outcome(self, payload: dict[str, Any]) -> None:
         section_id = payload.get("section_id")
@@ -746,6 +901,19 @@ class GenerationReportRecorder:
         section.image_outcome = payload.get("outcome")
         section.image_error = payload.get("error_message")
         section.image_provider = payload.get("provider")
+        outcome = payload.get("outcome")
+        if outcome == "success":
+            self._set_media_decision_status(
+                section,
+                executor="image_generator",
+                status="generated",
+            )
+        elif outcome in {"timeout", "error"}:
+            self._set_media_decision_status(
+                section,
+                executor="image_generator",
+                status="failed",
+            )
 
     def _handle_interaction_outcome(self, payload: dict[str, Any]) -> None:
         section_id = payload.get("section_id")
@@ -759,6 +927,18 @@ class GenerationReportRecorder:
             "generated" if payload.get("outcome") == "generated" else "skipped"
         )
         section.simulation_failure_reason = None
+        if payload.get("outcome") == "generated":
+            self._set_media_decision_status(
+                section,
+                executor="interaction_generator",
+                status="generated",
+            )
+        elif payload.get("outcome") == "skipped":
+            self._set_media_decision_status(
+                section,
+                executor="interaction_generator",
+                status="skipped",
+            )
 
     def _handle_interaction_retry_queued(self, payload: dict[str, Any]) -> None:
         section_id = payload.get("section_id")
@@ -1027,10 +1207,56 @@ class GenerationReportRecorder:
             for node in nodes
             if node.error and "timed out" in node.error.lower()
         )
-        summary.diagram_skip_count = sum(
-            1
+        all_media_decisions = [
+            decision
             for section in self._sections.values()
-            if section.diagram_outcome == "skipped"
+            for decision in section.media_decisions
+        ]
+        summary.sections_without_media = len(self._sections_without_media_ids)
+        summary.planned_image_slots = sum(
+            1 for decision in all_media_decisions if decision.preferred_render_final == "image"
+        )
+        summary.planned_svg_slots = sum(
+            1 for decision in all_media_decisions if decision.preferred_render_final == "svg"
+        )
+        summary.planned_simulation_slots = sum(
+            1 for decision in all_media_decisions if decision.slot_type == "simulation"
+        )
+        summary.svg_attempted_slots = sum(
+            1
+            for decision in all_media_decisions
+            if decision.executor_selected == "diagram_generator"
+            and decision.status in {"generated", "failed"}
+        )
+        summary.svg_success_slots = sum(
+            1
+            for decision in all_media_decisions
+            if decision.executor_selected == "diagram_generator"
+            and decision.status == "generated"
+        )
+        summary.svg_failed_slots = sum(
+            1
+            for decision in all_media_decisions
+            if decision.executor_selected == "diagram_generator"
+            and decision.status == "failed"
+        )
+        summary.image_attempted_slots = sum(
+            1
+            for decision in all_media_decisions
+            if decision.executor_selected == "image_generator"
+            and decision.status in {"generated", "failed"}
+        )
+        summary.image_success_slots = sum(
+            1
+            for decision in all_media_decisions
+            if decision.executor_selected == "image_generator"
+            and decision.status == "generated"
+        )
+        summary.image_failed_slots = sum(
+            1
+            for decision in all_media_decisions
+            if decision.executor_selected == "image_generator"
+            and decision.status == "failed"
         )
         summary.image_success_count = sum(
             1 for section in self._sections.values() if section.image_outcome == "success"
@@ -1039,9 +1265,6 @@ class GenerationReportRecorder:
             1
             for section in self._sections.values()
             if section.image_outcome in {"timeout", "error"}
-        )
-        summary.image_skip_count = sum(
-            1 for section in self._sections.values() if section.image_outcome == "skipped"
         )
         summary.image_slots_count = len(self._image_slot_ids)
         summary.svg_slots_count = len(self._svg_slot_ids)
@@ -1209,7 +1432,7 @@ class GenerationReportRecorder:
 
     def _log_final_summary(self) -> None:
         logger.info(
-            "Generation report summary generation=%s status=%s outcome=%s planned=%s ready=%s missing=%s failed=%s stalled=%s retries=%s llm_transport_retries=%s validation_repairs=%s validation_repair_successes=%s media_slots_planned=%s media_slots_ready=%s media_slots_failed=%s media_frame_retries=%s diagram_retries=%s diagram_timeouts=%s diagram_skips=%s warnings=%s blocking_issues=%s tokens_in=%s tokens_out=%s cost_usd=%s slowest_node=%s slowest_section=%s",
+            "Generation report summary generation=%s status=%s outcome=%s planned=%s ready=%s missing=%s failed=%s stalled=%s retries=%s llm_transport_retries=%s validation_repairs=%s validation_repair_successes=%s media_slots_planned=%s media_slots_ready=%s media_slots_failed=%s media_frame_retries=%s diagram_retries=%s diagram_timeouts=%s sections_without_media=%s warnings=%s blocking_issues=%s tokens_in=%s tokens_out=%s cost_usd=%s slowest_node=%s slowest_section=%s",
             self._report.generation_id,
             self._report.status,
             self._report.outcome or "-",
@@ -1228,7 +1451,7 @@ class GenerationReportRecorder:
             self._report.summary.media_frame_retry_count,
             self._report.summary.diagram_retries,
             self._report.summary.diagram_timeout_count,
-            self._report.summary.diagram_skip_count,
+            self._report.summary.sections_without_media,
             self._report.summary.warning_count,
             self._report.summary.blocking_issue_count,
             self._report.summary.total_tokens_in,
@@ -1242,11 +1465,11 @@ class GenerationReportRecorder:
             self._report.summary.slowest_section or "-",
         )
         logger.info(
-            "Generation report image_and_interaction_summary generation=%s image_success=%s image_fail=%s image_skip=%s image_providers=%s simulation_success=%s simulation_fail=%s interaction_skip=%s interaction_retries=%s field_regen=%s field_regen_success=%s",
+            "Generation report image_and_interaction_summary generation=%s image_success=%s image_fail=%s image_slots_planned=%s image_providers=%s simulation_success=%s simulation_fail=%s interaction_skip=%s interaction_retries=%s field_regen=%s field_regen_success=%s",
             self._report.generation_id,
             self._report.summary.image_success_count,
             self._report.summary.image_failure_count,
-            self._report.summary.image_skip_count,
+            self._report.summary.planned_image_slots,
             self._report.summary.image_provider_counts,
             self._report.summary.simulation_success_count,
             self._report.summary.simulation_failure_count,

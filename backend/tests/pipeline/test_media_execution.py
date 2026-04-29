@@ -16,6 +16,7 @@ from pipeline.media.types import (
     VisualSlot,
     VisualSlotResult,
 )
+from pipeline.nodes.diagram_generator import _series_seed_steps
 from pipeline.nodes.diagram_generator import diagram_generator as diagram_node
 from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.nodes.section_assembler import section_assembler
@@ -385,6 +386,24 @@ def test_parse_simulation_output_tolerates_missing_meta() -> None:
     assert parsed.html_content.startswith("<!doctype html>")
     assert parsed.simulation_type == "graph_slider"
     assert parsed.goal == "Explore the graph."
+
+
+def test_legacy_diagram_series_seed_uses_plan_title_when_header_missing() -> None:
+    section = _section().model_copy(update={"header": None})
+    plan = SectionPlan(
+        section_id="s-01",
+        title="See Positive and Negative Slopes",
+        position=1,
+        focus="Show slope visually.",
+        terms_to_define=["positive slope"],
+    )
+
+    steps = _series_seed_steps(section, plan)
+
+    assert steps[0].step_label == "See Positive and Negative Slopes"
+    assert steps[0].caption == (
+        "See Positive and Negative Slopes - See Positive and Negative Slopes"
+    )
 
 
 def test_simulation_qc_flags_forbidden_patterns_and_slider_count() -> None:

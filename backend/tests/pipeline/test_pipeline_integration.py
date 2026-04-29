@@ -2098,6 +2098,9 @@ class TestProcessSectionComposite:
                     intent="explain_structure",
                     mode="svg",
                 ),
+                "visual_placements": [
+                    BlockVisualPlacement(block="explanation", slot_type="diagram")
+                ],
                 "needs_diagram": True,
             }
         )
@@ -2116,8 +2119,6 @@ class TestProcessSectionComposite:
             "schema_validator",
             "media_planner",
             "diagram_generator",
-            "image_generator",
-            "interaction_generator",
             "section_assembler",
             "qc_agent",
         ]
@@ -2179,6 +2180,9 @@ class TestProcessSectionComposite:
                     intent="explain_structure",
                     mode="svg",
                 ),
+                "visual_placements": [
+                    BlockVisualPlacement(block="explanation", slot_type="diagram")
+                ],
                 "needs_diagram": True,
             }
         )
@@ -2195,8 +2199,6 @@ class TestProcessSectionComposite:
             "schema_validator",
             "media_planner",
             "diagram_generator",
-            "image_generator",
-            "interaction_generator",
             "section_assembler",
         ]
 

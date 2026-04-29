@@ -451,7 +451,7 @@ async def test_recorder_tracks_failed_sections_repairs_and_diagram_outcomes() ->
     report = await repo.load_report(generation.id)
     assert report.summary.validation_repair_attempts == 1
     assert report.summary.validation_repair_successes == 1
-    assert report.summary.diagram_skip_count == 1
+    assert not hasattr(report.summary, "diagram_skip_count")
     assert report.summary.failed_sections == 1
     assert any(section.section_id == "s-02" and section.status == "failed" for section in report.sections)
 
@@ -559,7 +559,7 @@ async def test_recorder_tracks_image_interaction_and_field_regen_metrics() -> No
 
     assert report.summary.image_success_count == 1
     assert report.summary.image_failure_count == 1
-    assert report.summary.image_skip_count == 0
+    assert not hasattr(report.summary, "image_skip_count")
     assert report.summary.image_provider_counts == {"gemini": 1}
     assert report.summary.simulation_success_count == 1
     assert report.summary.interaction_skip_count == 1
@@ -579,6 +579,28 @@ async def test_recorder_tracks_media_slot_metrics_and_required_media_blocks() ->
             generation_id=generation.id,
             section_id="s-01",
             slot_count=2,
+            slots=[
+                {
+                    "slot_id": "diagram-main",
+                    "slot_type": "diagram",
+                    "preferred_render_initial": "svg",
+                    "preferred_render_final": "svg",
+                    "fallback_render": None,
+                    "decision_source": "slot_type_default",
+                    "decision_reason": "slot_type=diagram, block_target=explanation",
+                    "intelligent_prompt_resolved": False,
+                },
+                {
+                    "slot_id": "simulation-lab",
+                    "slot_type": "simulation",
+                    "preferred_render_initial": "html_simulation",
+                    "preferred_render_final": "html_simulation",
+                    "fallback_render": "svg",
+                    "decision_source": "slot_type_default",
+                    "decision_reason": "slot_type=simulation, block_target=section",
+                    "intelligent_prompt_resolved": False,
+                },
+            ],
         )
     )
     await recorder.apply_event(
@@ -631,11 +653,14 @@ async def test_recorder_tracks_media_slot_metrics_and_required_media_blocks() ->
     assert section.media_frame_retry_count == 1
     assert section.media_blocked is True
     assert section.media_block_reason is not None
+    assert [decision.status for decision in section.media_decisions] == ["generated", "failed"]
     assert section.simulation_outcome == "failed"
     assert report.summary.media_slots_planned == 2
     assert report.summary.media_slots_ready == 1
     assert report.summary.media_slots_failed == 1
     assert report.summary.media_frame_retry_count == 1
+    assert report.summary.planned_svg_slots == 1
+    assert report.summary.planned_simulation_slots == 1
     assert report.summary.simulation_failure_count == 1
 
 
@@ -910,12 +935,35 @@ async def test_recorder_tracks_visual_placement_and_render_mode_observability() 
         )
     )
     await recorder.apply_event(
+        MediaPlanReadyEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_count=1,
+            slots=[
+                {
+                    "slot_id": "diagram-main",
+                    "slot_type": "diagram",
+                    "preferred_render_initial": "svg",
+                    "preferred_render_final": "image",
+                    "fallback_render": "svg",
+                    "decision_source": "intelligent_image_prompt",
+                    "decision_reason": None,
+                    "intelligent_prompt_resolved": True,
+                }
+            ],
+        )
+    )
+    await recorder.apply_event(
         SlotRenderModeResolvedEvent(
             generation_id=generation.id,
             section_id="s-01",
             slot_id="diagram-main",
             render_mode="image",
             decided_by="intelligent_image_prompt",
+            preferred_render_initial="svg",
+            preferred_render_final="image",
+            fallback_render="svg",
+            intelligent_prompt_resolved=True,
         )
     )
 
@@ -927,8 +975,14 @@ async def test_recorder_tracks_visual_placement_and_render_mode_observability() 
         "worked_example:diagram:compact",
     ]
     assert section.slot_render_modes == {"diagram-main": "image"}
+    assert len(section.media_decisions) == 1
+    assert section.media_decisions[0].decision_source == "intelligent_image_prompt"
+    assert section.media_decisions[0].preferred_render_initial == "svg"
+    assert section.media_decisions[0].preferred_render_final == "image"
+    assert section.media_decisions[0].executor_selected == "image_generator"
     assert report.summary.image_slots_count == 1
     assert report.summary.svg_slots_count == 0
+    assert report.summary.planned_image_slots == 1
     assert report.summary.prompt_builder_calls == 1
 
 

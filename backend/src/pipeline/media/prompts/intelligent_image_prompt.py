@@ -40,17 +40,24 @@ def build_intelligent_image_prompt_input(
     style_context: StyleContext | None,
 ) -> str:
     frames_summary = "\n".join(
-        f"- frame {frame.index + 1}: label={frame.label or 'n/a'} goal={frame.generation_goal}"
+        f"- frame {frame.index + 1}: label={frame.label or 'n/a'} | brief={frame.generation_goal or 'n/a'}"
         for frame in slot.frames
     )
-    must_include = ", ".join(slot.frames[0].must_include) if slot.frames and slot.frames[0].must_include else "none"
-    avoid = ", ".join(slot.frames[0].avoid) if slot.frames and slot.frames[0].avoid else "none"
+    all_must_include: list[str] = []
+    all_avoid: list[str] = []
+    for frame in slot.frames:
+        all_must_include.extend(frame.must_include or [])
+        all_avoid.extend(frame.avoid or [])
+    must_include = ", ".join(dict.fromkeys(all_must_include)) or "none"
+    avoid = ", ".join(dict.fromkeys(all_avoid)) or "none"
     palette = style_context.palette if style_context is not None else "default classroom palette"
     surface = style_context.surface_style if style_context is not None else "default"
+    grade_band = getattr(style_context, "grade_band", "") if style_context is not None else ""
     return "\n".join(
         [
             f"Section title: {section_title}",
             f"Slot type: {slot.slot_type.value}",
+            f"Block target: {slot.block_target or 'section'}",
             f"Current preferred render: {slot.preferred_render.value}",
             f"Pedagogical intent: {slot.pedagogical_intent}",
             f"Caption target: {slot.caption}",
@@ -58,10 +65,11 @@ def build_intelligent_image_prompt_input(
             f"Reference style: {slot.reference_style.value}",
             f"Palette: {palette}",
             f"Surface style: {surface}",
-            f"Must include: {must_include}",
+            f"Grade band: {grade_band or 'unspecified'}",
+            f"Must include (all frames): {must_include}",
             f"Avoid: {avoid}",
             "Frames:",
-            frames_summary or "- frame 1: label=n/a goal=Create a clear supporting visual.",
+            frames_summary or "- frame 1: label=n/a brief=n/a",
         ]
     )
 

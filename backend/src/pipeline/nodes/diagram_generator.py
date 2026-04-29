@@ -138,6 +138,29 @@ def _with_outcome(
     return updated
 
 
+def _safe_section_title(section, plan) -> str:
+    """Safe title for partial sections where header may be None."""
+    if getattr(section, "header", None) is not None and section.header.title:
+        return section.header.title
+    if plan is not None and getattr(plan, "title", None):
+        return plan.title
+    return "Visual section"
+
+
+def _terms_from_plan_for_diagram(plan) -> list[str]:
+    """Terms for must_include on visual-role sections without explanation."""
+    if plan is None:
+        return []
+    terms = list(getattr(plan, "terms_to_define", None) or [])
+    terms += list(getattr(plan, "terms_assumed", None) or [])
+    return terms[:6]
+
+
+def _diagram_plan_attr(plan, attr: str, default=None):
+    diagram_plan = getattr(plan, "diagram", None)
+    return getattr(diagram_plan, attr, default) if diagram_plan is not None else default
+
+
 def _wrap_label(label: str, *, max_chars: int = 18) -> list[str]:
     words = label.split()
     if not words:
@@ -328,7 +351,8 @@ def _series_seed_steps(section, composition_plan) -> list[DiagramSeriesStep]:
             for step in existing_series.diagrams
         ]
 
-    labels = composition_plan.diagram.key_concepts[:] or [section.header.title]
+    title = _safe_section_title(section, composition_plan)
+    labels = list(_diagram_plan_attr(composition_plan, "key_concepts", []) or []) or [title]
     step_count = max(len(labels), 3)
     steps: list[DiagramSeriesStep] = []
     for index in range(step_count):
@@ -336,7 +360,7 @@ def _series_seed_steps(section, composition_plan) -> list[DiagramSeriesStep]:
         steps.append(
             DiagramSeriesStep(
                 step_label=label,
-                caption=f"{section.header.title} - {label}",
+                caption=f"{title} - {label}",
             )
         )
     return steps
@@ -345,13 +369,14 @@ def _series_seed_steps(section, composition_plan) -> list[DiagramSeriesStep]:
 def _seed_compare_content(section, composition_plan) -> DiagramCompareContent:
     if section.diagram_compare is not None:
         return section.diagram_compare
-    before_label = composition_plan.diagram.compare_before_label or "Before"
-    after_label = composition_plan.diagram.compare_after_label or "After"
+    title = _safe_section_title(section, composition_plan)
+    before_label = _diagram_plan_attr(composition_plan, "compare_before_label") or "Before"
+    after_label = _diagram_plan_attr(composition_plan, "compare_after_label") or "After"
     return DiagramCompareContent(
         before_label=before_label,
         after_label=after_label,
-        caption=f"Before and after comparison for {section.header.title}",
-        alt_text=f"Before and after comparison illustrating changes in {section.header.title}.",
+        caption=f"Before and after comparison for {title}",
+        alt_text=f"Before and after comparison illustrating changes in {title}.",
     )
 
 
@@ -364,20 +389,21 @@ async def _write_single_diagram(
     model_overrides: dict | None = None,
     config: RunnableConfig | None = None,
 ):
+    title = _safe_section_title(section, plan)
     slot = media_slot or VisualSlot(
         slot_id="diagram",
         slot_type=SlotType.DIAGRAM,
         required=True,
         preferred_render="svg",
-        pedagogical_intent=plan.diagram.visual_guidance or section.header.title,
-        caption=section.diagram.caption if section.diagram is not None else f"Visual explanation for {section.header.title}.",
+        pedagogical_intent=_diagram_plan_attr(plan, "visual_guidance") or title,
+        caption=section.diagram.caption if section.diagram is not None else f"Visual explanation for {title}.",
         frames=[
             VisualFrame(
                 slot_id="diagram",
                 index=0,
-                label=section.header.title,
-                generation_goal=f"Show the core idea of {section.header.title}.",
-                must_include=plan.diagram.key_concepts or [],
+                label=title,
+                generation_goal=f"Show the core idea of {title}.",
+                must_include=list(_diagram_plan_attr(plan, "key_concepts", []) or []),
                 avoid=["text overlays"],
             )
         ],
@@ -387,7 +413,7 @@ async def _write_single_diagram(
         state,
         slot=slot,
         frame=frame,
-        section_title=section.header.title,
+        section_title=title,
         model_overrides=model_overrides,
         config=config,
     )
@@ -404,22 +430,23 @@ async def _write_series_diagrams(
     config: RunnableConfig | None = None,
 ):
     seed_steps = _series_seed_steps(section, plan)
-    key_concepts = plan.diagram.key_concepts or []
+    title = _safe_section_title(section, plan)
+    plan_terms = _terms_from_plan_for_diagram(plan)
     rendered_steps: list[DiagramSeriesStep] = []
     slot = media_slot or VisualSlot(
         slot_id="diagram_series",
         slot_type=SlotType.DIAGRAM_SERIES,
         required=True,
         preferred_render="svg",
-        pedagogical_intent=plan.diagram.visual_guidance or section.header.title,
-        caption=section.diagram_series.title if section.diagram_series is not None else section.header.title,
+        pedagogical_intent=_diagram_plan_attr(plan, "visual_guidance") or title,
+        caption=section.diagram_series.title if section.diagram_series is not None else title,
         frames=[
             VisualFrame(
                 slot_id="diagram_series",
                 index=index,
                 label=step.step_label,
-                generation_goal=f"Show sequence step {index + 1} for {section.header.title}.",
-                must_include=[step.step_label],
+                generation_goal=step.caption or f"Show {step.step_label} for {title}.",
+                must_include=plan_terms or [step.step_label],
                 avoid=["text overlays"],
             )
             for index, step in enumerate(seed_steps)
@@ -431,20 +458,30 @@ async def _write_series_diagrams(
             rendered_steps.append(step)
             continue
 
-        frame = slot.frames[index] if index < len(slot.frames) else VisualFrame(
-            slot_id=slot.slot_id,
-            index=index,
-            label=step.step_label,
-            generation_goal=f"Show sequence step {index + 1} for {section.header.title}.",
-            must_include=[key_concepts[index] if index < len(key_concepts) else step.step_label],
-            avoid=["text overlays"],
-        )
+        if index < len(slot.frames):
+            frame = slot.frames[index]
+            if not frame.generation_goal or frame.generation_goal.startswith("Show sequence step"):
+                frame = frame.model_copy(
+                    update={
+                        "generation_goal": step.caption or frame.generation_goal,
+                        "must_include": frame.must_include or plan_terms or [step.step_label],
+                    }
+                )
+        else:
+            frame = VisualFrame(
+                slot_id=slot.slot_id,
+                index=index,
+                label=step.step_label,
+                generation_goal=step.caption or f"Show {step.step_label} for {title}.",
+                must_include=plan_terms or [step.step_label],
+                avoid=["text overlays"],
+            )
 
         output = await _generate_diagram_output(
             state,
             slot=slot,
             frame=frame,
-            section_title=section.header.title,
+            section_title=title,
             model_overrides=model_overrides,
             config=config,
         )
@@ -457,7 +494,7 @@ async def _write_series_diagrams(
             )
         )
 
-    title = section.diagram_series.title if section.diagram_series is not None else section.header.title
+    title = section.diagram_series.title if section.diagram_series is not None else title
     return section.model_copy(
         update={"diagram_series": DiagramSeriesContent(title=title, diagrams=rendered_steps)}
     )
@@ -473,6 +510,7 @@ async def _write_compare_diagrams(
     config: RunnableConfig | None = None,
 ):
     compare_content = _seed_compare_content(section, plan)
+    title = _safe_section_title(section, plan)
     before_svg = compare_content.before_svg
     after_svg = compare_content.after_svg
     slot = media_slot or VisualSlot(
@@ -480,14 +518,14 @@ async def _write_compare_diagrams(
         slot_type=SlotType.DIAGRAM_COMPARE,
         required=True,
         preferred_render="svg",
-        pedagogical_intent=plan.diagram.visual_guidance or section.header.title,
+        pedagogical_intent=_diagram_plan_attr(plan, "visual_guidance") or title,
         caption=compare_content.caption,
         frames=[
             VisualFrame(
                 slot_id="diagram_compare",
                 index=0,
                 label=compare_content.before_label,
-                generation_goal=f"Render the BEFORE state for {section.header.title}.",
+                generation_goal=f"Render the BEFORE state for {title}.",
                 must_include=[compare_content.before_label],
                 avoid=["text overlays"],
             ),
@@ -495,7 +533,7 @@ async def _write_compare_diagrams(
                 slot_id="diagram_compare",
                 index=1,
                 label=compare_content.after_label,
-                generation_goal=f"Render the AFTER state for {section.header.title}.",
+                generation_goal=f"Render the AFTER state for {title}.",
                 must_include=[compare_content.after_label],
                 avoid=["text overlays"],
             ),
@@ -508,7 +546,7 @@ async def _write_compare_diagrams(
             state,
             slot=slot,
             frame=before_frame,
-            section_title=section.header.title,
+            section_title=title,
             model_overrides=model_overrides,
             config=config,
         )
@@ -520,7 +558,7 @@ async def _write_compare_diagrams(
             state,
             slot=slot,
             frame=after_frame,
-            section_title=section.header.title,
+            section_title=title,
             model_overrides=model_overrides,
             config=config,
         )
@@ -569,7 +607,7 @@ async def _run_diagram_generation(
         mode=mode,
         targets=targets,
         plan_exists=plan is not None,
-        enabled=plan.diagram.enabled if plan is not None else None,
+        enabled=_diagram_plan_attr(plan, "enabled") if plan is not None else None,
     )
 
     if not targets:
@@ -607,7 +645,7 @@ async def _run_diagram_generation(
         )
         return {"diagram_outcomes": outcomes, "completed_nodes": ["diagram_generator"]}
 
-    if plan is not None and not plan.diagram.enabled:
+    if plan is not None and _diagram_plan_attr(plan, "enabled", True) is False:
         _log_diagram_event(logging.INFO, "GENERATOR_SKIP_NOT_ENABLED", section_id=sid)
         outcomes = _with_outcome(
             outcomes,

@@ -288,7 +288,8 @@ def test_visual_context_block_mode2_series_gives_caption_brief_instruction() -> 
     visual = _visual_context_block(plan)
 
     assert "IS the diagram series" in visual
-    assert "caption IS the diagram instruction" in visual
+    assert "caption IS the image instruction" in visual
+    assert "NO diagram" not in visual
     assert "NO diagram" not in visual
 
 

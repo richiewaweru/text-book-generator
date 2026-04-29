@@ -240,6 +240,7 @@ class MediaPlanReadyEvent(BaseModel):
     generation_id: str
     section_id: str
     slot_count: int
+    slots: list[dict[str, str | bool | None]] = Field(default_factory=list)
     planned_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -263,6 +264,11 @@ class SlotRenderModeResolvedEvent(BaseModel):
     slot_id: str
     render_mode: str
     decided_by: str
+    preferred_render_initial: str | None = None
+    preferred_render_final: str | None = None
+    fallback_render: str | None = None
+    decision_reason: str | None = None
+    intelligent_prompt_resolved: bool = False
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

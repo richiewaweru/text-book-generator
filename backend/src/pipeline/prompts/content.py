@@ -104,9 +104,12 @@ def _visual_context_block(section_plan: SectionPlan) -> str:
                 "This section's primary content IS the diagram series. "
                 "Each step_label and caption you write will become an image generation prompt. "
                 "Write captions as precise visual descriptions of what the image must show. "
-                "Be specific: name the objects, their positions, labels, and relationships. "
+                "Be specific: name the objects, their positions, labels, and spatial relationships. "
+                "For mathematical content: name axes, label values, describe line direction. "
+                "For scientific content: name structures, label components, describe relative positions. "
+                "Do NOT write captions that restate the step title. "
                 "Do NOT write prose that says 'see the diagram'. "
-                "The caption IS the diagram instruction."
+                "The caption IS the image instruction."
             )
         if slot_type == "diagram_compare":
             return (

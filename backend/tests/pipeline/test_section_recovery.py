@@ -471,6 +471,7 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
             ),
         ],
     )
+    captured_phase3_steps: list[str] = []
 
     async def fake_run_section_steps(state, *, steps, **kwargs):
         _ = (state, kwargs)
@@ -496,6 +497,7 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
 
     async def fake_parallel_phase(state, *, steps, **kwargs):
         _ = (state, steps, kwargs)
+        captured_phase3_steps.extend(name for name, _ in steps)
         return {
             "generated_sections": {"s-01": section_with_simulation},
             "interaction_specs": {"s-01": interaction_spec},
@@ -519,6 +521,56 @@ async def test_process_section_runs_phases_and_merges_outputs(monkeypatch) -> No
         "media_planner",
         "diagram_generator",
         "interaction_generator",
+        "section_assembler",
+        "qc_agent",
+    ]
+    assert captured_phase3_steps == ["diagram_generator", "interaction_generator"]
+
+
+@pytest.mark.asyncio
+async def test_process_section_skips_all_executors_when_no_media_slots(monkeypatch) -> None:
+    sid = "s-01"
+    section = _section(sid)
+    media_plan = MediaPlan(section_id=sid, slots=[])
+
+    async def fake_run_section_steps(state, *, steps, **kwargs):
+        _ = (state, kwargs)
+        first = steps[0][0]
+        if first == "content_generator":
+            return {
+                "generated_sections": {sid: section},
+                "completed_nodes": ["content_generator", "schema_validator"],
+            }
+        if first == "media_planner":
+            return {
+                "media_plans": {sid: media_plan},
+                "completed_nodes": ["media_planner"],
+            }
+        return {
+            "assembled_sections": {sid: section},
+            "qc_reports": {
+                sid: QCReport(section_id=sid, passed=True, issues=[], warnings=[])
+            },
+            "section_pending_assets": {sid: []},
+            "completed_nodes": ["section_assembler", "qc_agent"],
+        }
+
+    async def fail_parallel_phase(state, *, steps, **kwargs):
+        _ = (state, steps, kwargs)
+        raise AssertionError("Phase 3 should not run for a section with no media slots")
+
+    monkeypatch.setattr(process_section_module, "run_section_steps", fake_run_section_steps)
+    monkeypatch.setattr(process_section_module, "_run_parallel_phase", fail_parallel_phase)
+
+    result = await process_section_module.process_section(_state())
+
+    assert "diagram_generator" not in result["completed_nodes"]
+    assert "image_generator" not in result["completed_nodes"]
+    assert "interaction_generator" not in result["completed_nodes"]
+    assert result["completed_nodes"] == [
+        "content_generator",
+        "schema_validator",
+        "media_planner",
         "section_assembler",
         "qc_agent",
     ]

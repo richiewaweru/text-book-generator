@@ -70,11 +70,12 @@ async def _generate_image_frame(
     api_key_present: bool,
     variant: str,
 ) -> VisualFrameResult:
-    prompt = slot.generation_prompt or build_image_generation_prompt(
+    prompt = build_image_generation_prompt(
         section_title=section_title,
         slot=slot,
         frame=frame,
         style_context=style_context,
+        override_brief=slot.generation_prompt or None,
     )
     image_result, _attempts = await legacy._request_image_bytes(
         client=client,
