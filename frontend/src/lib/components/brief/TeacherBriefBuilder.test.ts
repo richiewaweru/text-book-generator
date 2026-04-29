@@ -221,7 +221,12 @@ describe('TeacherBriefBuilder', () => {
 		});
 		reviewTeacherBrief.mockResolvedValue({
 			coherent: true,
-			warnings: []
+			warnings: [],
+			feasibility: {
+				subtopics_fit: true,
+				depth_adequate: true,
+				supports_compatible: true
+			}
 		});
 		planFromBrief.mockResolvedValue({
 			id: 'plan-1',

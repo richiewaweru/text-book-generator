@@ -145,7 +145,12 @@ describe('teacher brief API helpers', () => {
 			new Response(
 				JSON.stringify({
 					coherent: false,
-					warnings: [{ message: 'Quick depth may be too shallow.', suggestion: 'Use standard depth.' }]
+					warnings: [{ message: 'Quick depth may be too shallow.', suggestion: 'Use standard depth.' }],
+					feasibility: {
+						subtopics_fit: false,
+						depth_adequate: true,
+						supports_compatible: true
+					}
 				}),
 				{ status: 200, headers: { 'Content-Type': 'application/json' } }
 			)
@@ -186,7 +191,11 @@ describe('teacher brief API helpers', () => {
 					generation_id: 'gen-123',
 					status: 'pending',
 					events_url: '/api/v1/generations/gen-123/events',
-					document_url: '/api/v1/generations/gen-123/document'
+					document_url: '/api/v1/generations/gen-123/document',
+					section_count: 3,
+					sections_with_visuals: 1,
+					subtopics_covered: ['Solving two-step equations'],
+					warning: null
 				}),
 				{ status: 200, headers: { 'Content-Type': 'application/json' } }
 			)

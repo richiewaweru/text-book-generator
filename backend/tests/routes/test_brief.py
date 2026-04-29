@@ -19,7 +19,6 @@ from generation.dependencies import (
 from generation.dtos.generation_response import GenerationAcceptedResponse
 from pipeline.types.requests import SectionPlan
 from pipeline.types.teacher_brief import (
-    BriefReviewResult,
     TeacherBrief,
     TopicResolutionRequest,
     TopicResolutionResult,
@@ -240,6 +239,7 @@ class TestBriefApi:
     async def test_commit_brief_starts_generation_with_teacher_brief_context(self):
         _install_overrides(TEST_PROFILE)
         spec = _planning_spec()
+        spec.sections[0].practice_target = "Explain how energy moves through the river food web."
         captured: dict[str, object] = {}
 
         async def fake_enqueue_generation(**kwargs):
@@ -250,6 +250,10 @@ class TestBriefApi:
                 events_url="/api/v1/generations/gen-123/events",
                 document_url="/api/v1/generations/gen-123/document",
                 report_url="/api/v1/generations/gen-123/report",
+                section_count=kwargs["section_count"],
+                sections_with_visuals=kwargs["sections_with_visuals"],
+                subtopics_covered=list(kwargs["subtopics_covered"]),
+                warning=kwargs["planning_warning"],
             )
 
         with (
@@ -277,10 +281,16 @@ class TestBriefApi:
 
         assert response.status_code == 200
         assert response.json()["generation_id"] == "gen-123"
-        assert captured["subject"] == "Food webs in river ecosystems"
+        assert response.json()["section_count"] == 1
+        assert response.json()["sections_with_visuals"] == 0
+        assert response.json()["subtopics_covered"] == ["Food webs in river ecosystems"]
+        assert response.json()["warning"] is None
+        assert captured["subject"] == "Science"
         assert "Resource type: worksheet" in str(captured["context"])
         assert "Grade level: grade_9" in str(captured["context"])
         assert "Class profile: reading=below_grade" in str(captured["context"])
+        assert "Introduces: food web" in str(captured["context"])
+        assert "Practice: Explain how energy moves through the river food web." in str(captured["context"])
         assert captured["grade_band"] == "secondary"
         assert captured["learner_fit"] == "supported"
         assert '"status":"committed"' in captured["planning_spec_json"]
@@ -494,17 +504,13 @@ class TestBriefApi:
 
         async def fake_review(brief):
             _ = brief
-            return BriefReviewResult.model_validate(
+            return [
                 {
-                    "coherent": False,
-                    "warnings": [
-                        {
-                            "message": "Several subtopics with quick depth will be very shallow.",
-                            "suggestion": "Use standard depth or fewer subtopics.",
-                        }
-                    ],
+                    "message": "Several subtopics with quick depth will be very shallow.",
+                    "suggestion": "Use standard depth or fewer subtopics.",
+                    "severity": "warning",
                 }
-            )
+            ]
 
         with patch.object(brief_routes, "_review_brief_with_llm", side_effect=fake_review):
             async with _client() as client:
@@ -516,4 +522,64 @@ class TestBriefApi:
         assert response.status_code == 200
         payload = response.json()
         assert payload["coherent"] is False
+        assert payload["feasibility"] == {
+            "subtopics_fit": True,
+            "depth_adequate": True,
+            "supports_compatible": True,
+        }
+        assert payload["warnings"][0]["severity"] == "warning"
         assert payload["warnings"][0]["suggestion"] == "Use standard depth or fewer subtopics."
+
+    async def test_review_brief_returns_deterministic_feasibility_warnings(self):
+        _install_overrides(TEST_PROFILE)
+
+        quick_brief = _teacher_brief().model_copy(
+            update={
+                "subtopics": [
+                    "Food webs in river ecosystems",
+                    "Producer and consumer roles",
+                    "Energy transfer",
+                ],
+                "depth": "quick",
+            }
+        )
+
+        with patch.object(brief_routes, "_review_brief_with_llm", return_value=[]):
+            async with _client() as client:
+                response = await client.post(
+                    "/api/v1/brief/review",
+                    json={"brief": quick_brief.model_dump(mode="json")},
+                )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["coherent"] is False
+        assert payload["feasibility"]["subtopics_fit"] is False
+        assert payload["warnings"][0]["severity"] == "warning"
+        assert "condensed coverage" in payload["warnings"][0]["message"].lower()
+
+    async def test_review_brief_flags_atypical_supports_as_info(self):
+        _install_overrides(TEST_PROFILE)
+
+        support_heavy_brief = _teacher_brief().model_copy(
+            update={
+                "resource_type": "exit_ticket",
+                "supports": ["worked_examples"],
+            }
+        )
+
+        with patch.object(brief_routes, "_review_brief_with_llm", return_value=[]):
+            async with _client() as client:
+                response = await client.post(
+                    "/api/v1/brief/review",
+                    json={"brief": support_heavy_brief.model_dump(mode="json")},
+                )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["coherent"] is True
+        assert payload["feasibility"]["supports_compatible"] is False
+        assert any(
+            warning["severity"] == "info" and "unusual for this resource type" in warning["message"].lower()
+            for warning in payload["warnings"]
+        )

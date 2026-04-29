@@ -59,6 +59,16 @@
 	let streamErrorRecoveryAttempted = false;
 
 	const generationId = $derived(accepted.generation_id);
+	const acceptedSectionCount = $derived(accepted.section_count ?? null);
+	const acceptedSectionsWithVisuals = $derived(accepted.sections_with_visuals ?? 0);
+	const acceptedSubtopics = $derived(accepted.subtopics_covered ?? []);
+	const acceptedWarning = $derived(accepted.warning ?? null);
+	const hasStartupSummary = $derived(
+		acceptedSectionCount !== null ||
+			acceptedSectionsWithVisuals > 0 ||
+			acceptedSubtopics.length > 0 ||
+			Boolean(acceptedWarning)
+	);
 	const sectionSlots = $derived(buildSectionSlots(document, plannedSections, sectionSignals));
 	const failureMap = $derived(new Map((document?.failed_sections ?? []).map((entry) => [entry.section_id, entry])));
 	const readySectionCount = $derived(
@@ -87,6 +97,28 @@
 			return detail.error ?? 'The generation failed before the lesson could be completed.';
 		}
 		return null;
+	});
+	const startupSummaryItems = $derived.by(() => {
+		const items: Array<{ label: string; value: string }> = [];
+		if (acceptedSectionCount !== null) {
+			items.push({
+				label: 'Planned sections',
+				value: String(acceptedSectionCount)
+			});
+		}
+		if (acceptedSectionsWithVisuals > 0) {
+			items.push({
+				label: 'Sections with visuals',
+				value: String(acceptedSectionsWithVisuals)
+			});
+		}
+		if (acceptedSubtopics.length > 0) {
+			items.push({
+				label: 'Subtopics',
+				value: acceptedSubtopics.join(', ')
+			});
+		}
+		return items;
 	});
 
 	function isStudioPlanningSpec(value: unknown): value is PlanningGenerationSpec {
@@ -425,7 +457,7 @@
 		loading = true;
 		error = null;
 		qcSummary = null;
-		plannedSections = null;
+		plannedSections = accepted.section_count ?? null;
 		progressUpdate = null;
 		runtimePolicy = null;
 		runtimeProgress = null;
@@ -531,6 +563,22 @@
 	{/if}
 
 	{#if loading}
+		{#if hasStartupSummary}
+			<section class="startup-card" aria-label="Generation startup summary">
+				<p class="rail-label">Startup summary</p>
+				<div class="meta-list">
+					{#each startupSummaryItems as item}
+						<div>
+							<span>{item.label}</span>
+							<strong>{item.value}</strong>
+						</div>
+					{/each}
+				</div>
+				{#if acceptedWarning}
+					<p class="startup-warning">{acceptedWarning}</p>
+				{/if}
+			</section>
+		{/if}
 		<div class="loading-panel" aria-busy="true">
 			<div class="skeleton-sidebar"></div>
 			<div class="skeleton-viewer"></div>
@@ -538,6 +586,23 @@
 	{:else}
 		<div class="workspace">
 			<aside class="progress-rail">
+				{#if hasStartupSummary}
+					<section class="rail-card">
+						<p class="rail-label">Startup summary</p>
+						<div class="meta-list">
+							{#each startupSummaryItems as item}
+								<div>
+									<span>{item.label}</span>
+									<strong>{item.value}</strong>
+								</div>
+							{/each}
+						</div>
+						{#if acceptedWarning}
+							<p class="startup-warning">{acceptedWarning}</p>
+						{/if}
+					</section>
+				{/if}
+
 				<section class="rail-card">
 					<p class="rail-label">Progress</p>
 					<div class="progress-list">
@@ -829,9 +894,22 @@
 	}
 
 	.notice,
+	.startup-card,
 	.loading-panel {
 		border-radius: 1rem;
 		padding: 0.95rem 1rem;
+	}
+
+	.startup-card {
+		display: grid;
+		gap: 0.8rem;
+		border: 0.5px solid rgba(36, 52, 63, 0.12);
+		background: #fffdf9;
+	}
+
+	.startup-warning {
+		color: #805d16;
+		line-height: 1.55;
 	}
 
 	.notice-info {

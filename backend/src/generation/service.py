@@ -1420,6 +1420,9 @@ async def enqueue_generation(
     section_count: int,
     section_plans: list | None,
     planning_spec_json: str | None,
+    sections_with_visuals: int = 0,
+    subtopics_covered: list[str] | None = None,
+    planning_warning: str | None = None,
     grade_band: str | None = None,
     learner_fit: str | None = None,
 ) -> GenerationAcceptedResponse:
@@ -1512,6 +1515,10 @@ async def enqueue_generation(
         events_url=events_url,
         document_url=document_url,
         report_url=report_url,
+        section_count=section_count,
+        sections_with_visuals=sections_with_visuals,
+        subtopics_covered=subtopics_covered or [],
+        warning=planning_warning,
     )
 @router.get("/generations")
 async def list_generations(

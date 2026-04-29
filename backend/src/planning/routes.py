@@ -6,6 +6,7 @@ import sys
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from core.auth.middleware import get_current_user
@@ -37,6 +38,7 @@ from pipeline.types.requests import (
     needs_diagram_from_placements,
 )
 from pipeline.types.teacher_brief import (
+    BriefFeasibility,
     BriefReviewRequest,
     BriefReviewResult,
     BriefReviewWarning,
@@ -62,6 +64,35 @@ import core.events as core_events
 
 router = APIRouter(prefix="/api/v1", tags=["brief"])
 logger = logging.getLogger(__name__)
+
+_DEPTH_EXPLAIN_SLOTS = {
+    "quick": 1,
+    "standard": 2,
+    "deep": 4,
+}
+_SHALLOW_RESOURCES = {"exit_ticket", "quick_explainer"}
+_ATYPICAL_SUPPORTS: dict[str, set[str]] = {
+    "exit_ticket": {
+        "worked_examples",
+        "vocabulary_support",
+        "step_by_step",
+        "discussion_questions",
+    },
+    "quiz": {
+        "worked_examples",
+        "step_by_step",
+        "discussion_questions",
+    },
+    "quick_explainer": {
+        "worked_examples",
+        "step_by_step",
+        "discussion_questions",
+    },
+}
+
+
+class _BriefReviewLLMResponse(BaseModel):
+    warnings: list[BriefReviewWarning] = Field(default_factory=list)
 
 
 def diag(tag: str, **fields) -> None:
@@ -132,6 +163,8 @@ def _brief_review_system_prompt() -> str:
             "Warnings are advisory, never blocking.",
             "Look for tensions between subtopic count, depth, supports, resource type, intended outcome, and teacher notes.",
             "Keep warnings concise and practical.",
+            'Return {"warnings": [{ "message": string, "suggestion": string | null, "severity": "warning" | "info" }]}',
+            'Return at most 4 warnings. Use {"warnings": []} when the brief is coherent.',
         ]
     )
 
@@ -160,8 +193,7 @@ def _brief_review_user_prompt(brief: TeacherBrief) -> str:
             f"Depth: {brief.depth}",
             f"Teacher notes: {brief.teacher_notes or 'none'}",
             "Return:",
-            "- coherent: boolean",
-            "- warnings: [{ message, suggestion }]",
+            '- warnings: [{ message, suggestion, severity }]',
         ]
     )
 
@@ -192,14 +224,14 @@ async def _resolve_topic_with_llm(payload: TopicResolutionRequest) -> TopicResol
     return output
 
 
-async def _review_brief_with_llm(brief: TeacherBrief) -> BriefReviewResult:
+async def _review_brief_with_llm(brief: TeacherBrief) -> list[BriefReviewWarning]:
     trace_id = uuid.uuid4().hex
     spec = get_planning_spec(PLANNING_BRIEF_REVIEW_CALLER)
     slot = get_planning_slot(PLANNING_BRIEF_REVIEW_CALLER)
     model = build_model(spec)
     agent = Agent(
         model=model,
-        output_type=BriefReviewResult,
+        output_type=_BriefReviewLLMResponse,
         system_prompt=_brief_review_system_prompt(),
     )
     result = await run_llm(
@@ -215,7 +247,7 @@ async def _review_brief_with_llm(brief: TeacherBrief) -> BriefReviewResult:
     output = result.output
     if output is None:
         raise RuntimeError("Brief review returned no structured output.")
-    return output
+    return output.warnings
 
 
 async def _load_profile(
@@ -325,6 +357,57 @@ def _runtime_grade_band(brief: TeacherBrief) -> str:
     return "secondary"
 
 
+def _check_brief_feasibility(brief: TeacherBrief) -> BriefFeasibility:
+    explain_slots = _DEPTH_EXPLAIN_SLOTS.get(brief.depth, 2)
+    subtopics_fit = len(brief.subtopics) <= explain_slots
+    depth_adequate = not (
+        brief.resource_type in _SHALLOW_RESOURCES and brief.depth == "deep"
+    )
+    atypical = _ATYPICAL_SUPPORTS.get(brief.resource_type, set())
+    supports_compatible = len(set(brief.supports) & atypical) == 0
+    return BriefFeasibility(
+        subtopics_fit=subtopics_fit,
+        depth_adequate=depth_adequate,
+        supports_compatible=supports_compatible,
+    )
+
+
+def _deterministic_review_warnings(
+    brief: TeacherBrief,
+    feasibility: BriefFeasibility,
+) -> list[BriefReviewWarning]:
+    warnings: list[BriefReviewWarning] = []
+    if not feasibility.subtopics_fit:
+        warnings.append(
+            BriefReviewWarning(
+                message=(
+                    f"{len(brief.subtopics)} subtopics with {brief.depth} depth will likely force condensed coverage."
+                ),
+                suggestion="Use standard or deep depth, or reduce the selected subtopics.",
+                severity="warning",
+            )
+        )
+    if not feasibility.depth_adequate:
+        warnings.append(
+            BriefReviewWarning(
+                message=(
+                    f"{brief.depth.capitalize()} depth is unusual for a {brief.resource_type.replace('_', ' ')}."
+                ),
+                suggestion="Exit tickets and quick explainers usually work best with quicker coverage.",
+                severity="info",
+            )
+        )
+    if not feasibility.supports_compatible:
+        warnings.append(
+            BriefReviewWarning(
+                message="Some selected supports are unusual for this resource type.",
+                suggestion="Review the support choices; some may not fit the final resource well.",
+                severity="info",
+            )
+        )
+    return warnings
+
+
 def _context_from_planning_spec(spec: PlanningGenerationSpec) -> str:
     brief = spec.source_brief
     lines = [
@@ -356,8 +439,12 @@ def _context_from_planning_spec(spec: PlanningGenerationSpec) -> str:
     lines.append("Reviewed resource plan:")
 
     for section in spec.sections:
-        summary = section.focus_note or section.objective or section.rationale
+        summary = section.focus_note or section.objective or section.rationale or section.title
         lines.append(f"Section {section.order}: {section.title} [{section.role}] - {summary}")
+        if section.terms_to_define:
+            lines.append(f"  Introduces: {', '.join(section.terms_to_define)}")
+        if section.practice_target:
+            lines.append(f"  Practice: {section.practice_target}")
 
     if spec.warning:
         lines.append("")
@@ -422,30 +509,24 @@ async def review_teacher_brief(
     current_user: User = Depends(get_current_user),
 ) -> BriefReviewResult:
     _ = current_user
+    feasibility = _check_brief_feasibility(payload.brief)
+    llm_warnings: list[BriefReviewWarning] = []
     try:
-        review = await _review_brief_with_llm(payload.brief)
+        llm_warnings = [
+            warning
+            if isinstance(warning, BriefReviewWarning)
+            else BriefReviewWarning.model_validate(warning)
+            for warning in await _review_brief_with_llm(payload.brief)
+        ]
     except Exception:
         logger.exception("TeacherBrief pedagogical review failed")
-        warnings: list[BriefReviewWarning] = []
-        if len(payload.brief.subtopics) >= 3 and payload.brief.depth == "quick":
-            warnings.append(
-                BriefReviewWarning(
-                    message="Several subtopics with quick depth will likely force very shallow coverage.",
-                    suggestion="Use standard depth or reduce the selected subtopics.",
-                )
-            )
-        if payload.brief.resource_type in {"quiz", "exit_ticket"} and any(
-            support in payload.brief.supports for support in {"worked_examples", "step_by_step"}
-        ):
-            warnings.append(
-                BriefReviewWarning(
-                    message="Scaffold-heavy supports can make this resource feel more like teaching than checking.",
-                    suggestion="Switch resource type or remove the extra scaffolds.",
-                )
-            )
-        return BriefReviewResult(coherent=len(warnings) == 0, warnings=warnings)
-
-    return review
+    warnings = _deterministic_review_warnings(payload.brief, feasibility) + llm_warnings
+    coherent = not any(warning.severity == "warning" for warning in warnings)
+    return BriefReviewResult(
+        coherent=coherent,
+        warnings=warnings,
+        feasibility=feasibility,
+    )
 
 
 @router.post("/brief/plan", response_model=PlanningGenerationSpec)
@@ -513,6 +594,14 @@ async def commit_brief(
     committed = spec.model_copy(update={"status": "committed"})
     runtime_grade_band = _runtime_grade_band(committed.source_brief)
     learner_fit = _derive_learner_fit(committed.source_brief.class_profile)
+    subject = (
+        committed.source_brief.subject
+        or committed.source_brief.topic
+        or committed.source_brief.subtopics[0]
+        or "Untitled"
+    )
+    context_str = _context_from_planning_spec(committed)
+    sections_with_visuals = sum(1 for section in committed.sections if section.visual_placements)
     return await enqueue_generation(
         current_user=current_user,
         profile=profile,
@@ -520,14 +609,17 @@ async def commit_brief(
         gen_repo=gen_repo,
         document_repo=document_repo,
         report_repo=report_repo,
-        subject=committed.source_brief.subtopics[0],
-        context=_context_from_planning_spec(committed),
+        subject=subject,
+        context=context_str,
         mode=committed.mode,
         template_id=committed.template_id,
         preset_id=committed.preset_id,
         section_count=len(committed.sections),
         section_plans=_pipeline_sections_from_planning_spec(committed),
         planning_spec_json=committed.model_dump_json(),
+        sections_with_visuals=sections_with_visuals,
+        subtopics_covered=list(committed.source_brief.subtopics),
+        planning_warning=committed.warning,
         grade_band=runtime_grade_band,
         learner_fit=learner_fit,
     )

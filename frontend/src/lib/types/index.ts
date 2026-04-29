@@ -19,6 +19,7 @@ import type {
 	ClassReadingLevel,
 	BriefReviewRequest,
 	BriefReviewResult,
+	BriefFeasibility,
 	BriefReviewWarning,
 	BriefValidationMessage,
 	BriefValidationRequest,
@@ -119,6 +120,10 @@ export interface GenerationAccepted {
 	events_url: string;
 	document_url: string;
 	report_url?: string;
+	section_count?: number;
+	sections_with_visuals?: number;
+	subtopics_covered?: string[];
+	warning?: string | null;
 }
 
 export interface PDFExportRequest {
@@ -571,6 +576,7 @@ export type {
 	ClassReadingLevel,
 	BriefReviewRequest,
 	BriefReviewResult,
+	BriefFeasibility,
 	BriefReviewWarning,
 	BriefValidationMessage,
 	BriefValidationRequest,

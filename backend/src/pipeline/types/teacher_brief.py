@@ -248,9 +248,16 @@ class BriefReviewRequest(BaseModel):
     brief: TeacherBrief
 
 
+class BriefFeasibility(BaseModel):
+    subtopics_fit: bool
+    depth_adequate: bool
+    supports_compatible: bool
+
+
 class BriefReviewWarning(BaseModel):
     message: str = Field(min_length=1, max_length=280)
     suggestion: str | None = Field(default=None, max_length=280)
+    severity: Literal["warning", "info"] = "warning"
 
     @field_validator("message", "suggestion")
     @classmethod
@@ -264,3 +271,4 @@ class BriefReviewWarning(BaseModel):
 class BriefReviewResult(BaseModel):
     coherent: bool
     warnings: list[BriefReviewWarning] = Field(default_factory=list)
+    feasibility: BriefFeasibility

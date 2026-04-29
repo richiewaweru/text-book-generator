@@ -139,14 +139,22 @@ export interface BriefReviewRequest {
 	brief: TeacherBrief;
 }
 
+export interface BriefFeasibility {
+	subtopics_fit: boolean;
+	depth_adequate: boolean;
+	supports_compatible: boolean;
+}
+
 export interface BriefReviewWarning {
 	message: string;
 	suggestion?: string | null;
+	severity?: 'warning' | 'info';
 }
 
 export interface BriefReviewResult {
 	coherent: boolean;
 	warnings: BriefReviewWarning[];
+	feasibility: BriefFeasibility;
 }
 
 export type BriefBuilderStep =

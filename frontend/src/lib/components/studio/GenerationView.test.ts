@@ -264,6 +264,35 @@ describe('GenerationView', () => {
 		cleanup();
 	});
 
+	it('shows startup summary from accepted generation metadata before the first refresh completes', () => {
+		getGenerationDetail.mockReturnValue(new Promise(() => {}));
+		getGenerationDocument.mockReturnValue(new Promise(() => {}));
+
+		render(GenerationView, {
+			props: {
+				accepted: {
+					generation_id: 'gen-123',
+					status: 'pending',
+					events_url: '/api/v1/generations/gen-123/events',
+					document_url: '/api/v1/generations/gen-123/document',
+					section_count: 4,
+					sections_with_visuals: 2,
+					subtopics_covered: ['Understanding halves', 'Understanding quarters'],
+					warning: 'Diagram coverage will be selective.'
+				},
+				onReset: vi.fn()
+			}
+		});
+
+		expect(screen.getByLabelText(/generation startup summary/i)).toBeTruthy();
+		expect(screen.getByText(/planned sections/i)).toBeTruthy();
+		expect(screen.getByText(/^4$/)).toBeTruthy();
+		expect(screen.getByText(/sections with visuals/i)).toBeTruthy();
+		expect(screen.getByText(/^2$/)).toBeTruthy();
+		expect(screen.getByText(/understanding halves, understanding quarters/i)).toBeTruthy();
+		expect(screen.getByText(/diagram coverage will be selective/i)).toBeTruthy();
+	});
+
 	it('renders the live workspace, marks active sections, and shows failed sections inline', async () => {
 		getGenerationDetail.mockResolvedValue(buildDetail());
 		getGenerationDocument.mockResolvedValue(buildDocument());
