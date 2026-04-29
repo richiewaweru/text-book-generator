@@ -4,9 +4,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from planning.fallback import build_fallback_composition, build_fallback_spec
-from planning.models import CompositionResult, PlanningSectionPlan
+from planning.models import CompositionResult, PlanningSectionPlan, PlanValidationResult
 from planning.plan_validator import validate_plan
-from planning.service import PlanningService, _resolve_directives, _resolve_roles
+from planning.service import (
+    PlanningService,
+    _enrich_planning_sections,
+    _resolve_directives,
+    _resolve_roles,
+)
 from pipeline.resources import get_resource_template
 from pipeline.types.teacher_brief import TeacherBrief
 
@@ -208,6 +213,58 @@ async def test_planning_service_retries_then_preserves_runtime_template_id() -> 
     assert result.source_brief.subtopics == brief.subtopics
 
 
+async def test_planning_service_enriches_before_visual_routing() -> None:
+    brief = build_brief()
+    composition = CompositionResult(
+        sections=build_sections(),
+        lesson_rationale="A short worksheet that introduces the method and checks it.",
+        warning=None,
+    )
+    stage_order: list[str] = []
+
+    async def fake_compose(*args, **kwargs):
+        _ = (args, kwargs)
+        stage_order.append("compose")
+        return composition
+
+    async def fake_enrich(*, brief, sections, model, run_llm_fn, generation_id):
+        _ = (brief, model, run_llm_fn, generation_id)
+        stage_order.append("enrich")
+        return [
+            section.model_copy(
+                update={
+                    "bridges_to": "Try the method" if section.id == "section-1" else section.bridges_to,
+                    "terms_to_define": ["two-step equation"] if section.id == "section-1" else [],
+                }
+            )
+            for section in sections
+        ]
+
+    async def fake_route_visuals(brief, directives, template, sections, **kwargs):
+        _ = (brief, directives, template, kwargs)
+        stage_order.append("route")
+        assert sections[0].bridges_to == "Try the method"
+        assert sections[0].terms_to_define == ["two-step equation"]
+        return sections
+
+    with (
+        patch("planning.service.compose_sections", side_effect=fake_compose),
+        patch("planning.service.validate_plan", return_value=PlanValidationResult(is_valid=True, issues=[])),
+        patch("planning.service._enrich_planning_sections", side_effect=fake_enrich),
+        patch("planning.service.route_visuals", side_effect=fake_route_visuals),
+    ):
+        result = await PlanningService().plan(
+            brief,
+            model=object(),
+            run_llm_fn=lambda **kwargs: SimpleNamespace(output=None),
+            generation_id="trace-order",
+        )
+
+    assert stage_order == ["compose", "enrich", "route"]
+    assert result.sections[0].bridges_to == "Try the method"
+    assert result.sections[0].terms_to_define == ["two-step equation"]
+
+
 async def test_planning_service_uses_fallback_when_validation_stays_invalid() -> None:
     brief = build_brief(resource_type="quick_explainer", depth="quick")
     broken = CompositionResult(
@@ -243,6 +300,29 @@ async def test_planning_service_uses_fallback_when_validation_stays_invalid() ->
     assert result.warning is not None
     assert result.template_id == "guided-concept-path"
     assert result.sections
+
+
+async def test_enrich_planning_sections_returns_original_sections_when_llm_fails() -> None:
+    brief = build_brief()
+    sections = build_sections()
+
+    async def failing_run_llm(**kwargs):
+        _ = kwargs
+        raise RuntimeError("llm unavailable")
+
+    enriched = await _enrich_planning_sections(
+        brief=brief,
+        sections=sections,
+        model=object(),
+        run_llm_fn=failing_run_llm,
+        generation_id="trace-failure",
+    )
+
+    assert enriched[0].terms_to_define == []
+    assert enriched[0].bridges_from is None
+    assert enriched[0].bridges_to == sections[1].objective
+    assert enriched[1].bridges_from == sections[0].objective
+    assert enriched[2].bridges_to is None
 
 
 def test_fallback_distributes_subtopics_across_content_sections() -> None:
@@ -338,3 +418,29 @@ def test_fallback_spec_sets_visual_placements_for_visual_role_sections() -> None
     for section in visual_sections:
         assert section.visual_placements
         assert all(placement.block == "section" for placement in section.visual_placements)
+
+
+def test_fallback_spec_assigns_terms_and_bridges() -> None:
+    brief = build_brief(
+        supports=["visuals"],
+        resource_type="worksheet",
+        subtopics=["What is Photosynthesis?", "Chlorophyll", "Inputs and Outputs"],
+    )
+    template = get_resource_template(brief.resource_type)
+
+    spec = build_fallback_spec(
+        brief=brief,
+        template=template,
+        roles=["intro", "explain", "visual", "practice", "summary"],
+        directives=_resolve_directives(brief),
+    )
+
+    assert spec.sections[1].terms_to_define == ["What is Photosynthesis?"]
+    assert spec.sections[2].terms_to_define == ["Chlorophyll", "Inputs and Outputs"]
+    assert spec.sections[3].terms_assumed == ["What is Photosynthesis?", "Chlorophyll", "Inputs and Outputs"]
+    assert spec.sections[3].practice_target == (
+        "Confirm the learner can apply: What is Photosynthesis?, Chlorophyll, Inputs and Outputs."
+    )
+    assert spec.sections[0].bridges_from is None
+    assert spec.sections[0].bridges_to == spec.sections[1].focus_note
+    assert spec.sections[1].bridges_from == spec.sections[0].objective

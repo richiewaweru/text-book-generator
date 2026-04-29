@@ -267,8 +267,8 @@ def _pipeline_section_from_planning(
         position=section.order,
         focus=focus,
         role=section.role,
-        bridges_from=None,
-        bridges_to=None,
+        bridges_from=section.bridges_from,
+        bridges_to=section.bridges_to,
         needs_diagram=needs_diagram,
         needs_worked_example=needs_worked_example,
         required_components=selected,
@@ -297,9 +297,9 @@ def _pipeline_sections_from_planning_spec(spec: PlanningGenerationSpec) -> list[
         for section in spec.sections
     ]
     for index, section in enumerate(sections):
-        if index > 0:
+        if index > 0 and not section.bridges_from:
             section.bridges_from = sections[index - 1].title
-        if index + 1 < len(sections):
+        if index + 1 < len(sections) and not section.bridges_to:
             section.bridges_to = sections[index + 1].title
     return sections
 

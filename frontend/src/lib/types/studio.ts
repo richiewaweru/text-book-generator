@@ -83,6 +83,8 @@ export interface PlanningSectionPlan {
 	visual_policy: VisualPolicy | null;
 	generation_notes: SectionGenerationNotes | null;
 	rationale: string;
+	bridges_from?: string | null;
+	bridges_to?: string | null;
 	terms_to_define?: string[];
 	terms_assumed?: string[];
 	practice_target?: string | null;

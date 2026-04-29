@@ -52,6 +52,11 @@
 	}
 
 	const visualConflicts = $derived(conflictingVisualTargets());
+
+	function joinedOrNull(values: string[] | undefined): string | null {
+		if (!values?.length) return null;
+		return values.join(', ');
+	}
 </script>
 
 <section class="review-shell">
@@ -104,6 +109,25 @@
 				</div>
 				<h3>{section.title}</h3>
 				<p>{section.objective ?? section.focus_note ?? section.rationale}</p>
+				{#if joinedOrNull(section.terms_to_define) || joinedOrNull(section.terms_assumed) || section.bridges_from || section.bridges_to || section.practice_target}
+					<div class="detail-list">
+						{#if joinedOrNull(section.terms_to_define)}
+							<p><strong>Introduces:</strong> {joinedOrNull(section.terms_to_define)}</p>
+						{/if}
+						{#if joinedOrNull(section.terms_assumed)}
+							<p><strong>Assumes:</strong> {joinedOrNull(section.terms_assumed)}</p>
+						{/if}
+						{#if section.bridges_from}
+							<p><strong>Bridge from:</strong> {section.bridges_from}</p>
+						{/if}
+						{#if section.bridges_to}
+							<p><strong>Bridge to:</strong> {section.bridges_to}</p>
+						{/if}
+						{#if section.practice_target}
+							<p><strong>Practice target:</strong> {section.practice_target}</p>
+						{/if}
+					</div>
+				{/if}
 				<div class="chip-row">
 					{#each section.selected_components as component}
 						<span class="chip">{labelForComponent(component)}</span>
@@ -178,6 +202,18 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
+	}
+
+	.detail-list {
+		display: grid;
+		gap: 0.35rem;
+		padding: 0.75rem;
+		border-radius: 0.85rem;
+		background: #f7f2eb;
+	}
+
+	.detail-list p {
+		color: #4f5c65;
 	}
 
 	.meta span,

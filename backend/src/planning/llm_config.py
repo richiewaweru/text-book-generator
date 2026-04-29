@@ -6,6 +6,8 @@ from core.llm import ModelFamily, ModelSlot, ModelSpec
 
 PLANNING_SECTION_COMPOSER_CALLER = "section_composer"
 PLANNING_SECTION_COMPOSER_SLOT = ModelSlot.STANDARD
+PLANNING_ENRICHMENT_CALLER = "planning_enrichment"
+PLANNING_ENRICHMENT_SLOT = ModelSlot.STANDARD
 PLANNING_VISUAL_ROUTER_CALLER = "visual_router"
 PLANNING_VISUAL_ROUTER_SLOT = ModelSlot.STANDARD
 PLANNING_TOPIC_RESOLUTION_CALLER = "topic_resolution"
@@ -16,6 +18,13 @@ PLANNING_BRIEF_REVIEW_SLOT = ModelSlot.FAST
 PLANNING_MODEL_SPECS: dict[str, tuple[ModelSlot, ModelSpec]] = {
     PLANNING_SECTION_COMPOSER_CALLER: (
         PLANNING_SECTION_COMPOSER_SLOT,
+        ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+    ),
+    PLANNING_ENRICHMENT_CALLER: (
+        PLANNING_ENRICHMENT_SLOT,
         ModelSpec(
             family=ModelFamily.ANTHROPIC,
             model_name="claude-sonnet-4-6",

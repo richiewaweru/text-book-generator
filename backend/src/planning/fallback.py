@@ -151,6 +151,10 @@ def _practice_target(covered_subtopics: list[str]) -> str:
     return "Confirm the learner can use the idea independently."
 
 
+def _section_bridge_label(section: PlanningSectionPlan) -> str:
+    return section.focus_note or section.objective or section.title
+
+
 def _fallback_sections(
     *,
     brief: TeacherBrief,
@@ -262,6 +266,55 @@ def _apply_fallback_visual_placements(
     return routed
 
 
+def _apply_fallback_enrichment(
+    sections: list[PlanningSectionPlan],
+    brief: TeacherBrief,
+) -> list[PlanningSectionPlan]:
+    available_terms = [term.strip() for term in (brief.subtopics or [brief.topic]) if term.strip()]
+    content_indexes = [
+        index for index, section in enumerate(sections) if section.role in _CONTENT_BEARING_ROLES
+    ]
+    term_assignments: dict[str, list[str]] = {section.id: [] for section in sections}
+    if content_indexes:
+        for index, term in enumerate(available_terms):
+            target_index = content_indexes[min(index, len(content_indexes) - 1)]
+            term_assignments[sections[target_index].id].append(term)
+
+    enriched: list[PlanningSectionPlan] = []
+    assumed_terms: list[str] = []
+    for index, section in enumerate(sections):
+        terms_to_define = term_assignments.get(section.id, [])
+        practice_target = section.practice_target
+        if section.role == "practice":
+            covered_terms = [*assumed_terms, *terms_to_define]
+            practice_target = _practice_target(covered_terms)
+        elif section.role == "summary" and not practice_target:
+            covered_terms = [*assumed_terms, *terms_to_define]
+            if covered_terms:
+                practice_target = f"Check whether the learner can explain or apply: {', '.join(covered_terms)}."
+
+        enriched.append(
+            section.model_copy(
+                update={
+                    "terms_to_define": list(terms_to_define),
+                    "terms_assumed": list(assumed_terms),
+                    "practice_target": practice_target,
+                    "bridges_from": (
+                        _section_bridge_label(sections[index - 1]) if index > 0 else None
+                    ),
+                    "bridges_to": (
+                        _section_bridge_label(sections[index + 1])
+                        if index + 1 < len(sections)
+                        else None
+                    ),
+                }
+            )
+        )
+        assumed_terms.extend(terms_to_define)
+
+    return enriched
+
+
 def build_fallback_spec(
     *,
     brief: TeacherBrief,
@@ -272,6 +325,7 @@ def build_fallback_spec(
 ) -> PlanningGenerationSpec:
     composition = build_fallback_composition(brief=brief, template=template, roles=roles)
     sections = _apply_fallback_visual_placements(composition.sections, brief)
+    sections = _apply_fallback_enrichment(sections, brief)
     return PlanningGenerationSpec(
         id=generation_id or uuid4().hex,
         template_id=_RUNTIME_TEMPLATE_ID,

@@ -138,12 +138,21 @@ class PlanningSectionPlan(BaseModel):
     visual_policy: VisualPolicy | None = None
     generation_notes: SectionGenerationNotes | None = None
     rationale: str
+    bridges_from: str | None = None
+    bridges_to: str | None = None
     terms_to_define: list[str] = Field(default_factory=list)
     terms_assumed: list[str] = Field(default_factory=list)
     practice_target: str | None = None
     visual_placements: list[BlockVisualPlacement] = Field(default_factory=list)
 
-    @field_validator("title", "objective", "focus_note", "rationale")
+    @field_validator(
+        "title",
+        "objective",
+        "focus_note",
+        "rationale",
+        "bridges_from",
+        "bridges_to",
+    )
     @classmethod
     def _trim_optional_text(cls, value: str | None) -> str | None:
         if value is None:

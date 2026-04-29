@@ -171,6 +171,11 @@ def _planning_spec() -> PlanningGenerationSpec:
                     "visual_policy": None,
                     "generation_notes": None,
                     "rationale": "Open with a concrete example.",
+                    "bridges_from": None,
+                    "bridges_to": "Explain the local food web",
+                    "terms_to_define": ["food web"],
+                    "terms_assumed": [],
+                    "practice_target": None,
                 }
             ],
             "warning": None,
@@ -229,6 +234,8 @@ class TestBriefApi:
         assert payload["template_id"] == "guided-concept-path"
         assert payload["source_brief"]["subtopics"] == ["Food webs in river ecosystems"]
         assert payload["template_decision"]["chosen_id"] == "worksheet"
+        assert payload["sections"][0]["bridges_to"] == "Explain the local food web"
+        assert payload["sections"][0]["terms_to_define"] == ["food web"]
 
     async def test_commit_brief_starts_generation_with_teacher_brief_context(self):
         _install_overrides(TEST_PROFILE)
@@ -277,6 +284,92 @@ class TestBriefApi:
         assert captured["grade_band"] == "secondary"
         assert captured["learner_fit"] == "supported"
         assert '"status":"committed"' in captured["planning_spec_json"]
+
+    def test_pipeline_sections_from_planning_spec_preserve_explicit_bridges(self):
+        spec = PlanningGenerationSpec.model_validate(
+            {
+                **_planning_spec().model_dump(mode="json"),
+                "sections": [
+                    {
+                        "id": "section-1",
+                        "order": 1,
+                        "role": "intro",
+                        "title": "Start with a river food web",
+                        "objective": "Frame the ecosystem with one local example.",
+                        "focus_note": "Use the river example first.",
+                        "selected_components": ["hook-hero"],
+                        "visual_policy": None,
+                        "generation_notes": None,
+                        "rationale": "Open with a concrete example.",
+                        "bridges_from": None,
+                        "bridges_to": "Explain the producer-consumer link",
+                        "terms_to_define": ["food web"],
+                        "terms_assumed": [],
+                        "practice_target": None,
+                    },
+                    {
+                        "id": "section-2",
+                        "order": 2,
+                        "role": "practice",
+                        "title": "Explain the producer-consumer link",
+                        "objective": "Let learners explain how energy moves.",
+                        "focus_note": "Energy moves from producers to consumers.",
+                        "selected_components": ["practice-stack"],
+                        "visual_policy": None,
+                        "generation_notes": None,
+                        "rationale": "Move into explanation and application.",
+                        "bridges_from": "Start from the local river example",
+                        "bridges_to": None,
+                        "terms_to_define": ["producer", "consumer"],
+                        "terms_assumed": ["food web"],
+                        "practice_target": "Explain the producer-consumer link in the river example.",
+                    },
+                ],
+            }
+        )
+
+        sections = brief_routes._pipeline_sections_from_planning_spec(spec)
+
+        assert sections[0].bridges_to == "Explain the producer-consumer link"
+        assert sections[1].bridges_from == "Start from the local river example"
+
+    def test_pipeline_sections_from_planning_spec_synthesizes_missing_bridges_for_legacy_specs(self):
+        spec = PlanningGenerationSpec.model_validate(
+            {
+                **_planning_spec().model_dump(mode="json"),
+                "sections": [
+                    {
+                        "id": "section-1",
+                        "order": 1,
+                        "role": "intro",
+                        "title": "Start with a river food web",
+                        "objective": "Frame the ecosystem with one local example.",
+                        "focus_note": "Use the river example first.",
+                        "selected_components": ["hook-hero"],
+                        "visual_policy": None,
+                        "generation_notes": None,
+                        "rationale": "Open with a concrete example.",
+                    },
+                    {
+                        "id": "section-2",
+                        "order": 2,
+                        "role": "practice",
+                        "title": "Explain the producer-consumer link",
+                        "objective": "Let learners explain how energy moves.",
+                        "focus_note": "Energy moves from producers to consumers.",
+                        "selected_components": ["practice-stack"],
+                        "visual_policy": None,
+                        "generation_notes": None,
+                        "rationale": "Move into explanation and application.",
+                    },
+                ],
+            }
+        )
+
+        sections = brief_routes._pipeline_sections_from_planning_spec(spec)
+
+        assert sections[0].bridges_to == "Explain the producer-consumer link"
+        assert sections[1].bridges_from == "Start with a river food web"
 
     async def test_commit_brief_rejects_invalid_template_preset_combination(self):
         _install_overrides(TEST_PROFILE)

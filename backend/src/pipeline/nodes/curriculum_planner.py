@@ -12,15 +12,13 @@ from __future__ import annotations
 import logging
 
 from langchain_core.runnables.config import RunnableConfig
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from pydantic_ai import Agent
 
 from core.config import settings as app_settings
 from pipeline.contracts import get_preset, validate_preset_for_template
 from pipeline.events import CurriculumPlannedEvent, SectionStartedEvent
 from pipeline.prompts.curriculum import (
-    build_curriculum_enrichment_system_prompt,
-    build_curriculum_enrichment_user_prompt,
     build_curriculum_system_prompt,
     build_curriculum_user_prompt,
 )
@@ -46,17 +44,6 @@ logger = logging.getLogger(__name__)
 
 class CurriculumOutput(BaseModel):
     sections: list[SectionPlan]
-
-
-class SectionPlanEnrichment(BaseModel):
-    section_id: str
-    terms_to_define: list[str] = Field(default_factory=list)
-    terms_assumed: list[str] = Field(default_factory=list)
-    practice_target: str | None = None
-
-
-class CurriculumEnrichmentOutput(BaseModel):
-    sections: list[SectionPlanEnrichment] = Field(default_factory=list)
 
 
 _SPATIAL_HINTS = {
@@ -449,72 +436,6 @@ def _outline_digest(outline: list[SectionPlan]) -> list[dict[str, object]]:
         }
         for plan in outline
     ]
-
-
-def _apply_enrichment(
-    outline: list[SectionPlan],
-    enrichment: list[SectionPlanEnrichment],
-) -> list[SectionPlan]:
-    enrichment_by_id = {item.section_id: item for item in enrichment}
-    enriched_outline: list[SectionPlan] = []
-    for plan in outline:
-        enriched = enrichment_by_id.get(plan.section_id)
-        if enriched is None:
-            enriched_outline.append(plan)
-            continue
-
-        updates = {
-            "terms_to_define": list(enriched.terms_to_define),
-            "terms_assumed": list(enriched.terms_assumed),
-            "practice_target": enriched.practice_target,
-        }
-
-        enriched_outline.append(plan.model_copy(update=updates))
-
-    return enriched_outline
-
-
-async def _enrich_seeded_outline(
-    state: TextbookPipelineState,
-    outline: list[SectionPlan],
-    *,
-    model,
-    retry_policy,
-) -> tuple[list[SectionPlan], str]:
-    agent = Agent(
-        model=model,
-        output_type=CurriculumEnrichmentOutput,
-        system_prompt=build_curriculum_enrichment_system_prompt(
-            template_id=state.contract.id,
-            template_name=state.contract.name,
-            template_family=state.contract.family,
-        ),
-    )
-    try:
-        result = await run_llm(
-            generation_id=state.request.generation_id or "",
-            node="curriculum_planner",
-            agent=agent,
-            model=model,
-            user_prompt=build_curriculum_enrichment_user_prompt(
-                context=state.request.context,
-                subject=state.request.subject,
-                grade_band=state.request.grade_band,
-                learner_fit=state.request.learner_fit,
-                sections=_outline_digest(outline),
-            ),
-            generation_mode=state.request.mode,
-            retry_policy=retry_policy,
-        )
-        return _apply_enrichment(outline, result.output.sections), "enriched"
-    except Exception as exc:
-        logger.warning(
-            "Curriculum outline enrichment failed; using supplied outline unchanged generation_id=%s error=%s",
-            state.request.generation_id or "",
-            exc,
-        )
-        return outline, "fallback"
-
 
 async def curriculum_planner(
     state: TextbookPipelineState | dict,
