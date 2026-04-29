@@ -131,13 +131,6 @@ def _planning_spec_payload(generation: Generation) -> dict | None:
         payload = json.loads(generation.planning_spec_json)
         if "mode" not in payload:
             payload["mode"] = generation.mode.value
-        source_brief = payload.get("source_brief")
-        if (
-            isinstance(source_brief, dict)
-            and "mode" not in source_brief
-            and "intent" in source_brief
-        ):
-            source_brief["mode"] = generation.mode.value
         return payload
     except json.JSONDecodeError:
         logger.warning(

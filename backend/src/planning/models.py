@@ -44,13 +44,6 @@ class GenerationDirectives(BaseModel):
     brevity: PlanningBrevity
 
 
-class PlanningSignalAffinity(BaseModel):
-    topic_type: dict[str, float] = Field(default_factory=dict)
-    learning_outcome: dict[str, float] = Field(default_factory=dict)
-    class_style: dict[str, float] = Field(default_factory=dict)
-    format: dict[str, float] = Field(default_factory=dict)
-
-
 class PlanningTemplateContract(BaseModel):
     id: str
     name: str
@@ -73,7 +66,6 @@ class PlanningTemplateContract(BaseModel):
     max_per_section: dict[str, int] = Field(default_factory=dict)
     default_behaviours: dict[str, str] = Field(default_factory=dict)
     section_role_defaults: dict[PlanningSectionRole, list[str]] = Field(default_factory=dict)
-    signal_affinity: PlanningSignalAffinity = Field(default_factory=PlanningSignalAffinity)
     layout_notes: list[str] = Field(default_factory=list)
     responsive_rules: list[str] = Field(default_factory=list)
     print_rules: list[str] = Field(default_factory=list)

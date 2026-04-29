@@ -28,7 +28,7 @@ from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_report_repository import GenerationReportRepository
 from generation.ports.generation_repository import GenerationRepository
 from generation.service import enqueue_generation
-from pipeline.contracts import validate_preset_for_template as _legacy_validate_preset_for_template
+from pipeline.contracts import get_contract, list_template_ids
 from pipeline.resources import get_resource_template, validate_brief
 from pipeline.types.requests import (
     GenerationMode,
@@ -58,7 +58,11 @@ from planning.llm_config import (
     get_planning_slot,
     get_planning_spec,
 )
-from planning.models import PlanningGenerationSpec, PlanningSectionPlan
+from planning.models import (
+    PlanningGenerationSpec,
+    PlanningSectionPlan,
+    PlanningTemplateContract,
+)
 
 import core.events as core_events
 
@@ -458,7 +462,6 @@ def validate_render_shell(template_id: str, preset_id: str) -> bool:
 
 
 def validate_preset_for_template(template_id: str, preset_id: str) -> bool:
-    _ = _legacy_validate_preset_for_template
     return validate_render_shell(template_id, preset_id)
 
 
@@ -527,6 +530,17 @@ async def review_teacher_brief(
         warnings=warnings,
         feasibility=feasibility,
     )
+
+
+@router.get("/contracts", response_model=list[PlanningTemplateContract])
+async def list_contracts(
+    current_user: User = Depends(get_current_user),
+) -> list[PlanningTemplateContract]:
+    _ = current_user
+    return [
+        PlanningTemplateContract.model_validate(get_contract(template_id).model_dump())
+        for template_id in list_template_ids()
+    ]
 
 
 @router.post("/brief/plan", response_model=PlanningGenerationSpec)

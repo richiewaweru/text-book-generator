@@ -490,6 +490,24 @@ class TestGenerationApi:
 
         assert response.status_code == 405
 
+    async def test_legacy_brief_endpoint_is_absent(self):
+        async with _client() as client:
+            response = await client.post(
+                "/api/v1/brief",
+                headers=AUTH_HEADERS,
+            )
+
+        assert response.status_code == 404
+
+    async def test_legacy_brief_stream_endpoint_is_absent(self):
+        async with _client() as client:
+            response = await client.post(
+                "/api/v1/brief/stream",
+                headers=AUTH_HEADERS,
+            )
+
+        assert response.status_code == 404
+
     async def test_commit_brief_rejects_invalid_template_pair(self):
         async with _client() as client:
             response = await client.post(
@@ -727,17 +745,38 @@ class TestGenerationApi:
                 resolved_preset_id="blue-classroom",
                 section_count=3,
                 quality_passed=True,
-                planning_spec_json=json.dumps(
-                    {
-                        "id": "spec-1",
-                        "template_id": "guided-concept-path",
-                        "preset_id": "blue-classroom",
-                        "mode": "draft",
-                        "sections": [
-                            {
-                                "id": "section-1",
-                                "order": 1,
-                                "role": "intro",
+                  planning_spec_json=json.dumps(
+                      {
+                          "id": "spec-1",
+                          "template_id": "guided-concept-path",
+                          "preset_id": "blue-classroom",
+                          "mode": "draft",
+                          "source_brief": {
+                              "subject": "Mathematics",
+                              "topic": "Slope",
+                              "subtopics": ["Slope as steepness"],
+                              "grade_level": "grade_8",
+                              "grade_band": "middle_school",
+                              "class_profile": {
+                                  "reading_level": "on_grade",
+                                  "language_support": "none",
+                                  "confidence": "mixed",
+                                  "prior_knowledge": "some_background",
+                                  "pacing": "normal",
+                                  "learning_preferences": [],
+                              },
+                              "learner_context": "Middle school graphing students",
+                              "intended_outcome": "understand",
+                              "resource_type": "worksheet",
+                              "supports": [],
+                              "depth": "standard",
+                              "teacher_notes": "Use graph language carefully.",
+                          },
+                          "sections": [
+                              {
+                                  "id": "section-1",
+                                  "order": 1,
+                                  "role": "intro",
                                 "title": "Start with the central idea",
                             }
                         ],
@@ -794,6 +833,8 @@ class TestGenerationApi:
         assert detail_response.status_code == 200
         payload = detail_response.json()
         assert payload["planning_spec"]["status"] == "committed"
+        assert payload["planning_spec"]["source_brief"]["topic"] == "Slope"
+        assert "mode" not in payload["planning_spec"]["source_brief"]
         assert payload["runtime_curriculum_outline"][0]["terms_to_define"] == ["slope"]
         assert "visual_commitment" not in payload["runtime_curriculum_outline"][0]
         assert payload["planner_trace"]["path"] == "seeded_enrichment"

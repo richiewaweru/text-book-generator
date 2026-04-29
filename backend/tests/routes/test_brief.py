@@ -236,6 +236,18 @@ class TestBriefApi:
         assert payload["sections"][0]["bridges_to"] == "Explain the local food web"
         assert payload["sections"][0]["terms_to_define"] == ["food web"]
 
+    async def test_list_contracts_returns_current_typed_catalog(self):
+        _install_overrides(TEST_PROFILE)
+
+        async with _client() as client:
+            response = await client.get("/api/v1/contracts")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload
+        assert all("signal_affinity" not in contract for contract in payload)
+        assert any(contract["id"] == "guided-concept-path" for contract in payload)
+
     async def test_commit_brief_starts_generation_with_teacher_brief_context(self):
         _install_overrides(TEST_PROFILE)
         spec = _planning_spec()

@@ -19,13 +19,6 @@ class GenerationGuidance(BaseModel):
     avoid: list[str]
 
 
-class SignalAffinity(BaseModel):
-    topic_type: dict[str, float] = Field(default_factory=dict)
-    learning_outcome: dict[str, float] = Field(default_factory=dict)
-    class_style: dict[str, float] = Field(default_factory=dict)
-    format: dict[str, float] = Field(default_factory=dict)
-
-
 class TemplateContractSummary(BaseModel):
     id: str
     name: str
@@ -44,7 +37,6 @@ class TemplateContractSummary(BaseModel):
     max_per_section: dict[str, int] = Field(default_factory=dict)
     default_behaviours: dict[str, str] = Field(default_factory=dict)
     section_role_defaults: dict[str, list[str]] = Field(default_factory=dict)
-    signal_affinity: SignalAffinity = Field(default_factory=SignalAffinity)
     generation_guidance: GenerationGuidance
     best_for: list[str] = Field(default_factory=list)
     not_ideal_for: list[str] = Field(default_factory=list)
