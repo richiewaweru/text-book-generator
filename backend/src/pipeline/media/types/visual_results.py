@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pipeline.media.types.visual_slot import SlotType, VisualRender
 from pipeline.types.section_content import InteractionSpec
@@ -25,6 +25,7 @@ class VisualFrameResult(BaseModel):
     svg_generation_mode: str | None = None
     model_slot: str | None = None
     diagram_kind: str | None = None
+    generation_notes: list[str] = Field(default_factory=list)
     sanitized: bool = False
     intent_validated: bool = False
     svg_failure_reason: str | None = None

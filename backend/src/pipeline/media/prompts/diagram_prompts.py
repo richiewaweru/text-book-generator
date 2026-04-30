@@ -95,7 +95,7 @@ def build_diagram_user_prompt(
         primary_brief = frame.generation_goal or slot.content_brief or section_title
     else:
         primary_brief = slot.content_brief or frame.generation_goal or section_title
-    return f"""Section: {section_title}
+    prompt = f"""Section: {section_title}
 Slot type: {slot.slot_type.value}
 Sizing: {slot.sizing}
 Target block: {slot.block_target or "section"}
@@ -109,3 +109,19 @@ Avoid: {avoid}
 
 Generate raw SVG that makes the planned concept visually clear.
 Keep the result aligned to the slot intent and frame scope only."""
+
+    previous_steps_context = frame.output_placeholders.get("previous_steps_context")
+    if previous_steps_context:
+        prompt += (
+            "\n\nPrevious steps context (maintain visual consistency):\n"
+            f"{previous_steps_context}"
+        )
+
+    previous_attempt_feedback = frame.output_placeholders.get("previous_attempt_feedback")
+    if previous_attempt_feedback:
+        prompt += (
+            "\n\nPrevious attempt feedback (correct this on the next attempt):\n"
+            f"{previous_attempt_feedback}"
+        )
+
+    return prompt

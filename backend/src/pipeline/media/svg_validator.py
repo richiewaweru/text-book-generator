@@ -25,7 +25,13 @@ GRAPH_BRIEF_TERMS = {
     "coordinate",
     "graph",
     "grid",
+    "axis",
+    "axes",
 }
+GRAPH_FLOWCHART_MESSAGE = (
+    "Brief asks for a graph/coordinate diagram but SVG appears to be a flowchart. "
+    "Regenerate as a coordinate grid."
+)
 
 
 class SvgValidationError(ValueError):
@@ -92,6 +98,8 @@ def validate_svg_intent(svg_content: str, brief: str | None) -> None:
     text_labels = counts.get("text", 0) + counts.get("tspan", 0)
     rects = counts.get("rect", 0)
 
+    if graph_marks == 0 and rects > 0:
+        raise SvgIntentValidationError(GRAPH_FLOWCHART_MESSAGE)
     if graph_marks == 0:
         raise SvgIntentValidationError(
             "The brief asks for a graph-like diagram, but the SVG has no line/path/polyline marks."
@@ -101,6 +109,4 @@ def validate_svg_intent(svg_content: str, brief: str | None) -> None:
             "The brief asks for a graph-like diagram, but the SVG has no text labels."
         )
     if rects >= 2 and rects >= graph_marks:
-        raise SvgIntentValidationError(
-            "The brief asks for slope/rise-run graphing, but the SVG appears to be a flowchart."
-        )
+        raise SvgIntentValidationError(GRAPH_FLOWCHART_MESSAGE)

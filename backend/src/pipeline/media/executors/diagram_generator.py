@@ -8,6 +8,7 @@ from langchain_core.runnables.config import RunnableConfig
 from pipeline.media.assembly import (
     apply_slot_results_to_section,
     build_slot_result,
+    frame_has_required_artifact,
     frame_result_key,
 )
 from pipeline.media.svg_sanitizer import SvgSanitizationError
@@ -53,6 +54,89 @@ def _static_svg_slots(state: TextbookPipelineState) -> list:
     ]
 
 
+def _previous_steps_context(slot, frame, slot_frame_results: dict[str, VisualFrameResult]) -> str | None:
+    if slot.slot_type != SlotType.DIAGRAM_SERIES:
+        return None
+
+    lines: list[str] = []
+    current_key = frame_result_key(frame)
+    for previous_frame in slot.frames:
+        if frame_result_key(previous_frame) == current_key:
+            break
+        previous_result = slot_frame_results.get(frame_result_key(previous_frame))
+        if not frame_has_required_artifact(slot, previous_result):
+            continue
+
+        label = previous_result.label or previous_frame.label or f"Step {previous_frame.index + 1}"
+        details: list[str] = []
+        if previous_result.diagram_kind:
+            details.append(f"diagram kind: {previous_result.diagram_kind}")
+        if previous_result.explanation:
+            details.append(f"caption: {previous_result.explanation}")
+        if previous_result.generation_notes:
+            details.append(f"self-check: {'; '.join(previous_result.generation_notes)}")
+        summary = "; ".join(details) if details else "generated successfully"
+        lines.append(f"Step {previous_frame.index + 1} ({label}): {summary}")
+
+    if not lines:
+        return None
+    return "\n".join(lines)
+
+
+def _previous_attempt_feedback(
+    *,
+    frame,
+    retry_request,
+    slot_frame_results: dict[str, VisualFrameResult],
+) -> str | None:
+    if retry_request is None or retry_request.frame_key != frame_result_key(frame):
+        return None
+
+    previous_result = slot_frame_results.get(frame_result_key(frame))
+    if previous_result is None:
+        return retry_request.reason
+
+    parts: list[str] = []
+    if previous_result.svg_failure_reason:
+        parts.append(f"failure category: {previous_result.svg_failure_reason}")
+    if previous_result.error_message:
+        parts.append(previous_result.error_message)
+    elif retry_request.reason:
+        parts.append(retry_request.reason)
+    return "\n".join(parts) if parts else None
+
+
+def _frame_with_prompt_context(
+    *,
+    slot,
+    frame,
+    retry_request,
+    slot_frame_results: dict[str, VisualFrameResult],
+):
+    updates: dict[str, str | None] = {}
+    previous_steps = _previous_steps_context(slot, frame, slot_frame_results)
+    if previous_steps:
+        updates["previous_steps_context"] = previous_steps
+    previous_feedback = _previous_attempt_feedback(
+        frame=frame,
+        retry_request=retry_request,
+        slot_frame_results=slot_frame_results,
+    )
+    if previous_feedback:
+        updates["previous_attempt_feedback"] = previous_feedback
+
+    if not updates:
+        return frame
+    return frame.model_copy(
+        update={
+            "output_placeholders": {
+                **frame.output_placeholders,
+                **updates,
+            }
+        }
+    )
+
+
 async def _generate_frame(
     *,
     legacy,
@@ -81,6 +165,7 @@ async def _generate_frame(
         svg_generation_mode=_svg_generation_mode(legacy),
         model_slot="standard",
         diagram_kind=output.diagram_kind,
+        generation_notes=output.self_check,
         sanitized=legacy._raw_svg_diagrams_enabled(),
         intent_validated=legacy._raw_svg_diagrams_enabled(),
         alt_text=output.alt_text,
@@ -159,18 +244,24 @@ async def diagram_generator(
             ]
 
         for frame in target_frames:
+            frame_for_generation = _frame_with_prompt_context(
+                slot=slot,
+                frame=frame,
+                retry_request=retry_request,
+                slot_frame_results=slot_frame_results,
+            )
             emit_frame_started(
                 generation_id=generation_id,
                 section_id=sid,
                 slot=slot,
-                frame=frame,
+                frame=frame_for_generation,
             )
             try:
                 generated_frame = await _generate_frame(
                     legacy=legacy,
                     state=typed,
                     slot=slot,
-                    frame=frame,
+                    frame=frame_for_generation,
                     section_title=current_title,
                     model_overrides=model_overrides,
                     config=config,
