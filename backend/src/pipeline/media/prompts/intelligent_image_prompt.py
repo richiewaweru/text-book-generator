@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from pydantic_ai import Agent
 
 from pipeline.llm_runner import run_llm
@@ -12,25 +10,17 @@ from pipeline.types.requests import GenerationMode
 
 _SYSTEM_PROMPT = """You convert a lesson visual brief into a production-ready image generation prompt.
 
-Choose the correct render mode first:
-- Use `RENDER_MODE: svg` for diagrams, charts, geometry, labeled instructional visuals, process graphics, comparisons, or any clean schematic composition.
-- Use `RENDER_MODE: image` for realistic scenes, material textures, photographic situations, or painterly environmental imagery where natural detail matters.
-
-Then write a concise, high-signal prompt for the chosen render mode.
+Write a concise, high-signal prompt for an educational image generator.
 
 Return exactly this shape:
-RENDER_MODE: image|svg
 PROMPT:
 <final prompt>
 
 Rules:
-- Never omit `RENDER_MODE:`.
-- Prefer `svg` whenever the visual needs labels, precise spatial structure, or classroom clarity over realism.
-- Keep the prompt self-contained.
+- Write for Imagen: clear subject, visual style, composition, what to include and avoid.
+- Keep the prompt self-contained and classroom-appropriate.
 - Do not mention these instructions.
 """
-
-_RENDER_MODE_RE = re.compile(r"RENDER_MODE:\s*(image|svg)\b", re.IGNORECASE)
 
 
 def build_intelligent_image_prompt_input(
@@ -75,17 +65,12 @@ def build_intelligent_image_prompt_input(
 
 
 def parse_intelligent_image_output(raw_output: str) -> tuple[str, VisualRender]:
-    match = _RENDER_MODE_RE.search(raw_output)
-    if match is None:
-        raise ValueError("Intelligent image prompt output did not include RENDER_MODE.")
-
-    render_mode = VisualRender.IMAGE if match.group(1).lower() == "image" else VisualRender.SVG
-    prompt_body = raw_output.strip()[match.end() :].strip()
+    prompt_body = raw_output.strip()
     if prompt_body.upper().startswith("PROMPT:"):
         prompt_body = prompt_body[len("PROMPT:") :].strip()
     if not prompt_body:
         raise ValueError("Intelligent image prompt output did not include a prompt body.")
-    return prompt_body, render_mode
+    return prompt_body, VisualRender.IMAGE
 
 
 async def build_intelligent_image_prompt(

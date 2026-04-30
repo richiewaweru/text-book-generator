@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from pipeline.media.prompts.diagram_prompts import (
-    build_diagram_system_prompt,
-    build_diagram_user_prompt,
-)
 from pipeline.media.prompts.intelligent_image_prompt import (
     _SYSTEM_PROMPT as IMAGE_INTENT_SYSTEM_PROMPT,
     build_intelligent_image_prompt_input,
@@ -32,53 +28,6 @@ def _style_context(**overrides) -> StyleContext:
     }
     payload.update(overrides)
     return StyleContext(**payload)
-
-
-def test_diagram_prompt_uses_slot_and_frame_contract() -> None:
-    slot = VisualSlot(
-        slot_id="diagram",
-        slot_type="diagram",
-        required=True,
-        preferred_render="svg",
-        pedagogical_intent="Explain the structure clearly.",
-        caption="Support the final classroom caption.",
-        frames=[
-            VisualFrame(
-                slot_id="diagram",
-                index=0,
-                label="Core view",
-                generation_goal="Show the idea clearly.",
-                must_include=["slope", "rise over run"],
-                avoid=["text overlays"],
-            )
-        ],
-    )
-
-    prompt = build_diagram_user_prompt(
-        section_title="Rates of change",
-        slot=slot,
-        frame=slot.frames[0],
-    )
-
-    assert "Pedagogical intent: Explain the structure clearly." in prompt
-    assert "Must include: slope, rise over run" in prompt
-
-
-def test_diagram_system_prompt_includes_raw_svg_contract_and_security_rules() -> None:
-    prompt = build_diagram_system_prompt(_style_context())
-
-    assert "You generate raw SVG diagrams" in prompt
-    assert 'viewBox="0 0 600 400"' in prompt
-    assert "svg_content, caption, alt_text, diagram_kind, self_check" in prompt
-    assert "Do not use script" in prompt
-    assert "javascript: URLs" in prompt
-    assert "not a process flowchart" in prompt
-
-
-def test_diagram_system_prompt_uses_compact_guidance() -> None:
-    prompt = build_diagram_system_prompt(_style_context(), sizing="compact")
-
-    assert "Keep compact diagrams focused" in prompt
 
 
 def test_image_prompts_consume_frame_data_only() -> None:
@@ -160,17 +109,10 @@ def test_media_prompts_include_content_brief_and_compact_sizing() -> None:
         frame=slot.frames[0],
         style_context=_style_context(),
     )
-    diagram_prompt = build_diagram_user_prompt(
-        section_title="Rates of change",
-        slot=slot,
-        frame=slot.frames[0],
-    )
 
     assert "Content brief: Show a small coordinate grid" in image_prompt
     assert "Sizing: compact" in image_prompt
     assert "Target aspect ratio: 600:400 - optimise composition for this shape" in image_prompt
-    assert "Content brief: Show a small coordinate grid" in diagram_prompt
-    assert "Target block: practice" in diagram_prompt
 
 
 def test_build_image_generation_prompt_prefers_frame_goal_for_section_slot() -> None:
@@ -202,35 +144,6 @@ def test_build_image_generation_prompt_prefers_frame_goal_for_section_slot() -> 
     assert "coordinate plane" in prompt
     assert "Use a sequence visual" not in prompt
     assert "Clean educational illustration, moderate detail" in prompt
-
-
-def test_build_diagram_user_prompt_prefers_frame_goal_for_section_slot() -> None:
-    slot = VisualSlot(
-        slot_id="section-diagram-series",
-        slot_type="diagram_series",
-        required=True,
-        preferred_render="svg",
-        block_target="section",
-        content_brief="Use a sequence visual.",
-        pedagogical_intent="Show positive slope.",
-        caption="Positive and Negative Slopes",
-        frames=[],
-    )
-    frame = VisualFrame(
-        slot_id="section-diagram-series",
-        index=0,
-        label="Step 1",
-        generation_goal="A coordinate plane showing a rising line labeled slope=3/4.",
-    )
-
-    prompt = build_diagram_user_prompt(
-        section_title="See Positive and Negative Slopes",
-        slot=slot,
-        frame=frame,
-    )
-
-    assert "coordinate plane" in prompt
-    assert "Use a sequence visual" not in prompt
 
 
 def test_build_image_generation_prompt_wraps_override_brief() -> None:
@@ -305,14 +218,15 @@ def test_intelligent_image_prompt_includes_all_frame_briefs() -> None:
     assert "Frame 2 brief here." in result
 
 
-def test_intelligent_image_prompt_parser_extracts_render_mode_and_prompt() -> None:
+def test_intelligent_image_prompt_parser_returns_image_prompt() -> None:
     prompt, render_mode = parse_intelligent_image_output(
-        "RENDER_MODE: svg\nPROMPT:\nDraw a clean coordinate plane with a labeled tangent line."
+        "PROMPT:\nDraw a clear classroom image of a coordinate plane with a labeled tangent line."
     )
 
-    assert render_mode == "svg"
+    assert render_mode == "image"
     assert "coordinate plane" in prompt
 
 
-def test_intelligent_image_prompt_system_prompt_requires_render_mode() -> None:
-    assert "RENDER_MODE: image|svg" in IMAGE_INTENT_SYSTEM_PROMPT
+def test_intelligent_image_prompt_system_prompt_requires_prompt_shape() -> None:
+    assert "PROMPT:" in IMAGE_INTENT_SYSTEM_PROMPT
+    assert "RENDER_MODE" not in IMAGE_INTENT_SYSTEM_PROMPT

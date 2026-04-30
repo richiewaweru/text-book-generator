@@ -216,6 +216,27 @@ def test_media_planner_builds_single_diagram_from_explanation_placement() -> Non
     assert "Rates of change help explain" in (diagram_slot.content_brief or "")
 
 
+def test_media_planner_defaults_single_diagram_to_image_without_visual_policy() -> None:
+    plan = media_planner(
+        section_plan=SectionPlan(
+            section_id="s-01",
+            title="Rates of change",
+            position=1,
+            focus="Make the concept visible.",
+            visual_placements=[
+                BlockVisualPlacement(block="explanation", slot_type="diagram", hint="Use a clear line diagram.")
+            ],
+        ),
+        section_content=_section(),
+        template_contract=_contract(),
+        style_context=None,
+    )
+
+    diagram_slot = next(slot for slot in plan.slots if slot.slot_type.value == "diagram")
+    assert diagram_slot.preferred_render.value == "image"
+    assert diagram_slot.frames[0].output_placeholders == {"image_url": None}
+
+
 def test_media_planner_uses_style_context_for_supported_learners() -> None:
     plan = media_planner(
         section_plan=SectionPlan(
@@ -469,6 +490,50 @@ def test_media_planner_deduplicates_series_labels_case_insensitively() -> None:
 
     series_slot = next(slot for slot in plan.slots if slot.slot_type.value == "diagram_series")
     assert [frame.label for frame in series_slot.frames] == ["Start", "Transform"]
+
+
+def test_build_series_slot_uses_diagram_series_caption_as_generation_goal() -> None:
+    plan = media_planner(
+        section_plan=SectionPlan(
+            section_id="s-01",
+            title="Parts of a seed",
+            position=1,
+            focus="Show germination steps.",
+            visual_policy=SectionVisualPolicy(required=True, mode="image"),
+            visual_placements=[
+                BlockVisualPlacement(block="explanation", slot_type="diagram_series")
+            ],
+        ),
+        section_content=_section(
+            diagram_series=DiagramSeriesContent(
+                title="Seed germination",
+                diagrams=[
+                    DiagramSeriesStep(
+                        step_label="Seed coat",
+                        caption="Show the tough outer seed coat protecting the seed.",
+                    ),
+                    DiagramSeriesStep(
+                        step_label="Radicle",
+                        caption="",
+                    ),
+                ],
+            )
+        ).model_copy(
+            update={
+                "header": SectionHeaderContent(
+                    title="Parts of a seed",
+                    subject="Science",
+                    grade_band="secondary",
+                )
+            }
+        ),
+        template_contract=_contract(optional=["diagram-series", "simulation-block"]),
+        style_context=None,
+    )
+
+    series_slot = next(slot for slot in plan.slots if slot.slot_type.value == "diagram_series")
+    assert series_slot.frames[0].generation_goal == "Show the tough outer seed coat protecting the seed."
+    assert series_slot.frames[1].generation_goal == "Show sequence step 2 for Parts of a seed: Radicle."
 
 
 def test_media_planner_represents_simulation_separately() -> None:

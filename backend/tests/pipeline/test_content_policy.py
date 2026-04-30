@@ -504,6 +504,7 @@ async def test_curriculum_planner_fresh_path_routes_visual_placements_after_llm_
 
     section = result["curriculum_outline"][0]
     assert section.visual_placements[0].slot_type == "diagram"
+    assert section.visual_policy.mode == "image"
     assert section.needs_diagram is True
     planner_event = next(event for event in published_events if event.type == "curriculum_planned")
     assert len(planner_event.duplicate_term_warnings) == 1
@@ -512,6 +513,20 @@ async def test_curriculum_planner_fresh_path_routes_visual_placements_after_llm_
     assert planner_event.planner_trace_sections[0].visual_placements_summary == [
         "explanation:diagram"
     ]
+
+
+def test_curriculum_planner_defaults_static_visual_mode_to_image() -> None:
+    state = _base_state(
+        request=_request(subject="History", context="Ancient trade routes"),
+    )
+    plan = _section_plan(
+        title="Trade route map",
+        focus="Show how goods moved between cities.",
+    )
+
+    mode = curriculum_planner_mod._visual_mode_for_plan(state, plan, "diagram")
+
+    assert mode == "image"
 
 
 def test_visual_router_uses_section_block_for_visual_roles() -> None:

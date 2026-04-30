@@ -70,6 +70,8 @@ async def _resolve_static_slot_prompts(
             }
             continue
 
+        if preferred_render == VisualRender.SVG:
+            preferred_render = VisualRender.IMAGE
         slot.preferred_render = preferred_render
         slot.fallback_render = _fallback_render_for_slot(slot.slot_type, preferred_render)
         slot.render_decision = {

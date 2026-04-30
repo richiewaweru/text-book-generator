@@ -129,12 +129,12 @@ async def test_media_planner_resolves_render_mode_before_parallel_generation(mon
     result = await media_planner(_state())
 
     slot = result["media_plans"]["s-01"].slots[0]
-    assert slot.preferred_render == VisualRender.SVG
+    assert slot.preferred_render == VisualRender.IMAGE
     assert slot.generation_prompt == "Use a precise coordinate grid with labeled axes and a tangent line."
-    assert slot.frames[0].output_placeholders == {"svg_content": None}
+    assert slot.frames[0].output_placeholders == {"image_url": None}
     assert published[0][0] == "gen-media-plan"
     assert isinstance(published[0][1], SlotRenderModeResolvedEvent)
-    assert published[0][1].render_mode == "svg"
+    assert published[0][1].render_mode == "image"
 
 
 @pytest.mark.asyncio

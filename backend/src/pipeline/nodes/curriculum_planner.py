@@ -157,22 +157,10 @@ def _all_contract_components(state: TextbookPipelineState) -> set[str]:
 
 
 def _visual_mode_for_plan(state: TextbookPipelineState, plan: SectionPlan, slot_type: str) -> str:
+    _ = state
     if plan.visual_policy is not None and plan.visual_policy.mode is not None:
         return plan.visual_policy.mode
-    if slot_type in {"diagram_series", "diagram_compare"}:
-        return "image"
-
-    profile = " ".join(
-        part.lower()
-        for part in (
-            state.request.subject,
-            state.request.context,
-            plan.title,
-            plan.focus,
-        )
-        if part
-    )
-    if any(keyword in profile for keyword in _SPATIAL_HINTS | _GRAPH_HINTS):
+    if slot_type in {"diagram", "diagram_series", "diagram_compare"}:
         return "image"
     return "svg"
 

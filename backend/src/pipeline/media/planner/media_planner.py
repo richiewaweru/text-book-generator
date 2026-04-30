@@ -105,7 +105,7 @@ def _preferred_render_for_slot(
     explicit_mode = getattr(visual_policy, "mode", None)
     if explicit_mode is not None:
         return VisualRender(explicit_mode)
-    return VisualRender.SVG
+    return VisualRender.IMAGE
 
 
 def _fallback_render_for_slot(slot_type: SlotType, preferred_render: VisualRender) -> VisualRender | None:
@@ -461,6 +461,13 @@ def _build_series_slot(
     preferred_render = _preferred_render_for_slot(plan, SlotType.DIAGRAM_SERIES)
     concepts = _key_concepts(section)
     labels = _dedupe_casefold(_series_labels(section, plan, concepts))
+    step_captions: dict[str, str] = {}
+    if section.diagram_series is not None:
+        step_captions = {
+            step.step_label: step.caption
+            for step in section.diagram_series.diagrams
+            if step.caption
+        }
     frame_count = len(labels)
     tw, th = _target_dimensions(SlotType.DIAGRAM_SERIES, frame_count, sizing=sizing)
     slot_id = _slot_id(SlotType.DIAGRAM_SERIES, block_target=block_target)
@@ -471,7 +478,8 @@ def _build_series_slot(
             index=index,
             label=label,
             generation_goal=_styled_goal(
-                f"Show sequence step {index + 1} for {title}: {label}.",
+                step_captions.get(label)
+                or f"Show sequence step {index + 1} for {title}: {label}.",
                 style_context,
             ),
             must_include=[label] + ([concepts[index]] if index < len(concepts) else []),

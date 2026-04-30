@@ -25,79 +25,6 @@ from pipeline.types.requests import BlockVisualPlacement
 from pipeline.types.teacher_brief import TeacherBrief
 
 logger = logging.getLogger(__name__)
-_SPATIAL_HINTS = {
-    "biology",
-    "chemistry",
-    "ecosystem",
-    "cell",
-    "atom",
-    "heart",
-    "anatomy",
-    "river",
-    "map",
-    "planet",
-    "cycle",
-    "photosynthesis",
-    "geography",
-    "architecture",
-    "geology",
-    "organ",
-    "molecule",
-    "skeleton",
-    "volcano",
-    "ocean",
-    "continent",
-    "mountain",
-    "weather",
-    "circuit",
-    "engine",
-    "building",
-    "bridge",
-    "solar",
-    "galaxy",
-}
-_GRAPH_HINTS = {
-    "graph",
-    "plot",
-    "axes",
-    "axis",
-    "coordinate",
-    "gradient",
-    "slope",
-    "derivative",
-    "integral",
-    "function",
-    "equation",
-    "curve",
-    "tangent",
-    "linear",
-    "quadratic",
-    "parabola",
-    "intercept",
-    "asymptote",
-    "vector",
-    "force",
-    "velocity",
-    "acceleration",
-    "displacement",
-    "distance",
-    "frequency",
-    "wavelength",
-    "amplitude",
-    "probability",
-    "distribution",
-    "histogram",
-    "scatter",
-    "correlation",
-    "regression",
-    "demand",
-    "supply",
-    "elasticity",
-    "marginal",
-    "revenue",
-    "cost",
-    "profit",
-}
 
 
 class _SectionVisualDecision(BaseModel):
@@ -111,23 +38,6 @@ class _VisualRoutingPlan(BaseModel):
     sections: list[_SectionVisualDecision] = Field(default_factory=list)
 
 
-def _normalized_topic_terms(brief: TeacherBrief) -> set[str]:
-    terms = {
-        *brief.subject.lower().split(),
-        *brief.topic.lower().split(),
-        *" ".join(brief.subtopics).lower().split(),
-    }
-    return {term.strip(" ,.;:!?") for term in terms if term}
-
-
-def _classify_spatial(brief: TeacherBrief) -> bool:
-    return bool(_normalized_topic_terms(brief).intersection(_SPATIAL_HINTS))
-
-
-def _classify_graph(brief: TeacherBrief) -> bool:
-    return bool(_normalized_topic_terms(brief).intersection(_GRAPH_HINTS))
-
-
 def _visual_intent(section: PlanningSectionPlan) -> PlanningVisualIntent:
     if section.role == "process":
         return "demonstrate_process"
@@ -139,13 +49,8 @@ def _visual_intent(section: PlanningSectionPlan) -> PlanningVisualIntent:
 
 
 def _visual_mode(brief: TeacherBrief, directives: GenerationDirectives, intent: str) -> PlanningVisualMode:
-    if intent in {"show_realism", "demonstrate_process", "compare_variants"}:
-        return "image"
-    if _classify_spatial(brief) or _classify_graph(brief):
-        return "image"
-    if directives.reading_level == "simple":
-        return "image"
-    return "svg"
+    _ = (brief, directives, intent)
+    return "image"
 
 
 def _derive_visual_placements(
