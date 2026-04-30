@@ -1,57 +1,55 @@
 # Agent Context
 
-This file is the human-readable source of truth for the current project state.
+This file is the descriptive source of truth for the current live system shape. Code in `backend/src/` and `frontend/src/` remains authoritative.
 
 ## Current Runtime Shape
 
-- `backend/src/core/` holds shared infrastructure and the shared auth/profile/user layer.
-- `backend/src/generation/` is the generation app.
-- `backend/src/planning/` is the planning layer used by Teacher Studio.
-- `backend/src/pipeline/` is the only live generation engine.
-- `backend/src/app.py` is the FastAPI composition entrypoint.
+- `backend/src/core/` holds shared auth, config, database, events, and generic LLM utilities.
+- `backend/src/planning/` owns Teacher Studio brief workflows and the bridge into generation.
+- `backend/src/generation/` owns persistence, orchestration, SSE, detail/history APIs, and PDF export.
+- `backend/src/telemetry/` owns saved reports and LLM usage reporting.
+- `backend/src/pipeline/` is the only live lesson-generation engine.
+- `backend/src/app.py` assembles the FastAPI app.
 - The canonical saved artifact is a JSON `PipelineDocument`.
-- The frontend hydrates from `/document` and appends new sections from `/events`.
-- Generation uses a single mode-free path with slot-based model routing.
-- `/studio` is the canonical teacher creation flow.
+- `/studio` is the teacher creation route and `/textbook/[id]` is generation-centric.
 
 ## Current Schema Highlights
 
-- `Generation` stores document metadata, template/preset ids, timing, and failure metadata.
-- `PlanningGenerationSpec` stores the reviewed lesson plan that bridges Teacher Studio into generation.
-- `GenerationRequest` and `GenerationAcceptedResponse` live under `backend/src/generation/dtos/`.
-- `SectionContent` is Lectio-aligned and rendered natively in the frontend.
-- `grade_band` is derived in the generation path from `StudentProfile.education_level`.
-- `learner_fit` currently defaults to `general`.
+- `TeacherBrief` is the planning input contract.
+- `PlanningGenerationSpec` is the reviewed planning artifact that gets committed into generation.
+- `GenerationAcceptedResponse` includes startup metadata used by `GenerationView`.
+- `Generation.planning_spec_json` stores the committed planning artifact for detail/report hydration.
+- `SectionContent` remains Lectio-aligned and renders natively in the frontend viewer.
 
-## Current Prompt Source of Truth
+## Current Studio Flow
 
-- Planning prompt/refinement code lives in `backend/src/planning/prompt_builder.py`.
-- Media prompt builders live in `backend/src/pipeline/media/prompts/`.
-- Non-media pipeline prompt helpers stay under `backend/src/pipeline/`.
+- `/studio` renders `TeacherBriefBuilder` directly.
+- Topic narrowing happens through `POST /api/v1/brief/resolve-topic`.
+- Deterministic readiness checks happen through `POST /api/v1/brief/validate`.
+- Pedagogical review happens through `POST /api/v1/brief/review`.
+- Planning happens through `POST /api/v1/brief/plan`.
+- After teacher review, generation starts through `POST /api/v1/brief/commit`.
+- `GenerationView` hydrates generation detail/document state and follows live `/events`.
+
+There is no live planning SSE route. `POST /api/v1/brief` and `POST /api/v1/brief/stream` are not current endpoints.
+
+## Prompt and Contract Sources
+
+- Planning prompt entrypoints live in the current planning modules such as `planning/section_composer.py`, `planning/service.py`, and `planning/routes.py`.
+- Media prompt builders live under `backend/src/pipeline/media/prompts/`.
 - Contract loading lives in `backend/src/pipeline/contracts.py`.
-- Reference docs under `docs/` are descriptive only. Code in `backend/src/` is authoritative.
+- Synced raw contract JSON lives in `backend/contracts/`; app-facing typed payloads are derived from the current pipeline and planning models.
 
-## Current Viewer Contract
+## Viewer Contract
 
-- `/textbook/[id]` is generation-centric.
-- `/studio` owns teacher intent capture, planning stream, review, and in-studio generation.
-- The frontend loads generation detail and saved document by generation ID.
-- SSE carries both section-level events and media lifecycle events.
-- Viewer state is derived from media-aware section statuses: `planned`, `generating`, `partially_ready`, `blocked_by_required_media`, `ready`, and `failed`.
-- Runtime counters are expressed as `media_running` / `media_queued`.
-- Raw filesystem paths are internal storage details and are not part of the viewer contract.
+- The frontend loads generation detail by generation ID.
+- `/document` hydrates the current saved `PipelineDocument`.
+- `/report` hydrates telemetry/report state.
+- `/events` carries authenticated generation SSE, including section progress and media lifecycle events.
+- Viewer section states are media-aware: `planned`, `generating`, `partially_ready`, `blocked_by_required_media`, `ready`, `failed`, and `unplanned_output`.
 
-## Current Contract Source
+## Media Runtime
 
-- `backend/contracts/` is synced from `frontend/node_modules/lectio/contracts/` via `tools/update_lectio_contracts.py`.
-- The current harmonised catalog includes `classification`, `concept-compact`, `diagram-led`, `low-load`, `open-canvas`, `procedure`, `timeline`, `visual-led`, plus the other live-safe templates shipped by Lectio.
-
-## Current Media Runtime
-
-- `backend/src/pipeline/media/planner/media_planner.py` is the single planning authority for section media.
-- Static media executes through `backend/src/pipeline/media/executors/diagram_generator.py` and `backend/src/pipeline/media/executors/image_generator.py`.
-- Simulation executes through `backend/src/pipeline/media/executors/simulation_generator.py`.
-- `process_section` runs `content_generator -> media_planner -> parallel media executors -> section_assembler -> qc_agent`.
-- Assembly reads typed `media_frame_results` / `media_slot_results`, not legacy composition-plan assumptions.
-- Required media retries are frame-first and report truthfully through media lifecycle events.
-- Image provider routing is config-driven via `PIPELINE_IMAGE_PROVIDER` with `gemini`, `openai`, and `xai` support.
+- `pipeline.media.planner.media_planner` remains the single planning authority for media execution.
+- Static media execution lives under `pipeline.media.executors`.
+- Required media retries are frame-first and surfaced through runtime events and report state.

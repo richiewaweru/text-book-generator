@@ -410,15 +410,14 @@ def build_section_generation_manifest(
     template_id: str,
     section_plan,
 ) -> SectionGenerationManifest:
-    contract = _load_contract_raw(template_id)
     required_components = _section_plan_list(section_plan, "required_components")
     optional_components = _section_plan_list(section_plan, "optional_components")
 
     if not required_components:
-        required_components = _required_components(contract)
-
-    if not optional_components:
-        optional_components = _optional_components(contract)
+        raise ValueError(
+            f"Section {_section_plan_id(section_plan) or '<unknown>'} has no required_components. "
+            "This is a planning failure."
+        )
 
     required_components = _dedupe(required_components)
     optional_components = [
@@ -434,7 +433,7 @@ def build_section_generation_manifest(
     for component_id in required_components:
         field_contract = _field_contract(component_id, required=True)
         if field_contract is None:
-            continue
+            raise ValueError(f"Unknown required component '{component_id}' in section manifest build.")
         if field_contract.external:
             external_fields.append(field_contract)
         else:
@@ -443,7 +442,7 @@ def build_section_generation_manifest(
     for component_id in optional_components:
         field_contract = _field_contract(component_id, required=False)
         if field_contract is None:
-            continue
+            raise ValueError(f"Unknown optional component '{component_id}' in section manifest build.")
         if field_contract.external:
             external_fields.append(field_contract)
         else:

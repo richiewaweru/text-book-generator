@@ -17,6 +17,7 @@ from pipeline.media.runtime_events import (
     emit_slot_state,
 )
 from pipeline.media.types import SlotType, VisualFrameResult, VisualFrameResultStatus
+from pipeline.section_content_helpers import section_title
 from pipeline.state import PipelineError, TextbookPipelineState
 
 
@@ -69,11 +70,12 @@ async def _generate_image_frame(
     api_key_present: bool,
     variant: str,
 ) -> VisualFrameResult:
-    prompt = slot.generation_prompt or build_image_generation_prompt(
+    prompt = build_image_generation_prompt(
         section_title=section_title,
         slot=slot,
         frame=frame,
         style_context=style_context,
+        override_brief=slot.generation_prompt or None,
     )
     image_result, _attempts = await legacy._request_image_bytes(
         client=client,
@@ -321,6 +323,7 @@ async def image_generator(
     errors: list[PipelineError] = []
 
     for slot in slots:
+        current_title = section_title(updated_section)
         slot_frame_results = dict(section_frame_results.get(slot.slot_id, {}))
         target_frames = slot.frames
         if retry_request is not None:
@@ -343,7 +346,7 @@ async def image_generator(
                         slot=slot,
                         frame=frame,
                         peer_frame=peer_frame,
-                        section_title=updated_section.header.title,
+                        section_title=current_title,
                         style_context=typed.style_context,
                         sid=sid,
                         generation_id=generation_id,
@@ -356,7 +359,7 @@ async def image_generator(
                         legacy=legacy,
                         slot=slot,
                         frame=frame,
-                        section_title=updated_section.header.title,
+                        section_title=current_title,
                         style_context=typed.style_context,
                         sid=sid,
                         generation_id=generation_id,
@@ -369,7 +372,7 @@ async def image_generator(
                         legacy=legacy,
                         slot=slot,
                         frame=frame,
-                        section_title=updated_section.header.title,
+                        section_title=current_title,
                         style_context=typed.style_context,
                         sid=sid,
                         generation_id=generation_id,

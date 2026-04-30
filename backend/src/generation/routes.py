@@ -12,22 +12,17 @@ from core.auth.middleware import get_current_user
 from core.dependencies import (
     get_jwt_handler,
     get_settings,
-    get_student_profile_repository,
     get_user_repository,
 )
 from core.entities.user import User
-from core.ports.student_profile_repository import StudentProfileRepository
 from core.ports.user_repository import UserRepository
 from generation import service as generation_service
 from generation.dependencies import (
     get_document_repository,
-    get_generation_engine,
     get_generation_repository,
 )
 from generation.pdf_export.cleanup import cleanup_files
 from generation.pdf_export.service import PDFExportRequest, export_generation_pdf
-from generation.dtos import GenerationAcceptedResponse, GenerationRequest
-from core.rate_limit import limiter
 from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_repository import GenerationRepository
 from pipeline.adapter import run_pipeline_streaming
@@ -49,6 +44,7 @@ event_bus = core_events.event_bus
 _SSE_KEEPALIVE_TIMEOUT_SECONDS = generation_service._SSE_KEEPALIVE_TIMEOUT_SECONDS
 _persist_failed_generation_state = generation_service._persist_failed_generation_state
 _generation_job_timeout = generation_service._generation_job_timeout
+_ASYNCIO_PATCH_POINT = asyncio
 
 
 class _PatchedPipelineEngine:
@@ -96,48 +92,6 @@ async def _run_generation_job(
             original_persist_failed_generation_state
         )
         generation_service._generation_job_timeout = original_generation_job_timeout
-
-
-@router.post("/generations", status_code=202, response_model=GenerationAcceptedResponse)
-@limiter.limit("10/minute")
-async def create_generation(
-    request: Request,
-    req: GenerationRequest,
-    current_user: User = Depends(get_current_user),
-    profile_repo: StudentProfileRepository = Depends(get_student_profile_repository),
-    engine=Depends(get_generation_engine),
-    gen_repo: GenerationRepository = Depends(get_generation_repository),
-    document_repo: DocumentRepository = Depends(get_document_repository),
-    report_repo: GenerationReportRepository = Depends(get_report_repository),
-):
-    (
-        effective_subject,
-        effective_context,
-        effective_mode,
-        effective_template_id,
-        effective_preset_id,
-        effective_section_count,
-        effective_section_plans,
-        planning_spec_json,
-    ) = generation_service._effective_generation_payload(req)
-
-    profile = await profile_repo.find_by_user_id(current_user.id)
-    return await generation_service.enqueue_generation(
-        current_user=current_user,
-        profile=profile,
-        engine=engine,
-        gen_repo=gen_repo,
-        document_repo=document_repo,
-        report_repo=report_repo,
-        subject=effective_subject,
-        context=effective_context,
-        mode=effective_mode,
-        template_id=effective_template_id,
-        preset_id=effective_preset_id,
-        section_count=effective_section_count,
-        section_plans=effective_section_plans,
-        planning_spec_json=planning_spec_json,
-    )
 
 
 @router.get("/generations")

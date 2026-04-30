@@ -30,7 +30,7 @@ from pipeline.api import (
     PipelinePartialSectionEntry,
     PipelineSectionManifestItem,
 )
-from pipeline.contracts import get_contract, validate_preset_for_template
+from pipeline.contracts import get_contract
 from pipeline.events import (
     CompleteEvent,
     ErrorEvent,
@@ -60,11 +60,9 @@ from pipeline.types.requests import (
     count_visual_placements,
     needs_diagram_from_placements,
 )
-from planning.dtos import GenerationSpec
 from planning.models import PlanningGenerationSpec, PlanningSectionPlan
 from generation.dtos import (
     GenerationAcceptedResponse,
-    GenerationRequest,
     GenerationReport,
 )
 from generation.entities.generation import Generation
@@ -75,7 +73,6 @@ from generation.ports.generation_report_repository import (
     GenerationReportRepository,
 )
 from generation.ports.generation_repository import GenerationRepository
-from core.ports.student_profile_repository import StudentProfileRepository
 from core.ports.user_repository import UserRepository
 from generation.failure import classify_generation_failure
 from generation.logging import GenerationLogger
@@ -85,7 +82,6 @@ from generation.dependencies import (
     get_report_repository,
 )
 from core.dependencies import (
-    get_student_profile_repository,
     get_user_repository,
 )
 from generation.recovery import (
@@ -135,9 +131,6 @@ def _planning_spec_payload(generation: Generation) -> dict | None:
         payload = json.loads(generation.planning_spec_json)
         if "mode" not in payload:
             payload["mode"] = generation.mode.value
-        source_brief = payload.get("source_brief")
-        if isinstance(source_brief, dict) and "mode" not in source_brief:
-            source_brief["mode"] = generation.mode.value
         return payload
     except json.JSONDecodeError:
         logger.warning(
@@ -221,12 +214,9 @@ def _generation_urls(generation_id: str) -> tuple[str, str, str]:
 def _pipeline_section_from_planning(
     section: PlanningSectionPlan,
     *,
-    always_present: list[str],
     generation_mode: GenerationMode,
 ) -> SectionPlan:
-    selected = list(dict.fromkeys([*always_present, *section.selected_components]))
-    bridges_from = None
-    bridges_to = None
+    selected = list(dict.fromkeys(section.selected_components))
     needs_diagram = needs_diagram_from_placements(section)
     needs_worked_example = any(component == "worked-example-card" for component in selected)
     interaction_required = any(component == "simulation-block" for component in selected)
@@ -267,8 +257,8 @@ def _pipeline_section_from_planning(
         position=section.order,
         focus=focus,
         role=section.role,
-        bridges_from=bridges_from,
-        bridges_to=bridges_to,
+        bridges_from=section.bridges_from,
+        bridges_to=section.bridges_to,
         needs_diagram=needs_diagram,
         needs_worked_example=needs_worked_example,
         required_components=selected,
@@ -289,65 +279,50 @@ def _pipeline_section_from_planning(
 
 
 def _pipeline_sections_from_planning_spec(spec: PlanningGenerationSpec) -> list[SectionPlan]:
-    contract = get_contract(spec.template_id)
-    always_present = contract.always_present or contract.required_components
     sections = [
         _pipeline_section_from_planning(
             section,
-            always_present=always_present,
             generation_mode=spec.mode,
         )
         for section in spec.sections
     ]
     for index, section in enumerate(sections):
-        if index > 0:
+        if index > 0 and not section.bridges_from:
             section.bridges_from = sections[index - 1].title
-        if index + 1 < len(sections):
+        if index + 1 < len(sections) and not section.bridges_to:
             section.bridges_to = sections[index + 1].title
     return sections
 
 
-def _context_from_generation_spec(
-    spec: GenerationSpec,
-    *,
-    subject: str,
-) -> str:
-    lines = [
-        subject,
-        f"Audience: {spec.source_brief.audience}",
-    ]
-    if spec.source_brief.extra_context:
-        lines.append(f"Additional context: {spec.source_brief.extra_context}")
-    lines.append("")
-    lines.append("Reviewed lesson plan:")
-    for section in spec.sections:
-        suffix = f" [{section.role}]" if section.role else ""
-        lines.append(
-            f"Section {section.position}: {section.title}{suffix} - {section.focus}"
-        )
-        if section.continuity_notes:
-            lines.append(f"Continuity: {section.continuity_notes}")
-    if spec.warning:
-        lines.append("")
-        lines.append(f"Planning warning: {spec.warning}")
-    return "\n".join(lines)
-
-
 def _context_from_planning_spec(
     spec: PlanningGenerationSpec,
-    *,
-    subject: str,
 ) -> str:
+    brief = spec.source_brief
     lines = [
-        subject,
-        f"Audience: {spec.source_brief.audience}",
+        f"Subject: {brief.subject}",
+        f"Topic: {brief.topic}",
+        f"Subtopics: {', '.join(brief.subtopics)}",
+        f"Grade level: {brief.grade_level}",
+        f"Grade band: {brief.grade_band}",
+        f"Learner summary: {brief.learner_context}",
+        (
+            "Class profile: "
+            f"reading={brief.class_profile.reading_level}, "
+            f"language={brief.class_profile.language_support}, "
+            f"confidence={brief.class_profile.confidence}, "
+            f"prior_knowledge={brief.class_profile.prior_knowledge}, "
+            f"pacing={brief.class_profile.pacing}, "
+            f"preferences={', '.join(brief.class_profile.learning_preferences) or 'none'}"
+        ),
+        f"Intended outcome: {brief.intended_outcome}",
+        f"Resource type: {brief.resource_type}",
+        f"Depth: {brief.depth}",
+        f"Supports: {', '.join(brief.supports) if brief.supports else 'none'}",
     ]
-    if spec.source_brief.prior_knowledge:
-        lines.append(f"Prior knowledge: {spec.source_brief.prior_knowledge}")
-    if spec.source_brief.extra_context:
-        lines.append(f"Additional context: {spec.source_brief.extra_context}")
+    if brief.teacher_notes:
+        lines.append(f"Teacher notes: {brief.teacher_notes}")
     lines.append("")
-    lines.append("Reviewed lesson plan:")
+    lines.append("Reviewed resource plan:")
     for section in spec.sections:
         suffix = f" [{section.role}]"
         summary = section.focus_note or section.objective or section.rationale
@@ -356,41 +331,6 @@ def _context_from_planning_spec(
         lines.append("")
         lines.append(f"Planning warning: {spec.warning}")
     return "\n".join(lines)
-
-
-def _effective_generation_spec(req: GenerationRequest) -> GenerationSpec | None:
-    return req.generation_spec
-
-
-def _effective_generation_payload(
-    req: GenerationRequest,
-) -> tuple[str, str, GenerationMode, str, str, int, list | None, str | None]:
-    spec = _effective_generation_spec(req)
-    if spec is None:
-        return (
-            req.subject,
-            req.context,
-            req.mode,
-            req.template_id,
-            req.preset_id,
-            req.section_count,
-            None,
-            None,
-        )
-
-    return (
-        req.subject or spec.source_brief.intent,
-        _context_from_generation_spec(
-            spec,
-            subject=req.subject or spec.source_brief.intent,
-        ),
-        spec.mode,
-        spec.template_id,
-        spec.preset_id,
-        spec.section_count,
-        spec.sections,
-        spec.model_dump_json(),
-    )
 
 
 def _progress_updates_for_event(event: dict) -> list[dict]:
@@ -1450,7 +1390,7 @@ def _validate_template_and_preset(template_id: str, preset_id: str) -> None:
         get_contract(template_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not validate_preset_for_template(template_id, preset_id):
+    if not (template_id == "guided-concept-path" and preset_id == "blue-classroom"):
         raise HTTPException(
             status_code=400,
             detail=f"Preset '{preset_id}' is not allowed for template '{template_id}'",
@@ -1473,6 +1413,11 @@ async def enqueue_generation(
     section_count: int,
     section_plans: list | None,
     planning_spec_json: str | None,
+    sections_with_visuals: int = 0,
+    subtopics_covered: list[str] | None = None,
+    planning_warning: str | None = None,
+    grade_band: str | None = None,
+    learner_fit: str | None = None,
 ) -> GenerationAcceptedResponse:
     _validate_template_and_preset(template_id, preset_id)
     if profile is None:
@@ -1526,11 +1471,11 @@ async def enqueue_generation(
         generation_id=generation_id,
         subject=subject,
         context=context,
-        grade_band=_grade_band(profile),
+        grade_band=grade_band or _grade_band(profile),
         mode=mode,
         template_id=template_id,
         preset_id=preset_id,
-        learner_fit="general",
+        learner_fit=learner_fit or "general",
         section_count=section_count,
         section_plans=section_plans,
     )
@@ -1563,47 +1508,11 @@ async def enqueue_generation(
         events_url=events_url,
         document_url=document_url,
         report_url=report_url,
+        section_count=section_count,
+        sections_with_visuals=sections_with_visuals,
+        subtopics_covered=subtopics_covered or [],
+        warning=planning_warning,
     )
-
-
-@router.post("/generations", status_code=202, response_model=GenerationAcceptedResponse)
-async def create_generation(
-    req: GenerationRequest,
-    current_user: User = Depends(get_current_user),
-    profile_repo: StudentProfileRepository = Depends(get_student_profile_repository),
-    gen_repo: GenerationRepository = Depends(get_generation_repository),
-    document_repo: DocumentRepository = Depends(get_document_repository),
-    report_repo: GenerationReportRepository = Depends(get_report_repository),
-):
-    (
-        effective_subject,
-        effective_context,
-        effective_mode,
-        effective_template_id,
-        effective_preset_id,
-        effective_section_count,
-        effective_section_plans,
-        planning_spec_json,
-    ) = _effective_generation_payload(req)
-
-    profile = await profile_repo.find_by_user_id(current_user.id)
-    return await enqueue_generation(
-        current_user=current_user,
-        profile=profile,
-        gen_repo=gen_repo,
-        document_repo=document_repo,
-        report_repo=report_repo,
-        subject=effective_subject,
-        context=effective_context,
-        mode=effective_mode,
-        template_id=effective_template_id,
-        preset_id=effective_preset_id,
-        section_count=effective_section_count,
-        section_plans=effective_section_plans,
-        planning_spec_json=planning_spec_json,
-    )
-
-
 @router.get("/generations")
 async def list_generations(
     current_user: User = Depends(get_current_user),

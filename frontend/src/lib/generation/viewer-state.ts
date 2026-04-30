@@ -25,7 +25,8 @@ export type ViewerSectionStatus =
 	| 'partially_ready'
 	| 'blocked_by_required_media'
 	| 'ready'
-	| 'failed';
+	| 'failed'
+	| 'unplanned_output';
 
 export interface ViewerSectionSignal {
 	status: ViewerSectionStatus;
@@ -414,9 +415,9 @@ export function buildSectionSlots(
 			.filter((section) => !manifestIds.has(section.section_id))
 			.map((section, index) => ({
 				section_id: section.section_id,
-				title: section.header.title,
+				title: section.header?.title ?? section.section_id,
 				position: manifest.length + index + 1,
-				status: 'ready' as const,
+				status: 'unplanned_output' as const,
 				section,
 				partial: null,
 				failure: null,
@@ -426,9 +427,9 @@ export function buildSectionSlots(
 			.filter((section) => !manifestIds.has(section.section_id))
 			.map((section, index) => ({
 				section_id: section.section_id,
-				title: section.content.header.title,
+				title: section.content.header?.title ?? section.section_id,
 				position: manifest.length + orphanReady.length + index + 1,
-				status: sectionSignals[section.section_id]?.status ?? derivePartialSlotStatus(section),
+				status: 'unplanned_output' as const,
 				section: null,
 				partial: section,
 				failure: null,
@@ -440,7 +441,7 @@ export function buildSectionSlots(
 				section_id: section.section_id,
 				title: section.title,
 				position: manifest.length + orphanReady.length + orphanPartial.length + index + 1,
-				status: 'failed' as const,
+				status: 'unplanned_output' as const,
 				section: null,
 				partial: null,
 				failure: section,
@@ -476,9 +477,9 @@ export function buildSectionSlots(
 		return {
 			section_id: ready?.section_id ?? failed?.section_id ?? partial?.section_id ?? `pending-${index + 1}`,
 			title:
-				ready?.header.title ??
+				ready?.header?.title ??
 				failed?.title ??
-				partial?.content.header.title ??
+				partial?.content.header?.title ??
 				`Section ${index + 1}`,
 			position: index + 1,
 			status,

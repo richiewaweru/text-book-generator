@@ -8,6 +8,35 @@ import type {
 	ReadingLevel,
 	Tone
 } from './studio';
+import type {
+	BriefBuilderStep,
+	ClassConfidence,
+	ClassLanguageSupport,
+	ClassLearningPreference,
+	ClassPacing,
+	ClassPriorKnowledge,
+	ClassProfile,
+	ClassReadingLevel,
+	BriefReviewRequest,
+	BriefReviewResult,
+	BriefFeasibility,
+	BriefReviewWarning,
+	BriefValidationMessage,
+	BriefValidationRequest,
+	BriefValidationResult,
+	BriefValidationSuggestion,
+	BuilderWarning,
+	TeacherBrief,
+	TeacherBriefDepth,
+	TeacherGradeBand,
+	TeacherGradeLevel,
+	TeacherBriefOutcome,
+	TeacherBriefResourceType,
+	TeacherBriefSupport,
+	TopicResolutionRequest,
+	TopicResolutionResult,
+	TopicResolutionSubtopic
+} from './brief';
 
 export type TeacherRole = 'teacher' | 'tutor' | 'homeschool' | 'instructor';
 export type GradeBand = 'primary' | 'middle' | 'high_school' | 'undergraduate' | 'adult';
@@ -68,13 +97,6 @@ export interface TeacherProfileUpsertRequest {
 	delivery_preferences: TeacherDeliveryPreferences;
 }
 
-export interface BriefRequest {
-	intent: string;
-	audience: string;
-	extra_context: string;
-	mode?: GenerationMode;
-}
-
 export interface OutlineSection {
 	section_id: string;
 	position: number;
@@ -92,35 +114,16 @@ export interface SectionPlan extends OutlineSection {
 	continuity_notes: string | null;
 }
 
-export interface GenerationSpec {
-	template_id: string;
-	preset_id: string;
-	mode: GenerationMode;
-	section_count: number;
-	sections: SectionPlan[];
-	warning: string | null;
-	rationale: string;
-	source_brief: BriefRequest;
-}
-
-export type BriefResponse = GenerationSpec;
-
-export interface GenerationRequest {
-	subject: string;
-	context: string;
-	mode?: GenerationMode;
-	template_id: string;
-	preset_id: string;
-	section_count?: number;
-	generation_spec?: GenerationSpec | null;
-}
-
 export interface GenerationAccepted {
 	generation_id: string;
 	status: string;
 	events_url: string;
 	document_url: string;
 	report_url?: string;
+	section_count?: number;
+	sections_with_visuals?: number;
+	subtopics_covered?: string[];
+	warning?: string | null;
 }
 
 export interface PDFExportRequest {
@@ -168,7 +171,7 @@ export interface GenerationDetail {
 	created_at: string | null;
 	completed_at: string | null;
 	document_path: string | null;
-	planning_spec: GenerationSpec | PlanningGenerationSpec | null;
+	planning_spec: PlanningGenerationSpec | null;
 }
 
 export interface PipelineSectionManifestItem {
@@ -563,36 +566,51 @@ export type GenerationStreamEvent =
 	| ErrorEvent;
 
 export type {
+	BriefBuilderStep,
+	ClassConfidence,
+	ClassLanguageSupport,
+	ClassLearningPreference,
+	ClassPacing,
+	ClassPriorKnowledge,
+	ClassProfile,
+	ClassReadingLevel,
+	BriefReviewRequest,
+	BriefReviewResult,
+	BriefFeasibility,
+	BriefReviewWarning,
+	BriefValidationMessage,
+	BriefValidationRequest,
+	BriefValidationResult,
+	BriefValidationSuggestion,
+	BuilderWarning,
+	TeacherBrief,
+	TeacherBriefDepth,
+	TeacherGradeBand,
+	TeacherGradeLevel,
+	TeacherBriefOutcome,
+	TeacherBriefResourceType,
+	TeacherBriefSupport,
+	TopicResolutionRequest,
+	TopicResolutionResult,
+	TopicResolutionSubtopic
+} from './brief';
+
+export type {
 	Brevity,
-	ClassStyle,
-	DeliveryPreferences,
 	ExampleStyle,
 	ExplanationStyle,
 	GenerationMode,
 	GenerationDirectives,
-	LearningOutcome,
-	LessonFormat,
-	PlanningCompleteEvent,
-	PlanningErrorEvent,
 	PlanningGenerationSpec,
 	PlanningSectionPlan,
-	PlanningSectionPlannedEvent,
-	PlanningStreamEvent,
-	PlanningTemplateSelectedEvent,
-	PlanDraft,
+	PlanningStatus,
 	ReadingLevel,
+	ScaffoldLevel,
 	SectionGenerationNotes,
 	SectionRole,
-	StudioBriefRequest,
-	StudioGenerationState,
 	StudioState,
-	StudioTemplateContract,
-	TeacherConstraints,
-	TeacherSignals,
 	TemplateAlternative,
 	TemplateDecision,
-	TopicType,
 	Tone,
-	UserBriefDraft,
 	VisualPolicy
 } from './studio';

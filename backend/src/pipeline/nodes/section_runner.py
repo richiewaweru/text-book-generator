@@ -657,7 +657,9 @@ async def run_section_steps(
                     node_name=node_name,
                     section_id=section_id,
                     messages=step_errors,
-                    missing_components=list(step_state.contract.required_components),
+                    missing_components=list(step_state.current_section_plan.required_components)
+                    if step_state.current_section_plan is not None
+                    else [],
                 )
                 step_state.failed_sections[section_id] = record
                 raw["failed_sections"] = dict(step_state.failed_sections)
@@ -700,7 +702,9 @@ async def run_section_steps(
                     node_name=node_name,
                     section_id=section_id,
                     messages=step_errors,
-                    missing_components=list(step_state.contract.required_components),
+                    missing_components=list(step_state.current_section_plan.required_components)
+                    if step_state.current_section_plan is not None
+                    else [],
                 )
                 step_state.failed_sections[section_id] = record
                 raw["failed_sections"] = dict(step_state.failed_sections)

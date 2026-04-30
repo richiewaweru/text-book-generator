@@ -6,6 +6,7 @@
 		getGenerationDetail,
 		getGenerationDocument
 	} from '$lib/api/client';
+	import { gradeBandLabel, gradeLevelLabel } from '$lib/brief/config';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import {
 		applyGenerationStreamEvent,
@@ -58,6 +59,16 @@
 	let streamErrorRecoveryAttempted = false;
 
 	const generationId = $derived(accepted.generation_id);
+	const acceptedSectionCount = $derived(accepted.section_count ?? null);
+	const acceptedSectionsWithVisuals = $derived(accepted.sections_with_visuals ?? 0);
+	const acceptedSubtopics = $derived(accepted.subtopics_covered ?? []);
+	const acceptedWarning = $derived(accepted.warning ?? null);
+	const hasStartupSummary = $derived(
+		acceptedSectionCount !== null ||
+			acceptedSectionsWithVisuals > 0 ||
+			acceptedSubtopics.length > 0 ||
+			Boolean(acceptedWarning)
+	);
 	const sectionSlots = $derived(buildSectionSlots(document, plannedSections, sectionSignals));
 	const failureMap = $derived(new Map((document?.failed_sections ?? []).map((entry) => [entry.section_id, entry])));
 	const readySectionCount = $derived(
@@ -68,11 +79,14 @@
 	);
 	const isLive = $derived(detail?.status === 'pending' || detail?.status === 'running');
 	const lessonFormat = $derived(resolveLessonFormat(detail?.planning_spec ?? null));
-	const templateName = $derived(formatTemplateName(detail));
+	const renderShellName = $derived(formatTemplateName(detail));
 	const viewerTitle = $derived(document?.subject || detail?.subject || 'Live lesson');
 	const showFullLesson = $derived(detail?.status === 'completed' || detail?.status === 'partial');
 	const runtimeSectionsTotal = $derived(
 		runtimeProgress?.sections_total ?? plannedSections ?? sectionSlots.length
+	);
+	const planningBrief = $derived(
+		isStudioPlanningSpec(detail?.planning_spec) ? detail?.planning_spec.source_brief : null
 	);
 	const terminalSummary = $derived.by(() => {
 		if (!detail) return null;
@@ -83,6 +97,28 @@
 			return detail.error ?? 'The generation failed before the lesson could be completed.';
 		}
 		return null;
+	});
+	const startupSummaryItems = $derived.by(() => {
+		const items: Array<{ label: string; value: string }> = [];
+		if (acceptedSectionCount !== null) {
+			items.push({
+				label: 'Planned sections',
+				value: String(acceptedSectionCount)
+			});
+		}
+		if (acceptedSectionsWithVisuals > 0) {
+			items.push({
+				label: 'Sections with visuals',
+				value: String(acceptedSectionsWithVisuals)
+			});
+		}
+		if (acceptedSubtopics.length > 0) {
+			items.push({
+				label: 'Subtopics',
+				value: acceptedSubtopics.join(', ')
+			});
+		}
+		return items;
 	});
 
 	function isStudioPlanningSpec(value: unknown): value is PlanningGenerationSpec {
@@ -96,10 +132,9 @@
 
 	function resolveLessonFormat(spec: GenerationDetail['planning_spec']): string {
 		if (isStudioPlanningSpec(spec)) {
-			const format = spec.source_brief.signals.format;
-			if (format === 'printed-booklet') return 'Printed booklet';
-			if (format === 'screen-based') return 'Screen-based';
-			if (format === 'both') return 'Print + screen';
+			const resource = spec.source_brief.resource_type.replaceAll('_', ' ');
+			const depth = spec.source_brief.depth;
+			return `${resource} / ${depth}`;
 		}
 		return 'Live runtime';
 	}
@@ -136,6 +171,7 @@
 		const status = displaySectionStatus(slot);
 		if (status === 'ready') return 'Ready';
 		if (status === 'failed') return 'Failed';
+		if (status === 'unplanned_output') return 'Unexpected output';
 		if (status === 'planned') return 'Planned';
 		if (status === 'generating') {
 			return (
@@ -157,7 +193,18 @@
 		if (status === 'blocked_by_required_media') {
 			return slot.signal?.reason ?? 'Blocked by required media';
 		}
+		if (status === 'unplanned_output') {
+			return 'Unexpected section from pipeline';
+		}
 		return 'Planned';
+	}
+
+	function plannedComponents(position: number): string[] {
+		const spec = detail?.planning_spec;
+		if (!isStudioPlanningSpec(spec)) {
+			return [];
+		}
+		return spec.sections.find((entry) => entry.order === position)?.selected_components ?? [];
 	}
 
 	function formatSeconds(seconds: number | null | undefined): string {
@@ -410,7 +457,7 @@
 		loading = true;
 		error = null;
 		qcSummary = null;
-		plannedSections = null;
+		plannedSections = accepted.section_count ?? null;
 		progressUpdate = null;
 		runtimePolicy = null;
 		runtimeProgress = null;
@@ -516,6 +563,22 @@
 	{/if}
 
 	{#if loading}
+		{#if hasStartupSummary}
+			<section class="startup-card" aria-label="Generation startup summary">
+				<p class="rail-label">Startup summary</p>
+				<div class="meta-list">
+					{#each startupSummaryItems as item}
+						<div>
+							<span>{item.label}</span>
+							<strong>{item.value}</strong>
+						</div>
+					{/each}
+				</div>
+				{#if acceptedWarning}
+					<p class="startup-warning">{acceptedWarning}</p>
+				{/if}
+			</section>
+		{/if}
 		<div class="loading-panel" aria-busy="true">
 			<div class="skeleton-sidebar"></div>
 			<div class="skeleton-viewer"></div>
@@ -523,6 +586,23 @@
 	{:else}
 		<div class="workspace">
 			<aside class="progress-rail">
+				{#if hasStartupSummary}
+					<section class="rail-card">
+						<p class="rail-label">Startup summary</p>
+						<div class="meta-list">
+							{#each startupSummaryItems as item}
+								<div>
+									<span>{item.label}</span>
+									<strong>{item.value}</strong>
+								</div>
+							{/each}
+						</div>
+						{#if acceptedWarning}
+							<p class="startup-warning">{acceptedWarning}</p>
+						{/if}
+					</section>
+				{/if}
+
 				<section class="rail-card">
 					<p class="rail-label">Progress</p>
 					<div class="progress-list">
@@ -582,23 +662,23 @@
 					<p class="rail-label">Lesson</p>
 					<div class="meta-list">
 						<div>
-							<span>Template</span>
-							<strong>{templateName}</strong>
+							<span>Render shell</span>
+							<strong>{renderShellName}</strong>
+						</div>
+						<div>
+							<span>Resource</span>
+							<strong>{lessonFormat}</strong>
 						</div>
 						<div>
 							<span>Sections</span>
 							<strong>{runtimeSectionsTotal}</strong>
 						</div>
 						<div>
-							<span>Format</span>
-							<strong>{lessonFormat}</strong>
-						</div>
-						<div>
 							<span>Workers</span>
 							<strong>{workerLabel()}</strong>
 						</div>
 						<div>
-							<span>Rerenders</span>
+							<span>Repairs</span>
 							<strong>{runtimePolicy ? `${runtimePolicy.max_section_rerenders} max` : 'Pending'}</strong>
 						</div>
 						<div>
@@ -627,6 +707,39 @@
 						</div>
 					</div>
 				</section>
+
+				{#if planningBrief}
+					<section class="rail-card">
+						<p class="rail-label">Audience</p>
+						<div class="meta-list audience-list">
+							<div>
+								<span>Grade level</span>
+								<strong>{gradeLevelLabel(planningBrief.grade_level)}</strong>
+							</div>
+							<div>
+								<span>Grade band</span>
+								<strong>{gradeBandLabel(planningBrief.grade_band)}</strong>
+							</div>
+							<div>
+								<span>Reading</span>
+								<strong>{planningBrief.class_profile.reading_level.replaceAll('_', ' ')}</strong>
+							</div>
+							<div>
+								<span>Language</span>
+								<strong>{planningBrief.class_profile.language_support.replaceAll('_', ' ')}</strong>
+							</div>
+							<div>
+								<span>Confidence</span>
+								<strong>{planningBrief.class_profile.confidence.replaceAll('_', ' ')}</strong>
+							</div>
+							<div>
+								<span>Pacing</span>
+								<strong>{planningBrief.class_profile.pacing.replaceAll('_', ' ')}</strong>
+							</div>
+						</div>
+						<p class="audience-summary">{planningBrief.learner_context}</p>
+					</section>
+				{/if}
 			</aside>
 
 			<section class="viewer">
@@ -659,6 +772,9 @@
 									Section {slot.position}{role ? ` - ${role}` : ''}
 								</div>
 								<h4>{slot.title}</h4>
+								{#if plannedComponents(slot.position).length}
+									<small>Planned components: {plannedComponents(slot.position).join(', ')}</small>
+								{/if}
 
 								{#if slotStatus === 'ready' && slot.section}
 									<p>{buildSectionPreview(slot.section)}</p>
@@ -679,9 +795,17 @@
 										{failureMap.get(slot.section_id)?.error_summary ??
 											'This section could not be generated.'}
 									</p>
+									{#if failureMap.get(slot.section_id)?.missing_components?.length}
+										<small>
+											Missing selected components:
+											{failureMap.get(slot.section_id)?.missing_components.join(', ')}
+										</small>
+									{/if}
 									{#if failureMap.get(slot.section_id)?.can_retry}
 										<small>Retries are tracked in the run report while the rest of the lesson stays readable.</small>
 									{/if}
+								{:else if slotStatus === 'unplanned_output'}
+									<p>Unexpected section from pipeline.</p>
 								{:else if slotStatus === 'blocked_by_required_media'}
 									<p>{statusLabel(slot)}</p>
 								{:else}
@@ -770,9 +894,22 @@
 	}
 
 	.notice,
+	.startup-card,
 	.loading-panel {
 		border-radius: 1rem;
 		padding: 0.95rem 1rem;
+	}
+
+	.startup-card {
+		display: grid;
+		gap: 0.8rem;
+		border: 0.5px solid rgba(36, 52, 63, 0.12);
+		background: #fffdf9;
+	}
+
+	.startup-warning {
+		color: #805d16;
+		line-height: 1.55;
 	}
 
 	.notice-info {
@@ -895,12 +1032,20 @@
 		background: #c8822a;
 	}
 
+	.progress-dot-unplanned_output {
+		background: #8a4f7d;
+	}
+
 	.progress-dot-blocked_by_required_media {
 		background: #8c8579;
 	}
 
 	.meta-list {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.audience-list {
+		grid-template-columns: 1fr;
 	}
 
 	.meta-list div {
@@ -967,6 +1112,11 @@
 		border-color: rgba(186, 117, 23, 0.22);
 	}
 
+	.viewer-section-unplanned_output {
+		background: #f8eef5;
+		border-color: rgba(138, 79, 125, 0.22);
+	}
+
 	.active-row {
 		justify-content: flex-start;
 		align-items: center;
@@ -982,6 +1132,12 @@
 		height: 0.55rem;
 		background: #1d9e75;
 		animation: pulse 1.2s ease-in-out infinite;
+	}
+
+	.audience-summary {
+		margin: 0;
+		color: #625a50;
+		line-height: 1.55;
 	}
 
 	@keyframes pulse {

@@ -24,6 +24,7 @@ from langchain_core.runnables.config import RunnableConfig
 from pydantic_ai import Agent
 
 from core.config import settings as app_settings
+from pipeline.contracts import get_section_field_for_component
 from pipeline.events import FieldRegenOutcomeEvent
 from pipeline.llm_runner import run_llm
 from pipeline.prompts.field_regen import (
@@ -35,6 +36,16 @@ from pipeline.providers.registry import get_node_text_model
 from pipeline.runtime_context import retry_policy_for_node
 from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, TextbookPipelineState
+
+_COMPLEX_FIELDS = frozenset(
+    {
+        "explanation",
+        "practice",
+        "worked_example",
+    }
+)
+
+_SIMPLE_FIELDS = frozenset(RETRYABLE_FIELDS - _COMPLEX_FIELDS)
 
 
 def _publish_field_regen_outcome(
@@ -59,6 +70,16 @@ def _publish_field_regen_outcome(
     )
 
 
+def _planned_fields(state: TextbookPipelineState) -> set[str]:
+    plan = state.current_section_plan
+    required_components = list(getattr(plan, "required_components", None) or [])
+    return {
+        field_name
+        for component_id in required_components
+        if (field_name := get_section_field_for_component(component_id)) is not None
+    }
+
+
 async def field_regenerator(
     state: TextbookPipelineState | dict,
     *,
@@ -76,6 +97,10 @@ async def field_regenerator(
     if request.block_type not in RETRYABLE_FIELDS:
         return {"completed_nodes": ["field_regenerator"]}
 
+    planned_fields = _planned_fields(state)
+    if planned_fields and request.block_type not in planned_fields:
+        return {"completed_nodes": ["field_regenerator"]}
+
     section = state.generated_sections.get(sid)
     if section is None:
         return {
@@ -90,16 +115,32 @@ async def field_regenerator(
             "completed_nodes": ["field_regenerator"],
         }
 
-    model = get_node_text_model(
-        "field_regenerator",
-        model_overrides=model_overrides,
-        generation_mode=state.request.mode,
-    )
+    existing_value = getattr(section, request.block_type, None)
+    if existing_value is None:
+        return {"completed_nodes": ["field_regenerator"]}
+
+    if request.block_type in _COMPLEX_FIELDS:
+        model = get_node_text_model(
+            "content_generator",
+            model_overrides=model_overrides,
+            generation_mode=state.request.mode,
+        )
+    elif request.block_type in _SIMPLE_FIELDS:
+        model = get_node_text_model(
+            "field_regenerator",
+            model_overrides=model_overrides,
+            generation_mode=state.request.mode,
+        )
+    else:
+        return {"completed_nodes": ["field_regenerator"]}
 
     agent = Agent(
         model=model,
         output_type=str,
-        system_prompt=build_field_regen_system_prompt(state.contract.id),
+        system_prompt=build_field_regen_system_prompt(
+            state.contract.id,
+            request.block_type,
+        ),
     )
 
     try:

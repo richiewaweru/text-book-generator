@@ -11,7 +11,7 @@ from telemetry.dtos import (
     GenerationReportSummary,
     GenerationTimelineEvent,
 )
-from .generation_request import GenerationAcceptedResponse, GenerationRequest
+from .generation_response import GenerationAcceptedResponse
 from .generation_status import (
     GenerationDetail,
     GenerationDocumentResponse,
@@ -37,6 +37,5 @@ __all__ = [
     "GenerationReportRetry",
     "GenerationReportSection",
     "GenerationReportSummary",
-    "GenerationRequest",
     "GenerationTimelineEvent",
 ]

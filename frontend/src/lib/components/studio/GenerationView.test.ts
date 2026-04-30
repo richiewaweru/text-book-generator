@@ -58,14 +58,14 @@ function buildDetail(overrides: Record<string, unknown> = {}) {
 		created_at: '2026-03-23T00:00:00Z',
 		completed_at: null,
 		document_path: 'memory://gen-123',
-		planning_spec: {
-			id: 'plan-1',
-			template_id: 'guided-concept-path',
-			preset_id: 'blue-classroom',
-			template_decision: {
-				chosen_id: 'guided-concept-path',
-				chosen_name: 'Guided Concept Path',
-				rationale: 'Best fit.',
+			planning_spec: {
+				id: 'plan-1',
+				template_id: 'guided-concept-path',
+				preset_id: 'blue-classroom',
+				template_decision: {
+					chosen_id: 'worksheet',
+					chosen_name: 'Worksheet',
+					rationale: 'Best fit.',
 				fit_score: 0.92,
 				alternatives: []
 			},
@@ -108,30 +108,25 @@ function buildDetail(overrides: Record<string, unknown> = {}) {
 			warning: null,
 			source_brief_id: 'brief-1',
 			source_brief: {
-				intent: 'Teach fractions',
-				audience: 'Year 5',
-				prior_knowledge: '',
-				extra_context: '',
-				mode: 'balanced',
-				signals: {
-					topic_type: 'concept',
-					learning_outcome: 'understand-why',
-					class_style: [],
-					format: 'printed-booklet'
+				subject: 'Math',
+				topic: 'Fractions',
+				subtopics: ['Understanding halves and quarters'],
+				grade_level: 'grade_5',
+				grade_band: 'upper_elementary',
+				class_profile: {
+					reading_level: 'below_grade',
+					language_support: 'some_ell',
+					confidence: 'mixed',
+					prior_knowledge: 'some_background',
+					pacing: 'short_chunks',
+					learning_preferences: ['visual']
 				},
-				preferences: {
-					tone: 'supportive',
-					reading_level: 'standard',
-					explanation_style: 'balanced',
-					example_style: 'everyday',
-					brevity: 'balanced'
-				},
-				constraints: {
-					more_practice: false,
-					keep_short: false,
-					use_visuals: false,
-					print_first: true
-				}
+				learner_context: 'Year 5',
+				intended_outcome: 'understand',
+				resource_type: 'worksheet',
+				supports: ['worked_examples'],
+				depth: 'standard',
+				teacher_notes: ''
 			},
 			status: 'committed'
 		},
@@ -269,6 +264,35 @@ describe('GenerationView', () => {
 		cleanup();
 	});
 
+	it('shows startup summary from accepted generation metadata before the first refresh completes', () => {
+		getGenerationDetail.mockReturnValue(new Promise(() => {}));
+		getGenerationDocument.mockReturnValue(new Promise(() => {}));
+
+		render(GenerationView, {
+			props: {
+				accepted: {
+					generation_id: 'gen-123',
+					status: 'pending',
+					events_url: '/api/v1/generations/gen-123/events',
+					document_url: '/api/v1/generations/gen-123/document',
+					section_count: 4,
+					sections_with_visuals: 2,
+					subtopics_covered: ['Understanding halves', 'Understanding quarters'],
+					warning: 'Diagram coverage will be selective.'
+				},
+				onReset: vi.fn()
+			}
+		});
+
+		expect(screen.getByLabelText(/generation startup summary/i)).toBeTruthy();
+		expect(screen.getByText(/planned sections/i)).toBeTruthy();
+		expect(screen.getByText(/^4$/)).toBeTruthy();
+		expect(screen.getByText(/sections with visuals/i)).toBeTruthy();
+		expect(screen.getByText(/^2$/)).toBeTruthy();
+		expect(screen.getByText(/understanding halves, understanding quarters/i)).toBeTruthy();
+		expect(screen.getByText(/diagram coverage will be selective/i)).toBeTruthy();
+	});
+
 	it('renders the live workspace, marks active sections, and shows failed sections inline', async () => {
 		getGenerationDetail.mockResolvedValue(buildDetail());
 		getGenerationDocument.mockResolvedValue(buildDocument());
@@ -288,7 +312,9 @@ describe('GenerationView', () => {
 		await waitFor(() => expect(getGenerationDetail).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(getGenerationDocument).toHaveBeenCalledTimes(1));
 		expect(screen.getByText('Live')).toBeTruthy();
-		expect(screen.getByText(/printed booklet/i)).toBeTruthy();
+		expect(screen.getByText(/worksheet \/ standard/i)).toBeTruthy();
+		expect(screen.getByText(/grade 5/i)).toBeTruthy();
+		expect(screen.getByText(/below grade/i)).toBeTruthy();
 		expect(screen.getAllByText(/planned/i).length).toBeGreaterThan(0);
 
 		emitEvent('runtime_policy', {
@@ -344,6 +370,8 @@ describe('GenerationView', () => {
 		);
 		expect(screen.getByText(/4 sections \/ 2 media \/ 4 qc/i)).toBeTruthy();
 		expect(screen.getByText(/390s/i)).toBeTruthy();
+		expect(screen.getByText(/render shell/i)).toBeTruthy();
+		expect(screen.getByText(/repairs/i)).toBeTruthy();
 
 		emitEvent('section_started', {
 			type: 'section_started',

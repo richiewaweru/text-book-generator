@@ -2,55 +2,68 @@
 
 ## Strategy
 
-The repo now uses a `Core + Generation + Planning + Pipeline` architecture.
+The live system uses a `Core + Generation + Planning + Telemetry + Pipeline` split.
 
-- `backend/src/core/` holds shared infrastructure: config, auth, database, error handling, shared events, and generic LLM helpers.
-- `backend/src/generation/` owns generation persistence, orchestration, and SSE transport.
-- `backend/src/planning/` owns Teacher Studio planning.
-- `backend/src/pipeline/` is the standalone generation engine.
-- `backend/src/app.py` assembles the FastAPI application.
-- `frontend/` is the native Lectio client and can also be served statically from Docker.
+- `backend/src/core/` owns shared auth, config, database, rate limiting, events, and generic LLM wiring.
+- `backend/src/planning/` owns Teacher Studio brief validation, review, planning, and the planning-to-generation bridge.
+- `backend/src/generation/` owns generation persistence, orchestration, history/detail routes, SSE transport, and PDF export.
+- `backend/src/telemetry/` owns saved reports and LLM usage reporting.
+- `backend/src/pipeline/` is the standalone lesson-generation engine and remains the only live content generator.
+- `frontend/` is the SvelteKit client. `/studio` is the teacher creation entrypoint and `/textbook/[id]` is the generation-centric viewer.
 
 Architecture guard: `python tools/agent/check_architecture.py --format text`
 
 ## Boundary Rules
 
-- `core/` must not import from `generation`, `planning`, or `pipeline`.
-- `generation/` may import `core`, `planning`, and `pipeline`.
-- `planning/` may import `core` and the generation bridge, but must not import pipeline LLM internals.
-- `pipeline/` must never import `generation` or `planning`.
-- The pipeline owns prompts, contract loading, provider registry, graph state, nodes, QC, retries, and Lectio document assembly.
-- The generation app owns auth, profiles, persistence, HTTP routes, Teacher Studio planning, SSE transport, and generation history.
-- All live generation flows through `pipeline.run` / `pipeline.api`.
+- `core/` must not import from `generation/`, `planning/`, `telemetry/`, or `pipeline/`.
+- `generation/` may import `core/`, `planning/`, `telemetry/`, and `pipeline/`.
+- `planning/` may import `core/` and selected generation bridge types, but must not depend on pipeline LLM internals.
+- `telemetry/` may import `core/` and `pipeline.reporting`, but must not import `generation/` or `planning/`.
+- `pipeline/` must never import `generation/`, `planning/`, or `telemetry/`.
+- The canonical saved artifact is a structured JSON `PipelineDocument`, not HTML.
 
-## Planning Rules
+## Teacher Studio Flow
 
-- `backend/src/planning/` normalizes teacher intent, scores templates, composes sections, routes visuals, and performs the single planning refinement call.
-- Planning emits `PlanningGenerationSpec` artifacts for review. It does not generate lesson content.
-- Routes under `planning/routes.py` are the only place that should adapt planning outputs into generation requests.
-- The Lectio contracts in `backend/contracts/` are synced from `frontend/node_modules/lectio/contracts/` via `tools/update_lectio_contracts.py`.
+`/studio` renders `TeacherBriefBuilder` directly. The live planning path is a JSON round trip, not planning SSE:
+
+1. `POST /api/v1/brief/resolve-topic`
+2. `POST /api/v1/brief/validate`
+3. `POST /api/v1/brief/review`
+4. `POST /api/v1/brief/plan`
+5. Teacher reviews the returned `PlanningGenerationSpec`
+6. `POST /api/v1/brief/commit`
+7. `GenerationView` follows the generation through `/generations/{id}`, `/document`, `/report`, and `/events`
+
+Planning produces a reviewed `PlanningGenerationSpec`. It never generates lesson content itself.
 
 ## Runtime Boundaries
 
-- Canonical artifact: structured JSON `PipelineDocument`
-- Canonical teacher creation route: `/studio`
-- Planning catalog endpoint: `GET /api/v1/contracts`
-- Planning stream endpoint: `POST /api/v1/brief/stream`
-- Planning commit-and-start endpoint: `POST /api/v1/brief/commit`
-- Legacy compatibility path: `POST /api/v1/brief` (deprecated shim)
-- Streaming transport: authenticated SSE at `/api/v1/generations/{id}/events`
-- Document hydration: `/api/v1/generations/{id}/document`
-- Legacy HTML renderer and iframe viewer are removed from the live architecture
-- Section media planning is owned by `pipeline.media.planner.media_planner`
-- Static and simulation execution live under `pipeline.media.executors`
-- Media retries are frame-first and surfaced through media lifecycle SSE events
+- Contract catalog: `GET /api/v1/contracts`
+- Planning endpoints: `POST /api/v1/brief/resolve-topic`, `/validate`, `/review`, `/plan`, `/commit`
+- Generation detail: `GET /api/v1/generations/{id}`
+- Document hydration: `GET /api/v1/generations/{id}/document`
+- Report hydration: `GET /api/v1/generations/{id}/report`
+- Live stream: authenticated SSE at `GET /api/v1/generations/{id}/events`
+- PDF export: `POST /api/v1/generations/{id}/export/pdf`
 
-## Current LLM Routing
+These legacy endpoints are not live and should stay absent:
 
-- Model routing is slot-based and mode-free.
-- Pipeline LLM helpers resolve concrete models through the shared `core/llm/` layer.
-- Planning uses its own planning-specific LLM config instead of borrowing pipeline defaults.
+- `POST /api/v1/brief`
+- `POST /api/v1/brief/stream`
+- `POST /api/v1/generations`
 
-## Snapshot References
+## Planning and Contracts
 
-- `docs/v0.1.0/ARCHITECTURE.md`
+- The route layer in `backend/src/planning/routes.py` is the only place that adapts `PlanningGenerationSpec` into generation inputs.
+- The current studio flow assumes `TeacherBrief`-shaped `source_brief` payloads.
+- Lectio contracts under `backend/contracts/` are synced artifacts. App-facing typed payloads come from `pipeline.types.template_contract` and the planning models.
+
+## LLM Routing
+
+- Planning uses `backend/src/planning/llm_config.py`.
+- Pipeline routing remains slot-based through the shared `core/llm/` layer.
+- Media planning and execution stays under `pipeline.media.*`.
+
+## Snapshot Reference
+
+- Historical architecture notes live under `docs/v0.1.0/`.

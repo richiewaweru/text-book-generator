@@ -41,10 +41,11 @@ class VisualSlot(BaseModel):
     preferred_render: VisualRender
     fallback_render: VisualRender | None = None
     sizing: Literal["full", "compact"] = "full"
-    block_target: Literal["hook", "explanation", "practice", "worked_example"] | None = None
+    block_target: Literal["hook", "explanation", "practice", "worked_example", "section"] | None = None
     problem_index: int | None = None
     content_brief: str | None = None
     generation_prompt: str | None = None
+    render_decision: dict[str, str | bool | None] | None = None
     pedagogical_intent: str
     caption: str
     reference_style: ReferenceStyle = ReferenceStyle.STANDARD

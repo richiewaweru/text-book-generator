@@ -6,7 +6,6 @@ import json
 import os
 import urllib.error
 from contextlib import contextmanager
-from unittest.mock import patch
 
 from pydantic_ai.models.test import TestModel
 
@@ -102,7 +101,7 @@ def test_pipeline_name_alias_no_longer_affects_profiles():
 def test_get_node_text_slot_maps_llm_nodes():
     assert get_node_text_slot("curriculum_planner") == ModelSlot.FAST
     assert get_node_text_slot("content_generator") == ModelSlot.STANDARD
-    assert get_node_text_slot("diagram_generator") == ModelSlot.FAST
+    assert get_node_text_slot("diagram_generator") == ModelSlot.STANDARD
     assert get_node_text_slot("intelligent_image_prompt") == ModelSlot.FAST
     assert get_node_text_slot("interaction_generator") == ModelSlot.STANDARD
     assert get_node_text_slot("qc_agent") == ModelSlot.FAST

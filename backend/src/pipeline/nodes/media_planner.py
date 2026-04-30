@@ -7,6 +7,7 @@ from pipeline.media.prompts.intelligent_image_prompt import (
 )
 from pipeline.media.planner.media_planner import media_planner as build_media_plan
 from pipeline.media.types import SlotType, VisualRender
+from pipeline.section_content_helpers import section_title
 from pipeline.state import TextbookPipelineState
 
 
@@ -35,7 +36,18 @@ async def _resolve_static_slot_prompts(
     model_overrides: dict | None = None,
 ) -> None:
     for slot in plan.slots:
+        previous_render = slot.preferred_render.value
         if not should_resolve_intelligent_image_prompt(slot):
+            slot.render_decision = {
+                "preferred_render_initial": previous_render,
+                "preferred_render_final": previous_render,
+                "fallback_render": slot.fallback_render.value if slot.fallback_render else None,
+                "decision_source": "slot_type_default",
+                "intelligent_prompt_resolved": False,
+                "decision_reason": (
+                    f"slot_type={slot.slot_type.value}, block_target={slot.block_target}"
+                ),
+            }
             continue
         try:
             prompt, preferred_render = await build_intelligent_image_prompt(
@@ -48,10 +60,28 @@ async def _resolve_static_slot_prompts(
                 generation_mode=typed.request.mode,
             )
         except Exception:
+            slot.render_decision = {
+                "preferred_render_initial": previous_render,
+                "preferred_render_final": previous_render,
+                "fallback_render": slot.fallback_render.value if slot.fallback_render else None,
+                "decision_source": "slot_type_default",
+                "intelligent_prompt_resolved": False,
+                "decision_reason": "intelligent_image_prompt_failed",
+            }
             continue
 
+        if preferred_render == VisualRender.SVG:
+            preferred_render = VisualRender.IMAGE
         slot.preferred_render = preferred_render
         slot.fallback_render = _fallback_render_for_slot(slot.slot_type, preferred_render)
+        slot.render_decision = {
+            "preferred_render_initial": previous_render,
+            "preferred_render_final": preferred_render.value,
+            "fallback_render": slot.fallback_render.value if slot.fallback_render else None,
+            "decision_source": "intelligent_image_prompt",
+            "intelligent_prompt_resolved": previous_render != preferred_render.value,
+            "decision_reason": None,
+        }
         generation_id = typed.request.generation_id or ""
         if generation_id:
             event_bus.publish(
@@ -62,6 +92,10 @@ async def _resolve_static_slot_prompts(
                     slot_id=slot.slot_id,
                     render_mode=preferred_render.value,
                     decided_by="intelligent_image_prompt",
+                    preferred_render_initial=previous_render,
+                    preferred_render_final=preferred_render.value,
+                    fallback_render=slot.fallback_render.value if slot.fallback_render else None,
+                    intelligent_prompt_resolved=previous_render != preferred_render.value,
                 ),
             )
         if len(slot.frames) == 1:
@@ -90,7 +124,7 @@ async def media_planner(
     await _resolve_static_slot_prompts(
         typed,
         sid=sid,
-        section_title=section.header.title,
+        section_title=section_title(section, fallback=typed.current_section_plan.title),
         plan=plan,
         model_overrides=model_overrides,
     )

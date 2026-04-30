@@ -1,18 +1,35 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import sys
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import StreamingResponse
-from core.rate_limit import limiter
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
+from pydantic_ai import Agent
 
-import core.events as core_events
+from core.auth.middleware import get_current_user
+from core.dependencies import get_student_profile_repository
+from core.entities.student_profile import StudentProfile
+from core.entities.user import User
+from core.events import TraceClosedEvent, TraceRegisteredEvent
 from core.llm import build_model, run_llm
-from pipeline.contracts import get_contract, list_template_ids, validate_preset_for_template
+from core.ports.student_profile_repository import StudentProfileRepository
+from core.rate_limit import limiter
+from generation.dependencies import (
+    get_document_repository,
+    get_generation_engine,
+    get_generation_repository,
+    get_report_repository,
+)
+from generation.dtos import GenerationAcceptedResponse
+from generation.ports.document_repository import DocumentRepository
+from generation.ports.generation_report_repository import GenerationReportRepository
+from generation.ports.generation_repository import GenerationRepository
+from generation.service import enqueue_generation
+from pipeline.contracts import get_contract, list_template_ids
+from pipeline.resources import get_resource_template, validate_brief
 from pipeline.types.requests import (
     GenerationMode,
     SectionPlan,
@@ -20,38 +37,66 @@ from pipeline.types.requests import (
     count_visual_placements,
     needs_diagram_from_placements,
 )
-from generation.dtos import GenerationAcceptedResponse
-from generation.ports.document_repository import DocumentRepository
-from generation.ports.generation_report_repository import (
-    GenerationReportRepository,
+from pipeline.types.teacher_brief import (
+    BriefFeasibility,
+    BriefReviewRequest,
+    BriefReviewResult,
+    BriefReviewWarning,
+    BriefValidationRequest,
+    BriefValidationResult,
+    ClassProfile,
+    GRADE_BAND_BY_LEVEL,
+    TeacherBrief,
+    TopicResolutionRequest,
+    TopicResolutionResult,
 )
-from generation.ports.generation_repository import GenerationRepository
-from generation.dependencies import (
-    get_document_repository,
-    get_generation_engine,
-    get_generation_repository,
-    get_report_repository,
+from planning import PlanningService
+from planning.llm_config import (
+    PLANNING_BRIEF_REVIEW_CALLER,
+    PLANNING_SECTION_COMPOSER_CALLER,
+    PLANNING_TOPIC_RESOLUTION_CALLER,
+    get_planning_slot,
+    get_planning_spec,
 )
-from generation.service import enqueue_generation
-from planning.llm_config import get_planning_spec, get_planning_slot
-from planning.dtos import BriefRequest, GenerationSpec
-from planning import PlanningService, PlanningTemplateContract, StudioBriefRequest
-from planning.models import PlanningGenerationSpec, PlanningSectionPlan
-from planning.service import (
-    BriefPlannerService,
-    TemplateSummary,
-    _fallback_spec,
+from planning.models import (
+    PlanningGenerationSpec,
+    PlanningSectionPlan,
+    PlanningTemplateContract,
 )
-from core.entities.student_profile import StudentProfile
-from core.entities.user import User
-from core.dependencies import get_student_profile_repository
-from core.ports.student_profile_repository import StudentProfileRepository
-from core.auth.middleware import get_current_user
-from core.events import TraceClosedEvent, TraceRegisteredEvent
+
+import core.events as core_events
 
 router = APIRouter(prefix="/api/v1", tags=["brief"])
 logger = logging.getLogger(__name__)
-_PLANNING_CALLER = "brief_interpreter"
+
+_DEPTH_EXPLAIN_SLOTS = {
+    "quick": 1,
+    "standard": 2,
+    "deep": 4,
+}
+_SHALLOW_RESOURCES = {"exit_ticket", "quick_explainer"}
+_ATYPICAL_SUPPORTS: dict[str, set[str]] = {
+    "exit_ticket": {
+        "worked_examples",
+        "vocabulary_support",
+        "step_by_step",
+        "discussion_questions",
+    },
+    "quiz": {
+        "worked_examples",
+        "step_by_step",
+        "discussion_questions",
+    },
+    "quick_explainer": {
+        "worked_examples",
+        "step_by_step",
+        "discussion_questions",
+    },
+}
+
+
+class _BriefReviewLLMResponse(BaseModel):
+    warnings: list[BriefReviewWarning] = Field(default_factory=list)
 
 
 def diag(tag: str, **fields) -> None:
@@ -59,35 +104,154 @@ def diag(tag: str, **fields) -> None:
     sys.stderr.flush()
 
 
-def _legacy_live_safe_templates() -> list[TemplateSummary]:
-    templates: list[TemplateSummary] = []
-    for template_id in list_template_ids():
-        if not validate_preset_for_template(template_id, "blue-classroom"):
-            continue
-        contract = get_contract(template_id)
-        templates.append(
-            TemplateSummary(
-                id=contract.id,
-                name=contract.name,
-                intent=contract.intent,
-                learner_fit=list(contract.learner_fit),
-            )
+def _topic_resolution_system_prompt() -> str:
+    return "\n".join(
+        [
+            "You turn a teacher's raw topic into a tighter planning brief.",
+            "Return valid JSON only.",
+            "Infer a broad school subject, normalize the main topic, and propose 4 to 8 candidate subtopics.",
+            "Keep subtopic titles teacher-facing, short, and commonly taught.",
+            "Always calibrate the topic breakdown to the selected grade level and grade band.",
+            "When a specific grade is selected, avoid broad grade-range framing in the suggestions.",
+            "Use likely_grade_band as a short teacher-facing fit label such as 'Grade 10 fit', 'Good review', 'Challenge option', or 'Prerequisite review'.",
+            "Only use broad grade ranges when grade_level is mixed.",
+            "Do not suggest material that is clearly too advanced or too basic unless you frame it as review, prerequisite, or challenge.",
+            "Prefer age-appropriate subtopics when learner context or class profile is present.",
+            "Set needs_clarification=true only when the topic is too vague to narrow responsibly.",
+            "Do not invent niche or overly advanced subtopics when common classroom targets fit.",
+        ]
+    )
+
+
+def _topic_resolution_user_prompt(payload: TopicResolutionRequest) -> str:
+    class_profile = payload.class_profile
+    class_profile_summary = (
+        "none"
+        if class_profile is None
+        else (
+            f"reading={class_profile.reading_level}, "
+            f"language={class_profile.language_support}, "
+            f"confidence={class_profile.confidence}, "
+            f"prior_knowledge={class_profile.prior_knowledge}, "
+            f"pacing={class_profile.pacing}, "
+            f"preferences={', '.join(class_profile.learning_preferences) or 'none'}"
         )
-    return templates
+    )
+    return "\n".join(
+        [
+            f"Raw topic: {payload.raw_topic}",
+            f"Grade level: {payload.grade_level}",
+            f"Grade band: {payload.grade_band}",
+            f"Learner context: {payload.learner_context or 'none'}",
+            f"Class profile: {class_profile_summary}",
+            (
+                "Grade guidance: "
+                "If grade_level is mixed, broad ranges are acceptable. "
+                "Otherwise, keep the breakdown anchored to the exact selected grade."
+            ),
+            "Return:",
+            "- subject",
+            "- topic",
+            "- candidate_subtopics: 4 to 8 items with id, title, description, likely_grade_band",
+            "- needs_clarification",
+            "- clarification_message when needed",
+        ]
+    )
 
 
-def _planning_live_safe_templates() -> list[PlanningTemplateContract]:
-    templates: list[PlanningTemplateContract] = []
-    for template_id in list_template_ids():
-        if not validate_preset_for_template(template_id, "blue-classroom"):
-            continue
-        contract = get_contract(template_id)
-        templates.append(PlanningTemplateContract.model_validate(contract.model_dump(mode="json")))
-    return templates
+def _brief_review_system_prompt() -> str:
+    return "\n".join(
+        [
+            "You review a structured teacher brief for pedagogical coherence.",
+            "Return valid JSON only.",
+            "Warnings are advisory, never blocking.",
+            "Look for tensions between subtopic count, depth, supports, resource type, intended outcome, and teacher notes.",
+            "Keep warnings concise and practical.",
+            'Return {"warnings": [{ "message": string, "suggestion": string | null, "severity": "warning" | "info" }]}',
+            'Return at most 4 warnings. Use {"warnings": []} when the brief is coherent.',
+        ]
+    )
 
 
-def _sse_event(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+def _brief_review_user_prompt(brief: TeacherBrief) -> str:
+    return "\n".join(
+        [
+            f"Subject: {brief.subject}",
+            f"Topic: {brief.topic}",
+            f"Subtopics: {', '.join(brief.subtopics)}",
+            f"Grade level: {brief.grade_level}",
+            f"Grade band: {brief.grade_band}",
+            (
+                "Class profile: "
+                f"reading={brief.class_profile.reading_level}, "
+                f"language={brief.class_profile.language_support}, "
+                f"confidence={brief.class_profile.confidence}, "
+                f"prior_knowledge={brief.class_profile.prior_knowledge}, "
+                f"pacing={brief.class_profile.pacing}, "
+                f"preferences={', '.join(brief.class_profile.learning_preferences) or 'none'}"
+            ),
+            f"Learner context: {brief.learner_context}",
+            f"Intended outcome: {brief.intended_outcome}",
+            f"Resource type: {brief.resource_type}",
+            f"Supports: {', '.join(brief.supports) if brief.supports else 'none'}",
+            f"Depth: {brief.depth}",
+            f"Teacher notes: {brief.teacher_notes or 'none'}",
+            "Return:",
+            '- warnings: [{ message, suggestion, severity }]',
+        ]
+    )
+
+
+async def _resolve_topic_with_llm(payload: TopicResolutionRequest) -> TopicResolutionResult:
+    trace_id = uuid.uuid4().hex
+    spec = get_planning_spec(PLANNING_TOPIC_RESOLUTION_CALLER)
+    slot = get_planning_slot(PLANNING_TOPIC_RESOLUTION_CALLER)
+    model = build_model(spec)
+    agent = Agent(
+        model=model,
+        output_type=TopicResolutionResult,
+        system_prompt=_topic_resolution_system_prompt(),
+    )
+    result = await run_llm(
+        caller=PLANNING_TOPIC_RESOLUTION_CALLER,
+        trace_id=trace_id,
+        generation_id=trace_id,
+        agent=agent,
+        model=model,
+        user_prompt=_topic_resolution_user_prompt(payload),
+        slot=slot,
+        spec=spec,
+    )
+    output = result.output
+    if output is None:
+        raise RuntimeError("Topic resolution returned no structured output.")
+    return output
+
+
+async def _review_brief_with_llm(brief: TeacherBrief) -> list[BriefReviewWarning]:
+    trace_id = uuid.uuid4().hex
+    spec = get_planning_spec(PLANNING_BRIEF_REVIEW_CALLER)
+    slot = get_planning_slot(PLANNING_BRIEF_REVIEW_CALLER)
+    model = build_model(spec)
+    agent = Agent(
+        model=model,
+        output_type=_BriefReviewLLMResponse,
+        system_prompt=_brief_review_system_prompt(),
+    )
+    result = await run_llm(
+        caller=PLANNING_BRIEF_REVIEW_CALLER,
+        trace_id=trace_id,
+        generation_id=trace_id,
+        agent=agent,
+        model=model,
+        user_prompt=_brief_review_user_prompt(brief),
+        slot=slot,
+        spec=spec,
+    )
+    output = result.output
+    if output is None:
+        raise RuntimeError("Brief review returned no structured output.")
+    return output.warnings
 
 
 async def _load_profile(
@@ -100,14 +264,11 @@ async def _load_profile(
 def _pipeline_section_from_planning(
     section: PlanningSectionPlan,
     *,
-    always_present: list[str],
     generation_mode: GenerationMode,
 ) -> SectionPlan:
-    selected = list(dict.fromkeys([*always_present, *section.selected_components]))
+    selected = list(dict.fromkeys(section.selected_components))
     needs_diagram = needs_diagram_from_placements(section)
-    needs_worked_example = any(
-        component == "worked-example-card" for component in selected
-    )
+    needs_worked_example = any(component == "worked-example-card" for component in selected)
     interaction_required = any(component == "simulation-block" for component in selected)
     focus = section.focus_note or section.objective or section.rationale or section.title
     computed_diagram_policy = "required" if needs_diagram else "allowed"
@@ -130,15 +291,11 @@ def _pipeline_section_from_planning(
         section_id=section.id,
         title=section.title,
         selected_components=selected,
-        planning_visual_policy=(
-            section.visual_policy.model_dump() if section.visual_policy else None
-        ),
+        planning_visual_policy=section.visual_policy.model_dump() if section.visual_policy else None,
         visual_placements_count=count_visual_placements(section),
         computed_needs_diagram=needs_diagram,
         computed_diagram_policy=computed_diagram_policy,
-        pipeline_visual_policy=(
-            pipeline_visual_policy.model_dump() if pipeline_visual_policy else None
-        ),
+        pipeline_visual_policy=pipeline_visual_policy.model_dump() if pipeline_visual_policy else None,
     )
     return SectionPlan(
         section_id=section.id,
@@ -146,8 +303,8 @@ def _pipeline_section_from_planning(
         position=section.order,
         focus=focus,
         role=section.role,
-        bridges_from=None,
-        bridges_to=None,
+        bridges_from=section.bridges_from,
+        bridges_to=section.bridges_to,
         needs_diagram=needs_diagram,
         needs_worked_example=needs_worked_example,
         required_components=selected,
@@ -168,89 +325,243 @@ def _pipeline_section_from_planning(
 
 
 def _pipeline_sections_from_planning_spec(spec: PlanningGenerationSpec) -> list[SectionPlan]:
-    contract = get_contract(spec.template_id)
-    always_present = contract.always_present or contract.required_components
     sections = [
         _pipeline_section_from_planning(
             section,
-            always_present=always_present,
             generation_mode=spec.mode,
         )
         for section in spec.sections
     ]
     for index, section in enumerate(sections):
-        if index > 0:
+        if index > 0 and not section.bridges_from:
             section.bridges_from = sections[index - 1].title
-        if index + 1 < len(sections):
+        if index + 1 < len(sections) and not section.bridges_to:
             section.bridges_to = sections[index + 1].title
     return sections
 
 
-def _context_from_planning_spec(
-    spec: PlanningGenerationSpec,
-    *,
-    subject: str,
-) -> str:
+def _derive_learner_fit(profile: ClassProfile) -> str:
+    if (
+        profile.confidence == "low"
+        or profile.reading_level == "below_grade"
+        or profile.language_support in {"some_ell", "many_ell"}
+    ):
+        return "supported"
+    if profile.confidence == "high" and profile.reading_level == "above_grade":
+        return "advanced"
+    return "general"
+
+
+def _runtime_grade_band(brief: TeacherBrief) -> str:
+    detailed_band = GRADE_BAND_BY_LEVEL.get(brief.grade_level, "mixed")
+    if detailed_band in {"early_elementary", "upper_elementary"}:
+        return "primary"
+    if detailed_band in {"college", "adult"}:
+        return "advanced"
+    return "secondary"
+
+
+def _check_brief_feasibility(brief: TeacherBrief) -> BriefFeasibility:
+    explain_slots = _DEPTH_EXPLAIN_SLOTS.get(brief.depth, 2)
+    subtopics_fit = len(brief.subtopics) <= explain_slots
+    depth_adequate = not (
+        brief.resource_type in _SHALLOW_RESOURCES and brief.depth == "deep"
+    )
+    atypical = _ATYPICAL_SUPPORTS.get(brief.resource_type, set())
+    supports_compatible = len(set(brief.supports) & atypical) == 0
+    return BriefFeasibility(
+        subtopics_fit=subtopics_fit,
+        depth_adequate=depth_adequate,
+        supports_compatible=supports_compatible,
+    )
+
+
+def _deterministic_review_warnings(
+    brief: TeacherBrief,
+    feasibility: BriefFeasibility,
+) -> list[BriefReviewWarning]:
+    warnings: list[BriefReviewWarning] = []
+    if not feasibility.subtopics_fit:
+        warnings.append(
+            BriefReviewWarning(
+                message=(
+                    f"{len(brief.subtopics)} subtopics with {brief.depth} depth will likely force condensed coverage."
+                ),
+                suggestion="Use standard or deep depth, or reduce the selected subtopics.",
+                severity="warning",
+            )
+        )
+    if not feasibility.depth_adequate:
+        warnings.append(
+            BriefReviewWarning(
+                message=(
+                    f"{brief.depth.capitalize()} depth is unusual for a {brief.resource_type.replace('_', ' ')}."
+                ),
+                suggestion="Exit tickets and quick explainers usually work best with quicker coverage.",
+                severity="info",
+            )
+        )
+    if not feasibility.supports_compatible:
+        warnings.append(
+            BriefReviewWarning(
+                message="Some selected supports are unusual for this resource type.",
+                suggestion="Review the support choices; some may not fit the final resource well.",
+                severity="info",
+            )
+        )
+    return warnings
+
+
+def _context_from_planning_spec(spec: PlanningGenerationSpec) -> str:
+    brief = spec.source_brief
     lines = [
-        subject,
-        f"Audience: {spec.source_brief.audience}",
+        f"Subject: {brief.subject}",
+        f"Topic: {brief.topic}",
+        f"Subtopics: {', '.join(brief.subtopics)}",
+        f"Grade level: {brief.grade_level}",
+        f"Grade band: {brief.grade_band}",
+        f"Learner summary: {brief.learner_context}",
+        (
+            "Class profile: "
+            f"reading={brief.class_profile.reading_level}, "
+            f"language={brief.class_profile.language_support}, "
+            f"confidence={brief.class_profile.confidence}, "
+            f"prior_knowledge={brief.class_profile.prior_knowledge}, "
+            f"pacing={brief.class_profile.pacing}, "
+            f"preferences={', '.join(brief.class_profile.learning_preferences) or 'none'}"
+        ),
+        f"Intended outcome: {brief.intended_outcome}",
+        f"Resource type: {brief.resource_type}",
+        f"Depth: {brief.depth}",
+        f"Supports: {', '.join(brief.supports) if brief.supports else 'none'}",
     ]
-    if spec.source_brief.prior_knowledge:
-        lines.append(f"Prior knowledge: {spec.source_brief.prior_knowledge}")
-    if spec.source_brief.extra_context:
-        lines.append(f"Additional context: {spec.source_brief.extra_context}")
+
+    if brief.teacher_notes:
+        lines.append(f"Teacher notes: {brief.teacher_notes}")
+
     lines.append("")
-    lines.append("Reviewed lesson plan:")
+    lines.append("Reviewed resource plan:")
+
     for section in spec.sections:
-        suffix = f" [{section.role}]"
-        summary = section.focus_note or section.objective or section.rationale
-        lines.append(f"Section {section.order}: {section.title}{suffix} - {summary}")
+        summary = section.focus_note or section.objective or section.rationale or section.title
+        lines.append(f"Section {section.order}: {section.title} [{section.role}] - {summary}")
+        if section.terms_to_define:
+            lines.append(f"  Introduces: {', '.join(section.terms_to_define)}")
+        if section.practice_target:
+            lines.append(f"  Practice: {section.practice_target}")
+
     if spec.warning:
         lines.append("")
         lines.append(f"Planning warning: {spec.warning}")
+
     return "\n".join(lines)
 
 
-@router.post("/brief", response_model=GenerationSpec)
-async def create_brief(
-    brief: BriefRequest,
-    response: Response,
+def validate_render_shell(template_id: str, preset_id: str) -> bool:
+    return template_id == "guided-concept-path" and preset_id == "blue-classroom"
+
+
+def validate_preset_for_template(template_id: str, preset_id: str) -> bool:
+    return validate_render_shell(template_id, preset_id)
+
+
+@router.post("/brief/resolve-topic", response_model=TopicResolutionResult)
+@limiter.limit("20/minute")
+async def resolve_topic(
+    request: Request,
+    payload: TopicResolutionRequest,
     current_user: User = Depends(get_current_user),
-    profile_repo: StudentProfileRepository = Depends(get_student_profile_repository),
-) -> GenerationSpec:
-    logger.warning(
-        "Deprecated POST /api/v1/brief used by user_id=%s; prefer /api/v1/brief/stream + /api/v1/brief/commit",
-        current_user.id,
-    )
-    response.headers["Deprecation"] = "true"
-    response.headers["Warning"] = (
-        '299 - "Deprecated endpoint; use /api/v1/brief/stream and /api/v1/brief/commit."'
-    )
-
-    profile = await _load_profile(current_user, profile_repo)
-    templates = _legacy_live_safe_templates()
-    if not templates:
+) -> TopicResolutionResult:
+    _ = (request, current_user)
+    try:
+        resolution = await _resolve_topic_with_llm(payload)
+    except Exception as exc:
+        logger.exception("Topic resolution failed: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="No live-safe templates are available for blue-classroom.",
-        )
+            status_code=502,
+            detail="Topic resolution failed. Please try again.",
+        ) from exc
 
-    planning_spec = get_planning_spec(_PLANNING_CALLER)
-    planning_slot = get_planning_slot(_PLANNING_CALLER)
+    deduped = []
+    seen_titles: set[str] = set()
+    for item in resolution.candidate_subtopics:
+        key = item.title.strip().lower()
+        if key in seen_titles:
+            continue
+        seen_titles.add(key)
+        deduped.append(item)
+        if len(deduped) == 8:
+            break
+
+    return resolution.model_copy(update={"candidate_subtopics": deduped})
+
+
+@router.post("/brief/validate", response_model=BriefValidationResult)
+async def validate_teacher_brief(
+    payload: BriefValidationRequest,
+    current_user: User = Depends(get_current_user),
+) -> BriefValidationResult:
+    _ = current_user
+    template = get_resource_template(payload.brief.resource_type)
+    return validate_brief(payload.brief, template)
+
+
+@router.post("/brief/review", response_model=BriefReviewResult)
+async def review_teacher_brief(
+    payload: BriefReviewRequest,
+    current_user: User = Depends(get_current_user),
+) -> BriefReviewResult:
+    _ = current_user
+    feasibility = _check_brief_feasibility(payload.brief)
+    llm_warnings: list[BriefReviewWarning] = []
+    try:
+        llm_warnings = [
+            warning
+            if isinstance(warning, BriefReviewWarning)
+            else BriefReviewWarning.model_validate(warning)
+            for warning in await _review_brief_with_llm(payload.brief)
+        ]
+    except Exception:
+        logger.exception("TeacherBrief pedagogical review failed")
+    warnings = _deterministic_review_warnings(payload.brief, feasibility) + llm_warnings
+    coherent = not any(warning.severity == "warning" for warning in warnings)
+    return BriefReviewResult(
+        coherent=coherent,
+        warnings=warnings,
+        feasibility=feasibility,
+    )
+
+
+@router.get("/contracts", response_model=list[PlanningTemplateContract])
+async def list_contracts(
+    current_user: User = Depends(get_current_user),
+) -> list[PlanningTemplateContract]:
+    _ = current_user
+    return [
+        PlanningTemplateContract.model_validate(get_contract(template_id).model_dump())
+        for template_id in list_template_ids()
+    ]
+
+
+@router.post("/brief/plan", response_model=PlanningGenerationSpec)
+@limiter.limit("20/minute")
+async def plan_from_brief(
+    request: Request,
+    brief: TeacherBrief,
+    current_user: User = Depends(get_current_user),
+) -> PlanningGenerationSpec:
+    _ = request
     trace_id = uuid.uuid4().hex
+    service = PlanningService()
 
-    async def run_legacy_brief_llm(**kwargs):
-        generation_id = kwargs.pop("generation_id", "")
-        caller = kwargs.pop("node", _PLANNING_CALLER)
+    async def run_planning_llm(**kwargs):
+        caller = kwargs.get("caller", PLANNING_SECTION_COMPOSER_CALLER)
         return await run_llm(
-            trace_id=generation_id,
-            caller=caller,
-            slot=planning_slot,
-            spec=planning_spec,
+            slot=get_planning_slot(caller),
+            spec=get_planning_spec(caller),
             **kwargs,
         )
 
-    service = BriefPlannerService()
     try:
         core_events.event_bus.publish(
             trace_id,
@@ -260,129 +571,21 @@ async def create_brief(
                 source="planning",
             ),
         )
-        model = build_model(planning_spec)
+        model = build_model(get_planning_spec(PLANNING_SECTION_COMPOSER_CALLER))
         return await service.plan(
             brief,
-            profile=profile,
-            templates=templates,
             model=model,
-            run_llm_fn=run_legacy_brief_llm,
+            run_llm_fn=run_planning_llm,
             generation_id=trace_id,
         )
     except Exception:
-        logger.exception("Legacy brief planning failed; returning fallback spec")
-        return _fallback_spec(brief)
+        logger.exception("TeacherBrief planning failed; returning deterministic fallback")
+        return service.fallback(brief, generation_id=trace_id)
     finally:
         core_events.event_bus.publish(
             trace_id,
             TraceClosedEvent(trace_id=trace_id, source="planning"),
         )
-
-
-@router.post("/brief/stream")
-@limiter.limit("20/minute")
-async def stream_brief(
-    request: Request,
-    brief: StudioBriefRequest,
-    current_user: User = Depends(get_current_user),
-):
-    _ = current_user
-    templates = _planning_live_safe_templates()
-    if not templates:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="No live-safe templates are available for blue-classroom.",
-        )
-
-    planning_spec = get_planning_spec(_PLANNING_CALLER)
-    planning_slot = get_planning_slot(_PLANNING_CALLER)
-    service = PlanningService()
-    trace_id = uuid.uuid4().hex
-
-    async def stream():
-        queue: asyncio.Queue[dict | None] = asyncio.Queue()
-
-        async def emit(payload: dict) -> None:
-            await queue.put(payload)
-
-        async def run_planning_llm(**kwargs):
-            return await run_llm(
-                slot=planning_slot,
-                spec=planning_spec,
-                **kwargs,
-            )
-
-        async def run() -> None:
-            try:
-                core_events.event_bus.publish(
-                    trace_id,
-                    TraceRegisteredEvent(
-                        trace_id=trace_id,
-                        user_id=current_user.id,
-                        source="planning",
-                    ),
-                )
-                model = build_model(planning_spec)
-                spec = await service.plan(
-                    brief,
-                    contracts=templates,
-                    model=model,
-                    run_llm_fn=run_planning_llm,
-                    generation_id=trace_id,
-                    emit=emit,
-                )
-                await queue.put(
-                    {
-                        "event": "plan_complete",
-                        "data": {"spec": spec.model_dump(mode="json")},
-                    }
-                )
-            except Exception:
-                fallback = service.fallback(brief, contracts=templates)
-                await queue.put(
-                    {
-                        "event": "plan_error",
-                        "data": {
-                            "spec": fallback.model_dump(mode="json"),
-                            "warning": fallback.warning,
-                        },
-                    }
-                )
-            finally:
-                core_events.event_bus.publish(
-                    trace_id,
-                    TraceClosedEvent(trace_id=trace_id, source="planning"),
-                )
-                await queue.put(None)
-
-        task = asyncio.create_task(run())
-        try:
-            while True:
-                payload = await queue.get()
-                if payload is None:
-                    break
-                yield _sse_event(payload["event"], payload["data"])
-        finally:
-            if not task.done():
-                task.cancel()
-
-    return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-@router.get("/contracts", response_model=list[PlanningTemplateContract])
-async def list_contracts(
-    current_user: User = Depends(get_current_user),
-) -> list[PlanningTemplateContract]:
-    _ = current_user
-    return _planning_live_safe_templates()
 
 
 @router.post("/brief/commit", response_model=GenerationAcceptedResponse)
@@ -403,6 +606,16 @@ async def commit_brief(
 
     profile = await _load_profile(current_user, profile_repo)
     committed = spec.model_copy(update={"status": "committed"})
+    runtime_grade_band = _runtime_grade_band(committed.source_brief)
+    learner_fit = _derive_learner_fit(committed.source_brief.class_profile)
+    subject = (
+        committed.source_brief.subject
+        or committed.source_brief.topic
+        or committed.source_brief.subtopics[0]
+        or "Untitled"
+    )
+    context_str = _context_from_planning_spec(committed)
+    sections_with_visuals = sum(1 for section in committed.sections if section.visual_placements)
     return await enqueue_generation(
         current_user=current_user,
         profile=profile,
@@ -410,15 +623,17 @@ async def commit_brief(
         gen_repo=gen_repo,
         document_repo=document_repo,
         report_repo=report_repo,
-        subject=committed.source_brief.intent,
-        context=_context_from_planning_spec(
-            committed,
-            subject=committed.source_brief.intent,
-        ),
+        subject=subject,
+        context=context_str,
         mode=committed.mode,
         template_id=committed.template_id,
         preset_id=committed.preset_id,
         section_count=len(committed.sections),
         section_plans=_pipeline_sections_from_planning_spec(committed),
         planning_spec_json=committed.model_dump_json(),
+        sections_with_visuals=sections_with_visuals,
+        subtopics_covered=list(committed.source_brief.subtopics),
+        planning_warning=committed.warning,
+        grade_band=runtime_grade_band,
+        learner_fit=learner_fit,
     )

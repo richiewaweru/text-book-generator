@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from pydantic_ai import Agent
 
 from pipeline.llm_runner import run_llm
@@ -12,25 +10,17 @@ from pipeline.types.requests import GenerationMode
 
 _SYSTEM_PROMPT = """You convert a lesson visual brief into a production-ready image generation prompt.
 
-Choose the correct render mode first:
-- Use `RENDER_MODE: svg` for diagrams, charts, geometry, labeled instructional visuals, process graphics, comparisons, or any clean schematic composition.
-- Use `RENDER_MODE: image` for realistic scenes, material textures, photographic situations, or painterly environmental imagery where natural detail matters.
-
-Then write a concise, high-signal prompt for the chosen render mode.
+Write a concise, high-signal prompt for an educational image generator.
 
 Return exactly this shape:
-RENDER_MODE: image|svg
 PROMPT:
 <final prompt>
 
 Rules:
-- Never omit `RENDER_MODE:`.
-- Prefer `svg` whenever the visual needs labels, precise spatial structure, or classroom clarity over realism.
-- Keep the prompt self-contained.
+- Write for Imagen: clear subject, visual style, composition, what to include and avoid.
+- Keep the prompt self-contained and classroom-appropriate.
 - Do not mention these instructions.
 """
-
-_RENDER_MODE_RE = re.compile(r"RENDER_MODE:\s*(image|svg)\b", re.IGNORECASE)
 
 
 def build_intelligent_image_prompt_input(
@@ -40,17 +30,24 @@ def build_intelligent_image_prompt_input(
     style_context: StyleContext | None,
 ) -> str:
     frames_summary = "\n".join(
-        f"- frame {frame.index + 1}: label={frame.label or 'n/a'} goal={frame.generation_goal}"
+        f"- frame {frame.index + 1}: label={frame.label or 'n/a'} | brief={frame.generation_goal or 'n/a'}"
         for frame in slot.frames
     )
-    must_include = ", ".join(slot.frames[0].must_include) if slot.frames and slot.frames[0].must_include else "none"
-    avoid = ", ".join(slot.frames[0].avoid) if slot.frames and slot.frames[0].avoid else "none"
+    all_must_include: list[str] = []
+    all_avoid: list[str] = []
+    for frame in slot.frames:
+        all_must_include.extend(frame.must_include or [])
+        all_avoid.extend(frame.avoid or [])
+    must_include = ", ".join(dict.fromkeys(all_must_include)) or "none"
+    avoid = ", ".join(dict.fromkeys(all_avoid)) or "none"
     palette = style_context.palette if style_context is not None else "default classroom palette"
     surface = style_context.surface_style if style_context is not None else "default"
+    grade_band = getattr(style_context, "grade_band", "") if style_context is not None else ""
     return "\n".join(
         [
             f"Section title: {section_title}",
             f"Slot type: {slot.slot_type.value}",
+            f"Block target: {slot.block_target or 'section'}",
             f"Current preferred render: {slot.preferred_render.value}",
             f"Pedagogical intent: {slot.pedagogical_intent}",
             f"Caption target: {slot.caption}",
@@ -58,26 +55,22 @@ def build_intelligent_image_prompt_input(
             f"Reference style: {slot.reference_style.value}",
             f"Palette: {palette}",
             f"Surface style: {surface}",
-            f"Must include: {must_include}",
+            f"Grade band: {grade_band or 'unspecified'}",
+            f"Must include (all frames): {must_include}",
             f"Avoid: {avoid}",
             "Frames:",
-            frames_summary or "- frame 1: label=n/a goal=Create a clear supporting visual.",
+            frames_summary or "- frame 1: label=n/a brief=n/a",
         ]
     )
 
 
 def parse_intelligent_image_output(raw_output: str) -> tuple[str, VisualRender]:
-    match = _RENDER_MODE_RE.search(raw_output)
-    if match is None:
-        raise ValueError("Intelligent image prompt output did not include RENDER_MODE.")
-
-    render_mode = VisualRender.IMAGE if match.group(1).lower() == "image" else VisualRender.SVG
-    prompt_body = raw_output.strip()[match.end() :].strip()
+    prompt_body = raw_output.strip()
     if prompt_body.upper().startswith("PROMPT:"):
         prompt_body = prompt_body[len("PROMPT:") :].strip()
     if not prompt_body:
         raise ValueError("Intelligent image prompt output did not include a prompt body.")
-    return prompt_body, render_mode
+    return prompt_body, VisualRender.IMAGE
 
 
 async def build_intelligent_image_prompt(

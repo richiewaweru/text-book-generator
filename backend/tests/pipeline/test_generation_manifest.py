@@ -46,3 +46,24 @@ def test_generation_manifest_classifies_external_media_fields() -> None:
     assert "diagram-block" in external_components
     assert "video-embed" in external_components
     assert "image-block" in external_components
+
+
+def test_generation_manifest_raises_when_required_components_are_missing() -> None:
+    plan = SectionPlan(
+        section_id="s-03",
+        title="Broken section",
+        position=3,
+        focus="Planning failed",
+        required_components=[],
+        optional_components=[],
+    )
+
+    try:
+        build_section_generation_manifest(
+            template_id="guided-concept-path",
+            section_plan=plan,
+        )
+    except ValueError as exc:
+        assert "has no required_components" in str(exc)
+    else:
+        raise AssertionError("Expected strict manifest build to fail without required_components.")

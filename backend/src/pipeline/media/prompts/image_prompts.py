@@ -24,17 +24,44 @@ def _translate_style_to_image_keywords(ctx: StyleContext) -> str:
     return f"{style}, {colours}, textbook quality"
 
 
+def _grade_image_style(grade_band: str) -> str:
+    """Grade-appropriate visual style instruction for image prompts."""
+    if grade_band in {"early_elementary", "upper_elementary", "primary"}:
+        return (
+            "Child-friendly, bold simple shapes, large clear labels, "
+            "bright but not distracting colours, no visual complexity."
+        )
+    if grade_band in {"middle_school", "secondary"}:
+        return (
+            "Clean educational illustration, moderate detail, "
+            "clear readable labels, standard classroom style."
+        )
+    if grade_band in {"high_school", "college", "advanced"}:
+        return (
+            "Precise academic illustration, technical detail where appropriate, "
+            "clean labels, professional educational style."
+        )
+    return "Clear educational illustration, accessible labels, clean composition."
+
+
 def build_image_generation_prompt(
     *,
     section_title: str,
     slot: VisualSlot,
     frame: VisualFrame,
     style_context: StyleContext,
+    override_brief: str | None = None,
 ) -> str:
     visual_style = _translate_style_to_image_keywords(style_context)
+    grade_style = _grade_image_style(getattr(style_context, "grade_band", "") or "")
     must_include = ", ".join(frame.must_include) if frame.must_include else "the core idea"
     avoid = ", ".join(frame.avoid) if frame.avoid else "text overlays"
-    primary_brief = slot.content_brief or frame.generation_goal
+    if override_brief:
+        primary_brief = override_brief
+    elif slot.block_target == "section":
+        primary_brief = frame.generation_goal or slot.content_brief or section_title
+    else:
+        primary_brief = slot.content_brief or frame.generation_goal or section_title
     size_hint = ""
     if frame.target_w and frame.target_h:
         ratio = f"{frame.target_w}:{frame.target_h}"
@@ -59,6 +86,7 @@ Must include: {must_include}
 Avoid: {avoid}
 
 Visual style: {visual_style}
+Grade style: {grade_style}
 
 Requirements:
 - Clear, simple composition for textbook use

@@ -140,6 +140,101 @@ class StaticProfileRepo:
         return self.profile
 
 
+def _planning_spec(*, section_count: int = 4) -> dict:
+    templates = [
+        (
+            "intro",
+            "Limits first look",
+            "Introduce the idea of approaching a value.",
+            ["hook-hero", "explanation-block"],
+        ),
+        (
+            "explain",
+            "Read the graph",
+            "Connect nearby values to the limit idea.",
+            ["explanation-block"],
+        ),
+        (
+            "practice",
+            "Try a limit",
+            "Work through guided practice.",
+            ["practice-stack"],
+        ),
+        (
+            "summary",
+            "Bridge to continuity",
+            "Close with the next conceptual step.",
+            ["what-next-bridge"],
+        ),
+    ]
+    sections = [
+        {
+            "id": f"section-{index}",
+            "order": index,
+            "role": role,
+            "title": title,
+            "objective": objective,
+            "focus_note": objective,
+            "selected_components": components,
+            "visual_policy": None,
+            "generation_notes": None,
+            "rationale": objective,
+        }
+        for index, (role, title, objective, components) in enumerate(
+            templates[:section_count],
+            start=1,
+        )
+    ]
+    return {
+        "id": "plan-tracing",
+        "template_id": "guided-concept-path",
+        "preset_id": "blue-classroom",
+        "mode": "balanced",
+        "template_decision": {
+            "chosen_id": "worksheet",
+            "chosen_name": "Worksheet",
+            "rationale": "Teacher selected Worksheet.",
+            "fit_score": 1.0,
+            "alternatives": [],
+        },
+        "lesson_rationale": "Move from explanation into practice and summary.",
+        "directives": {
+            "tone_profile": "supportive",
+            "reading_level": "standard",
+            "explanation_style": "balanced",
+            "example_style": "everyday",
+            "scaffold_level": "medium",
+            "brevity": "balanced",
+        },
+        "committed_budgets": {},
+        "sections": sections,
+        "warning": None,
+        "source_brief_id": "brief-tracing",
+        "source_brief": {
+            "subject": "Mathematics",
+            "topic": "Limits",
+            "subtopics": ["Understanding limits"],
+            "grade_level": "grade_11",
+            "grade_band": "adult",
+            "class_profile": {
+                "reading_level": "on_grade",
+                "language_support": "none",
+                "confidence": "mixed",
+                "prior_knowledge": "some_background",
+                "pacing": "normal",
+                "learning_preferences": [],
+            },
+            "learner_context": "High school calculus students",
+            "intended_outcome": "understand",
+            "resource_type": "worksheet",
+            "supports": [],
+            "depth": "standard",
+            "teacher_notes": None,
+        },
+        "status": "draft",
+    }
+
+
 class _ReportRouteSession:
     async def execute(self, statement):
         _ = statement
@@ -248,20 +343,14 @@ async def test_generation_job_logs_llm_trace_events() -> None:
         ):
             async with _client(app) as client:
                 response = await client.post(
-                    "/api/v1/generations",
-                    json={
-                        "subject": "Calculus",
-                        "context": "Explain limits",
-                        "template_id": "guided-concept-path",
-                        "preset_id": "blue-classroom",
-                        "section_count": 4,
-                    },
+                    "/api/v1/brief/commit",
+                    json=_planning_spec(section_count=4),
                 )
                 await asyncio.sleep(0.1)
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 202
+    assert response.status_code == 200
     assert len(trace_events) >= 2
     assert any(
         generation_id == response.json()["generation_id"]
@@ -342,6 +431,7 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
                         "terms_to_define": ["slope"],
                         "terms_assumed": [],
                         "practice_target": "identify slope as a measure of steepness",
+                        "visual_placements_count": 1,
                     }
                 ],
                 planner_trace_sections=[
@@ -352,6 +442,7 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
                         "role": "intro",
                         "rationale_summary": "Introduce slope as steepness on a graph.",
                         "visual_placements_count": 1,
+                        "visual_placements_summary": ["explanation:diagram"],
                     }
                 ],
             ),
@@ -428,14 +519,8 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
         ):
             async with _client(app) as client:
                 response = await client.post(
-                    "/api/v1/generations",
-                    json={
-                        "subject": "Calculus",
-                        "context": "Explain limits",
-                        "template_id": "guided-concept-path",
-                        "preset_id": "blue-classroom",
-                        "section_count": 1,
-                    },
+                    "/api/v1/brief/commit",
+                    json=_planning_spec(section_count=1),
                 )
                 await asyncio.sleep(0.1)
                 report_response = await client.get(
@@ -449,7 +534,7 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
     assert "section_started" in timeline_types
     assert "llm_call_started" in timeline_types
     assert "llm_call_succeeded" in timeline_types
-    assert "interaction_outcome" in timeline_types
+    assert "interaction_outcome" not in timeline_types
     assert "media_plan_ready" in timeline_types
     assert "curriculum_planned" in timeline_types
     assert report_response.status_code == 200
@@ -464,4 +549,7 @@ async def test_generation_report_captures_pipeline_and_direct_event_bus_events()
     assert "visual_commitment" not in report_response.json()["runtime_curriculum_outline"][0]
     assert report_response.json()["planner_trace"]["result"] == "enriched"
     assert report_response.json()["planner_trace"]["sections"][0]["visual_placements_count"] == 1
-
+    assert report_response.json()["planner_trace"]["sections"][0]["visual_placements_summary"] == [
+        "explanation:diagram"
+    ]
+    assert report_response.json()["summary"]["sections_with_planned_visuals"] == 1

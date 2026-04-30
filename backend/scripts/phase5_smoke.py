@@ -22,15 +22,21 @@ os.environ["RUN_MIGRATIONS_ON_STARTUP"] = "false"
 
 from app import create_app
 from core.auth.middleware import get_current_user
-from core.dependencies import get_jwt_handler
 from core.database.migrations import upgrade_database
 from core.database.models import GenerationModel, LLMCallModel, StudentProfileModel, UserModel
 from core.database.session import async_session_factory
+from core.dependencies import get_jwt_handler
 from core.entities.user import User
 from core.events import LLMCallStartedEvent, LLMCallSucceededEvent, event_bus
+from curriculum_enrichment.models import CurriculumEnrichmentOutput, SectionPlanEnrichment
+from generation import routes as generation_routes
 from pipeline.api import PipelineDocument, PipelineResult
-from pipeline.events import SectionStartedEvent
-from planning.models import PlanningRefinedSection, PlanningRefinementOutput
+from pipeline.events import CompleteEvent, SectionReadyEvent, SectionStartedEvent
+from planning.llm_config import (
+    PLANNING_ENRICHMENT_CALLER,
+    PLANNING_SECTION_COMPOSER_CALLER,
+)
+from planning.models import CompositionResult, PlanningSectionPlan
 
 USER_ID = "phase5-smoke-user"
 EMAIL = "phase5-smoke@example.com"
@@ -87,13 +93,31 @@ async def override_current_user():
     return SMOKE_USER
 
 
+def _section_content(subject: str, grade_band: str) -> dict:
+    return {
+        "section_id": "s-01",
+        "template_id": "guided-concept-path",
+        "header": {
+            "title": "Limits first look",
+            "subject": subject,
+            "grade_band": grade_band,
+        },
+        "explanation": {
+            "body": "Limits describe the value a function approaches.",
+            "emphasis": ["approaches", "nearby values"],
+        },
+    }
+
+
 async def fake_run_pipeline(command, on_event=None):
     generation_id = command.generation_id
+    section = _section_content(command.subject, command.grade_band)
+
     await on_event(
         SectionStartedEvent(
             generation_id=generation_id,
             section_id="s-01",
-            title="Intro",
+            title="Limits first look",
             position=1,
         )
     )
@@ -123,16 +147,36 @@ async def fake_run_pipeline(command, on_event=None):
             cost_usd=0.003,
         )
     )
+    await on_event(
+        SectionReadyEvent(
+            generation_id=generation_id,
+            section_id="s-01",
+            section=section,
+            completed_sections=1,
+            total_sections=1,
+        )
+    )
+    await on_event(
+        CompleteEvent(
+            generation_id=generation_id,
+            final_status="completed",
+            quality_passed=True,
+            completed_sections=1,
+            total_sections=1,
+        )
+    )
+
     return PipelineResult(
         document=PipelineDocument(
             generation_id=generation_id,
             subject=command.subject,
             context=command.context,
+            mode=command.mode,
             template_id=command.template_id,
             preset_id=command.preset_id,
             status="completed",
-            section_manifest=[{"section_id": "s-01", "title": "Intro", "position": 1}],
-            sections=[],
+            section_manifest=[{"section_id": "s-01", "title": "Limits first look", "position": 1}],
+            sections=[section],
             failed_sections=[],
             qc_reports=[],
             quality_passed=True,
@@ -147,11 +191,9 @@ async def fake_planning_run_llm(
     trace_id=None,
     caller=None,
     slot=None,
-    user_prompt=None,
     **kwargs,
 ):
     _ = kwargs
-    section_count = (user_prompt or "").count("order=") or 1
     event_bus.publish(
         trace_id,
         LLMCallStartedEvent(
@@ -178,17 +220,55 @@ async def fake_planning_run_llm(
             cost_usd=0.001,
         ),
     )
-    return SimpleNamespace(
-        output=PlanningRefinementOutput(
-            lesson_rationale="Refined for smoke test.",
-            sections=[
-                PlanningRefinedSection(
-                    title=f"Section {index + 1}",
-                    rationale="Refined rationale.",
-                )
-                for index in range(section_count)
-            ],
+
+    if caller == PLANNING_SECTION_COMPOSER_CALLER:
+        return SimpleNamespace(
+            output=CompositionResult(
+                lesson_rationale="Refined for smoke test.",
+                warning=None,
+                sections=[
+                    PlanningSectionPlan(
+                        id="section-1",
+                        order=1,
+                        role="intro",
+                        title="Limits first look",
+                        objective="Introduce the idea of approaching a value.",
+                        focus_note="Start with the idea of nearby values on a graph.",
+                        selected_components=["explanation-block"],
+                        rationale="Open with a graph-based explanation.",
+                    )
+                ],
+            )
         )
+
+    if caller == PLANNING_ENRICHMENT_CALLER:
+        return SimpleNamespace(
+            output=CurriculumEnrichmentOutput(
+                sections=[
+                    SectionPlanEnrichment(
+                        section_id="section-1",
+                        terms_to_define=["limit"],
+                        terms_assumed=["graph"],
+                        practice_target="Explain what a limit describes on a graph.",
+                    )
+                ]
+            )
+        )
+
+    return SimpleNamespace(output=None)
+
+
+async def fake_export_generation_pdf(**kwargs):
+    generation = kwargs["generation"]
+    pdf_path = Path(tempfile.gettempdir()) / f"{generation.id}-smoke.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF")
+    return SimpleNamespace(
+        pdf_path=pdf_path,
+        filename=f"{generation.id}.pdf",
+        file_size_bytes=pdf_path.stat().st_size,
+        page_count=1,
+        generation_time_ms=50,
+        cleanup_paths=[pdf_path],
     )
 
 
@@ -203,54 +283,89 @@ async def main() -> None:
         with patch(
             "pipeline.adapter.run_pipeline_streaming",
             side_effect=fake_run_pipeline,
-        ), patch("planning.routes.run_llm", side_effect=fake_planning_run_llm):
+        ), patch(
+            "planning.routes.run_llm",
+            side_effect=fake_planning_run_llm,
+        ), patch(
+            "planning.routes.build_model",
+            return_value=object(),
+        ), patch.object(
+            generation_routes,
+            "export_generation_pdf",
+            side_effect=fake_export_generation_pdf,
+        ):
             async with app.router.lifespan_context(app):
                 async with AsyncClient(
                     transport=ASGITransport(app=app),
                     base_url="http://test",
                 ) as client:
-                    generation_response = await client.post(
-                        "/api/v1/generations",
-                        json={
-                            "subject": "Calculus",
-                            "context": "Explain limits",
-                            "template_id": "guided-concept-path",
-                            "preset_id": "blue-classroom",
-                            "section_count": 1,
+                    brief_payload = {
+                        "subject": "Mathematics",
+                        "topic": "Limits",
+                        "subtopics": ["Understanding limits"],
+                        "grade_level": "grade_11",
+                        "grade_band": "adult",
+                        "class_profile": {
+                            "reading_level": "on_grade",
+                            "language_support": "none",
+                            "confidence": "mixed",
+                            "prior_knowledge": "some_background",
+                            "pacing": "normal",
+                            "learning_preferences": ["visual"],
                         },
+                        "learner_context": "High school calculus students",
+                        "intended_outcome": "understand",
+                        "resource_type": "worksheet",
+                        "supports": ["visuals"],
+                        "depth": "standard",
+                        "teacher_notes": "Keep it concise.",
+                    }
+
+                    plan_response = await client.post("/api/v1/brief/plan", json=brief_payload)
+                    plan_payload = plan_response.json()
+
+                    commit_response = await client.post(
+                        "/api/v1/brief/commit",
+                        json=plan_payload,
                     )
-                    generation_payload = generation_response.json()
+                    commit_payload = commit_response.json()
+                    generation_id = commit_payload.get("generation_id", "")
+
                     await asyncio.sleep(0.2)
 
+                    detail_response = await client.get(f"/api/v1/generations/{generation_id}")
+                    document_response = await client.get(commit_payload["document_url"])
                     events_response = await client.get(
-                        generation_payload["events_url"] + f"?token={token}"
+                        commit_payload["events_url"] + f"?token={token}"
                     )
-                    report_response = await client.get(generation_payload["report_url"])
-
-                    brief_response = await client.post(
-                        "/api/v1/brief/stream",
+                    report_response = await client.get(commit_payload["report_url"])
+                    export_response = await client.post(
+                        f"/api/v1/generations/{generation_id}/export/pdf",
                         json={
-                            "intent": "Teach limits",
-                            "audience": "High school calculus students",
-                            "prior_knowledge": "Basic algebra",
-                            "extra_context": "Keep it concise.",
+                            "school_name": "Smoke Test High",
+                            "teacher_name": "Phase 5 Smoke",
+                            "include_toc": True,
+                            "include_answers": False,
                         },
                     )
-                    await asyncio.sleep(0.2)
                     usage_response = await client.get("/api/v1/telemetry/llm-usage")
 
         print(
             {
-                "generation_status": generation_response.status_code,
+                "plan_status": plan_response.status_code,
+                "plan_has_sections": len(plan_payload.get("sections", [])) > 0,
+                "commit_status": commit_response.status_code,
+                "accepted_section_count": commit_payload.get("section_count"),
+                "detail_status": detail_response.status_code,
+                "detail_generation_status": detail_response.json().get("status"),
+                "document_status": document_response.status_code,
+                "document_has_sections": len(document_response.json().get("sections", [])) > 0,
                 "events_status": events_response.status_code,
                 "events_has_complete": "event: complete" in events_response.text,
                 "report_status": report_response.status_code,
                 "report_has_completed": report_response.json().get("status") == "completed",
-                "brief_status": brief_response.status_code,
-                "brief_has_plan_event": (
-                    "event: plan_complete" in brief_response.text
-                    or "event: plan_error" in brief_response.text
-                ),
+                "pdf_status": export_response.status_code,
+                "pdf_content_type": export_response.headers.get("content-type"),
                 "usage_status": usage_response.status_code,
                 "usage_total_calls": usage_response.json().get("total_calls"),
             }

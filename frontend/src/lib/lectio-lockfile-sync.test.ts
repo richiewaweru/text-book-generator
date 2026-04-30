@@ -21,6 +21,7 @@ describe('lectio lockfile sync', () => {
 		const pnpmLock = readFileSync(PNPM_LOCK_PATH, 'utf8');
 
 		const packageVersion = packageJson.dependencies?.lectio;
+		const normalizedPackageVersion = packageVersion?.replace(/^[~^]/, '');
 		const lockRootVersion = packageLock.packages?.['']?.dependencies?.lectio;
 		const lockInstalledVersion = packageLock.packages?.['node_modules/lectio']?.version;
 		const pnpmMatch = pnpmLock.match(
@@ -35,8 +36,8 @@ describe('lectio lockfile sync', () => {
 		expect(pnpmSpecifier).toBeTruthy();
 		expect(pnpmVersion).toBeTruthy();
 		expect(lockRootVersion).toBe(packageVersion);
-		expect(lockInstalledVersion).toBe(packageVersion);
+		expect(lockInstalledVersion).toBe(normalizedPackageVersion);
 		expect(pnpmSpecifier).toBe(packageVersion);
-		expect(pnpmVersion?.startsWith(`${packageVersion}(`)).toBe(true);
+		expect(pnpmVersion?.startsWith(`${normalizedPackageVersion}(`)).toBe(true);
 	});
 });

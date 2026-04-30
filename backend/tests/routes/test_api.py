@@ -27,8 +27,6 @@ from pipeline.runtime_context import (
     register_runtime_context,
     unregister_runtime_context,
 )
-from pipeline.types.requests import SectionPlan
-from planning.dtos import BriefRequest, GenerationSpec
 from pipeline.types.section_content import (
     ExplanationContent,
     HookHeroContent,
@@ -141,49 +139,107 @@ def _document(
         created_at=_now(),
         updated_at=_now(),
         completed_at=_now() if status == "completed" else None,
-    )
+)
 
 
-def _generation_spec() -> GenerationSpec:
-    return GenerationSpec(
-        template_id="guided-concept-path",
-        preset_id="blue-classroom",
-        mode="balanced",
-        section_count=3,
-        sections=[
-            SectionPlan(
-                section_id="section-1",
-                position=1,
-                title="Limits first look",
-                focus="Introduce the core idea of approaching a value.",
-                role="intro",
-            ),
-            SectionPlan(
-                section_id="section-2",
-                position=2,
-                title="Work a limit",
-                focus="Show a concrete worked example.",
-                role="develop",
-                needs_worked_example=True,
-                required_components=["worked_example"],
-            ),
-            SectionPlan(
-                section_id="section-3",
-                position=3,
-                title="Check understanding",
-                focus="End with practice and a short summary bridge.",
-                role="practice",
-                required_components=["practice", "what_next"],
-            ),
-        ],
-        warning=None,
-        rationale="Guided concept path suits a compact calculus lesson.",
-        source_brief=BriefRequest(
-            intent="Teach limits",
-            audience="High school calculus students",
-            extra_context="Keep it concise.",
+def _planning_spec(
+    *,
+    section_count: int = 4,
+    mode: str = "balanced",
+    preset_id: str = "blue-classroom",
+) -> dict:
+    templates = [
+        (
+            "intro",
+            "Limits first look",
+            "Introduce the core idea of approaching a value.",
+            ["hook-hero", "explanation-block"],
         ),
-    )
+        (
+            "explain",
+            "Read the graph",
+            "Connect nearby values to the limit idea.",
+            ["explanation-block"],
+        ),
+        (
+            "practice",
+            "Try a limit",
+            "Work through guided practice.",
+            ["practice-stack"],
+        ),
+        (
+            "summary",
+            "Bridge to continuity",
+            "Close with a short next-step summary.",
+            ["what-next-bridge"],
+        ),
+    ]
+    sections = [
+        {
+            "id": f"section-{index}",
+            "order": index,
+            "role": role,
+            "title": title,
+            "objective": objective,
+            "focus_note": objective,
+            "selected_components": components,
+            "visual_policy": None,
+            "generation_notes": None,
+            "rationale": objective,
+        }
+        for index, (role, title, objective, components) in enumerate(
+            templates[:section_count],
+            start=1,
+        )
+    ]
+    return {
+        "id": f"plan-{section_count}-{mode}",
+        "template_id": "guided-concept-path",
+        "preset_id": preset_id,
+        "mode": mode,
+        "template_decision": {
+            "chosen_id": "worksheet",
+            "chosen_name": "Worksheet",
+            "rationale": "Teacher selected Worksheet.",
+            "fit_score": 1.0,
+            "alternatives": [],
+        },
+        "lesson_rationale": "Guided concept path suits a compact calculus lesson.",
+        "directives": {
+            "tone_profile": "supportive",
+            "reading_level": "standard",
+            "explanation_style": "balanced",
+            "example_style": "everyday",
+            "scaffold_level": "medium",
+            "brevity": "balanced",
+        },
+        "committed_budgets": {},
+        "sections": sections,
+        "warning": None,
+        "source_brief_id": "brief-api",
+        "source_brief": {
+            "subject": "Mathematics",
+            "topic": "Limits",
+            "subtopics": ["Understanding limits"],
+            "grade_level": "grade_11",
+            "grade_band": "adult",
+            "class_profile": {
+                "reading_level": "on_grade",
+                "language_support": "none",
+                "confidence": "mixed",
+                "prior_knowledge": "some_background",
+                "pacing": "normal",
+                "learning_preferences": [],
+            },
+            "learner_context": "High school calculus students",
+            "intended_outcome": "understand",
+            "resource_type": "worksheet",
+            "supports": [],
+            "depth": "standard",
+            "teacher_notes": "Keep it concise.",
+        },
+        "status": "draft",
+    }
 
 
 class InMemoryGenerationRepo:
@@ -425,107 +481,44 @@ class TestHealthAndAuth:
 
 
 class TestGenerationApi:
-    async def test_create_generation_accepts_valid_template_and_preset(self):
-        async def fake_run_pipeline(command, on_event=None):
-            return PipelineResult(
-                document=_document(command.generation_id or "gen-test"),
-                completed_nodes=["curriculum_planner", "process_section", "qc_agent"],
-                generation_time_seconds=0.01,
-            )
-
-        with patch(
-            "pipeline.adapter.run_pipeline_streaming",
-            side_effect=fake_run_pipeline,
-        ):
-            async with _client() as client:
-                response = await client.post(
-                    "/api/v1/generations",
-                    json={
-                        "subject": "Calculus",
-                        "context": "Explain limits",
-                        "mode": "strict",
-                        "template_id": "guided-concept-path",
-                        "preset_id": "blue-classroom",
-                        "section_count": 4,
-                    },
-                    headers=AUTH_HEADERS,
-                )
-                await asyncio.sleep(0.05)
-
-        assert response.status_code == 202
-        payload = response.json()
-        assert "mode" not in payload
-        assert payload["events_url"].endswith("/events")
-        stored = await GEN_REPO.find_by_id(payload["generation_id"])
-        assert stored is not None
-        assert stored.mode == "strict"
-
-    async def test_create_generation_uses_generation_spec_as_source_of_truth(self):
-        captured: dict[str, object] = {}
-        spec = _generation_spec()
-
-        async def fake_run_pipeline(command, on_event=None):
-            captured["command"] = command
-            return PipelineResult(
-                document=_document(command.generation_id or "gen-spec", mode="balanced"),
-                completed_nodes=["curriculum_planner", "process_section", "qc_agent"],
-                generation_time_seconds=0.01,
-            )
-
-        with patch(
-            "pipeline.adapter.run_pipeline_streaming",
-            side_effect=fake_run_pipeline,
-        ):
-            async with _client() as client:
-                response = await client.post(
-                    "/api/v1/generations",
-                    json={
-                        "subject": "Teach limits",
-                        "context": "legacy context should be ignored",
-                        "template_id": "timeline-narrative",
-                        "preset_id": "blue-classroom",
-                        "section_count": 1,
-                        "generation_spec": spec.model_dump(mode="json"),
-                    },
-                    headers=AUTH_HEADERS,
-                )
-                await asyncio.sleep(0.05)
-
-        assert response.status_code == 202
-        command = captured["command"]
-        assert command.template_id == spec.template_id
-        assert command.mode == spec.mode
-        assert command.section_count == spec.section_count
-        assert command.section_plans is not None
-        assert len(command.section_plans) == 3
-        assert "Reviewed lesson plan:" in command.context
-        accepted = response.json()
-        assert accepted["report_url"].endswith("/report")
-        stored = await GEN_REPO.find_by_id(accepted["generation_id"])
-        assert stored is not None
-        assert stored.planning_spec_json is not None
-        assert stored.mode == spec.mode
-        assert stored.requested_template_id == "guided-concept-path"
-        assert stored.requested_preset_id == "blue-classroom"
-        assert stored.section_count == 3
-
-    async def test_create_generation_rejects_invalid_template_pair(self):
+    async def test_create_generation_endpoint_is_removed(self):
         async with _client() as client:
             response = await client.post(
                 "/api/v1/generations",
-                json={
-                    "subject": "Calculus",
-                    "context": "Explain limits",
-                    "template_id": "guided-concept-path",
-                    "preset_id": "minimal-light",
-                    "section_count": 4,
-                },
                 headers=AUTH_HEADERS,
             )
-        assert response.status_code == 400
-        assert "not allowed" in response.json()["detail"]
 
-    async def test_create_generation_rejects_when_user_has_too_many_active_generations(self):
+        assert response.status_code == 405
+
+    async def test_legacy_brief_endpoint_is_absent(self):
+        async with _client() as client:
+            response = await client.post(
+                "/api/v1/brief",
+                headers=AUTH_HEADERS,
+            )
+
+        assert response.status_code == 404
+
+    async def test_legacy_brief_stream_endpoint_is_absent(self):
+        async with _client() as client:
+            response = await client.post(
+                "/api/v1/brief/stream",
+                headers=AUTH_HEADERS,
+            )
+
+        assert response.status_code == 404
+
+    async def test_commit_brief_rejects_invalid_template_pair(self):
+        async with _client() as client:
+            response = await client.post(
+                "/api/v1/brief/commit",
+                json=_planning_spec(preset_id="minimal-light"),
+                headers=AUTH_HEADERS,
+            )
+        assert response.status_code == 422
+        assert "Invalid template/preset combination" in response.json()["detail"]
+
+    async def test_commit_brief_rejects_when_user_has_too_many_active_generations(self):
         for index in range(2):
             await GEN_REPO.create(
                 Generation(
@@ -542,14 +535,8 @@ class TestGenerationApi:
 
         async with _client() as client:
             response = await client.post(
-                "/api/v1/generations",
-                json={
-                    "subject": "Calculus",
-                    "context": "Explain limits",
-                    "template_id": "guided-concept-path",
-                    "preset_id": "blue-classroom",
-                    "section_count": 4,
-                },
+                "/api/v1/brief/commit",
+                json=_planning_spec(),
                 headers=AUTH_HEADERS,
             )
 
@@ -638,7 +625,7 @@ class TestGenerationApi:
         assert response.headers["x-file-size"] == str(exported_pdf.stat().st_size)
         assert response.headers["x-generation-time-ms"] == "850"
 
-    async def test_create_generation_uses_settings_backed_concurrency_limit(self, monkeypatch):
+    async def test_commit_brief_uses_settings_backed_concurrency_limit(self, monkeypatch):
         await GEN_REPO.create(
             Generation(
                 id="gen-active-settings",
@@ -659,51 +646,13 @@ class TestGenerationApi:
 
         async with _client() as client:
             response = await client.post(
-                "/api/v1/generations",
-                json={
-                    "subject": "Calculus",
-                    "context": "Explain limits",
-                    "template_id": "guided-concept-path",
-                    "preset_id": "blue-classroom",
-                    "section_count": 4,
-                },
+                "/api/v1/brief/commit",
+                json=_planning_spec(),
                 headers=AUTH_HEADERS,
             )
 
         assert response.status_code == 429
         assert "Maximum 1 concurrent generations allowed" in response.json()["detail"]
-
-    async def test_create_generation_rejects_blank_trimmed_fields(self):
-        async with _client() as client:
-            response = await client.post(
-                "/api/v1/generations",
-                json={
-                    "subject": "   ",
-                    "context": "Explain limits",
-                    "template_id": "guided-concept-path",
-                    "preset_id": "blue-classroom",
-                    "section_count": 4,
-                },
-                headers=AUTH_HEADERS,
-            )
-
-        assert response.status_code == 422
-
-    async def test_create_generation_rejects_section_count_above_phase_six_cap(self):
-        async with _client() as client:
-            response = await client.post(
-                "/api/v1/generations",
-                json={
-                    "subject": "Calculus",
-                    "context": "Explain limits",
-                    "template_id": "guided-concept-path",
-                    "preset_id": "blue-classroom",
-                    "section_count": 9,
-                },
-                headers=AUTH_HEADERS,
-            )
-
-        assert response.status_code == 422
 
     async def test_document_endpoint_returns_saved_json_document(self):
         generation_id = "gen-doc"
@@ -796,17 +745,38 @@ class TestGenerationApi:
                 resolved_preset_id="blue-classroom",
                 section_count=3,
                 quality_passed=True,
-                planning_spec_json=json.dumps(
-                    {
-                        "id": "spec-1",
-                        "template_id": "guided-concept-path",
-                        "preset_id": "blue-classroom",
-                        "mode": "draft",
-                        "sections": [
-                            {
-                                "id": "section-1",
-                                "order": 1,
-                                "role": "intro",
+                  planning_spec_json=json.dumps(
+                      {
+                          "id": "spec-1",
+                          "template_id": "guided-concept-path",
+                          "preset_id": "blue-classroom",
+                          "mode": "draft",
+                          "source_brief": {
+                              "subject": "Mathematics",
+                              "topic": "Slope",
+                              "subtopics": ["Slope as steepness"],
+                              "grade_level": "grade_8",
+                              "grade_band": "middle_school",
+                              "class_profile": {
+                                  "reading_level": "on_grade",
+                                  "language_support": "none",
+                                  "confidence": "mixed",
+                                  "prior_knowledge": "some_background",
+                                  "pacing": "normal",
+                                  "learning_preferences": [],
+                              },
+                              "learner_context": "Middle school graphing students",
+                              "intended_outcome": "understand",
+                              "resource_type": "worksheet",
+                              "supports": [],
+                              "depth": "standard",
+                              "teacher_notes": "Use graph language carefully.",
+                          },
+                          "sections": [
+                              {
+                                  "id": "section-1",
+                                  "order": 1,
+                                  "role": "intro",
                                 "title": "Start with the central idea",
                             }
                         ],
@@ -863,6 +833,8 @@ class TestGenerationApi:
         assert detail_response.status_code == 200
         payload = detail_response.json()
         assert payload["planning_spec"]["status"] == "committed"
+        assert payload["planning_spec"]["source_brief"]["topic"] == "Slope"
+        assert "mode" not in payload["planning_spec"]["source_brief"]
         assert payload["runtime_curriculum_outline"][0]["terms_to_define"] == ["slope"]
         assert "visual_commitment" not in payload["runtime_curriculum_outline"][0]
         assert payload["planner_trace"]["path"] == "seeded_enrichment"
@@ -1242,19 +1214,13 @@ class TestGenerationApi:
         ):
             async with _client() as client:
                 response = await client.post(
-                    "/api/v1/generations",
-                    json={
-                        "subject": "Calculus",
-                        "context": "Explain limits",
-                        "template_id": "guided-concept-path",
-                        "preset_id": "blue-classroom",
-                        "section_count": 2,
-                    },
+                    "/api/v1/brief/commit",
+                    json=_planning_spec(section_count=2),
                     headers=AUTH_HEADERS,
                 )
                 await asyncio.sleep(0.05)
 
-        assert response.status_code == 202
+        assert response.status_code == 200
 
     async def test_completed_generation_with_missing_sections_writes_partial_report(self):
         async def fake_run_pipeline(command, on_event=None):
@@ -1310,14 +1276,8 @@ class TestGenerationApi:
         ):
             async with _client() as client:
                 response = await client.post(
-                    "/api/v1/generations",
-                    json={
-                        "subject": "Calculus",
-                        "context": "Explain limits",
-                        "template_id": "guided-concept-path",
-                        "preset_id": "blue-classroom",
-                        "section_count": 4,
-                    },
+                    "/api/v1/brief/commit",
+                    json=_planning_spec(section_count=4),
                     headers=AUTH_HEADERS,
                 )
                 await asyncio.sleep(0.05)

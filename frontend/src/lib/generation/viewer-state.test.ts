@@ -290,7 +290,7 @@ describe('viewer-state helpers', () => {
 		}).document;
 
 		expect(updated.partial_sections).toHaveLength(1);
-		expect(updated.partial_sections?.[0]?.content.header.title).toBe('Updated first section');
+		expect(updated.partial_sections?.[0]?.content.header?.title).toBe('Updated first section');
 		expect(updated.partial_sections?.[0]?.status).toBe('finalizing');
 		expect(updated.partial_sections?.[0]?.visual_mode).toBe('svg');
 		expect(updated.partial_sections?.[0]?.pending_assets).toEqual(['diagram']);
@@ -324,7 +324,7 @@ describe('viewer-state helpers', () => {
 		);
 
 		expect(slots[0]?.status).toBe('ready');
-		expect(slots[0]?.section?.header.title).toBe('First section');
-		expect(slots[0]?.partial?.content.header.title).toBe('Stale partial title');
+		expect(slots[0]?.section?.header?.title).toBe('First section');
+		expect(slots[0]?.partial?.content.header?.title).toBe('Stale partial title');
 	});
 });

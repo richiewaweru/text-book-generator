@@ -5,7 +5,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from pipeline.contracts import build_section_generation_manifest, get_section_content_schema
+from pipeline.contracts import build_section_generation_manifest
 from pipeline.state import PipelineError, TextbookPipelineState
 
 
@@ -78,17 +78,13 @@ async def schema_validator(
             "completed_nodes": [node_name],
         }
 
-    schema = get_section_content_schema()
     section_dict = section.model_dump(exclude_none=True)
     manifest = build_section_generation_manifest(
         template_id=typed.contract.id,
         section_plan=typed.current_section_plan,
     )
 
-    failures = [
-        *_schema_failures(section_dict, schema),
-        *_required_field_failures(section_dict, manifest),
-    ]
+    failures = _required_field_failures(section_dict, manifest)
     if failures:
         encoded = json.dumps(
             {"summary": "schema_validation_failed", "failures": failures},

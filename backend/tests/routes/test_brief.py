@@ -6,20 +6,24 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from planning.models import PlanningGenerationSpec, PlanningTemplateContract, StudioBriefRequest
-from pipeline.types.requests import SectionPlan
-from planning.dtos import BriefRequest, GenerationSpec
-from generation.dtos.generation_request import GenerationAcceptedResponse
+from app import app
+from core.auth.middleware import get_current_user
+from core.dependencies import get_student_profile_repository
 from core.entities.student_profile import TeacherProfile
 from core.entities.user import User
-from app import app
 from generation.dependencies import (
     get_document_repository,
     get_generation_repository,
     get_report_repository,
 )
-from core.dependencies import get_student_profile_repository
-from core.auth.middleware import get_current_user
+from generation.dtos.generation_response import GenerationAcceptedResponse
+from pipeline.types.requests import SectionPlan
+from pipeline.types.teacher_brief import (
+    TeacherBrief,
+    TopicResolutionRequest,
+    TopicResolutionResult,
+)
+from planning.models import PlanningGenerationSpec
 from planning import routes as brief_routes
 
 
@@ -69,13 +73,6 @@ class StaticProfileRepo:
         return self.profile
 
 
-class FakeAgent:
-    def __init__(self, *, model, output_type, system_prompt) -> None:
-        self.model = model
-        self.output_type = output_type
-        self.system_prompt = system_prompt
-
-
 async def _override_current_user() -> User:
     return TEST_USER
 
@@ -112,408 +109,114 @@ def _install_overrides(profile: TeacherProfile | None) -> None:
     app.dependency_overrides[get_report_repository] = override_report_repo
 
 
-def _fake_live_safe_catalog() -> dict[str, SimpleNamespace]:
-    return {
-        "guided-concept-path": SimpleNamespace(
-            id="guided-concept-path",
-            name="Guided Concept Path",
-            intent="teach one concept clearly",
-            learner_fit=["secondary", "mixed-ability"],
-        ),
-        "timeline": SimpleNamespace(
-            id="timeline",
-            name="Timeline",
-            intent="sequence events or developments",
-            learner_fit=["secondary"],
-        ),
-    }
-
-
-def _planning_contract() -> PlanningTemplateContract:
-    return PlanningTemplateContract(
-        id="guided-concept-path",
-        name="Guided Concept Path",
-        family="guided-concept",
-        intent="introduce-concept",
-        tagline="Lead with need, then explain.",
-        reading_style="linear-guided",
-        interaction_level="medium",
-        lesson_flow=["Hook", "Explain", "Practice", "What next"],
-        required_components=["section-header", "hook-hero", "practice-stack"],
-        optional_components=["diagram-block"],
-        always_present=["section-header", "hook-hero", "what-next-bridge"],
-        available_components=[
-            "section-header",
-            "hook-hero",
-            "practice-stack",
-            "what-next-bridge",
-            "diagram-block",
-        ],
-        component_budget={"practice-stack": 1},
-        max_per_section={"practice-stack": 1},
-        default_behaviours={},
-        section_role_defaults={
-            "intro": ["hook-hero"],
-            "explain": ["diagram-block"],
-            "practice": ["practice-stack"],
-            "summary": ["what-next-bridge"],
+def _teacher_brief() -> TeacherBrief:
+    return TeacherBrief(
+        subject="Science",
+        topic="Ecosystems",
+        subtopics=["Food webs in river ecosystems"],
+        grade_level="grade_9",
+        grade_band="adult",
+        class_profile={
+            "reading_level": "below_grade",
+            "language_support": "some_ell",
+            "confidence": "low",
+            "prior_knowledge": "new_topic",
+            "pacing": "short_chunks",
+            "learning_preferences": ["visual", "step_by_step"],
         },
-        signal_affinity={
-            "topic_type": {"concept": 0.9},
-            "learning_outcome": {"understand-why": 0.9},
-            "class_style": {},
-            "format": {"both": 0.8},
-        },
-        layout_notes=[],
-        responsive_rules=[],
-        print_rules=[],
-        allowed_presets=["blue-classroom"],
-        why_this_template_exists="Baseline teaching template.",
-        generation_guidance={
-            "tone": "clear",
-            "pacing": "steady",
-            "chunking": "medium",
-            "emphasis": "explain first",
-            "avoid": ["overload"],
-        },
-    )
-
-
-def _studio_brief() -> StudioBriefRequest:
-    return StudioBriefRequest(
-        intent="Teach ecosystems to Year 9 students",
-        audience="Year 9 mixed ability",
-        prior_knowledge="Basic food chains",
-        extra_context="Use a river ecosystem example.",
-        signals={
-            "topic_type": "concept",
-            "learning_outcome": "understand-why",
-            "class_style": ["engages-with-visuals"],
-            "format": "both",
-        },
-        preferences={
-            "tone": "supportive",
-            "reading_level": "standard",
-            "explanation_style": "balanced",
-            "example_style": "everyday",
-            "brevity": "balanced",
-        },
-        constraints={
-            "more_practice": False,
-            "keep_short": False,
-            "use_visuals": True,
-            "print_first": False,
-        },
+        learner_context="Year 9 mixed ability learners",
+        intended_outcome="understand",
+        resource_type="worksheet",
+        supports=["visuals", "worked_examples"],
+        depth="standard",
+        teacher_notes="Use a local river example.",
     )
 
 
 def _planning_spec() -> PlanningGenerationSpec:
-    return PlanningGenerationSpec(
-        id="plan-123",
-        template_id="guided-concept-path",
-        preset_id="blue-classroom",
-        template_decision={
-            "chosen_id": "guided-concept-path",
-            "chosen_name": "Guided Concept Path",
-            "rationale": "Best fit for first exposure.",
-            "fit_score": 0.93,
-            "alternatives": [],
-        },
-        lesson_rationale="This structure introduces the concept before guided practice.",
-        directives={
-            "tone_profile": "supportive",
-            "reading_level": "standard",
-            "explanation_style": "balanced",
-            "example_style": "everyday",
-            "scaffold_level": "medium",
-            "brevity": "balanced",
-        },
-        committed_budgets={"practice-stack": 1},
-        sections=[
-            {
-                "id": "section-1",
-                "order": 1,
-                "role": "intro",
-                "title": "Why ecosystems matter",
-                "objective": "Frame the lesson with a concrete setting.",
-                "focus_note": "Open with a local river example.",
-                "selected_components": ["hook-hero"],
-                "visual_policy": {
-                    "required": True,
-                    "intent": "show_realism",
-                    "mode": "image",
-                    "goal": "Anchor the topic in a real ecosystem.",
-                    "style_notes": "Natural classroom-safe reference image.",
-                },
-                "generation_notes": None,
-                "rationale": "Start with a vivid example.",
-            }
-        ],
-        warning=None,
-        source_brief_id="brief-123",
-        source_brief=_studio_brief(),
-        status="draft",
+    brief = _teacher_brief()
+    return PlanningGenerationSpec.model_validate(
+        {
+            "id": "plan-123",
+            "template_id": "guided-concept-path",
+            "preset_id": "blue-classroom",
+            "mode": "balanced",
+            "template_decision": {
+                "chosen_id": "worksheet",
+                "chosen_name": "Worksheet",
+                "rationale": "Teacher selected Worksheet.",
+                "fit_score": 1.0,
+                "alternatives": [],
+            },
+            "lesson_rationale": "This resource moves from setup into guided application.",
+            "directives": {
+                "tone_profile": "supportive",
+                "reading_level": "standard",
+                "explanation_style": "balanced",
+                "example_style": "everyday",
+                "scaffold_level": "medium",
+                "brevity": "balanced",
+            },
+            "committed_budgets": {},
+            "sections": [
+                {
+                    "id": "section-1",
+                    "order": 1,
+                    "role": "intro",
+                    "title": "Start with a river food web",
+                    "objective": "Frame the ecosystem with one local example.",
+                    "focus_note": "Use the river example first.",
+                    "selected_components": ["hook-hero"],
+                    "visual_policy": None,
+                    "generation_notes": None,
+                    "rationale": "Open with a concrete example.",
+                    "bridges_from": None,
+                    "bridges_to": "Explain the local food web",
+                    "terms_to_define": ["food web"],
+                    "terms_assumed": [],
+                    "practice_target": None,
+                }
+            ],
+            "warning": None,
+            "source_brief_id": "brief-123",
+            "source_brief": brief.model_dump(mode="json"),
+            "status": "draft",
+        }
     )
 
 
 class TestBriefApi:
-    async def test_brief_returns_generation_spec(self):
-        _install_overrides(TEST_PROFILE)
-        catalog = _fake_live_safe_catalog()
-        brief = BriefRequest(
-            intent="Teach ecosystems to year 9 students",
-            audience="Year 9 mixed ability",
-        )
-        spec = GenerationSpec(
-            template_id="guided-concept-path",
-            preset_id="blue-classroom",
-            section_count=3,
-            sections=[
-                SectionPlan(section_id="section-1", position=1, title="What ecosystems are", focus="Define the idea.", role="intro"),
-                SectionPlan(section_id="section-2", position=2, title="How parts interact", focus="Show relationships."),
-                SectionPlan(section_id="section-3", position=3, title="Check understanding", focus="Close with a quick check.", role="practice"),
-            ],
-            warning=None,
-            rationale="Guided concept path suits a compact concept lesson.",
-            source_brief=brief,
+    def test_topic_resolution_prompt_includes_grade_fields(self):
+        prompt = brief_routes._topic_resolution_user_prompt(
+            TopicResolutionRequest(
+                raw_topic="Algebra",
+                grade_level="grade_10",
+                grade_band="high_school",
+                learner_context="Grade 10 learners",
+                class_profile={
+                    "reading_level": "on_grade",
+                    "language_support": "none",
+                    "confidence": "mixed",
+                    "prior_knowledge": "some_background",
+                    "pacing": "normal",
+                    "learning_preferences": ["visual"],
+                },
+            )
         )
 
-        async def fake_run_llm(**kwargs):
-            return SimpleNamespace(output=spec, kwargs=kwargs)
+        assert "Grade level: grade_10" in prompt
+        assert "Grade band: high_school" in prompt
+        assert "Class profile: reading=on_grade" in prompt
 
-        with (
-            patch.object(brief_routes, "list_template_ids", return_value=list(catalog)),
-            patch.object(
-                brief_routes,
-                "validate_preset_for_template",
-                side_effect=lambda template_id, preset_id: template_id == "guided-concept-path" and preset_id == "blue-classroom",
-            ),
-            patch.object(brief_routes, "get_contract", side_effect=catalog.__getitem__),
-            patch.object(brief_routes, "get_planning_spec", return_value=SimpleNamespace()),
-            patch.object(brief_routes, "build_model", return_value=object()),
-            patch.object(brief_routes, "run_llm", side_effect=fake_run_llm),
-            patch(
-                "planning.service.Agent",
-                FakeAgent,
-            ),
-        ):
-            async with _client() as client:
-                response = await client.post("/api/v1/brief", json=brief.model_dump())
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["template_id"] == "guided-concept-path"
-        assert payload["preset_id"] == "blue-classroom"
-        assert payload["mode"] == "balanced"
-        assert payload["section_count"] == 3
-        assert payload["source_brief"]["intent"] == brief.intent
-        assert payload["source_brief"]["mode"] == "balanced"
-        assert response.headers["Deprecation"] == "true"
-        assert "/api/v1/brief/stream" in response.headers["Warning"]
-        assert "/api/v1/brief/commit" in response.headers["Warning"]
-
-    async def test_brief_filters_out_non_live_safe_templates(self):
+    async def test_plan_from_brief_returns_planning_generation_spec(self):
         _install_overrides(TEST_PROFILE)
-        catalog = _fake_live_safe_catalog()
-        captured: dict[str, str] = {}
-
-        async def fake_run_llm(**kwargs):
-            captured["system_prompt"] = kwargs["agent"].system_prompt
-            return SimpleNamespace(
-                output=GenerationSpec(
-                    template_id="guided-concept-path",
-                    preset_id="blue-classroom",
-                    section_count=3,
-                    sections=[
-                        SectionPlan(section_id="section-1", position=1, title="Intro", focus="Set the scene.", role="intro"),
-                        SectionPlan(section_id="section-2", position=2, title="Explain", focus="Show the core idea."),
-                        SectionPlan(section_id="section-3", position=3, title="Review", focus="Check understanding.", role="practice"),
-                    ],
-                    warning=None,
-                    rationale="Guided concept path suits the brief.",
-                    source_brief=BriefRequest(intent="Teach ecosystems", audience="Year 9"),
-                )
-            )
-
-        with (
-            patch.object(
-                brief_routes,
-                "list_template_ids",
-                return_value=["guided-concept-path", "timeline"],
-            ),
-            patch.object(
-                brief_routes,
-                "validate_preset_for_template",
-                side_effect=lambda template_id, preset_id: template_id == "guided-concept-path" and preset_id == "blue-classroom",
-            ),
-            patch.object(brief_routes, "get_contract", side_effect=catalog.__getitem__),
-            patch.object(brief_routes, "get_planning_spec", return_value=SimpleNamespace()),
-            patch.object(brief_routes, "build_model", return_value=object()),
-            patch.object(brief_routes, "run_llm", side_effect=fake_run_llm),
-            patch(
-                "planning.service.Agent",
-                FakeAgent,
-            ),
-        ):
-            async with _client() as client:
-                response = await client.post(
-                    "/api/v1/brief",
-                    json={"intent": "Teach ecosystems", "audience": "Year 9"},
-                )
-
-        assert response.status_code == 200
-        assert "guided-concept-path" in captured["system_prompt"]
-        assert "timeline" not in captured["system_prompt"]
-
-    async def test_brief_falls_back_after_invalid_output(self):
-        _install_overrides(TEST_PROFILE)
-        catalog = _fake_live_safe_catalog()
-        calls = 0
-
-        async def failing_run_llm(**kwargs):
-            nonlocal calls
-            calls += 1
-            raise ValueError("invalid json from model")
-
-        with (
-            patch.object(brief_routes, "list_template_ids", return_value=list(catalog)),
-            patch.object(
-                brief_routes,
-                "validate_preset_for_template",
-                side_effect=lambda template_id, preset_id: template_id == "guided-concept-path" and preset_id == "blue-classroom",
-            ),
-            patch.object(brief_routes, "get_contract", side_effect=catalog.__getitem__),
-            patch.object(brief_routes, "get_planning_spec", return_value=SimpleNamespace()),
-            patch.object(brief_routes, "build_model", return_value=object()),
-            patch.object(brief_routes, "run_llm", side_effect=failing_run_llm),
-            patch(
-                "planning.service.Agent",
-                FakeAgent,
-            ),
-        ):
-            async with _client() as client:
-                response = await client.post(
-                    "/api/v1/brief",
-                    json={"intent": "Teach ecosystems", "audience": "Year 9"},
-                )
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert calls == 2
-        assert payload["template_id"] == "guided-concept-path"
-        assert payload["section_count"] == 3
-        assert [section["title"] for section in payload["sections"]] == [
-            "Core Idea",
-            "Worked Example",
-            "Check Understanding",
-        ]
-
-    async def test_brief_does_not_include_saved_profile_context(self):
-        _install_overrides(TEST_PROFILE)
-        catalog = _fake_live_safe_catalog()
-        captured: dict[str, str] = {}
-
-        async def fake_run_llm(**kwargs):
-            captured["system_prompt"] = kwargs["agent"].system_prompt
-            return SimpleNamespace(
-                output=GenerationSpec(
-                    template_id="guided-concept-path",
-                    preset_id="blue-classroom",
-                    section_count=3,
-                    sections=[
-                        SectionPlan(section_id="section-1", position=1, title="Intro", focus="Set the scene.", role="intro"),
-                        SectionPlan(section_id="section-2", position=2, title="Explain", focus="Show the core idea."),
-                        SectionPlan(section_id="section-3", position=3, title="Review", focus="Check understanding.", role="practice"),
-                    ],
-                    warning=None,
-                    rationale="Guided concept path suits the brief.",
-                    source_brief=BriefRequest(intent="Teach ecosystems", audience="Year 9"),
-                )
-            )
-
-        with (
-            patch.object(brief_routes, "list_template_ids", return_value=list(catalog)),
-            patch.object(
-                brief_routes,
-                "validate_preset_for_template",
-                side_effect=lambda template_id, preset_id: template_id == "guided-concept-path" and preset_id == "blue-classroom",
-            ),
-            patch.object(brief_routes, "get_contract", side_effect=catalog.__getitem__),
-            patch.object(brief_routes, "get_planning_spec", return_value=SimpleNamespace()),
-            patch.object(brief_routes, "build_model", return_value=object()),
-            patch.object(brief_routes, "run_llm", side_effect=fake_run_llm),
-            patch(
-                "planning.service.Agent",
-                FakeAgent,
-            ),
-        ):
-            async with _client() as client:
-                response = await client.post(
-                    "/api/v1/brief",
-                    json={"intent": "Teach ecosystems", "audience": "Year 9"},
-                )
-
-        assert response.status_code == 200
-        assert "Profile context:" not in captured["system_prompt"]
-        assert "Mixed prior knowledge and limited device access." not in captured["system_prompt"]
-
-    async def test_contracts_lists_live_safe_planning_contracts(self):
-        _install_overrides(TEST_PROFILE)
-        contract = _planning_contract()
-
-        with patch.object(brief_routes, "_planning_live_safe_templates", return_value=[contract]):
-            async with _client() as client:
-                response = await client.get("/api/v1/contracts")
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload[0]["id"] == "guided-concept-path"
-        assert payload[0]["available_components"] == [
-            "section-header",
-            "hook-hero",
-            "practice-stack",
-            "what-next-bridge",
-            "diagram-block",
-        ]
-        assert payload[0]["signal_affinity"]["topic_type"]["concept"] == 0.9
-
-    async def test_stream_brief_emits_template_section_and_complete_events(self):
-        _install_overrides(TEST_PROFILE)
-        contract = _planning_contract()
         spec = _planning_spec()
 
-        async def fake_plan(
-            self,
-            brief,
-            *,
-            contracts,
-            model,
-            run_llm_fn,
-            generation_id="",
-            emit=None,
-        ):
-            _ = (brief, contracts, model, run_llm_fn, generation_id)
-            assert emit is not None
-            await emit(
-                {
-                    "event": "template_selected",
-                    "data": {
-                        "template_decision": spec.template_decision.model_dump(mode="json"),
-                        "lesson_rationale": spec.lesson_rationale,
-                        "warning": spec.warning,
-                    },
-                }
-            )
-            await emit(
-                {
-                    "event": "section_planned",
-                    "data": {"section": spec.sections[0].model_dump(mode="json")},
-                }
-            )
+        async def fake_plan(self, brief, *, model, run_llm_fn, generation_id="", emit=None):
+            _ = (brief, model, run_llm_fn, generation_id, emit)
             return spec
 
         with (
-            patch.object(brief_routes, "_planning_live_safe_templates", return_value=[contract]),
             patch.object(brief_routes, "get_planning_spec", return_value=SimpleNamespace()),
             patch.object(brief_routes, "build_model", return_value=object()),
             patch.object(brief_routes, "run_llm"),
@@ -521,20 +224,34 @@ class TestBriefApi:
         ):
             async with _client() as client:
                 response = await client.post(
-                    "/api/v1/brief/stream",
-                    json=_studio_brief().model_dump(mode="json"),
+                    "/api/v1/brief/plan",
+                    json=_teacher_brief().model_dump(mode="json"),
                 )
 
         assert response.status_code == 200
-        assert "event: template_selected" in response.text
-        assert "event: section_planned" in response.text
-        assert "event: plan_complete" in response.text
-        assert '"mode": "balanced"' in response.text
-        assert "Why ecosystems matter" in response.text
+        payload = response.json()
+        assert payload["template_id"] == "guided-concept-path"
+        assert payload["source_brief"]["subtopics"] == ["Food webs in river ecosystems"]
+        assert payload["template_decision"]["chosen_id"] == "worksheet"
+        assert payload["sections"][0]["bridges_to"] == "Explain the local food web"
+        assert payload["sections"][0]["terms_to_define"] == ["food web"]
 
-    async def test_commit_brief_starts_generation_with_committed_planning_spec(self):
+    async def test_list_contracts_returns_current_typed_catalog(self):
+        _install_overrides(TEST_PROFILE)
+
+        async with _client() as client:
+            response = await client.get("/api/v1/contracts")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload
+        assert all("signal_affinity" not in contract for contract in payload)
+        assert any(contract["id"] == "guided-concept-path" for contract in payload)
+
+    async def test_commit_brief_starts_generation_with_teacher_brief_context(self):
         _install_overrides(TEST_PROFILE)
         spec = _planning_spec()
+        spec.sections[0].practice_target = "Explain how energy moves through the river food web."
         captured: dict[str, object] = {}
 
         async def fake_enqueue_generation(**kwargs):
@@ -545,6 +262,10 @@ class TestBriefApi:
                 events_url="/api/v1/generations/gen-123/events",
                 document_url="/api/v1/generations/gen-123/document",
                 report_url="/api/v1/generations/gen-123/report",
+                section_count=kwargs["section_count"],
+                sections_with_visuals=kwargs["sections_with_visuals"],
+                subtopics_covered=list(kwargs["subtopics_covered"]),
+                warning=kwargs["planning_warning"],
             )
 
         with (
@@ -552,18 +273,13 @@ class TestBriefApi:
             patch.object(brief_routes, "enqueue_generation", side_effect=fake_enqueue_generation),
             patch.object(
                 brief_routes,
-                "_context_from_planning_spec",
-                return_value="Reviewed lesson plan",
-            ),
-            patch.object(
-                brief_routes,
                 "_pipeline_sections_from_planning_spec",
                 return_value=[
                     SectionPlan(
                         section_id="section-1",
                         position=1,
-                        title="Why ecosystems matter",
-                        focus="Open with a river ecosystem example.",
+                        title="Start with a river food web",
+                        focus="Use the river example first.",
                         role="intro",
                     )
                 ],
@@ -577,13 +293,105 @@ class TestBriefApi:
 
         assert response.status_code == 200
         assert response.json()["generation_id"] == "gen-123"
-        assert captured["subject"] == "Teach ecosystems to Year 9 students"
-        assert captured["context"] == "Reviewed lesson plan"
-        assert captured["mode"] == spec.mode
-        assert captured["template_id"] == "guided-concept-path"
-        assert len(captured["section_plans"]) == 1
-        assert '"mode":"balanced"' in captured["planning_spec_json"]
+        assert response.json()["section_count"] == 1
+        assert response.json()["sections_with_visuals"] == 0
+        assert response.json()["subtopics_covered"] == ["Food webs in river ecosystems"]
+        assert response.json()["warning"] is None
+        assert captured["subject"] == "Science"
+        assert "Resource type: worksheet" in str(captured["context"])
+        assert "Grade level: grade_9" in str(captured["context"])
+        assert "Class profile: reading=below_grade" in str(captured["context"])
+        assert "Introduces: food web" in str(captured["context"])
+        assert "Practice: Explain how energy moves through the river food web." in str(captured["context"])
+        assert captured["grade_band"] == "secondary"
+        assert captured["learner_fit"] == "supported"
         assert '"status":"committed"' in captured["planning_spec_json"]
+
+    def test_pipeline_sections_from_planning_spec_preserve_explicit_bridges(self):
+        spec = PlanningGenerationSpec.model_validate(
+            {
+                **_planning_spec().model_dump(mode="json"),
+                "sections": [
+                    {
+                        "id": "section-1",
+                        "order": 1,
+                        "role": "intro",
+                        "title": "Start with a river food web",
+                        "objective": "Frame the ecosystem with one local example.",
+                        "focus_note": "Use the river example first.",
+                        "selected_components": ["hook-hero"],
+                        "visual_policy": None,
+                        "generation_notes": None,
+                        "rationale": "Open with a concrete example.",
+                        "bridges_from": None,
+                        "bridges_to": "Explain the producer-consumer link",
+                        "terms_to_define": ["food web"],
+                        "terms_assumed": [],
+                        "practice_target": None,
+                    },
+                    {
+                        "id": "section-2",
+                        "order": 2,
+                        "role": "practice",
+                        "title": "Explain the producer-consumer link",
+                        "objective": "Let learners explain how energy moves.",
+                        "focus_note": "Energy moves from producers to consumers.",
+                        "selected_components": ["practice-stack"],
+                        "visual_policy": None,
+                        "generation_notes": None,
+                        "rationale": "Move into explanation and application.",
+                        "bridges_from": "Start from the local river example",
+                        "bridges_to": None,
+                        "terms_to_define": ["producer", "consumer"],
+                        "terms_assumed": ["food web"],
+                        "practice_target": "Explain the producer-consumer link in the river example.",
+                    },
+                ],
+            }
+        )
+
+        sections = brief_routes._pipeline_sections_from_planning_spec(spec)
+
+        assert sections[0].bridges_to == "Explain the producer-consumer link"
+        assert sections[1].bridges_from == "Start from the local river example"
+
+    def test_pipeline_sections_from_planning_spec_synthesizes_missing_bridges_for_legacy_specs(self):
+        spec = PlanningGenerationSpec.model_validate(
+            {
+                **_planning_spec().model_dump(mode="json"),
+                "sections": [
+                    {
+                        "id": "section-1",
+                        "order": 1,
+                        "role": "intro",
+                        "title": "Start with a river food web",
+                        "objective": "Frame the ecosystem with one local example.",
+                        "focus_note": "Use the river example first.",
+                        "selected_components": ["hook-hero"],
+                        "visual_policy": None,
+                        "generation_notes": None,
+                        "rationale": "Open with a concrete example.",
+                    },
+                    {
+                        "id": "section-2",
+                        "order": 2,
+                        "role": "practice",
+                        "title": "Explain the producer-consumer link",
+                        "objective": "Let learners explain how energy moves.",
+                        "focus_note": "Energy moves from producers to consumers.",
+                        "selected_components": ["practice-stack"],
+                        "visual_policy": None,
+                        "generation_notes": None,
+                        "rationale": "Move into explanation and application.",
+                    },
+                ],
+            }
+        )
+
+        sections = brief_routes._pipeline_sections_from_planning_spec(spec)
+
+        assert sections[0].bridges_to == "Explain the producer-consumer link"
+        assert sections[1].bridges_from == "Start with a river food web"
 
     async def test_commit_brief_rejects_invalid_template_preset_combination(self):
         _install_overrides(TEST_PROFILE)
@@ -599,26 +407,191 @@ class TestBriefApi:
         assert response.status_code == 422
         assert "Invalid template/preset combination" in response.json()["detail"]
 
-    async def test_brief_rejects_oversized_intent_before_planning(self):
+    async def test_resolve_topic_returns_structured_subtopics(self):
+        _install_overrides(TEST_PROFILE)
+
+        async def fake_run_pipeline_llm(**kwargs):
+            _ = kwargs
+            return SimpleNamespace(
+                output=TopicResolutionResult.model_validate(
+                    {
+                        "subject": "Math",
+                        "topic": "Algebra",
+                        "candidate_subtopics": [
+                            {
+                                "id": "two-step-equations",
+                                "title": "Solving two-step equations",
+                                "description": "Solve equations with two operations.",
+                                "likely_grade_band": "middle school",
+                            },
+                            {
+                                "id": "duplicate",
+                                "title": "Solving two-step equations",
+                                "description": "Duplicate title that should be removed.",
+                                "likely_grade_band": "middle school",
+                            },
+                        ],
+                        "needs_clarification": False,
+                        "clarification_message": None,
+                    }
+                )
+            )
+
+        class FakeAgent:
+            def __init__(self, *, model, output_type, system_prompt) -> None:
+                self.model = model
+                self.output_type = output_type
+                self.system_prompt = system_prompt
+
+        with (
+            patch.object(brief_routes, "build_model", return_value=object()),
+            patch.object(brief_routes, "get_planning_spec", return_value=SimpleNamespace()),
+            patch.object(brief_routes, "get_planning_slot", return_value=SimpleNamespace(value="fast")),
+            patch.object(brief_routes, "run_llm", side_effect=fake_run_pipeline_llm),
+            patch.object(brief_routes, "Agent", FakeAgent),
+        ):
+            async with _client() as client:
+                response = await client.post(
+                    "/api/v1/brief/resolve-topic",
+                    json={
+                        "raw_topic": "Algebra",
+                        "grade_level": "grade_7",
+                        "grade_band": "middle_school",
+                        "learner_context": "Grade 7 mixed levels",
+                        "class_profile": {
+                            "reading_level": "mixed",
+                            "language_support": "none",
+                            "confidence": "mixed",
+                            "prior_knowledge": "some_background",
+                            "pacing": "normal",
+                            "learning_preferences": [],
+                        },
+                    },
+                )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["subject"] == "Math"
+        assert len(payload["candidate_subtopics"]) == 1
+
+    async def test_validate_brief_returns_deterministic_blockers_and_warnings(self):
         _install_overrides(TEST_PROFILE)
 
         async with _client() as client:
             response = await client.post(
-                "/api/v1/brief",
-                json={"intent": "x" * 201, "audience": "Year 9"},
+                "/api/v1/brief/validate",
+                json={
+                    "brief": {
+                        "subject": "Math",
+                        "topic": "Algebra",
+                        "subtopics": ["Algebra"],
+                        "grade_level": "mixed",
+                        "grade_band": "adult",
+                        "class_profile": {
+                            "reading_level": "below_grade",
+                            "language_support": "many_ell",
+                            "confidence": "low",
+                            "prior_knowledge": "new_topic",
+                            "pacing": "short_chunks",
+                            "learning_preferences": ["step_by_step"],
+                        },
+                        "learner_context": "Grade 7 students, mixed levels",
+                        "intended_outcome": "assess",
+                        "resource_type": "exit_ticket",
+                        "supports": ["worked_examples"],
+                        "depth": "deep",
+                    }
+                },
             )
 
-        assert response.status_code == 422
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["is_ready"] is False
+        assert any(message["field"] == "subtopics" for message in payload["blockers"])
+        assert any(message["field"] == "grade_level" for message in payload["warnings"])
+        assert any(message["field"] == "depth" for message in payload["warnings"])
 
-    async def test_stream_brief_rejects_oversized_prior_knowledge_before_llm(self):
+    async def test_review_brief_returns_pedagogical_warnings(self):
         _install_overrides(TEST_PROFILE)
-        brief = _studio_brief().model_copy(update={"prior_knowledge": "x" * 1001})
 
-        async with _client() as client:
-            response = await client.post(
-                "/api/v1/brief/stream",
-                json=brief.model_dump(mode="json"),
-            )
+        async def fake_review(brief):
+            _ = brief
+            return [
+                {
+                    "message": "Several subtopics with quick depth will be very shallow.",
+                    "suggestion": "Use standard depth or fewer subtopics.",
+                    "severity": "warning",
+                }
+            ]
 
-        assert response.status_code == 422
+        with patch.object(brief_routes, "_review_brief_with_llm", side_effect=fake_review):
+            async with _client() as client:
+                response = await client.post(
+                    "/api/v1/brief/review",
+                    json={"brief": _teacher_brief().model_dump(mode="json")},
+                )
 
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["coherent"] is False
+        assert payload["feasibility"] == {
+            "subtopics_fit": True,
+            "depth_adequate": True,
+            "supports_compatible": True,
+        }
+        assert payload["warnings"][0]["severity"] == "warning"
+        assert payload["warnings"][0]["suggestion"] == "Use standard depth or fewer subtopics."
+
+    async def test_review_brief_returns_deterministic_feasibility_warnings(self):
+        _install_overrides(TEST_PROFILE)
+
+        quick_brief = _teacher_brief().model_copy(
+            update={
+                "subtopics": [
+                    "Food webs in river ecosystems",
+                    "Producer and consumer roles",
+                    "Energy transfer",
+                ],
+                "depth": "quick",
+            }
+        )
+
+        with patch.object(brief_routes, "_review_brief_with_llm", return_value=[]):
+            async with _client() as client:
+                response = await client.post(
+                    "/api/v1/brief/review",
+                    json={"brief": quick_brief.model_dump(mode="json")},
+                )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["coherent"] is False
+        assert payload["feasibility"]["subtopics_fit"] is False
+        assert payload["warnings"][0]["severity"] == "warning"
+        assert "condensed coverage" in payload["warnings"][0]["message"].lower()
+
+    async def test_review_brief_flags_atypical_supports_as_info(self):
+        _install_overrides(TEST_PROFILE)
+
+        support_heavy_brief = _teacher_brief().model_copy(
+            update={
+                "resource_type": "exit_ticket",
+                "supports": ["worked_examples"],
+            }
+        )
+
+        with patch.object(brief_routes, "_review_brief_with_llm", return_value=[]):
+            async with _client() as client:
+                response = await client.post(
+                    "/api/v1/brief/review",
+                    json={"brief": support_heavy_brief.model_dump(mode="json")},
+                )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["coherent"] is True
+        assert payload["feasibility"]["supports_compatible"] is False
+        assert any(
+            warning["severity"] == "info" and "unusual for this resource type" in warning["message"].lower()
+            for warning in payload["warnings"]
+        )

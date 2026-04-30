@@ -16,10 +16,11 @@ from pipeline.media.types import (
     VisualSlot,
     VisualSlotResult,
 )
+from pipeline.nodes.diagram_generator import RawSvgDiagramOutput, _series_seed_steps
 from pipeline.nodes.diagram_generator import diagram_generator as diagram_node
 from pipeline.nodes.interaction_generator import interaction_generator
 from pipeline.nodes.section_assembler import section_assembler
-from pipeline.state import StyleContext, TextbookPipelineState
+from pipeline.state import MediaFrameRetryRequest, StyleContext, TextbookPipelineState
 from pipeline.types.section_content import (
     DiagramContent,
     ExplanationContent,
@@ -122,6 +123,18 @@ def _section() -> SectionContent:
 
 def _base_state(*, media_plan: MediaPlan, contract: TemplateContractSummary | None = None) -> TextbookPipelineState:
     section = _section()
+    slot_types = {slot.slot_type.value for slot in media_plan.slots}
+    required_components = [
+        "section-header",
+        "hook-hero",
+        "explanation-block",
+        "practice-stack",
+        "what-next-bridge",
+    ]
+    if "diagram" in slot_types:
+        required_components.append("diagram-block")
+    if "simulation" in slot_types:
+        required_components.append("simulation-block")
     section_plan = SectionPlan(
         section_id=section.section_id,
         title=section.header.title,
@@ -129,7 +142,7 @@ def _base_state(*, media_plan: MediaPlan, contract: TemplateContractSummary | No
         focus="Make the concept visible.",
         needs_diagram=True,
         interaction_policy="required",
-        required_components=["diagram-block", "simulation-block"],
+        required_components=required_components,
     )
     return TextbookPipelineState(
         request=_request(),
@@ -375,6 +388,24 @@ def test_parse_simulation_output_tolerates_missing_meta() -> None:
     assert parsed.goal == "Explore the graph."
 
 
+def test_legacy_diagram_series_seed_uses_plan_title_when_header_missing() -> None:
+    section = _section().model_copy(update={"header": None})
+    plan = SectionPlan(
+        section_id="s-01",
+        title="See Positive and Negative Slopes",
+        position=1,
+        focus="Show slope visually.",
+        terms_to_define=["positive slope"],
+    )
+
+    steps = _series_seed_steps(section, plan)
+
+    assert steps[0].step_label == "See Positive and Negative Slopes"
+    assert steps[0].caption == (
+        "See Positive and Negative Slopes - See Positive and Negative Slopes"
+    )
+
+
 def test_simulation_qc_flags_forbidden_patterns_and_slider_count() -> None:
     assert _check_html_safety("<script src=\"https://cdn.jsdelivr.net/lib.js\"></script>")
     assert _check_complexity(
@@ -397,6 +428,235 @@ async def test_graph_visible_diagram_node_delegates_to_media_executor(monkeypatc
     result = await diagram_node(_base_state(media_plan=MediaPlan(section_id="s-01", slots=[])))
 
     assert result["marker"] == "delegated"
+
+
+@pytest.mark.asyncio
+async def test_diagram_generator_writes_raw_svg_to_diagram_series(monkeypatch) -> None:
+    monkeypatch.delenv("PIPELINE_RAW_SVG_DIAGRAMS", raising=False)
+    slot = VisualSlot(
+        slot_id="diagram-series",
+        slot_type="diagram_series",
+        required=True,
+        preferred_render="svg",
+        block_target="section",
+        pedagogical_intent="Show slope visually.",
+        caption="Slope diagrams.",
+        frames=[
+            VisualFrame(
+                slot_id="diagram-series",
+                index=0,
+                label="Slope 3",
+                generation_goal="Draw a coordinate grid with a line showing slope 3.",
+            )
+        ],
+    )
+    state = _base_state(media_plan=MediaPlan(section_id="s-01", slots=[slot]))
+
+    async def fake_raw_output(*args, **kwargs):
+        _ = (args, kwargs)
+        return RawSvgDiagramOutput(
+            svg_content=(
+                '<svg viewBox="0 0 600 400">'
+                '<line x1="80" y1="330" x2="520" y2="70" />'
+                '<text x="110" y="120">slope 3</text>'
+                "</svg>"
+            ),
+            caption="A line rises three units for each unit of run.",
+            alt_text="Coordinate graph with a rising line labeled slope 3.",
+            diagram_kind="coordinate_slope",
+        )
+
+    monkeypatch.setattr("pipeline.nodes.diagram_generator._generate_raw_svg_output", fake_raw_output)
+
+    result = await diagram_node(state)
+
+    series = result["generated_sections"]["s-01"].diagram_series
+    frame = result["media_frame_results"]["s-01"]["diagram-series"]["0"]
+    assert series is not None
+    assert series.diagrams[0].svg_content.startswith("<svg")
+    assert "slope 3" in series.diagrams[0].svg_content
+    assert frame.svg_generation_mode == "raw_svg"
+    assert frame.model_slot == "standard"
+    assert frame.diagram_kind == "coordinate_slope"
+    assert frame.sanitized is True
+    assert frame.intent_validated is True
+
+
+@pytest.mark.asyncio
+async def test_diagram_series_frame_prompt_receives_previous_step_context(monkeypatch) -> None:
+    monkeypatch.delenv("PIPELINE_RAW_SVG_DIAGRAMS", raising=False)
+    slot = VisualSlot(
+        slot_id="diagram-series",
+        slot_type="diagram_series",
+        required=True,
+        preferred_render="svg",
+        block_target="section",
+        pedagogical_intent="Show slope visually.",
+        caption="Slope diagrams.",
+        frames=[
+            VisualFrame(
+                slot_id="diagram-series",
+                index=0,
+                label="Axes",
+                generation_goal="Draw axes for a coordinate graph.",
+            ),
+            VisualFrame(
+                slot_id="diagram-series",
+                index=1,
+                label="Line",
+                generation_goal="Draw the same axes with a slope line.",
+            ),
+        ],
+    )
+    state = _base_state(media_plan=MediaPlan(section_id="s-01", slots=[slot]))
+    captured_placeholders: list[dict[str, str | None]] = []
+
+    async def fake_raw_output(*args, **kwargs):
+        frame = kwargs["frame"]
+        captured_placeholders.append(dict(frame.output_placeholders))
+        return RawSvgDiagramOutput(
+            svg_content=(
+                '<svg viewBox="0 0 600 400">'
+                '<line x1="80" y1="330" x2="520" y2="70" />'
+                f'<text x="110" y="120">{frame.label}</text>'
+                "</svg>"
+            ),
+            caption=f"{frame.label} uses matching axes.",
+            alt_text=f"Coordinate graph frame for {frame.label}.",
+            diagram_kind="coordinate_grid",
+            self_check=["uses a 0-6 axis range", "keeps labels inside the canvas"],
+        )
+
+    monkeypatch.setattr("pipeline.nodes.diagram_generator._generate_raw_svg_output", fake_raw_output)
+
+    await diagram_node(state)
+
+    assert "previous_steps_context" not in captured_placeholders[0]
+    previous_context = captured_placeholders[1]["previous_steps_context"]
+    assert previous_context is not None
+    assert "Step 1 (Axes)" in previous_context
+    assert "diagram kind: coordinate_grid" in previous_context
+    assert "caption: Axes uses matching axes." in previous_context
+    assert "self-check: uses a 0-6 axis range; keeps labels inside the canvas" in previous_context
+
+
+@pytest.mark.asyncio
+async def test_diagram_retry_prompt_receives_previous_failure_feedback(monkeypatch) -> None:
+    monkeypatch.delenv("PIPELINE_RAW_SVG_DIAGRAMS", raising=False)
+    slot = VisualSlot(
+        slot_id="diagram-series",
+        slot_type="diagram_series",
+        required=True,
+        preferred_render="svg",
+        block_target="section",
+        pedagogical_intent="Show slope visually.",
+        caption="Slope diagrams.",
+        frames=[
+            VisualFrame(
+                slot_id="diagram-series",
+                index=0,
+                label="Slope 3",
+                generation_goal="Draw a coordinate grid with a line showing slope 3.",
+            )
+        ],
+    )
+    state = _base_state(media_plan=MediaPlan(section_id="s-01", slots=[slot]))
+    state.current_media_retry = MediaFrameRetryRequest(
+        section_id="s-01",
+        slot_id="diagram-series",
+        slot_type="diagram_series",
+        frame_key="0",
+        frame_index=0,
+        executor_node="diagram_generator",
+        reason="Retrying required media frame.",
+    )
+    state.media_frame_results = {
+        "s-01": {
+            "diagram-series": {
+                "0": VisualFrameResult(
+                    slot_id="diagram-series",
+                    frame_index=0,
+                    label="Slope 3",
+                    render=VisualRender.SVG,
+                    status=VisualFrameResultStatus.FAILED,
+                    svg_generation_mode="raw_svg",
+                    svg_failure_reason="intent",
+                    error_message=(
+                        "Diagram generation failed for frame 0: "
+                        "Brief asks for a graph/coordinate diagram but SVG appears to be a flowchart."
+                    ),
+                )
+            }
+        }
+    }
+    captured_placeholders: list[dict[str, str | None]] = []
+
+    async def fake_raw_output(*args, **kwargs):
+        frame = kwargs["frame"]
+        captured_placeholders.append(dict(frame.output_placeholders))
+        return RawSvgDiagramOutput(
+            svg_content=(
+                '<svg viewBox="0 0 600 400">'
+                '<line x1="80" y1="330" x2="520" y2="70" />'
+                '<text x="110" y="120">slope 3</text>'
+                "</svg>"
+            ),
+            caption="A line rises three units for each unit of run.",
+            alt_text="Coordinate graph with a rising line labeled slope 3.",
+            diagram_kind="coordinate_slope",
+        )
+
+    monkeypatch.setattr("pipeline.nodes.diagram_generator._generate_raw_svg_output", fake_raw_output)
+
+    await diagram_node(state)
+
+    feedback = captured_placeholders[0]["previous_attempt_feedback"]
+    assert feedback is not None
+    assert "failure category: intent" in feedback
+    assert "graph/coordinate diagram" in feedback
+
+
+@pytest.mark.asyncio
+async def test_diagram_generator_rejects_unsafe_raw_svg_as_recoverable_failure(monkeypatch) -> None:
+    monkeypatch.delenv("PIPELINE_RAW_SVG_DIAGRAMS", raising=False)
+    slot = VisualSlot(
+        slot_id="diagram-series",
+        slot_type="diagram_series",
+        required=True,
+        preferred_render="svg",
+        block_target="section",
+        pedagogical_intent="Show slope visually.",
+        caption="Slope diagrams.",
+        frames=[
+            VisualFrame(
+                slot_id="diagram-series",
+                index=0,
+                label="Slope 3",
+                generation_goal="Draw a coordinate grid with a line showing slope 3.",
+            )
+        ],
+    )
+    state = _base_state(media_plan=MediaPlan(section_id="s-01", slots=[slot]))
+
+    async def fake_raw_output(*args, **kwargs):
+        _ = (args, kwargs)
+        return RawSvgDiagramOutput(
+            svg_content='<svg viewBox="0 0 600 400"><script>alert(1)</script></svg>',
+            caption="Unsafe diagram.",
+            alt_text="Unsafe diagram.",
+            diagram_kind="coordinate_slope",
+        )
+
+    monkeypatch.setattr("pipeline.nodes.diagram_generator._generate_raw_svg_output", fake_raw_output)
+
+    result = await diagram_node(state)
+
+    frame = result["media_frame_results"]["s-01"]["diagram-series"]["0"]
+    assert frame.status == VisualFrameResultStatus.FAILED
+    assert frame.svg_generation_mode == "raw_svg"
+    assert frame.svg_failure_reason == "sanitizer"
+    assert result["errors"][0].recoverable is True
+    assert "banned SVG tag" in result["errors"][0].message
 
 
 @pytest.mark.asyncio
@@ -424,7 +684,13 @@ async def test_section_assembler_writes_compact_practice_diagram_to_target_probl
     state.current_section_plan = state.current_section_plan.model_copy(
         update={
             "needs_diagram": False,
-            "required_components": [],
+            "required_components": [
+                "section-header",
+                "hook-hero",
+                "explanation-block",
+                "practice-stack",
+                "what-next-bridge",
+            ],
             "visual_placements": [
                 BlockVisualPlacement(
                     block="practice",
@@ -485,7 +751,14 @@ async def test_section_assembler_writes_compact_worked_example_diagram() -> None
     state.current_section_plan = state.current_section_plan.model_copy(
         update={
             "needs_diagram": False,
-            "required_components": [],
+            "required_components": [
+                "section-header",
+                "hook-hero",
+                "explanation-block",
+                "practice-stack",
+                "what-next-bridge",
+                "worked-example-card",
+            ],
             "visual_placements": [
                 BlockVisualPlacement(
                     block="worked_example",

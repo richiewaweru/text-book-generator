@@ -21,6 +21,7 @@ from pipeline.types.section_content import (
     SectionContent,
     SimulationContent,
 )
+from pipeline.section_content_helpers import practice_problems
 
 
 def frame_result_key(frame: VisualFrame | int) -> str:
@@ -93,11 +94,12 @@ def build_slot_result(
 
 
 def _practice_problem_diagram(section: SectionContent, problem_index: int | None) -> DiagramContent | None:
+    problems = practice_problems(section)
     if problem_index is None:
         return None
-    if problem_index < 0 or problem_index >= len(section.practice.problems):
+    if problem_index < 0 or problem_index >= len(problems):
         return None
-    return getattr(section.practice.problems[problem_index], "diagram", None)
+    return getattr(problems[problem_index], "diagram", None)
 
 
 def _worked_example_diagram(section: SectionContent) -> DiagramContent | None:
@@ -314,9 +316,15 @@ def _write_practice_diagram(
     problem_index: int,
     diagram: DiagramContent | None,
 ) -> SectionContent:
-    if diagram is None or problem_index < 0 or problem_index >= len(section.practice.problems):
+    problems = practice_problems(section)
+    if (
+        diagram is None
+        or section.practice is None
+        or problem_index < 0
+        or problem_index >= len(problems)
+    ):
         return section
-    problems = list(section.practice.problems)
+    problems = list(problems)
     problems[problem_index] = problems[problem_index].model_copy(update={"diagram": diagram})
     return section.model_copy(update={"practice": section.practice.model_copy(update={"problems": problems})})
 

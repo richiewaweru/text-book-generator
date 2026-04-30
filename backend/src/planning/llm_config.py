@@ -4,12 +4,48 @@ import os
 
 from core.llm import ModelFamily, ModelSlot, ModelSpec
 
-PLANNING_BRIEF_INTERPRETER_CALLER = "brief_interpreter"
-PLANNING_BRIEF_INTERPRETER_SLOT = ModelSlot.FAST
+PLANNING_SECTION_COMPOSER_CALLER = "section_composer"
+PLANNING_SECTION_COMPOSER_SLOT = ModelSlot.STANDARD
+PLANNING_ENRICHMENT_CALLER = "planning_enrichment"
+PLANNING_ENRICHMENT_SLOT = ModelSlot.STANDARD
+PLANNING_VISUAL_ROUTER_CALLER = "visual_router"
+PLANNING_VISUAL_ROUTER_SLOT = ModelSlot.STANDARD
+PLANNING_TOPIC_RESOLUTION_CALLER = "topic_resolution"
+PLANNING_TOPIC_RESOLUTION_SLOT = ModelSlot.FAST
+PLANNING_BRIEF_REVIEW_CALLER = "brief_review"
+PLANNING_BRIEF_REVIEW_SLOT = ModelSlot.FAST
 
 PLANNING_MODEL_SPECS: dict[str, tuple[ModelSlot, ModelSpec]] = {
-    PLANNING_BRIEF_INTERPRETER_CALLER: (
-        PLANNING_BRIEF_INTERPRETER_SLOT,
+    PLANNING_SECTION_COMPOSER_CALLER: (
+        PLANNING_SECTION_COMPOSER_SLOT,
+        ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+    ),
+    PLANNING_ENRICHMENT_CALLER: (
+        PLANNING_ENRICHMENT_SLOT,
+        ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+    ),
+    PLANNING_VISUAL_ROUTER_CALLER: (
+        PLANNING_VISUAL_ROUTER_SLOT,
+        ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+    ),
+    PLANNING_TOPIC_RESOLUTION_CALLER: (
+        PLANNING_TOPIC_RESOLUTION_SLOT,
+        ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
+    ),
+    PLANNING_BRIEF_REVIEW_CALLER: (
+        PLANNING_BRIEF_REVIEW_SLOT,
         ModelSpec(
             family=ModelFamily.ANTHROPIC,
             model_name="claude-haiku-4-5-20251001",
@@ -70,9 +106,8 @@ def get_planning_slot(caller: str) -> ModelSlot:
 
 def get_planning_spec(caller: str) -> ModelSpec:
     try:
-        slot, base = PLANNING_MODEL_SPECS[caller]
+        _, base = PLANNING_MODEL_SPECS[caller]
     except KeyError as exc:
         raise ValueError(f"Planning caller '{caller}' is not registered.") from exc
     override = _env_override(caller, base=base)
     return override or base
-

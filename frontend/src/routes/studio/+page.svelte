@@ -1,5 +1,5 @@
 <script lang="ts">
-	import TeacherStudioFlow from '$lib/components/studio/TeacherStudioFlow.svelte';
+	import TeacherBriefBuilder from '$lib/components/brief/TeacherBriefBuilder.svelte';
 </script>
 
-<TeacherStudioFlow />
+<TeacherBriefBuilder />

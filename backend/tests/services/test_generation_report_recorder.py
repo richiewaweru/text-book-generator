@@ -44,6 +44,7 @@ from pipeline.types.section_content import (
     PracticeProblem,
     SectionContent,
     SectionHeaderContent,
+    StudentTextboxContent,
     WhatNextContent,
 )
 from telemetry.dtos import GenerationReport
@@ -450,7 +451,7 @@ async def test_recorder_tracks_failed_sections_repairs_and_diagram_outcomes() ->
     report = await repo.load_report(generation.id)
     assert report.summary.validation_repair_attempts == 1
     assert report.summary.validation_repair_successes == 1
-    assert report.summary.diagram_skip_count == 1
+    assert not hasattr(report.summary, "diagram_skip_count")
     assert report.summary.failed_sections == 1
     assert any(section.section_id == "s-02" and section.status == "failed" for section in report.sections)
 
@@ -558,7 +559,7 @@ async def test_recorder_tracks_image_interaction_and_field_regen_metrics() -> No
 
     assert report.summary.image_success_count == 1
     assert report.summary.image_failure_count == 1
-    assert report.summary.image_skip_count == 0
+    assert not hasattr(report.summary, "image_skip_count")
     assert report.summary.image_provider_counts == {"gemini": 1}
     assert report.summary.simulation_success_count == 1
     assert report.summary.interaction_skip_count == 1
@@ -578,6 +579,28 @@ async def test_recorder_tracks_media_slot_metrics_and_required_media_blocks() ->
             generation_id=generation.id,
             section_id="s-01",
             slot_count=2,
+            slots=[
+                {
+                    "slot_id": "diagram-main",
+                    "slot_type": "diagram",
+                    "preferred_render_initial": "svg",
+                    "preferred_render_final": "svg",
+                    "fallback_render": None,
+                    "decision_source": "slot_type_default",
+                    "decision_reason": "slot_type=diagram, block_target=explanation",
+                    "intelligent_prompt_resolved": False,
+                },
+                {
+                    "slot_id": "simulation-lab",
+                    "slot_type": "simulation",
+                    "preferred_render_initial": "html_simulation",
+                    "preferred_render_final": "html_simulation",
+                    "fallback_render": "svg",
+                    "decision_source": "slot_type_default",
+                    "decision_reason": "slot_type=simulation, block_target=section",
+                    "intelligent_prompt_resolved": False,
+                },
+            ],
         )
     )
     await recorder.apply_event(
@@ -588,6 +611,11 @@ async def test_recorder_tracks_media_slot_metrics_and_required_media_blocks() ->
             slot_type="diagram",
             ready_frames=1,
             total_frames=1,
+            svg_generation_mode="raw_svg",
+            model_slot="standard",
+            diagram_kind="coordinate_slope",
+            sanitized=True,
+            intent_validated=True,
         )
     )
     await recorder.apply_event(
@@ -630,12 +658,118 @@ async def test_recorder_tracks_media_slot_metrics_and_required_media_blocks() ->
     assert section.media_frame_retry_count == 1
     assert section.media_blocked is True
     assert section.media_block_reason is not None
+    assert [decision.status for decision in section.media_decisions] == ["generated", "failed"]
     assert section.simulation_outcome == "failed"
     assert report.summary.media_slots_planned == 2
     assert report.summary.media_slots_ready == 1
     assert report.summary.media_slots_failed == 1
     assert report.summary.media_frame_retry_count == 1
+    assert report.summary.planned_svg_slots == 1
+    assert report.summary.planned_simulation_slots == 1
+    assert report.summary.raw_svg_generation_count == 1
+    assert report.summary.svg_generation_model_slot == "standard"
+    assert report.summary.svg_diagram_kind_counts == {"coordinate_slope": 1}
     assert report.summary.simulation_failure_count == 1
+
+
+@pytest.mark.asyncio
+async def test_recorder_tracks_raw_svg_failure_metadata() -> None:
+    generation = _generation("gen-raw-svg-report")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        MediaPlanReadyEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_count=3,
+            slots=[
+                {
+                    "slot_id": "diagram-good",
+                    "slot_type": "diagram",
+                    "preferred_render_initial": "svg",
+                    "preferred_render_final": "svg",
+                    "decision_source": "slot_type_default",
+                },
+                {
+                    "slot_id": "diagram-intent",
+                    "slot_type": "diagram",
+                    "preferred_render_initial": "svg",
+                    "preferred_render_final": "svg",
+                    "decision_source": "slot_type_default",
+                },
+                {
+                    "slot_id": "diagram-validation",
+                    "slot_type": "diagram",
+                    "preferred_render_initial": "svg",
+                    "preferred_render_final": "svg",
+                    "decision_source": "slot_type_default",
+                },
+            ],
+        )
+    )
+    await recorder.apply_event(
+        MediaSlotReadyEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_id="diagram-good",
+            slot_type="diagram",
+            ready_frames=1,
+            total_frames=1,
+            svg_generation_mode="raw_svg",
+            model_slot="standard",
+            diagram_kind="coordinate_slope",
+            sanitized=True,
+            intent_validated=True,
+        )
+    )
+    await recorder.apply_event(
+        MediaSlotFailedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_id="diagram-intent",
+            slot_type="diagram",
+            ready_frames=0,
+            total_frames=1,
+            error="SVG appears to be a flowchart.",
+            svg_generation_mode="raw_svg",
+            model_slot="standard",
+            sanitized=True,
+            intent_validated=False,
+            svg_failure_reason="intent",
+        )
+    )
+    await recorder.apply_event(
+        MediaSlotFailedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_id="diagram-validation",
+            slot_type="diagram",
+            ready_frames=0,
+            total_frames=1,
+            error="SVG has no visible elements.",
+            svg_generation_mode="raw_svg",
+            model_slot="standard",
+            sanitized=True,
+            intent_validated=False,
+            svg_failure_reason="validation",
+        )
+    )
+
+    report = await repo.load_report(generation.id)
+    section = report.sections[0]
+    assert [decision.status for decision in section.media_decisions] == [
+        "generated",
+        "failed",
+        "failed",
+    ]
+    assert section.media_decisions[1].svg_failure_reason == "intent"
+    assert report.summary.raw_svg_generation_count == 3
+    assert report.summary.svg_success_slots == 1
+    assert report.summary.svg_failed_slots == 2
+    assert report.summary.svg_intent_retry_count == 1
+    assert report.summary.svg_validation_failure_count == 1
+    assert report.summary.svg_sanitizer_failure_count == 0
 
 
 @pytest.mark.asyncio
@@ -673,6 +807,7 @@ async def test_recorder_persists_runtime_outline_and_planner_trace() -> None:
                     "role": "intro",
                     "rationale_summary": "Introduce slope as the steepness of a line.",
                     "visual_placements_count": 1,
+                    "visual_placements_summary": ["explanation:diagram"],
                 }
             ],
         )
@@ -690,9 +825,204 @@ async def test_recorder_persists_runtime_outline_and_planner_trace() -> None:
         "Introduce slope as the steepness of a line."
     )
     assert report.planner_trace.sections[0].visual_placements_count == 1
+    assert report.planner_trace.sections[0].visual_placements_summary == [
+        "explanation:diagram"
+    ]
+    assert report.summary.sections_with_planned_visuals == 1
     assert report.planner_trace.duplicate_term_warnings[0].startswith(
         "Duplicate term assignment in curriculum plan"
     )
+
+
+@pytest.mark.asyncio
+async def test_recorder_uses_plan_components_not_template_contract() -> None:
+    generation = _generation("gen-plan-components")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        CurriculumPlannedEvent(
+            generation_id=generation.id,
+            path="seeded_passthrough",
+            result="enriched",
+            runtime_curriculum_outline=[
+                {
+                    "section_id": "s-01",
+                    "title": "Practice section",
+                    "position": 1,
+                    "role": "practice",
+                    "focus": "Apply the concept.",
+                    "terms_to_define": [],
+                    "terms_assumed": [],
+                    "required_components": ["practice-stack", "student-textbox"],
+                }
+            ],
+            planner_trace_sections=[],
+        )
+    )
+    await recorder.apply_event(
+        SectionStartedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            title="Practice section",
+            position=1,
+        )
+    )
+    await recorder.apply_event(
+        SectionAttemptStartedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            attempt=1,
+            trigger="initial",
+        )
+    )
+
+    section = SectionContent(
+        section_id="s-01",
+        template_id="guided-concept-path",
+        header=SectionHeaderContent(
+            title="Practice section",
+            subject="Calculus",
+            grade_band="secondary",
+        ),
+        practice=PracticeContent(
+            problems=[
+                PracticeProblem(
+                    difficulty="warm",
+                    question="Practice question?",
+                    hints=[PracticeHint(level=1, text="Hint")],
+                )
+            ]
+        ),
+        student_textbox=StudentTextboxContent(
+            prompt="Write your answer.",
+            lines=4,
+        ),
+    )
+    await recorder.apply_event(
+        SectionReadyEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            section=section,
+            completed_sections=1,
+            total_sections=1,
+        )
+    )
+    await recorder.finalize_success(
+        document=_document(generation.id, [section]),
+        generation_time_seconds=5.0,
+    )
+
+    report = await repo.load_report(generation.id)
+    section_report = report.sections[0]
+    assert set(section_report.expected_components) == {"practice", "student_textbox"}
+    assert section_report.missing_components == []
+    assert "explanation" not in section_report.expected_components
+    assert "comparison_grid" not in section_report.expected_components
+    assert "worked_example" not in section_report.expected_components
+
+
+@pytest.mark.asyncio
+async def test_recorder_timeline_excludes_noise_events() -> None:
+    generation = _generation("gen-timeline-filter")
+    repo = InMemoryReportRepo()
+    recorder = GenerationReportRecorder(generation=generation, repository=repo)
+
+    await recorder.apply_event(
+        PipelineStartEvent(
+            generation_id=generation.id,
+            section_count=1,
+            template_id="guided-concept-path",
+            preset_id="blue-classroom",
+        )
+    )
+    await recorder.apply_event(
+        SectionStartedEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            title="Section",
+            position=1,
+        )
+    )
+
+    await recorder.apply_event(
+        {
+            "type": "node_started",
+            "node": "schema_validator",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "attempt": 1,
+        }
+    )
+    await recorder.apply_event(
+        {
+            "type": "node_finished",
+            "node": "schema_validator",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "status": "succeeded",
+            "attempt": 1,
+            "latency_ms": 0.5,
+        }
+    )
+    await recorder.apply_event(
+        {
+            "type": "section_partial",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "status": "partial",
+            "pending_assets": [],
+        }
+    )
+    await recorder.apply_event(
+        {
+            "type": "media_plan_ready",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "slot_count": 0,
+        }
+    )
+    await recorder.apply_event(
+        {
+            "type": "image_outcome",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "outcome": "skipped",
+        }
+    )
+    await recorder.apply_event(
+        {
+            "type": "diagram_outcome",
+            "section_id": "s-01",
+            "generation_id": generation.id,
+            "outcome": "skipped",
+        }
+    )
+
+    await recorder.finalize_failure(error="Test")
+    report = await repo.load_report(generation.id)
+    timeline_types = {item.type for item in report.timeline}
+
+    assert "pipeline_start" in timeline_types
+    assert "section_started" in timeline_types
+    assert "node_started" not in timeline_types
+    assert "node_finished" not in timeline_types
+    assert "section_partial" not in timeline_types
+
+    skipped_outcomes = [
+        item
+        for item in report.timeline
+        if item.type in ("image_outcome", "diagram_outcome")
+        and item.payload.get("outcome") == "skipped"
+    ]
+    assert skipped_outcomes == []
+
+    zero_slot_plans = [
+        item
+        for item in report.timeline
+        if item.type == "media_plan_ready" and item.payload.get("slot_count", 0) == 0
+    ]
+    assert zero_slot_plans == []
 
 
 @pytest.mark.asyncio
@@ -713,12 +1043,35 @@ async def test_recorder_tracks_visual_placement_and_render_mode_observability() 
         )
     )
     await recorder.apply_event(
+        MediaPlanReadyEvent(
+            generation_id=generation.id,
+            section_id="s-01",
+            slot_count=1,
+            slots=[
+                {
+                    "slot_id": "diagram-main",
+                    "slot_type": "diagram",
+                    "preferred_render_initial": "svg",
+                    "preferred_render_final": "image",
+                    "fallback_render": "svg",
+                    "decision_source": "intelligent_image_prompt",
+                    "decision_reason": None,
+                    "intelligent_prompt_resolved": True,
+                }
+            ],
+        )
+    )
+    await recorder.apply_event(
         SlotRenderModeResolvedEvent(
             generation_id=generation.id,
             section_id="s-01",
             slot_id="diagram-main",
             render_mode="image",
             decided_by="intelligent_image_prompt",
+            preferred_render_initial="svg",
+            preferred_render_final="image",
+            fallback_render="svg",
+            intelligent_prompt_resolved=True,
         )
     )
 
@@ -730,8 +1083,14 @@ async def test_recorder_tracks_visual_placement_and_render_mode_observability() 
         "worked_example:diagram:compact",
     ]
     assert section.slot_render_modes == {"diagram-main": "image"}
+    assert len(section.media_decisions) == 1
+    assert section.media_decisions[0].decision_source == "intelligent_image_prompt"
+    assert section.media_decisions[0].preferred_render_initial == "svg"
+    assert section.media_decisions[0].preferred_render_final == "image"
+    assert section.media_decisions[0].executor_selected == "image_generator"
     assert report.summary.image_slots_count == 1
     assert report.summary.svg_slots_count == 0
+    assert report.summary.planned_image_slots == 1
     assert report.summary.prompt_builder_calls == 1
 
 
@@ -874,4 +1233,3 @@ async def test_wait_for_idle_times_out_and_drains_pending_queue() -> None:
 
     assert recorder.dropped_event_count == 1
     assert recorder.diagnostics_degraded is True
-

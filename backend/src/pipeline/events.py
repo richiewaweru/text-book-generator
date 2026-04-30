@@ -45,8 +45,8 @@ class SectionStartedEvent(BaseModel):
 class CurriculumPlannedEvent(BaseModel):
     type: Literal["curriculum_planned"] = "curriculum_planned"
     generation_id: str
-    path: Literal["fresh", "seeded_enrichment"]
-    result: Literal["planned", "enriched", "fallback"]
+    path: Literal["fresh", "seeded_enrichment", "seeded_passthrough"]
+    result: Literal["planned", "enriched", "fallback", "seeded_passthrough"]
     duplicate_term_warnings: list[str] = Field(default_factory=list)
     runtime_curriculum_outline: list[GenerationReportOutlineSection] = Field(
         default_factory=list
@@ -240,6 +240,7 @@ class MediaPlanReadyEvent(BaseModel):
     generation_id: str
     section_id: str
     slot_count: int
+    slots: list[dict[str, str | bool | None]] = Field(default_factory=list)
     planned_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -263,6 +264,11 @@ class SlotRenderModeResolvedEvent(BaseModel):
     slot_id: str
     render_mode: str
     decided_by: str
+    preferred_render_initial: str | None = None
+    preferred_render_final: str | None = None
+    fallback_render: str | None = None
+    decision_reason: str | None = None
+    intelligent_prompt_resolved: bool = False
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -316,6 +322,12 @@ class MediaFrameReadyEvent(BaseModel):
     frame_index: int
     render: str | None = None
     label: str | None = None
+    svg_generation_mode: str | None = None
+    model_slot: str | None = None
+    diagram_kind: str | None = None
+    sanitized: bool | None = None
+    intent_validated: bool | None = None
+    svg_failure_reason: str | None = None
     ready_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -332,6 +344,12 @@ class MediaFrameFailedEvent(BaseModel):
     render: str | None = None
     label: str | None = None
     error: str | None = None
+    svg_generation_mode: str | None = None
+    model_slot: str | None = None
+    diagram_kind: str | None = None
+    sanitized: bool | None = None
+    intent_validated: bool | None = None
+    svg_failure_reason: str | None = None
     failed_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -345,6 +363,12 @@ class MediaSlotReadyEvent(BaseModel):
     slot_type: str
     ready_frames: int
     total_frames: int
+    svg_generation_mode: str | None = None
+    model_slot: str | None = None
+    diagram_kind: str | None = None
+    sanitized: bool | None = None
+    intent_validated: bool | None = None
+    svg_failure_reason: str | None = None
     ready_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -359,6 +383,12 @@ class MediaSlotFailedEvent(BaseModel):
     ready_frames: int
     total_frames: int
     error: str | None = None
+    svg_generation_mode: str | None = None
+    model_slot: str | None = None
+    diagram_kind: str | None = None
+    sanitized: bool | None = None
+    intent_validated: bool | None = None
+    svg_failure_reason: str | None = None
     failed_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

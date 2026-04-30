@@ -29,6 +29,8 @@ from pipeline.state import (
 )
 from pipeline.types.requests import BlockVisualPlacement, PipelineRequest, SectionPlan, SectionVisualPolicy
 from pipeline.types.section_content import (
+    DiagramSeriesContent,
+    DiagramSeriesStep,
     ExplanationContent,
     HookHeroContent,
     PracticeContent,
@@ -107,6 +109,13 @@ def _plan(sid: str = "s-01", position: int = 1) -> SectionPlan:
         title=f"Test Section {sid}",
         position=position,
         focus="Test focus",
+        required_components=[
+            "section-header",
+            "hook-hero",
+            "explanation-block",
+            "practice-stack",
+            "what-next-bridge",
+        ],
     )
 
 
@@ -170,6 +179,16 @@ def _base_state(**overrides) -> TextbookPipelineState:
         style_context=_style_context(),
     )
     defaults.update(overrides)
+    if defaults.get("current_section_plan") is None and defaults.get("current_section_id") is not None:
+        current_section_id = defaults["current_section_id"]
+        defaults["current_section_plan"] = next(
+            (
+                plan
+                for plan in defaults.get("curriculum_outline", [])
+                if getattr(plan, "section_id", None) == current_section_id
+            ),
+            _plan(current_section_id),
+        )
     return TextbookPipelineState(**defaults)
 
 
@@ -1044,6 +1063,80 @@ class TestSectionAssembler:
         assert result["section_lifecycle"]["s-01"] == "final"
         assert "section_assembler" in result["completed_nodes"]
 
+    async def test_section_assembler_routes_media_incomplete_series_to_partial(self):
+        from pipeline.nodes.section_assembler import section_assembler
+
+        state = _base_state(
+            current_section_id="s-01",
+            current_section_plan=_plan("s-01").model_copy(
+                update={
+                    "required_components": ["diagram-series"],
+                    "visual_placements": [],
+                }
+            ),
+            generated_sections={
+                "s-01": _section("s-01").model_copy(
+                    update={
+                        "diagram_series": DiagramSeriesContent(
+                            title="Parts of a seed",
+                            diagrams=[
+                                DiagramSeriesStep(
+                                    step_label="Seed coat",
+                                    caption="Outer layer.",
+                                ),
+                                DiagramSeriesStep(
+                                    step_label="Embryo",
+                                    caption="Inner structure.",
+                                ),
+                            ],
+                        )
+                    }
+                )
+            },
+        )
+
+        result = await section_assembler(state)
+
+        assert "assembled_sections" not in result
+        assert "s-01" in result["partial_sections"]
+        assert result["section_pending_assets"]["s-01"] == ["diagram_series_frames"]
+        assert result["section_lifecycle"]["s-01"] == "awaiting_assets"
+
+    async def test_section_assembler_allows_series_with_real_media_when_visual_pipeline_is_empty(self):
+        from pipeline.nodes.section_assembler import section_assembler
+
+        state = _base_state(
+            current_section_id="s-01",
+            current_section_plan=_plan("s-01").model_copy(
+                update={
+                    "required_components": ["diagram-series"],
+                    "visual_placements": [],
+                }
+            ),
+            generated_sections={
+                "s-01": _section("s-01").model_copy(
+                    update={
+                        "diagram_series": DiagramSeriesContent(
+                            title="Parts of a seed",
+                            diagrams=[
+                                DiagramSeriesStep(
+                                    step_label="Seed coat",
+                                    caption="Outer layer.",
+                                    image_url="https://example.com/seed-coat.png",
+                                ),
+                            ],
+                        )
+                    }
+                )
+            },
+        )
+
+        result = await section_assembler(state)
+
+        assert "s-01" in result["assembled_sections"]
+        assert result["section_pending_assets"]["s-01"] == []
+        assert result["section_lifecycle"]["s-01"] == "final"
+
     async def test_final_section_assembler_defers_while_placed_visual_is_pending(self):
         from pipeline.nodes.section_assembler import section_assembler
 
@@ -1142,6 +1235,7 @@ class TestQCAgent:
         from pipeline.nodes import qc_agent as qca_mod
 
         calls = []
+        prompts = []
 
         class DummyAgent:
             def __init__(self, *args, **kwargs):
@@ -1150,6 +1244,7 @@ class TestQCAgent:
 
         async def fake_run_llm(**kwargs):
             calls.append(kwargs["section_id"])
+            prompts.append(kwargs["user_prompt"])
             return SimpleNamespace(
                 output=qca_mod.QCOutput(
                     passed=False,
@@ -1193,6 +1288,8 @@ class TestQCAgent:
         result = await qca_mod.qc_agent(state)
 
         assert calls == ["s-02"]
+        assert "Planned components for this section: section-header, hook-hero, explanation-block, practice-stack, what-next-bridge" in prompts[0]
+        assert "Role: develop" in prompts[0]
         assert result["qc_reports"]["s-01"].warnings == ["existing s-01 warning"]
         assert result["qc_reports"]["s-02"].warnings == [
             "capacity warning",
@@ -1402,7 +1499,6 @@ class TestRunPipelineStreamingEvents:
             SectionFinalEvent,
             SectionPartialEvent,
             SectionReadyEvent,
-            SectionStartedEvent,
         )
         from pipeline.runtime_context import get_runtime_context
 
@@ -2002,6 +2098,9 @@ class TestProcessSectionComposite:
                     intent="explain_structure",
                     mode="svg",
                 ),
+                "visual_placements": [
+                    BlockVisualPlacement(block="explanation", slot_type="diagram")
+                ],
                 "needs_diagram": True,
             }
         )
@@ -2020,8 +2119,6 @@ class TestProcessSectionComposite:
             "schema_validator",
             "media_planner",
             "diagram_generator",
-            "image_generator",
-            "interaction_generator",
             "section_assembler",
             "qc_agent",
         ]
@@ -2083,6 +2180,9 @@ class TestProcessSectionComposite:
                     intent="explain_structure",
                     mode="svg",
                 ),
+                "visual_placements": [
+                    BlockVisualPlacement(block="explanation", slot_type="diagram")
+                ],
                 "needs_diagram": True,
             }
         )
@@ -2099,8 +2199,6 @@ class TestProcessSectionComposite:
             "schema_validator",
             "media_planner",
             "diagram_generator",
-            "image_generator",
-            "interaction_generator",
             "section_assembler",
         ]
 

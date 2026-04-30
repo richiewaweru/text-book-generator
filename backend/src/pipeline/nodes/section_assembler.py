@@ -18,7 +18,7 @@ import json
 import sys
 from datetime import datetime, timezone
 
-from pipeline.contracts import validate_section_for_template
+from pipeline.contracts import build_section_generation_manifest
 from pipeline.console_diagnostics import force_console_log
 from pipeline.media.assembly import apply_media_results_to_section
 from pipeline.media.slot_state import pending_required_slot_ids, required_visual_fields, visual_mode
@@ -38,6 +38,12 @@ def diag(tag: str, **fields) -> None:
 
 diag("BUILD_MARKER", file="section_assembler", version="diag_v1")
 
+_VISUAL_COMPONENT_IDS: frozenset[str] = frozenset({
+    "diagram-block",
+    "diagram-series",
+    "diagram-compare",
+})
+
 
 def _check_capacity(section_dict: dict) -> list[str]:
     # TODO: Replace with capacity warnings derived from Lectio component-registry.json.
@@ -48,31 +54,34 @@ def _check_capacity(section_dict: dict) -> list[str]:
             return 0
         return len(str(text).strip().split())
 
-    hook = section_dict.get("hook", {})
-    if words(hook.get("headline")) > 12:
-        warnings.append("hook.headline exceeds 12 words")
-    if words(hook.get("body")) > 80:
-        warnings.append("hook.body exceeds 80 words")
+    hook = section_dict.get("hook")
+    if hook:
+        if words(hook.get("headline")) > 12:
+            warnings.append("hook.headline exceeds 12 words")
+        if words(hook.get("body")) > 80:
+            warnings.append("hook.body exceeds 80 words")
 
-    explanation = section_dict.get("explanation", {})
-    if words(explanation.get("body")) > 350:
-        warnings.append("explanation.body exceeds 350 words")
-    emphasis = explanation.get("emphasis", [])
-    if len(emphasis) > 3:
-        warnings.append(f"explanation.emphasis has {len(emphasis)} items -- max 3")
+    explanation = section_dict.get("explanation")
+    if explanation:
+        if words(explanation.get("body")) > 350:
+            warnings.append("explanation.body exceeds 350 words")
+        emphasis = explanation.get("emphasis", [])
+        if len(emphasis) > 3:
+            warnings.append(f"explanation.emphasis has {len(emphasis)} items -- max 3")
 
-    practice = section_dict.get("practice", {})
-    problems = practice.get("problems", [])
-    if len(problems) < 2:
-        warnings.append(f"practice has {len(problems)} problems -- minimum 2")
-    if len(problems) > 5:
-        warnings.append(f"practice has {len(problems)} problems -- maximum 5")
-    for index, problem in enumerate(problems):
-        hints = problem.get("hints", [])
-        if len(hints) > 3:
-            warnings.append(
-                f"practice problem {index + 1} has {len(hints)} hints -- max 3"
-            )
+    practice = section_dict.get("practice")
+    if practice:
+        problems = practice.get("problems", [])
+        if len(problems) < 2:
+            warnings.append(f"practice has {len(problems)} problems -- minimum 2")
+        if len(problems) > 5:
+            warnings.append(f"practice has {len(problems)} problems -- maximum 5")
+        for index, problem in enumerate(problems):
+            hints = problem.get("hints", [])
+            if len(hints) > 3:
+                warnings.append(
+                    f"practice problem {index + 1} has {len(hints)} hints -- max 3"
+                )
 
     glossary = section_dict.get("glossary")
     if glossary:
@@ -86,8 +95,8 @@ def _check_capacity(section_dict: dict) -> list[str]:
         if len(steps) > 6:
             warnings.append(f"worked_example has {len(steps)} steps -- max 6")
 
-    what_next = section_dict.get("what_next", {})
-    if words(what_next.get("body")) > 50:
+    what_next = section_dict.get("what_next")
+    if what_next and words(what_next.get("body")) > 50:
         warnings.append("what_next.body exceeds 50 words")
 
     definition = section_dict.get("definition")
@@ -98,6 +107,73 @@ def _check_capacity(section_dict: dict) -> list[str]:
             warnings.append("definition.plain exceeds 60 words")
 
     return warnings
+
+
+def _has_content(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (str, list, dict, tuple, set)):
+        return len(value) > 0
+    return True
+
+
+def _incomplete_visual_fields(
+    section: object,
+    section_plan,
+) -> list[str]:
+    if section_plan is None:
+        return []
+
+    if getattr(section_plan, "visual_placements", None):
+        return []
+
+    selected = set(getattr(section_plan, "required_components", None) or [])
+    selected_visuals = selected & _VISUAL_COMPONENT_IDS
+    if not selected_visuals:
+        return []
+
+    incomplete: list[str] = []
+
+    if "diagram-series" in selected_visuals:
+        series = getattr(section, "diagram_series", None)
+        if series and series.diagrams:
+            has_media = any(step.image_url or step.svg_content for step in series.diagrams)
+            if not has_media:
+                incomplete.append("diagram_series_frames")
+
+    if "diagram-block" in selected_visuals:
+        diagram = getattr(section, "diagram", None)
+        if diagram and not (diagram.image_url or diagram.svg_content):
+            incomplete.append("diagram")
+
+    if "diagram-compare" in selected_visuals:
+        compare = getattr(section, "diagram_compare", None)
+        if compare and not (
+            compare.before_image_url or compare.before_svg
+            or compare.after_image_url or compare.after_svg
+        ):
+            incomplete.append("diagram_compare")
+
+    return incomplete
+
+
+def validate_section_against_manifest(
+    *,
+    section_dict: dict,
+    manifest,
+    pending_assets: list[str],
+    additional_required_fields: set[str],
+) -> tuple[bool, list[str]]:
+    violations: list[str] = []
+    for field in manifest.required_fields:
+        if not _has_content(section_dict.get(field.field_name)):
+            violations.append(f"Required field '{field.field_name}' is missing or empty.")
+    for field in manifest.external_fields:
+        if _has_content(section_dict.get(field.field_name)):
+            continue
+        if field.field_name in additional_required_fields and field.field_name not in pending_assets:
+            violations.append(f"Required external field '{field.field_name}' is missing.")
+    return len(violations) == 0, violations
 
 
 async def section_assembler(
@@ -170,6 +246,10 @@ async def _assemble_section(
         if simulation_issues:
             pending_assets = [*pending_assets, simulation_slot.slot_id]
     pending_assets = list(dict.fromkeys(pending_assets))
+    manifest = build_section_generation_manifest(
+        template_id=typed.contract.id,
+        section_plan=typed.current_section_plan,
+    )
     if pending_assets:
         force_console_log(
             "FINALIZE",
@@ -197,24 +277,45 @@ async def _assemble_section(
             "completed_nodes": [node_name],
         }
 
-    is_valid, violations = validate_section_for_template(
-        section_dict,
-        typed.contract.id,
-        mode="final",
-        allow_missing_fields=set(pending_assets),
-        additional_required_fields=set(required_visual_fields(media_plan)),
-        required_components_override=list(
-            getattr(typed.current_section_plan, "required_components", []) or []
+    incomplete_visuals = _incomplete_visual_fields(section, typed.current_section_plan)
+    if incomplete_visuals:
+        force_console_log(
+            "FINALIZE",
+            "MEDIA_INCOMPLETE",
+            section_id=section_id,
+            incomplete_fields=incomplete_visuals,
+            reason="visual_placements empty - media pipeline did not run",
         )
-        or None,
+        partials = dict(typed.partial_sections)
+        partials[section_id] = PartialSectionRecord(
+            section_id=section.section_id,
+            template_id=section.template_id,
+            content=section,
+            status="awaiting_assets",
+            visual_mode=None,
+            pending_assets=incomplete_visuals,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        lifecycle = dict(typed.section_lifecycle)
+        lifecycle[section_id] = "awaiting_assets"
+        return {
+            "partial_sections": partials,
+            "section_pending_assets": {section_id: incomplete_visuals},
+            "section_lifecycle": lifecycle,
+            "completed_nodes": [node_name],
+        }
+
+    is_valid, violations = validate_section_against_manifest(
+        section_dict=section_dict,
+        manifest=manifest,
+        pending_assets=pending_assets,
+        additional_required_fields=set(required_visual_fields(media_plan)),
     )
     if not is_valid:
         payload = {
             "section_id": section_id,
             "violations": violations,
-            "required_components": getattr(typed.contract, "required_components", None),
-            "always_present": getattr(typed.contract, "always_present", None),
-            "available_components": getattr(typed.contract, "available_components", None),
+            "required_components": getattr(typed.current_section_plan, "required_components", None),
             "section_has_diagram": getattr(section, "diagram", None) is not None,
         }
         diag("ASSEMBLER_CONTRACT_VIOLATION", **payload)
