@@ -7,8 +7,6 @@
 		loading?: boolean;
 		onBack: () => void;
 		onCommit: () => void;
-		onGenerateAsPack?: () => void;
-		packError?: string | null;
 	}
 
 	const COMPONENT_LABELS: Record<string, string> = {
@@ -36,9 +34,7 @@
 		plan,
 		loading = false,
 		onBack,
-		onCommit,
-		onGenerateAsPack = undefined,
-		packError = null
+		onCommit
 	}: Props = $props();
 
 	function labelForComponent(component: string): string {
@@ -155,23 +151,10 @@
 
 	<div class="actions">
 		<button type="button" class="secondary" onclick={onBack} disabled={loading}>Back</button>
-		{#if onGenerateAsPack}
-			<button
-				type="button"
-				class="secondary"
-				onclick={onGenerateAsPack}
-				disabled={loading || visualConflicts.length > 0}
-			>
-				{loading ? 'Planning pack...' : 'Generate as pack'}
-			</button>
-		{/if}
 		<button type="button" class="primary" onclick={onCommit} disabled={loading || visualConflicts.length > 0}>
 			{loading ? 'Starting generation...' : 'Generate'}
 		</button>
 	</div>
-	{#if packError}
-		<p class="error">{packError}</p>
-	{/if}
 </section>
 
 <style>
@@ -257,11 +240,6 @@
 		padding: 0.85rem 0.95rem;
 		background: #fff8e4;
 		color: #805d16;
-	}
-
-	.error {
-		margin: 0;
-		color: #8d3a26;
 	}
 
 	.audience-card {

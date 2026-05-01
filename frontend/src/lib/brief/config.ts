@@ -172,6 +172,164 @@ export const outcomeOptions: Array<{
 	}
 ];
 
+export interface PackResourcePreview {
+	label: string;
+	resourceType: TeacherBriefResourceType;
+	purpose: string;
+	depthBehaviour: 'teacher_depth' | 'always_quick' | 'always_deep';
+	optional: boolean;
+}
+
+export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePreview[]> = {
+	understand: [
+		{
+			label: 'Mini lesson',
+			resourceType: 'mini_booklet',
+			purpose: 'Teaches the concept from scratch in a self-contained sequence.',
+			depthBehaviour: 'teacher_depth',
+			optional: false
+		},
+		{
+			label: 'Vocabulary cards',
+			resourceType: 'quick_explainer',
+			purpose: 'Anchors key terms before students attempt practice.',
+			depthBehaviour: 'always_quick',
+			optional: true
+		},
+		{
+			label: 'Practice worksheet',
+			resourceType: 'worksheet',
+			purpose: 'Applies the concept right away from warm to cold problems.',
+			depthBehaviour: 'teacher_depth',
+			optional: false
+		},
+		{
+			label: 'Exit ticket',
+			resourceType: 'exit_ticket',
+			purpose: 'Checks recall, apply, and explain before students leave.',
+			depthBehaviour: 'always_quick',
+			optional: false
+		}
+	],
+	practice: [
+		{
+			label: 'Practice worksheet',
+			resourceType: 'worksheet',
+			purpose: 'Graduated problems from guided to independent application.',
+			depthBehaviour: 'teacher_depth',
+			optional: false
+		},
+		{
+			label: 'Fluency drill',
+			resourceType: 'practice_set',
+			purpose: 'Extra volume for skills that need speed and accuracy.',
+			depthBehaviour: 'always_quick',
+			optional: true
+		},
+		{
+			label: 'Exit ticket',
+			resourceType: 'exit_ticket',
+			purpose: 'Quick check after practice to confirm transfer.',
+			depthBehaviour: 'always_quick',
+			optional: false
+		}
+	],
+	review: [
+		{
+			label: 'Targeted re-explanation',
+			resourceType: 'quick_explainer',
+			purpose: 'Reframes the specific gap from a different angle.',
+			depthBehaviour: 'always_quick',
+			optional: false
+		},
+		{
+			label: 'Guided practice',
+			resourceType: 'worksheet',
+			purpose: 'Scaffolded practice focused on the misconception.',
+			depthBehaviour: 'teacher_depth',
+			optional: false
+		},
+		{
+			label: 'Misconception check',
+			resourceType: 'exit_ticket',
+			purpose: 'Verifies the misconception is resolved before moving on.',
+			depthBehaviour: 'always_quick',
+			optional: false
+		}
+	],
+	assess: [
+		{
+			label: 'Quiz',
+			resourceType: 'quiz',
+			purpose: 'Formal check with recall, application, and extended response.',
+			depthBehaviour: 'teacher_depth',
+			optional: false
+		},
+		{
+			label: 'Quick check',
+			resourceType: 'exit_ticket',
+			purpose: 'Optional informal cross-check alongside the quiz.',
+			depthBehaviour: 'always_quick',
+			optional: true
+		}
+	],
+	compare: [
+		{
+			label: 'Mini lesson',
+			resourceType: 'mini_booklet',
+			purpose: 'Teaches the comparison with structured explanation.',
+			depthBehaviour: 'teacher_depth',
+			optional: false
+		},
+		{
+			label: 'Practice worksheet',
+			resourceType: 'worksheet',
+			purpose: 'Applies the comparison and distinction with evidence.',
+			depthBehaviour: 'teacher_depth',
+			optional: false
+		},
+		{
+			label: 'Exit ticket',
+			resourceType: 'exit_ticket',
+			purpose: 'Checks whether students can state the key distinction.',
+			depthBehaviour: 'always_quick',
+			optional: false
+		}
+	],
+	vocabulary: [
+		{
+			label: 'Vocabulary cards',
+			resourceType: 'quick_explainer',
+			purpose: 'Defines and contextualizes key terms with examples.',
+			depthBehaviour: 'always_quick',
+			optional: false
+		},
+		{
+			label: 'Mini lesson',
+			resourceType: 'mini_booklet',
+			purpose: 'Uses vocabulary in context so terms are not isolated.',
+			depthBehaviour: 'teacher_depth',
+			optional: false
+		},
+		{
+			label: 'Exit ticket',
+			resourceType: 'exit_ticket',
+			purpose: 'Checks accurate use of terms, not just recall.',
+			depthBehaviour: 'always_quick',
+			optional: false
+		}
+	]
+};
+
+export function resolvePreviewDepth(
+	resource: PackResourcePreview,
+	teacherDepth: TeacherBriefDepth
+): string {
+	if (resource.depthBehaviour === 'always_quick') return 'Quick';
+	if (resource.depthBehaviour === 'always_deep') return 'Deep';
+	return teacherDepth.charAt(0).toUpperCase() + teacherDepth.slice(1);
+}
+
 export const resourceTypeOptions: Array<{
 	value: TeacherBriefResourceType;
 	label: string;

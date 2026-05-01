@@ -15,8 +15,10 @@ const { getProfile } = vi.hoisted(() => ({
 	getProfile: vi.fn()
 }));
 
-const { generatePack, planPackFromBrief } = vi.hoisted(() => ({
+const { generatePack, getPackStatus, getPacks, planPackFromBrief } = vi.hoisted(() => ({
 	generatePack: vi.fn(),
+	getPackStatus: vi.fn(),
+	getPacks: vi.fn(),
 	planPackFromBrief: vi.fn()
 }));
 
@@ -35,8 +37,8 @@ vi.mock('$lib/api/profile', () => ({
 vi.mock('$lib/api/learning-pack', () => ({
 	planPackFromBrief,
 	generatePack,
-	getPackStatus: vi.fn(),
-	getPacks: vi.fn()
+	getPackStatus,
+	getPacks
 }));
 
 import TeacherBriefBuilder from './TeacherBriefBuilder.svelte';
@@ -84,6 +86,8 @@ describe('TeacherBriefBuilder', () => {
 	beforeEach(() => {
 		commitPlan.mockReset();
 		generatePack.mockReset();
+		getPackStatus.mockReset();
+		getPacks.mockReset();
 		planFromBrief.mockReset();
 		planPackFromBrief.mockReset();
 		resolveTopic.mockReset();
@@ -327,7 +331,7 @@ describe('TeacherBriefBuilder', () => {
 		expect(screen.getByText(/start with the idea/i)).toBeTruthy();
 	});
 
-	it('runs generate-as-pack flow from review to complete', async () => {
+	it('shows pack preview at review and generates pack directly', async () => {
 		resolveTopic.mockResolvedValue(
 			buildResolutionResult('Solving two-step equations', 'Grade 10 fit')
 		);
@@ -346,76 +350,15 @@ describe('TeacherBriefBuilder', () => {
 				supports_compatible: true
 			}
 		});
-		planFromBrief.mockResolvedValue({
-			id: 'plan-pack-flow',
-			template_id: 'guided-concept-path',
-			preset_id: 'blue-classroom',
-			mode: 'balanced',
-			template_decision: {
-				chosen_id: 'worksheet',
-				chosen_name: 'Worksheet',
-				rationale: 'Teacher selected Worksheet.',
-				fit_score: 1,
-				alternatives: []
-			},
-			lesson_rationale: 'Move from explanation into guided practice.',
-			directives: {
-				tone_profile: 'supportive',
-				reading_level: 'standard',
-				explanation_style: 'balanced',
-				example_style: 'everyday',
-				scaffold_level: 'medium',
-				brevity: 'balanced'
-			},
-			committed_budgets: {},
-			sections: [
-				{
-					id: 'section-pack-1',
-					order: 1,
-					role: 'intro',
-					title: 'Start with the idea',
-					objective: 'Open the resource clearly.',
-					focus_note: null,
-					selected_components: ['hook-hero'],
-					visual_policy: null,
-					generation_notes: null,
-					rationale: 'Open with a hook.'
-				}
-			],
-			warning: null,
-			source_brief_id: 'brief-pack-flow',
-			source_brief: {
-				subject: 'Math',
-				topic: 'Algebra',
-				subtopics: ['Solving two-step equations'],
-				grade_level: 'grade_10',
-				grade_band: 'high_school',
-				class_profile: {
-					reading_level: 'mixed',
-					language_support: 'none',
-					confidence: 'mixed',
-					prior_knowledge: 'some_background',
-					pacing: 'normal',
-					learning_preferences: []
-				},
-				learner_context: 'Grade 10 learners Some learners struggle with word problems',
-				intended_outcome: 'practice',
-				resource_type: 'worksheet',
-				supports: ['worked_examples'],
-				depth: 'standard',
-				teacher_notes: ''
-			},
-			status: 'draft'
-		});
 		planPackFromBrief.mockResolvedValue({
 			pack_id: 'pack-1',
 			learning_job: {
-				job: 'practice',
+				job: 'introduce',
 				subject: 'Math',
 				topic: 'Algebra',
 				grade_level: 'grade_10',
 				grade_band: 'high_school',
-				objective: 'Students can solve two-step equations.',
+				objective: 'Students can understand two-step equations.',
 				class_signals: ['mixed confidence'],
 				assumptions: [],
 				warnings: [],
@@ -424,7 +367,7 @@ describe('TeacherBriefBuilder', () => {
 				inferred_class_profile: {}
 			},
 			pack_learning_plan: {
-				objective: 'Students can solve two-step equations.',
+				objective: 'Students can understand two-step equations.',
 				success_criteria: [],
 				prerequisite_skills: [],
 				likely_misconceptions: [],
@@ -433,46 +376,105 @@ describe('TeacherBriefBuilder', () => {
 			},
 			resources: [
 				{
-					id: 'resource-1',
+					id: 'resource-1-mini',
 					order: 1,
-					resource_type: 'worksheet',
-					intended_outcome: 'practice',
-					label: 'Guided worksheet',
-					purpose: 'Practice equation solving',
+					resource_type: 'mini_booklet',
+					intended_outcome: 'understand',
+					label: 'Mini lesson',
+					purpose: 'Teach from scratch.',
 					depth: 'standard',
+					supports: ['worked_examples'],
+					enabled: true
+				},
+				{
+					id: 'resource-2-vocab',
+					order: 2,
+					resource_type: 'quick_explainer',
+					intended_outcome: 'understand',
+					label: 'Vocabulary cards',
+					purpose: 'Anchor terms.',
+					depth: 'quick',
+					supports: ['worked_examples'],
+					enabled: true
+				},
+				{
+					id: 'resource-3-practice',
+					order: 3,
+					resource_type: 'worksheet',
+					intended_outcome: 'understand',
+					label: 'Practice worksheet',
+					purpose: 'Apply concept.',
+					depth: 'standard',
+					supports: ['worked_examples'],
+					enabled: true
+				},
+				{
+					id: 'resource-4-exit',
+					order: 4,
+					resource_type: 'exit_ticket',
+					intended_outcome: 'understand',
+					label: 'Exit ticket',
+					purpose: 'Check understanding.',
+					depth: 'quick',
 					supports: ['worked_examples'],
 					enabled: true
 				}
 			],
-			pack_rationale: 'Practice pack'
+			pack_rationale: 'Understand pack'
 		});
 		generatePack.mockResolvedValue({ pack_id: 'pack-1', status: 'running' });
+		getPackStatus.mockResolvedValue({
+			pack_id: 'pack-1',
+			status: 'running',
+			learning_job_type: 'introduce',
+			subject: 'Math',
+			topic: 'Algebra',
+			resource_count: 3,
+			completed_count: 0,
+			current_phase: 'queued',
+			current_resource_label: 'Mini lesson',
+			resources: [],
+			created_at: '2026-05-01T00:00:00Z',
+			completed_at: null
+		});
 
 		render(TeacherBriefBuilder);
 
 		await moveThroughGradeAndSubtopic();
 		await waitFor(() => expect(screen.getByLabelText(/reading level/i)).toBeTruthy());
 		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
-		await fireEvent.click(screen.getByRole('button', { name: /practice a skill/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /understand the idea/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /worksheet/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /standard/i }));
 		await waitFor(() => expect(screen.getByRole('button', { name: /validate brief/i })).toBeTruthy());
 		await fireEvent.click(screen.getByRole('button', { name: /validate brief/i }));
-		await waitFor(() => expect(screen.getByRole('button', { name: /build plan/i })).toBeTruthy());
-		await fireEvent.click(screen.getByRole('button', { name: /build plan/i }));
+		await waitFor(() => expect(screen.getByText(/learning pack/i)).toBeTruthy());
+		expect(screen.getByText(/mini lesson/i)).toBeTruthy();
+		expect(screen.getByRole('button', { name: /generate 4 resources ->/i })).toBeTruthy();
+		expect((screen.getByLabelText(/exit ticket/i) as HTMLInputElement).disabled).toBe(true);
 
-		await waitFor(() => expect(screen.getByRole('button', { name: /generate as pack/i })).toBeTruthy());
-		await fireEvent.click(screen.getByRole('button', { name: /generate as pack/i }));
+		await fireEvent.click(screen.getByLabelText(/vocabulary cards/i));
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: /generate 3 resources ->/i })).toBeTruthy()
+		);
 
-		await waitFor(() => expect(screen.getByRole('heading', { name: /resources/i })).toBeTruthy());
-		expect(planPackFromBrief).toHaveBeenCalledTimes(1);
-
-		await fireEvent.click(screen.getByRole('button', { name: /generate 1 resources/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /generate 3 resources ->/i }));
+		await waitFor(() => expect(planPackFromBrief).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(generatePack).toHaveBeenCalledTimes(1));
 		expect(generatePack).toHaveBeenCalledWith(
-			expect.objectContaining({ pack_id: 'pack-1' }),
-			'Grade 10 learners Some learners struggle with word problems'
+			expect.objectContaining({
+				pack_id: 'pack-1',
+				resources: expect.arrayContaining([
+					expect.objectContaining({ resource_type: 'quick_explainer', enabled: false }),
+					expect.objectContaining({ resource_type: 'mini_booklet', enabled: true }),
+					expect.objectContaining({ resource_type: 'worksheet', enabled: true }),
+					expect.objectContaining({ resource_type: 'exit_ticket', enabled: true })
+				])
+			}),
+			expect.stringContaining('Some learners struggle with word problems')
 		);
+
+		await waitFor(() => expect(screen.getByText(/generating pack/i)).toBeTruthy());
 	});
 });

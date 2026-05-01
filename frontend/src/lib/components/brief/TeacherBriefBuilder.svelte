@@ -20,8 +20,8 @@
 	import GenerationView from '$lib/components/studio/GenerationView.svelte';
 	import PackComplete from '$lib/components/pack/PackComplete.svelte';
 	import PackGenerating from '$lib/components/pack/PackGenerating.svelte';
-	import PackReview from '$lib/components/pack/PackReview.svelte';
 	import { planPackFromBrief, generatePack } from '$lib/api/learning-pack';
+	import type { PackResourcePreview } from '$lib/brief/config';
 	import { resetGenerationState, setGenerationAccepted } from '$lib/stores/studio';
 	import type {
 		BriefBuilderStep,
@@ -37,11 +37,7 @@
 		TeacherGradeLevel,
 		TopicResolutionSubtopic
 	} from '$lib/types';
-	import type {
-		LearningPackPlan,
-		PackGenerateResponse,
-		PackStatusResponse
-	} from '$lib/types/learning-pack';
+	import type { LearningPackPlan, PackGenerateResponse, PackStatusResponse } from '$lib/types/learning-pack';
 
 	import BriefReviewCard from './BriefReviewCard.svelte';
 	import BriefStepCard from './BriefStepCard.svelte';
@@ -54,13 +50,13 @@
 	import SubtopicChoiceStep from './SubtopicChoiceStep.svelte';
 	import SupportsStep from './SupportsStep.svelte';
 	import TopicInputStep from './TopicInputStep.svelte';
+	import PackPreviewCard from './PackPreviewCard.svelte';
 
 	type BuilderStage =
 		| 'building'
 		| 'planning'
 		| 'reviewing'
 		| 'generating'
-		| 'pack-reviewing'
 		| 'pack-generating'
 		| 'pack-complete';
 
@@ -88,7 +84,6 @@
 	let apiError = $state<string | null>(null);
 	let plannedSpec = $state<PlanningGenerationSpec | null>(null);
 	let acceptedGeneration = $state<GenerationAccepted | null>(null);
-	let packPlan = $state<LearningPackPlan | null>(null);
 	let packResponse = $state<PackGenerateResponse | null>(null);
 	let packStatus = $state<PackStatusResponse | null>(null);
 	let packError = $state<string | null>(null);
@@ -129,7 +124,6 @@
 		stage = 'building';
 		plannedSpec = null;
 		acceptedGeneration = null;
-		packPlan = null;
 		packResponse = null;
 		packStatus = null;
 		packError = null;
@@ -141,6 +135,7 @@
 		warnings = [];
 		reviewWarnings = [];
 		apiError = null;
+		packError = null;
 	}
 
 	function clearValidationAndGeneratedState() {
@@ -485,26 +480,21 @@
 		}
 	}
 
-	async function handleGenerateAsPack() {
-		if (!plannedSpec) return;
+	async function handleGeneratePack(enabledResources: PackResourcePreview[]) {
+		if (!validationResult?.is_ready) return;
 		loading = true;
 		packError = null;
 		try {
-			packPlan = await planPackFromBrief(plannedSpec.source_brief);
-			stage = 'pack-reviewing';
-		} catch (err) {
-			packError = err instanceof Error ? err.message : 'Could not plan pack.';
-		} finally {
-			loading = false;
-		}
-	}
-
-	async function handlePackConfirmed(editedPlan: LearningPackPlan) {
-		if (!plannedSpec) return;
-		loading = true;
-		packError = null;
-		try {
-			packResponse = await generatePack(editedPlan, plannedSpec.source_brief.learner_context);
+			const packPlan = await planPackFromBrief(brief as TeacherBrief);
+			const enabledTypes = new Set<string>(enabledResources.map((resource) => resource.resourceType));
+			const editedPlan: LearningPackPlan = {
+				...packPlan,
+				resources: packPlan.resources.map((resource) => ({
+					...resource,
+					enabled: enabledTypes.has(resource.resource_type)
+				}))
+			};
+			packResponse = await generatePack(editedPlan, (brief as TeacherBrief).learner_context);
 			stage = 'pack-generating';
 		} catch (err) {
 			packError = err instanceof Error ? err.message : 'Could not start pack generation.';
@@ -516,14 +506,6 @@
 	function handlePackComplete(status: PackStatusResponse) {
 		packStatus = status;
 		stage = 'pack-complete';
-	}
-
-	function resetPackState() {
-		packPlan = null;
-		packResponse = null;
-		packStatus = null;
-		packError = null;
-		stage = 'reviewing';
 	}
 
 	onMount(() => {
@@ -547,24 +529,9 @@
 </script>
 
 {#if stage === 'reviewing' && plannedSpec}
-	<PlanReviewStep
-		plan={plannedSpec}
-		loading={loading}
-		onBack={resetPlanStage}
-		onCommit={handleCommit}
-		onGenerateAsPack={handleGenerateAsPack}
-		packError={packError}
-	/>
+	<PlanReviewStep plan={plannedSpec} loading={loading} onBack={resetPlanStage} onCommit={handleCommit} />
 {:else if stage === 'generating' && acceptedGeneration}
 	<GenerationView accepted={acceptedGeneration} onReset={resetPlanStage} />
-{:else if stage === 'pack-reviewing' && packPlan}
-	<PackReview
-		plan={packPlan}
-		generating={loading}
-		error={packError}
-		onBack={resetPackState}
-		onConfirmed={handlePackConfirmed}
-	/>
 {:else if stage === 'pack-generating' && packResponse}
 	<PackGenerating packId={packResponse.pack_id} onComplete={handlePackComplete} />
 {:else if stage === 'pack-complete' && packStatus}
@@ -771,10 +738,29 @@
 					/>
 
 					{#if briefIsReady}
-						<div class="review-actions">
-							<button type="button" class="primary-action" onclick={handlePlanFromBrief} disabled={loading}>
-								{loading ? 'Planning resource...' : 'Build plan'}
-							</button>
+						{#if packError}
+							<p class="notice notice-error">{packError}</p>
+						{/if}
+						<div class="review-actions-grid">
+							<div class="action-card action-card-single">
+								<div class="action-card-header">
+									<p class="action-card-kicker">Single resource</p>
+									<h4 class="action-card-title">Build plan</h4>
+									<p class="action-card-desc">
+										One {brief.resource_type?.replaceAll('_', ' ') ?? 'resource'} at {brief.depth ?? 'standard'} depth.
+									</p>
+								</div>
+								<button
+									type="button"
+									class="action-btn action-btn-single"
+									onclick={handlePlanFromBrief}
+									disabled={loading}
+								>
+									{loading && stage === 'planning' ? 'Planning...' : 'Build plan ->'}
+								</button>
+							</div>
+
+							<PackPreviewCard brief={brief} loading={loading} onGenerate={handleGeneratePack} />
 						</div>
 					{/if}
 				</BriefStepCard>
@@ -855,20 +841,67 @@
 		gap: 1rem;
 	}
 
-	.review-actions {
+	.review-actions-grid {
+		display: grid;
+		grid-template-columns: 1fr 2fr;
+		gap: 1rem;
 		margin-top: 0.75rem;
-		display: flex;
-		justify-content: flex-end;
+		align-items: start;
 	}
 
-	.primary-action {
+	.action-card {
+		display: grid;
+		gap: 1rem;
+		border: 1px solid rgba(36, 52, 63, 0.12);
+		border-radius: 20px;
+		background: white;
+		padding: 1.25rem;
+		align-content: space-between;
+	}
+
+	.action-card-kicker {
+		margin: 0 0 0.3rem;
+		font-size: 0.72rem;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: #6b7c88;
+	}
+
+	.action-card-title {
+		margin: 0 0 0.3rem;
+		font-size: 1.05rem;
+	}
+
+	.action-card-desc {
+		margin: 0;
+		font-size: 0.88rem;
+		color: #655c52;
+		line-height: 1.5;
+	}
+
+	.action-btn {
 		border: 0;
 		border-radius: 999px;
-		background: #1d9e75;
-		color: white;
 		padding: 0.8rem 1.1rem;
 		font-weight: 700;
 		cursor: pointer;
+		font-size: 0.9rem;
+		transition: opacity 0.15s;
+	}
+
+	.action-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.action-btn-single {
+		background: #24343f;
+		color: white;
+	}
+
+	.action-btn-single:hover:not(:disabled) {
+		opacity: 0.85;
 	}
 
 	@media (max-width: 720px) {
@@ -877,8 +910,8 @@
 			align-items: stretch;
 		}
 
-		.review-actions {
-			justify-content: stretch;
+		.review-actions-grid {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>
