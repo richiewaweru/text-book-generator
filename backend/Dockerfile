@@ -13,6 +13,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY backend/alembic.ini ./
 COPY backend/src ./src
 COPY backend/contracts ./contracts
+COPY backend/resources ./resources
 
 FROM python:3.11-slim AS runtime
 
@@ -32,6 +33,7 @@ COPY --from=builder /app/backend/.venv /app/backend/.venv
 COPY --from=builder /app/backend/alembic.ini /app/backend/alembic.ini
 COPY --from=builder /app/backend/src /app/backend/src
 COPY --from=builder /app/backend/contracts /app/backend/contracts
+COPY --from=builder /app/backend/resources /app/backend/resources
 
 RUN python -m playwright install --with-deps chromium \
     && mkdir -p /app/backend/outputs/reports /app/backend/outputs/pdf \

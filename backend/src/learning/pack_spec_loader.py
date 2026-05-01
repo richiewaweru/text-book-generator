@@ -14,7 +14,10 @@ _REGISTRY: dict[str, PackSpec] = {}
 
 def load_all_pack_specs(specs_dir: Path = _PACK_SPECS_DIR) -> dict[str, PackSpec]:
     registry: dict[str, PackSpec] = {}
-    for path in sorted(specs_dir.glob("*.yaml")):
+    paths = sorted(specs_dir.glob("*.yaml"))
+    if not paths:
+        raise RuntimeError(f"No pack specs found in {specs_dir}")
+    for path in paths:
         try:
             with path.open(encoding="utf-8") as handle:
                 raw = yaml.safe_load(handle)
@@ -38,4 +41,3 @@ def initialize_pack_registry() -> None:
     _REGISTRY.clear()
     _REGISTRY.update(load_all_pack_specs())
     logger.info("Pack spec registry ready: %s", list(_REGISTRY))
-

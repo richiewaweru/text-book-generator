@@ -14,7 +14,10 @@ _REGISTRY: dict[str, ResourceSpec] = {}
 
 def load_all_specs(specs_dir: Path = _SPECS_DIR) -> dict[str, ResourceSpec]:
     registry: dict[str, ResourceSpec] = {}
-    for path in sorted(specs_dir.glob("*.yaml")):
+    paths = sorted(specs_dir.glob("*.yaml"))
+    if not paths:
+        raise RuntimeError(f"No resource specs found in {specs_dir}")
+    for path in paths:
         try:
             with path.open(encoding="utf-8") as handle:
                 raw = yaml.safe_load(handle)
@@ -44,4 +47,3 @@ def initialize_registry() -> None:
     _REGISTRY.clear()
     _REGISTRY.update(load_all_specs())
     logger.info("Resource spec registry ready: %s", list(_REGISTRY))
-

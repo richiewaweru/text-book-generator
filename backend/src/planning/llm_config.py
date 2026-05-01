@@ -14,6 +14,10 @@ PLANNING_TOPIC_RESOLUTION_CALLER = "topic_resolution"
 PLANNING_TOPIC_RESOLUTION_SLOT = ModelSlot.FAST
 PLANNING_BRIEF_REVIEW_CALLER = "brief_review"
 PLANNING_BRIEF_REVIEW_SLOT = ModelSlot.FAST
+LEARNING_JOB_INTERPRETER_CALLER = "learning_job_interpreter"
+LEARNING_JOB_INTERPRETER_SLOT = ModelSlot.FAST
+PACK_LEARNING_PLANNER_CALLER = "pack_learning_planner"
+PACK_LEARNING_PLANNER_SLOT = ModelSlot.FAST
 
 PLANNING_MODEL_SPECS: dict[str, tuple[ModelSlot, ModelSpec]] = {
     PLANNING_SECTION_COMPOSER_CALLER: (
@@ -46,6 +50,20 @@ PLANNING_MODEL_SPECS: dict[str, tuple[ModelSlot, ModelSpec]] = {
     ),
     PLANNING_BRIEF_REVIEW_CALLER: (
         PLANNING_BRIEF_REVIEW_SLOT,
+        ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
+    ),
+    LEARNING_JOB_INTERPRETER_CALLER: (
+        LEARNING_JOB_INTERPRETER_SLOT,
+        ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
+    ),
+    PACK_LEARNING_PLANNER_CALLER: (
+        PACK_LEARNING_PLANNER_SLOT,
         ModelSpec(
             family=ModelFamily.ANTHROPIC,
             model_name="claude-haiku-4-5-20251001",
