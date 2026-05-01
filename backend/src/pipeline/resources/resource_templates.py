@@ -407,3 +407,12 @@ RESOURCE_TEMPLATE_REGISTRY: dict[TeacherBriefResourceType, ResourceTemplate] = {
 
 def get_resource_template(resource_type: TeacherBriefResourceType) -> ResourceTemplate:
     return RESOURCE_TEMPLATE_REGISTRY[resource_type]
+
+
+def get_resource_template_v2(resource_type: str):
+    try:
+        from resource_specs.loader import get_spec
+
+        return get_spec(resource_type)
+    except Exception:
+        return get_resource_template(resource_type)

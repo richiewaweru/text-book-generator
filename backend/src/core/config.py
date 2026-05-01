@@ -112,6 +112,11 @@ class Settings(BaseSettings):
 
     # Generation admission
     generation_max_concurrent_per_user: int = Field(default=2, ge=1)
+    learning_pack_max_active_per_user: int = Field(default=1, ge=1)
+    learning_pack_max_active_resources_per_pack: int = Field(default=2, ge=1)
+    learning_pack_max_resources: int = Field(default=7, ge=1)
+    learning_pack_status_poll_seconds: float = Field(default=3.0, gt=0)
+    learning_pack_runner_poll_seconds: float = Field(default=5.0, gt=0)
 
     # Runtime concurrency
     pipeline_concurrency_draft_section_max: int = Field(default=6, ge=1)

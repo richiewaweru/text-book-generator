@@ -146,6 +146,7 @@ async def qc_agent(
                 section_json=section_json,
                 selected_components=list(getattr(plan, "required_components", None) or []),
                 section_role=getattr(plan, "role", None),
+                pack_objective=state.request.pack_objective,
             ),
             section_id=section_id,
             generation_mode=state.request.mode,

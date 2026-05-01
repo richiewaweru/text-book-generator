@@ -1418,6 +1418,10 @@ async def enqueue_generation(
     planning_warning: str | None = None,
     grade_band: str | None = None,
     learner_fit: str | None = None,
+    pack_id: str | None = None,
+    pack_resource_id: str | None = None,
+    pack_resource_label: str | None = None,
+    pack_objective: str | None = None,
 ) -> GenerationAcceptedResponse:
     _validate_template_and_preset(template_id, preset_id)
     if profile is None:
@@ -1444,6 +1448,9 @@ async def enqueue_generation(
         requested_preset_id=preset_id,
         section_count=section_count,
         planning_spec_json=planning_spec_json,
+        pack_id=pack_id,
+        pack_resource_id=pack_resource_id,
+        pack_resource_label=pack_resource_label,
     )
     await gen_repo.create(generation)
     initial_document = _initial_document(generation)
@@ -1478,6 +1485,8 @@ async def enqueue_generation(
         learner_fit=learner_fit or "general",
         section_count=section_count,
         section_plans=section_plans,
+        pack_id=pack_id,
+        pack_objective=pack_objective,
     )
 
     async def run_generation_job() -> None:

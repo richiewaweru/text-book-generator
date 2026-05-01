@@ -402,7 +402,6 @@ async def test_curriculum_planner_seeded_outline_passes_through_without_reroutin
         "publish_runtime_event",
         lambda generation_id, event: published_events.append(event),
     )
-    monkeypatch.setattr(curriculum_planner_mod, "get_node_text_model", lambda *args, **kwargs: object())
 
     result = await curriculum_planner_mod.curriculum_planner(state)
 
@@ -445,7 +444,6 @@ async def test_curriculum_planner_seeded_outline_reports_existing_visual_placeme
         "publish_runtime_event",
         lambda generation_id, event: published_events.append(event),
     )
-    monkeypatch.setattr(curriculum_planner_mod, "get_node_text_model", lambda *args, **kwargs: object())
 
     await curriculum_planner_mod.curriculum_planner(state)
 
@@ -459,60 +457,18 @@ async def test_curriculum_planner_seeded_outline_reports_existing_visual_placeme
 
 
 @pytest.mark.asyncio
-async def test_curriculum_planner_fresh_path_routes_visual_placements_after_llm_output(monkeypatch) -> None:
+async def test_curriculum_planner_rejects_request_without_section_plans() -> None:
     state = _base_state(
         request=_request(section_plans=None),
         current_section_plan=None,
         curriculum_outline=None,
     )
 
-    async def fake_run_llm(**kwargs):
-        return SimpleNamespace(
-            output=curriculum_planner_mod.CurriculumOutput(
-                sections=[
-                    _section_plan(
-                        section_id="s-01",
-                        position=1,
-                        required_components=["diagram-block"],
-                        terms_to_define=["chlorophyll"],
-                        practice_target="name the role of chlorophyll",
-                    ),
-                    _section_plan(
-                        section_id="s-02",
-                        position=2,
-                        title="Repeat chlorophyll",
-                        required_components=["diagram-series"],
-                        role="process",
-                        terms_to_define=["Chlorophyll"],
-                        practice_target="spot the repeated term",
-                    ),
-                ]
-            )
-        )
-
-    monkeypatch.setattr(curriculum_planner_mod, "Agent", FakeAgent)
-    monkeypatch.setattr(curriculum_planner_mod, "run_llm", fake_run_llm)
-    monkeypatch.setattr(curriculum_planner_mod, "get_node_text_model", lambda *args, **kwargs: "fast-model")
-    published_events: list[object] = []
-    monkeypatch.setattr(
-        curriculum_planner_mod,
-        "publish_runtime_event",
-        lambda generation_id, event: published_events.append(event),
-    )
-
     result = await curriculum_planner_mod.curriculum_planner(state)
 
-    section = result["curriculum_outline"][0]
-    assert section.visual_placements[0].slot_type == "diagram"
-    assert section.visual_policy.mode == "image"
-    assert section.needs_diagram is True
-    planner_event = next(event for event in published_events if event.type == "curriculum_planned")
-    assert len(planner_event.duplicate_term_warnings) == 1
-    assert "visual_commitment" not in planner_event.runtime_curriculum_outline[0].model_dump()
-    assert planner_event.planner_trace_sections[0].visual_placements_count == 1
-    assert planner_event.planner_trace_sections[0].visual_placements_summary == [
-        "explanation:diagram"
-    ]
+    assert result["curriculum_outline"] == []
+    assert result["errors"][0].recoverable is False
+    assert "No section plans provided" in result["errors"][0].message
 
 
 def test_curriculum_planner_defaults_static_visual_mode_to_image() -> None:

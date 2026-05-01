@@ -6,16 +6,19 @@
 	import { isApiError } from '$lib/api/errors';
 	import { getOnboardingRoute, resolveDashboardProfileFailure } from '$lib/auth/routing';
 	import { getGenerations } from '$lib/api/client';
+	import { getPacks } from '$lib/api/learning-pack';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import { getProfile } from '$lib/api/profile';
 	import { authUser, logout } from '$lib/stores/auth';
 	import { getTextbookRoute } from '$lib/navigation/textbook';
 	import type { TeacherProfile, GenerationHistoryItem } from '$lib/types';
+	import type { PackStatusResponse } from '$lib/types/learning-pack';
 
 	const user = fromStore(authUser);
 
 	let profile = $state<TeacherProfile | null>(null);
 	let pastGenerations = $state<GenerationHistoryItem[]>([]);
+	let recentPacks = $state<PackStatusResponse[]>([]);
 	let loadingProfile = $state(true);
 	let profileErrorMessage = $state<string | null>(null);
 	const savedGenerations = $derived(
@@ -46,7 +49,9 @@
 		}
 
 		try {
-			pastGenerations = await getGenerations();
+			const [generations, packs] = await Promise.all([getGenerations(), getPacks()]);
+			pastGenerations = generations;
+			recentPacks = packs;
 		} catch (err) {
 			if (isApiError(err) && err.status === 401) {
 				logout();
@@ -165,6 +170,29 @@
 				</div>
 			</div>
 		</section>
+
+		{#if recentPacks.length > 0}
+			<section class="history-section">
+				<h2>Recent Packs</h2>
+				<ul class="history-list">
+					{#each recentPacks as pack}
+						<li class="history-item">
+							<div class="history-info">
+								<p class="history-subject">{pack.topic}</p>
+								<div class="history-meta">
+									<span class="status status-{pack.status}">{pack.status}</span>
+									<span>{pack.subject}</span>
+									<span>{pack.completed_count}/{pack.resource_count} ready</span>
+								</div>
+							</div>
+							<div class="history-actions">
+								<a href={`/packs/${pack.pack_id}`} class="view-link">Open</a>
+							</div>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
 
 		{#if savedGenerations.length > 0}
 			<section class="history-section">
@@ -418,7 +446,8 @@
 		color: #28516b;
 	}
 
-	.status-completed {
+	.status-completed,
+	.status-complete {
 		background: rgba(61, 120, 73, 0.13);
 		color: #276135;
 	}

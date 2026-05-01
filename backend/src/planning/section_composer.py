@@ -20,6 +20,8 @@ from planning.models import (
 from planning.role_maps import ROLE_COMPONENT_MAP
 from pipeline.resources import ResourceTemplate
 from pipeline.types.teacher_brief import TeacherBrief
+from resource_specs.loader import get_spec
+from resource_specs.renderer import render_spec_for_prompt
 
 
 def _build_section(
@@ -155,6 +157,24 @@ def _user_prompt(
 ) -> str:
     depth_limit = template.depth_limits[brief.depth]
     class_profile = brief.class_profile
+    try:
+        spec_block = render_spec_for_prompt(
+            spec=get_spec(brief.resource_type),
+            depth=brief.depth,
+            active_roles=list(roles),
+            active_supports=list(brief.supports),
+        )
+    except Exception:
+        spec_block = "\n".join(
+            [
+                f"Template label: {template.label}",
+                f"Template description: {template.description}",
+                f"Required obligations: {'; '.join(template.required_obligations) or 'none'}",
+                f"Resolved planning roles: {', '.join(roles)}",
+                "Role component map:",
+                _role_component_lines(roles),
+            ]
+        )
     parts = [
         f"Subject: {brief.subject}",
         f"Topic: {brief.topic}",
@@ -176,9 +196,7 @@ def _user_prompt(
         f"Depth: {brief.depth}",
         f"Supports: {', '.join(brief.supports) if brief.supports else 'none'}",
         f"Teacher notes: {brief.teacher_notes or 'none'}",
-        f"Template label: {template.label}",
-        f"Template description: {template.description}",
-        f"Required obligations: {'; '.join(template.required_obligations) or 'none'}",
+        spec_block,
         (
             "Depth limits: "
             f"min sections {depth_limit.min_components}, max sections {depth_limit.max_components}, "
@@ -191,9 +209,6 @@ def _user_prompt(
             f"explanation_style={directives.explanation_style}, example_style={directives.example_style}, "
             f"scaffold_level={directives.scaffold_level}, brevity={directives.brevity}"
         ),
-        f"Resolved planning roles: {', '.join(roles)}",
-        "Role component map:",
-        _role_component_lines(roles),
         "Return this JSON shape exactly:",
         "{",
         '  "lesson_rationale": "string",',

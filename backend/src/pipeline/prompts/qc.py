@@ -53,6 +53,7 @@ def build_qc_user_prompt(
     section_json: str,
     selected_components: list[str] | None = None,
     section_role: str | None = None,
+    pack_objective: str | None = None,
 ) -> str:
     components_block = ""
     if selected_components:
@@ -67,6 +68,10 @@ Absence of a component that is not in the planned list is correct behavior, not 
 
 """
 
+    objective_block = ""
+    if pack_objective:
+        objective_block = f"Pack objective: {pack_objective}\n\n"
+
     return f"""Evaluate this section:
 
-{components_block}{section_json}"""
+{objective_block}{components_block}{section_json}"""

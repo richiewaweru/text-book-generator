@@ -29,6 +29,7 @@ class UserModel(Base):
 
     profile = relationship("StudentProfileModel", back_populates="user", uselist=False)
     generations = relationship("GenerationModel", back_populates="user")
+    packs = relationship("LearningPackModel", back_populates="user")
     llm_calls = relationship("LLMCallModel", back_populates="user")
 
 
@@ -76,6 +77,28 @@ class StudentProfileModel(Base):
         self.delivery_preferences = json.dumps(values)
 
 
+class LearningPackModel(Base):
+    __tablename__ = "learning_packs"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    learning_job_type = Column(String, nullable=False)
+    subject = Column(String, nullable=False)
+    topic = Column(String, nullable=False)
+    pack_plan_json = Column(Text, nullable=False)
+    status = Column(String, default="pending", nullable=False, index=True)
+    resource_count = Column(Integer, nullable=False)
+    completed_count = Column(Integer, default=0, nullable=False)
+    current_resource_label = Column(String, nullable=True)
+    current_phase = Column(String, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+
+    generations = relationship("GenerationModel", back_populates="pack")
+    user = relationship("UserModel", back_populates="packs")
+
+
 class GenerationModel(Base):
     __tablename__ = "generations"
 
@@ -99,11 +122,15 @@ class GenerationModel(Base):
     generation_time_seconds = Column(Float, nullable=True)
     planning_spec_json = Column(Text, nullable=True)
     report_json = Column(JSON_DOCUMENT_TYPE, nullable=True)
+    pack_id = Column(String, ForeignKey("learning_packs.id"), nullable=True, index=True)
+    pack_resource_id = Column(String, nullable=True, index=True)
+    pack_resource_label = Column(String, nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     last_heartbeat = Column(DateTime, nullable=True, index=True)
 
     user = relationship("UserModel", back_populates="generations")
+    pack = relationship("LearningPackModel", back_populates="generations")
 
 
 class LLMCallModel(Base):

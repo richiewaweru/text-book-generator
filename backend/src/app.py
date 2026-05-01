@@ -38,7 +38,10 @@ from generation.recovery import mark_stale_generations_failed
 from generation.repositories.sql_document_repo import SqlDocumentRepository
 from generation.repositories.sql_generation_repo import SqlGenerationRepository
 from generation.routes import router as generation_router
+from learning.pack_spec_loader import initialize_pack_registry
+from learning.routes import router as learning_router
 from planning.routes import router as brief_router
+from resource_specs.loader import initialize_registry as initialize_resource_registry
 from telemetry import telemetry_router
 from telemetry.dependencies import get_llm_call_repository, get_report_repository
 from telemetry.service import telemetry_monitor
@@ -185,6 +188,8 @@ async def lifespan(app: FastAPI):
     )
     if settings.run_migrations_on_startup:
         await asyncio.to_thread(upgrade_database)
+    initialize_resource_registry()
+    initialize_pack_registry()
     await telemetry_monitor.start()
     stale_generations = await _mark_stale_generations_failed()
     pdf_temp_cleaned = cleanup_stale_pdf_exports(
@@ -252,6 +257,7 @@ def create_app() -> FastAPI:
     app.include_router(shares_router)
     app.include_router(profile_router)
     app.include_router(brief_router)
+    app.include_router(learning_router)
     app.include_router(generation_router)
     app.include_router(telemetry_router)
 

@@ -29,6 +29,8 @@ class PipelineRequest(BaseModel):
     mode: GenerationMode = GenerationMode.BALANCED
     generation_id: str | None = None
     section_plans: list["SectionPlan"] | None = None
+    pack_id: str | None = None
+    pack_objective: str | None = None
 
     @property
     def topic(self) -> str:
