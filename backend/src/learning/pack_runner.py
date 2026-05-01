@@ -13,20 +13,12 @@ from generation.service import (
     _pipeline_sections_from_planning_spec,
     enqueue_generation,
 )
-from learning.models import LearningJob, LearningPackPlan, PackGenerateResponse, PackLearningPlan, ResourcePlan
+from learning.models import LearningPackPlan, PackGenerateResponse, PackLearningPlan, ResourcePlan
 from learning.pack_repository import LearningPackRepository
 from pipeline.types.teacher_brief import ClassProfile, GRADE_BAND_BY_LEVEL, TeacherBrief
 from planning.service import PlanningService
 
 logger = logging.getLogger(__name__)
-
-
-def _learner_context_from_job(job: LearningJob, situation: str) -> str:
-    parts = [f"{job.grade_level.replace('_', ' ').title()} {job.subject} class."]
-    if job.class_signals:
-        parts.append(f"Class signals: {', '.join(job.class_signals)}.")
-    parts.append(f"Situation: {situation[:300].strip()}")
-    return " ".join(parts)
 
 
 def _pack_context_prefix(
@@ -91,7 +83,7 @@ def _brief_from_resource_plan(
 
 async def start_pack(
     pack: LearningPackPlan,
-    situation: str,
+    learner_context: str,
     *,
     current_user,
     profile,
@@ -129,7 +121,7 @@ async def start_pack(
     asyncio.create_task(
         run_pack(
             pack,
-            situation,
+            learner_context,
             current_user=current_user,
             profile=profile,
             engine=engine,
@@ -146,7 +138,7 @@ async def start_pack(
 
 async def run_pack(
     pack: LearningPackPlan,
-    situation: str,
+    learner_context: str,
     *,
     current_user,
     profile,
@@ -159,7 +151,6 @@ async def run_pack(
     pack_repo: LearningPackRepository,
 ) -> None:
     enabled = [resource for resource in pack.resources if resource.enabled]
-    learner_context = _learner_context_from_job(pack.learning_job, situation)
     service = PlanningService()
 
     try:

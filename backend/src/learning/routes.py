@@ -20,7 +20,6 @@ from generation.dependencies import (
     get_report_repository,
 )
 from generation.ports.generation_repository import GenerationRepository
-from learning.interpreter import interpret_situation
 from learning.models import (
     LearningJob,
     LearningPackPlan,
@@ -29,11 +28,11 @@ from learning.models import (
     PackLearningPlan,
     PackStatusResponse,
     ResourceStatus,
-    SituationRequest,
 )
 from learning.pack_planner import generate_pack_learning_plan, plan_pack
 from learning.pack_repository import LearningPackRepository
 from learning.pack_runner import start_pack
+from pipeline.types.teacher_brief import TeacherBrief
 from planning.llm_config import PLANNING_SECTION_COMPOSER_CALLER, get_planning_slot, get_planning_spec
 from planning.routes import _load_profile
 
@@ -54,38 +53,57 @@ async def _run_llm_fn(**kwargs):
     )
 
 
-@router.post("/interpret", response_model=LearningJob)
-@limiter.limit("20/minute")
-async def interpret_teaching_situation(
-    request: Request,
-    payload: SituationRequest,
-    current_user: User = Depends(get_current_user),
-) -> LearningJob:
-    _ = (request, current_user)
-    trace_id = uuid.uuid4().hex
-    model = build_model(get_planning_spec(PLANNING_SECTION_COMPOSER_CALLER))
-    try:
-        return await interpret_situation(
-            payload,
-            model=model,
-            run_llm_fn=_run_llm_fn,
-            generation_id=trace_id,
-        )
-    except Exception as exc:
-        logger.exception("Situation interpretation failed")
-        raise HTTPException(status_code=502, detail="Interpretation failed. Please try again.") from exc
+_OUTCOME_TO_JOB: dict[str, str] = {
+    "understand": "introduce",
+    "practice": "practice",
+    "review": "reteach",
+    "assess": "assess",
+    "compare": "introduce",
+    "vocabulary": "introduce",
+}
 
 
-@router.post("/plan", response_model=LearningPackPlan)
+def _brief_to_learning_job(brief: TeacherBrief) -> LearningJob:
+    profile = brief.class_profile
+    signals: list[str] = []
+    if profile.reading_level == "below_grade":
+        signals.append("below grade reading level")
+    if profile.language_support in ("some_ell", "many_ell"):
+        signals.append(f"{profile.language_support.replace('_', ' ')} students")
+    if profile.confidence == "low":
+        signals.append("low confidence")
+    if profile.prior_knowledge == "new_topic":
+        signals.append("first exposure to this topic")
+    if profile.pacing == "short_chunks":
+        signals.append("needs shorter tasks")
+
+    return LearningJob(
+        job=_OUTCOME_TO_JOB.get(brief.intended_outcome, "introduce"),
+        subject=brief.subject or brief.topic,
+        topic=brief.topic,
+        grade_level=brief.grade_level,
+        grade_band=brief.grade_band,
+        objective=brief.subtopics[0] if brief.subtopics else brief.topic,
+        class_signals=signals,
+        assumptions=[],
+        warnings=[],
+        recommended_depth=brief.depth,
+        inferred_supports=list(brief.supports),
+        inferred_class_profile=profile.model_dump(),
+    )
+
+
+@router.post("/plan-from-brief", response_model=LearningPackPlan)
 @limiter.limit("20/minute")
-async def plan_learning_pack(
+async def plan_pack_from_brief(
     request: Request,
-    job: LearningJob,
+    brief: TeacherBrief,
     current_user: User = Depends(get_current_user),
 ) -> LearningPackPlan:
     _ = (request, current_user)
     trace_id = uuid.uuid4().hex
     model = build_model(get_planning_spec(PLANNING_SECTION_COMPOSER_CALLER))
+    job = _brief_to_learning_job(brief)
     try:
         pack_learning_plan = await generate_pack_learning_plan(
             job,
@@ -94,7 +112,7 @@ async def plan_learning_pack(
             generation_id=trace_id,
         )
     except Exception:
-        logger.exception("Pack learning plan failed; using fallback")
+        logger.exception("Pack learning plan LLM failed; using minimal fallback")
         pack_learning_plan = PackLearningPlan(
             objective=job.objective,
             success_criteria=[],
@@ -131,7 +149,7 @@ async def generate_learning_pack(
     try:
         return await start_pack(
             payload.pack_plan,
-            payload.situation,
+            payload.learner_context,
             current_user=current_user,
             profile=profile,
             engine=engine,

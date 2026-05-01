@@ -1,21 +1,5 @@
-export type LearningJobType = 'introduce' | 'practice' | 'reteach' | 'assess' | 'differentiate';
 export type PackStatus = 'pending' | 'running' | 'complete' | 'failed';
 export type ResourcePhase = 'pending' | 'planning' | 'queued' | 'generating' | 'done' | 'failed';
-
-export interface LearningJob {
-	job: LearningJobType;
-	subject: string;
-	topic: string;
-	grade_level: string;
-	grade_band: string;
-	objective: string;
-	class_signals: string[];
-	assumptions: string[];
-	warnings: string[];
-	recommended_depth: 'quick' | 'standard' | 'deep';
-	inferred_supports: string[];
-	inferred_class_profile: Record<string, unknown>;
-}
 
 export interface PackLearningPlan {
 	objective: string;
@@ -40,10 +24,28 @@ export interface ResourcePlan {
 
 export interface LearningPackPlan {
 	pack_id: string;
-	learning_job: LearningJob;
+	learning_job: {
+		job: string;
+		subject: string;
+		topic: string;
+		grade_level: string;
+		grade_band: string;
+		objective: string;
+		class_signals: string[];
+		assumptions: string[];
+		warnings: string[];
+		recommended_depth: 'quick' | 'standard' | 'deep';
+		inferred_supports: string[];
+		inferred_class_profile: Record<string, unknown>;
+	};
 	pack_learning_plan: PackLearningPlan;
 	resources: ResourcePlan[];
 	pack_rationale: string;
+}
+
+export interface PackGenerateRequest {
+	pack_plan: LearningPackPlan;
+	learner_context: string;
 }
 
 export interface PackGenerateResponse {
@@ -63,7 +65,7 @@ export interface ResourceStatus {
 export interface PackStatusResponse {
 	pack_id: string;
 	status: PackStatus;
-	learning_job_type: LearningJobType;
+	learning_job_type: string;
 	subject: string;
 	topic: string;
 	resource_count: number;
@@ -74,4 +76,3 @@ export interface PackStatusResponse {
 	created_at: string;
 	completed_at: string | null;
 }
-

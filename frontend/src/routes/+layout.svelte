@@ -53,7 +53,6 @@
 					<div class="nav-links">
 						<a href="/dashboard" class="nav-link">Dashboard</a>
 						<a href="/studio" class="nav-link">Studio</a>
-						<a href="/pack" class="nav-link">Packs</a>
 					</div>
 				{/if}
 			</div>

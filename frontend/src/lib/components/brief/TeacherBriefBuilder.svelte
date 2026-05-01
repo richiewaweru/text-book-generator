@@ -18,6 +18,10 @@
 		stepSummary
 	} from '$lib/brief/config';
 	import GenerationView from '$lib/components/studio/GenerationView.svelte';
+	import PackComplete from '$lib/components/pack/PackComplete.svelte';
+	import PackGenerating from '$lib/components/pack/PackGenerating.svelte';
+	import PackReview from '$lib/components/pack/PackReview.svelte';
+	import { planPackFromBrief, generatePack } from '$lib/api/learning-pack';
 	import { resetGenerationState, setGenerationAccepted } from '$lib/stores/studio';
 	import type {
 		BriefBuilderStep,
@@ -33,6 +37,11 @@
 		TeacherGradeLevel,
 		TopicResolutionSubtopic
 	} from '$lib/types';
+	import type {
+		LearningPackPlan,
+		PackGenerateResponse,
+		PackStatusResponse
+	} from '$lib/types/learning-pack';
 
 	import BriefReviewCard from './BriefReviewCard.svelte';
 	import BriefStepCard from './BriefStepCard.svelte';
@@ -46,7 +55,14 @@
 	import SupportsStep from './SupportsStep.svelte';
 	import TopicInputStep from './TopicInputStep.svelte';
 
-	type BuilderStage = 'building' | 'planning' | 'reviewing' | 'generating';
+	type BuilderStage =
+		| 'building'
+		| 'planning'
+		| 'reviewing'
+		| 'generating'
+		| 'pack-reviewing'
+		| 'pack-generating'
+		| 'pack-complete';
 
 	let stage = $state<BuilderStage>('building');
 	let active_step = $state<BriefBuilderStep>('topic');
@@ -72,6 +88,10 @@
 	let apiError = $state<string | null>(null);
 	let plannedSpec = $state<PlanningGenerationSpec | null>(null);
 	let acceptedGeneration = $state<GenerationAccepted | null>(null);
+	let packPlan = $state<LearningPackPlan | null>(null);
+	let packResponse = $state<PackGenerateResponse | null>(null);
+	let packStatus = $state<PackStatusResponse | null>(null);
+	let packError = $state<string | null>(null);
 
 	const learnerSummary = $derived(learnerText);
 	const reviewReady = $derived(
@@ -109,6 +129,10 @@
 		stage = 'building';
 		plannedSpec = null;
 		acceptedGeneration = null;
+		packPlan = null;
+		packResponse = null;
+		packStatus = null;
+		packError = null;
 		resetGenerationState();
 	}
 
@@ -461,6 +485,47 @@
 		}
 	}
 
+	async function handleGenerateAsPack() {
+		if (!plannedSpec) return;
+		loading = true;
+		packError = null;
+		try {
+			packPlan = await planPackFromBrief(plannedSpec.source_brief);
+			stage = 'pack-reviewing';
+		} catch (err) {
+			packError = err instanceof Error ? err.message : 'Could not plan pack.';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function handlePackConfirmed(editedPlan: LearningPackPlan) {
+		if (!plannedSpec) return;
+		loading = true;
+		packError = null;
+		try {
+			packResponse = await generatePack(editedPlan, plannedSpec.source_brief.learner_context);
+			stage = 'pack-generating';
+		} catch (err) {
+			packError = err instanceof Error ? err.message : 'Could not start pack generation.';
+		} finally {
+			loading = false;
+		}
+	}
+
+	function handlePackComplete(status: PackStatusResponse) {
+		packStatus = status;
+		stage = 'pack-complete';
+	}
+
+	function resetPackState() {
+		packPlan = null;
+		packResponse = null;
+		packStatus = null;
+		packError = null;
+		stage = 'reviewing';
+	}
+
 	onMount(() => {
 		resetGenerationState();
 		void getProfile()
@@ -482,9 +547,28 @@
 </script>
 
 {#if stage === 'reviewing' && plannedSpec}
-	<PlanReviewStep plan={plannedSpec} loading={loading} onBack={resetPlanStage} onCommit={handleCommit} />
+	<PlanReviewStep
+		plan={plannedSpec}
+		loading={loading}
+		onBack={resetPlanStage}
+		onCommit={handleCommit}
+		onGenerateAsPack={handleGenerateAsPack}
+		packError={packError}
+	/>
 {:else if stage === 'generating' && acceptedGeneration}
 	<GenerationView accepted={acceptedGeneration} onReset={resetPlanStage} />
+{:else if stage === 'pack-reviewing' && packPlan}
+	<PackReview
+		plan={packPlan}
+		generating={loading}
+		error={packError}
+		onBack={resetPackState}
+		onConfirmed={handlePackConfirmed}
+	/>
+{:else if stage === 'pack-generating' && packResponse}
+	<PackGenerating packId={packResponse.pack_id} onComplete={handlePackComplete} />
+{:else if stage === 'pack-complete' && packStatus}
+	<PackComplete packStatus={packStatus} onNewPack={resetPlanStage} />
 {:else}
 	<section class="builder-shell">
 		<header class="builder-header">

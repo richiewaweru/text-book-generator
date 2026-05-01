@@ -1,23 +1,6 @@
 from __future__ import annotations
 
 
-SITUATION_INTERPRETER_SYSTEM = """
-You interpret a teacher's plain-language situation into a structured LearningJob.
-Return only valid JSON matching the output schema.
-
-Choose exactly one job:
-- introduce: new concept or first exposure
-- practice: already taught, needs application or fluency
-- reteach: misconception, gap, or prior struggle
-- assess: quiz, test, check understanding
-- differentiate: mixed levels or different access needs
-
-Infer subject, topic, grade_level, objective, class_signals, assumptions, warnings,
-recommended_depth, inferred_supports, and inferred_class_profile. Do not invent details.
-Use objective format: "Students can ...".
-""".strip()
-
-
 PACK_LEARNING_PLAN_SYSTEM = """
 You create the shared instructional anchor for a learning pack.
 Return only valid JSON matching the PackLearningPlan schema.
@@ -33,17 +16,6 @@ Rules:
 Every generated resource in the pack will receive this plan, so make it specific,
 coherent, and grounded in the learning job.
 """.strip()
-
-
-def build_situation_interpreter_user_prompt(situation: str) -> str:
-    return "\n".join(
-        [
-            "Teaching situation:",
-            situation.strip(),
-            "",
-            "Extract the structured learning job. Use only stated or strongly implied details.",
-        ]
-    )
 
 
 def build_pack_learning_plan_user_prompt(
@@ -71,4 +43,3 @@ def build_pack_learning_plan_user_prompt(
             pack_intent.strip(),
         ]
     )
-

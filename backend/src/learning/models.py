@@ -10,10 +10,7 @@ PackStatus = Literal["pending", "running", "complete", "failed"]
 ResourcePhase = Literal["pending", "planning", "queued", "generating", "done", "failed"]
 
 
-class SituationRequest(BaseModel):
-    situation: str = Field(min_length=5, max_length=2000)
-
-
+# Internal intermediate type for pack planning and generation orchestration.
 class LearningJob(BaseModel):
     job: LearningJobType
     subject: str
@@ -60,7 +57,7 @@ class LearningPackPlan(BaseModel):
 
 class PackGenerateRequest(BaseModel):
     pack_plan: LearningPackPlan
-    situation: str = Field(min_length=5, max_length=2000)
+    learner_context: str = Field(min_length=5, max_length=2000)
 
 
 class PackGenerateResponse(BaseModel):
@@ -90,4 +87,3 @@ class PackStatusResponse(BaseModel):
     resources: list[ResourceStatus] = Field(default_factory=list)
     created_at: str
     completed_at: str | None = None
-

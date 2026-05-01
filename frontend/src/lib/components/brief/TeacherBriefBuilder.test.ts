@@ -15,6 +15,11 @@ const { getProfile } = vi.hoisted(() => ({
 	getProfile: vi.fn()
 }));
 
+const { generatePack, planPackFromBrief } = vi.hoisted(() => ({
+	generatePack: vi.fn(),
+	planPackFromBrief: vi.fn()
+}));
+
 vi.mock('$lib/api/teacher-brief', () => ({
 	commitPlan,
 	planFromBrief,
@@ -25,6 +30,13 @@ vi.mock('$lib/api/teacher-brief', () => ({
 
 vi.mock('$lib/api/profile', () => ({
 	getProfile
+}));
+
+vi.mock('$lib/api/learning-pack', () => ({
+	planPackFromBrief,
+	generatePack,
+	getPackStatus: vi.fn(),
+	getPacks: vi.fn()
 }));
 
 import TeacherBriefBuilder from './TeacherBriefBuilder.svelte';
@@ -71,7 +83,9 @@ async function moveThroughGradeAndSubtopic() {
 describe('TeacherBriefBuilder', () => {
 	beforeEach(() => {
 		commitPlan.mockReset();
+		generatePack.mockReset();
 		planFromBrief.mockReset();
+		planPackFromBrief.mockReset();
 		resolveTopic.mockReset();
 		reviewTeacherBrief.mockReset();
 		validateTeacherBrief.mockReset();
@@ -311,5 +325,154 @@ describe('TeacherBriefBuilder', () => {
 		await waitFor(() => expect(screen.getByText(/plan review/i)).toBeTruthy());
 		expect(screen.getAllByText(/grade 10/i).length).toBeGreaterThan(0);
 		expect(screen.getByText(/start with the idea/i)).toBeTruthy();
+	});
+
+	it('runs generate-as-pack flow from review to complete', async () => {
+		resolveTopic.mockResolvedValue(
+			buildResolutionResult('Solving two-step equations', 'Grade 10 fit')
+		);
+		validateTeacherBrief.mockResolvedValue({
+			is_ready: true,
+			blockers: [],
+			warnings: [],
+			suggestions: []
+		});
+		reviewTeacherBrief.mockResolvedValue({
+			coherent: true,
+			warnings: [],
+			feasibility: {
+				subtopics_fit: true,
+				depth_adequate: true,
+				supports_compatible: true
+			}
+		});
+		planFromBrief.mockResolvedValue({
+			id: 'plan-pack-flow',
+			template_id: 'guided-concept-path',
+			preset_id: 'blue-classroom',
+			mode: 'balanced',
+			template_decision: {
+				chosen_id: 'worksheet',
+				chosen_name: 'Worksheet',
+				rationale: 'Teacher selected Worksheet.',
+				fit_score: 1,
+				alternatives: []
+			},
+			lesson_rationale: 'Move from explanation into guided practice.',
+			directives: {
+				tone_profile: 'supportive',
+				reading_level: 'standard',
+				explanation_style: 'balanced',
+				example_style: 'everyday',
+				scaffold_level: 'medium',
+				brevity: 'balanced'
+			},
+			committed_budgets: {},
+			sections: [
+				{
+					id: 'section-pack-1',
+					order: 1,
+					role: 'intro',
+					title: 'Start with the idea',
+					objective: 'Open the resource clearly.',
+					focus_note: null,
+					selected_components: ['hook-hero'],
+					visual_policy: null,
+					generation_notes: null,
+					rationale: 'Open with a hook.'
+				}
+			],
+			warning: null,
+			source_brief_id: 'brief-pack-flow',
+			source_brief: {
+				subject: 'Math',
+				topic: 'Algebra',
+				subtopics: ['Solving two-step equations'],
+				grade_level: 'grade_10',
+				grade_band: 'high_school',
+				class_profile: {
+					reading_level: 'mixed',
+					language_support: 'none',
+					confidence: 'mixed',
+					prior_knowledge: 'some_background',
+					pacing: 'normal',
+					learning_preferences: []
+				},
+				learner_context: 'Grade 10 learners Some learners struggle with word problems',
+				intended_outcome: 'practice',
+				resource_type: 'worksheet',
+				supports: ['worked_examples'],
+				depth: 'standard',
+				teacher_notes: ''
+			},
+			status: 'draft'
+		});
+		planPackFromBrief.mockResolvedValue({
+			pack_id: 'pack-1',
+			learning_job: {
+				job: 'practice',
+				subject: 'Math',
+				topic: 'Algebra',
+				grade_level: 'grade_10',
+				grade_band: 'high_school',
+				objective: 'Students can solve two-step equations.',
+				class_signals: ['mixed confidence'],
+				assumptions: [],
+				warnings: [],
+				recommended_depth: 'standard',
+				inferred_supports: ['worked_examples'],
+				inferred_class_profile: {}
+			},
+			pack_learning_plan: {
+				objective: 'Students can solve two-step equations.',
+				success_criteria: [],
+				prerequisite_skills: [],
+				likely_misconceptions: [],
+				shared_vocabulary: ['equation', 'inverse operation', 'variable'],
+				shared_examples: []
+			},
+			resources: [
+				{
+					id: 'resource-1',
+					order: 1,
+					resource_type: 'worksheet',
+					intended_outcome: 'practice',
+					label: 'Guided worksheet',
+					purpose: 'Practice equation solving',
+					depth: 'standard',
+					supports: ['worked_examples'],
+					enabled: true
+				}
+			],
+			pack_rationale: 'Practice pack'
+		});
+		generatePack.mockResolvedValue({ pack_id: 'pack-1', status: 'running' });
+
+		render(TeacherBriefBuilder);
+
+		await moveThroughGradeAndSubtopic();
+		await waitFor(() => expect(screen.getByLabelText(/reading level/i)).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /practice a skill/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /worksheet/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /standard/i }));
+		await waitFor(() => expect(screen.getByRole('button', { name: /validate brief/i })).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: /validate brief/i }));
+		await waitFor(() => expect(screen.getByRole('button', { name: /build plan/i })).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: /build plan/i }));
+
+		await waitFor(() => expect(screen.getByRole('button', { name: /generate as pack/i })).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: /generate as pack/i }));
+
+		await waitFor(() => expect(screen.getByRole('heading', { name: /resources/i })).toBeTruthy());
+		expect(planPackFromBrief).toHaveBeenCalledTimes(1);
+
+		await fireEvent.click(screen.getByRole('button', { name: /generate 1 resources/i }));
+		await waitFor(() => expect(generatePack).toHaveBeenCalledTimes(1));
+		expect(generatePack).toHaveBeenCalledWith(
+			expect.objectContaining({ pack_id: 'pack-1' }),
+			'Grade 10 learners Some learners struggle with word problems'
+		);
 	});
 });
