@@ -16,14 +16,31 @@
 		error?: string | null;
 	} = $props();
 
-	function cloneInitialPlan(): LearningPackPlan {
-		return structuredClone(plan);
+	function clonePlan(value: LearningPackPlan): LearningPackPlan {
+		return JSON.parse(JSON.stringify(value)) as LearningPackPlan;
 	}
 
-	let localPlan = $state<LearningPackPlan>(cloneInitialPlan());
-	const enabledCount = $derived(localPlan.resources.filter((resource) => resource.enabled).length);
+	let initializedPackId = '';
+	let localPlan = $state<LearningPackPlan | null>(null);
+	const enabledCount = $derived(
+		localPlan?.resources.filter((resource) => resource.enabled).length ?? 0
+	);
+
+	$effect(() => {
+		if (initializedPackId !== plan.pack_id) {
+			initializedPackId = plan.pack_id;
+			localPlan = clonePlan(plan);
+		}
+	});
+
+	function confirmLocalPlan() {
+		if (localPlan) {
+			onConfirmed(clonePlan(localPlan));
+		}
+	}
 </script>
 
+{#if localPlan}
 <section class="review">
 	<div class="header">
 		<div>
@@ -64,12 +81,13 @@
 
 	<button
 		class="primary"
-		onclick={() => onConfirmed(localPlan)}
+		onclick={confirmLocalPlan}
 		disabled={enabledCount === 0 || generating}
 	>
 		{generating ? 'Starting...' : `Generate ${enabledCount} resources`}
 	</button>
 </section>
+{/if}
 
 <style>
 	.review {
