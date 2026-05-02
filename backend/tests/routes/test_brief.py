@@ -236,6 +236,18 @@ class TestBriefApi:
         assert payload["sections"][0]["bridges_to"] == "Explain the local food web"
         assert payload["sections"][0]["terms_to_define"] == ["food web"]
 
+    async def test_plan_from_brief_rejects_missing_resource_type(self):
+        _install_overrides(TEST_PROFILE)
+        payload = _teacher_brief().model_dump(mode="json")
+        payload.pop("resource_type", None)
+
+        async with _client() as client:
+            response = await client.post("/api/v1/brief/plan", json=payload)
+
+        assert response.status_code == 422
+        errors = response.json().get("detail", [])
+        assert any(error.get("loc", [])[-1:] == ["resource_type"] for error in errors)
+
     async def test_list_contracts_returns_current_typed_catalog(self):
         _install_overrides(TEST_PROFILE)
 

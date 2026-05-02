@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from pipeline.types.teacher_brief import (
+    GRADE_BAND_BY_LEVEL,
+    ClassProfile,
+    TeacherBriefDepth,
+    TeacherBriefOutcome,
+    TeacherBriefSupport,
+    TeacherGradeBand,
+    TeacherGradeLevel,
+)
 
 
 LearningJobType = Literal["introduce", "practice", "reteach", "assess", "differentiate"]
@@ -24,6 +34,53 @@ class LearningJob(BaseModel):
     recommended_depth: Literal["quick", "standard", "deep"] = "standard"
     inferred_supports: list[str] = Field(default_factory=list)
     inferred_class_profile: dict = Field(default_factory=dict)
+
+
+class PackBriefRequest(BaseModel):
+    subject: str = Field(min_length=1, max_length=120)
+    topic: str = Field(min_length=1, max_length=160)
+    subtopics: list[str] = Field(min_length=1, max_length=4)
+    grade_level: TeacherGradeLevel
+    grade_band: TeacherGradeBand
+    class_profile: ClassProfile = Field(default_factory=ClassProfile)
+    learner_context: str = Field(min_length=1, max_length=1000)
+    intended_outcome: TeacherBriefOutcome
+    supports: list[TeacherBriefSupport] = Field(default_factory=list)
+    depth: TeacherBriefDepth
+    teacher_notes: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("subject", "topic", "learner_context", "teacher_notes")
+    @classmethod
+    def _trim_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip()
+
+    @field_validator("subtopics")
+    @classmethod
+    def _normalize_subtopics(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value if item and item.strip()]
+        deduped = list(dict.fromkeys(normalized))
+        if not deduped:
+            raise ValueError("subtopics must include at least one subtopic.")
+        return deduped
+
+    @field_validator("supports")
+    @classmethod
+    def _dedupe_supports(
+        cls, value: list[TeacherBriefSupport]
+    ) -> list[TeacherBriefSupport]:
+        return list(dict.fromkeys(value))
+
+    @model_validator(mode="after")
+    def _validate_required_text(self) -> "PackBriefRequest":
+        for field_name in ("subject", "topic", "learner_context"):
+            if not getattr(self, field_name):
+                raise ValueError(f"{field_name} must not be empty.")
+        if not self.subtopics:
+            raise ValueError("subtopics must not be empty.")
+        self.grade_band = GRADE_BAND_BY_LEVEL[self.grade_level]
+        return self
 
 
 class PackLearningPlan(BaseModel):

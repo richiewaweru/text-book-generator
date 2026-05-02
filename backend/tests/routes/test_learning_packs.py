@@ -18,8 +18,14 @@ from generation.dependencies import (
     get_report_repository,
 )
 from learning import routes as learning_routes
-from learning.models import LearningJob, LearningPackPlan, PackGenerateResponse, PackLearningPlan, ResourcePlan
-from pipeline.types.teacher_brief import TeacherBrief
+from learning.models import (
+    LearningJob,
+    LearningPackPlan,
+    PackBriefRequest,
+    PackGenerateResponse,
+    PackLearningPlan,
+    ResourcePlan,
+)
 
 
 TEST_USER = User(
@@ -37,8 +43,8 @@ async def _override_current_user() -> User:
     return TEST_USER
 
 
-def _teacher_brief() -> TeacherBrief:
-    return TeacherBrief(
+def _pack_brief() -> PackBriefRequest:
+    return PackBriefRequest(
         subject="Science",
         topic="Food Webs",
         subtopics=["Energy transfer in river ecosystems"],
@@ -54,7 +60,6 @@ def _teacher_brief() -> TeacherBrief:
         },
         learner_context="Grade 7 mixed-ability class with ELL learners.",
         intended_outcome="practice",
-        resource_type="worksheet",
         supports=["worked_examples", "visuals"],
         depth="standard",
         teacher_notes="Use local examples.",
@@ -150,7 +155,7 @@ def _client() -> AsyncClient:
 
 class TestLearningPacksApi:
     def test_brief_to_learning_job_maps_outcome_and_signals(self):
-        brief = _teacher_brief()
+        brief = _pack_brief()
         job = learning_routes._brief_to_learning_job(brief)
 
         assert job.job == "practice"
@@ -178,7 +183,7 @@ class TestLearningPacksApi:
 
     async def test_plan_from_brief_returns_pack_plan(self):
         _install_overrides()
-        brief = _teacher_brief()
+        brief = _pack_brief()
         returned_plan = _pack_plan()
 
         async def fake_generate_pack_learning_plan(*args, **kwargs):
@@ -205,7 +210,7 @@ class TestLearningPacksApi:
 
     async def test_plan_from_brief_falls_back_when_pack_planning_fails(self):
         _install_overrides()
-        brief = _teacher_brief()
+        brief = _pack_brief()
         captured: dict[str, object] = {}
 
         def fake_plan_pack(job, pack_learning_plan):

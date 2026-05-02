@@ -23,6 +23,7 @@ from generation.ports.generation_repository import GenerationRepository
 from learning.models import (
     LearningJob,
     LearningPackPlan,
+    PackBriefRequest,
     PackGenerateRequest,
     PackGenerateResponse,
     PackLearningPlan,
@@ -32,7 +33,6 @@ from learning.models import (
 from learning.pack_planner import generate_pack_learning_plan, plan_pack
 from learning.pack_repository import LearningPackRepository
 from learning.pack_runner import start_pack
-from pipeline.types.teacher_brief import TeacherBrief
 from planning.llm_config import PLANNING_SECTION_COMPOSER_CALLER, get_planning_slot, get_planning_spec
 from planning.routes import _load_profile
 
@@ -63,7 +63,7 @@ _OUTCOME_TO_JOB: dict[str, str] = {
 }
 
 
-def _brief_to_learning_job(brief: TeacherBrief) -> LearningJob:
+def _brief_to_learning_job(brief: PackBriefRequest) -> LearningJob:
     profile = brief.class_profile
     signals: list[str] = []
     if profile.reading_level == "below_grade":
@@ -97,7 +97,7 @@ def _brief_to_learning_job(brief: TeacherBrief) -> LearningJob:
 @limiter.limit("20/minute")
 async def plan_pack_from_brief(
     request: Request,
-    brief: TeacherBrief,
+    brief: PackBriefRequest,
     current_user: User = Depends(get_current_user),
 ) -> LearningPackPlan:
     _ = (request, current_user)
