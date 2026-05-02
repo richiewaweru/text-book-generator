@@ -1,4 +1,5 @@
 import type {
+	BuildMode,
 	BriefBuilderStep,
 	ClassConfidence,
 	ClassLanguageSupport,
@@ -16,17 +17,39 @@ import type {
 	TeacherGradeLevel
 } from '$lib/types';
 
-export const briefSteps: BriefBuilderStep[] = [
+export const sharedSteps: BriefBuilderStep[] = [
 	'topic',
 	'grade_level',
 	'choose_subtopic',
 	'class_profile',
 	'intended_outcome',
+	'build_mode'
+];
+
+export const singleSteps: BriefBuilderStep[] = [
+	...sharedSteps,
 	'resource_type',
 	'supports',
 	'depth',
 	'review'
 ];
+
+export const packSteps: BriefBuilderStep[] = [
+	...sharedSteps,
+	'pack_composition',
+	'supports',
+	'depth',
+	'review'
+];
+
+export function stepsForMode(mode: BuildMode | null): BriefBuilderStep[] {
+	if (mode === 'single') return singleSteps;
+	if (mode === 'pack') return packSteps;
+	return sharedSteps;
+}
+
+// Backward-compatible alias for existing imports that still expect briefSteps.
+export const briefSteps = singleSteps;
 
 export const GRADE_BAND_BY_LEVEL: Record<TeacherGradeLevel, TeacherGradeBand> = {
 	pre_k: 'early_elementary',
@@ -177,7 +200,10 @@ export interface PackResourcePreview {
 	resourceType: TeacherBriefResourceType;
 	purpose: string;
 	depthBehaviour: 'teacher_depth' | 'always_quick' | 'always_deep';
-	optional: boolean;
+	required: boolean;
+	defaultEnabled: boolean;
+	// Legacy compatibility for existing pack preview surfaces.
+	optional?: boolean;
 }
 
 export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePreview[]> = {
@@ -187,6 +213,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'mini_booklet',
 			purpose: 'Teaches the concept from scratch in a self-contained sequence.',
 			depthBehaviour: 'teacher_depth',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		},
 		{
@@ -194,6 +222,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'quick_explainer',
 			purpose: 'Anchors key terms before students attempt practice.',
 			depthBehaviour: 'always_quick',
+			required: false,
+			defaultEnabled: true,
 			optional: true
 		},
 		{
@@ -201,6 +231,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'worksheet',
 			purpose: 'Applies the concept right away from warm to cold problems.',
 			depthBehaviour: 'teacher_depth',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		},
 		{
@@ -208,6 +240,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'exit_ticket',
 			purpose: 'Checks recall, apply, and explain before students leave.',
 			depthBehaviour: 'always_quick',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		}
 	],
@@ -217,6 +251,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'worksheet',
 			purpose: 'Graduated problems from guided to independent application.',
 			depthBehaviour: 'teacher_depth',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		},
 		{
@@ -224,6 +260,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'practice_set',
 			purpose: 'Extra volume for skills that need speed and accuracy.',
 			depthBehaviour: 'always_quick',
+			required: false,
+			defaultEnabled: false,
 			optional: true
 		},
 		{
@@ -231,6 +269,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'exit_ticket',
 			purpose: 'Quick check after practice to confirm transfer.',
 			depthBehaviour: 'always_quick',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		}
 	],
@@ -240,6 +280,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'quick_explainer',
 			purpose: 'Reframes the specific gap from a different angle.',
 			depthBehaviour: 'always_quick',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		},
 		{
@@ -247,6 +289,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'worksheet',
 			purpose: 'Scaffolded practice focused on the misconception.',
 			depthBehaviour: 'teacher_depth',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		},
 		{
@@ -254,6 +298,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'exit_ticket',
 			purpose: 'Verifies the misconception is resolved before moving on.',
 			depthBehaviour: 'always_quick',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		}
 	],
@@ -263,6 +309,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'quiz',
 			purpose: 'Formal check with recall, application, and extended response.',
 			depthBehaviour: 'teacher_depth',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		},
 		{
@@ -270,6 +318,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'exit_ticket',
 			purpose: 'Optional informal cross-check alongside the quiz.',
 			depthBehaviour: 'always_quick',
+			required: false,
+			defaultEnabled: false,
 			optional: true
 		}
 	],
@@ -279,6 +329,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'mini_booklet',
 			purpose: 'Teaches the comparison with structured explanation.',
 			depthBehaviour: 'teacher_depth',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		},
 		{
@@ -286,6 +338,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'worksheet',
 			purpose: 'Applies the comparison and distinction with evidence.',
 			depthBehaviour: 'teacher_depth',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		},
 		{
@@ -293,6 +347,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'exit_ticket',
 			purpose: 'Checks whether students can state the key distinction.',
 			depthBehaviour: 'always_quick',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		}
 	],
@@ -302,6 +358,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'quick_explainer',
 			purpose: 'Defines and contextualizes key terms with examples.',
 			depthBehaviour: 'always_quick',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		},
 		{
@@ -309,6 +367,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'mini_booklet',
 			purpose: 'Uses vocabulary in context so terms are not isolated.',
 			depthBehaviour: 'teacher_depth',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		},
 		{
@@ -316,6 +376,8 @@ export const packPreviewByOutcome: Record<TeacherBriefOutcome, PackResourcePrevi
 			resourceType: 'exit_ticket',
 			purpose: 'Checks accurate use of terms, not just recall.',
 			depthBehaviour: 'always_quick',
+			required: true,
+			defaultEnabled: true,
 			optional: false
 		}
 	]
@@ -593,10 +655,63 @@ export function recommendSupports({
 	return Array.from(recommended);
 }
 
+export function recommendSupportsForPack({
+	intendedOutcome,
+	classProfile
+}: {
+	intendedOutcome?: TeacherBriefOutcome;
+	classProfile: ClassProfile;
+}): TeacherBriefSupport[] {
+	const recommended = new Set<TeacherBriefSupport>();
+
+	if (
+		classProfile.learning_preferences.includes('visual') ||
+		classProfile.language_support === 'many_ell'
+	) {
+		recommended.add('visuals');
+	}
+
+	if (
+		classProfile.language_support === 'some_ell' ||
+		classProfile.language_support === 'many_ell'
+	) {
+		recommended.add('vocabulary_support');
+		recommended.add('simpler_reading');
+	}
+
+	if (
+		classProfile.reading_level === 'below_grade' ||
+		classProfile.confidence === 'low' ||
+		classProfile.pacing === 'short_chunks' ||
+		classProfile.learning_preferences.includes('step_by_step')
+	) {
+		recommended.add('step_by_step');
+	}
+
+	if (intendedOutcome === 'practice' || intendedOutcome === 'review') {
+		recommended.add('worked_examples');
+	}
+
+	if (
+		classProfile.reading_level === 'above_grade' ||
+		classProfile.confidence === 'high' ||
+		classProfile.learning_preferences.includes('challenge')
+	) {
+		recommended.add('challenge_questions');
+	}
+
+	if (classProfile.learning_preferences.includes('discussion') || intendedOutcome === 'compare') {
+		recommended.add('discussion_questions');
+	}
+
+	return Array.from(recommended);
+}
+
 export function stepSummary(
 	step: BriefBuilderStep,
 	brief: Partial<TeacherBrief>,
-	learnerText: string
+	learnerText: string,
+	buildMode?: BuildMode | null
 ): string {
 	switch (step) {
 		case 'topic':
@@ -628,11 +743,21 @@ export function stepSummary(
 				outcomeOptions.find((option) => option.value === brief.intended_outcome)?.label ??
 				'Not set'
 			);
+		case 'build_mode':
+			if (buildMode === 'single') return 'Single lesson';
+			if (buildMode === 'pack') return 'Learning pack';
+			return 'Not selected';
 		case 'resource_type':
 			return (
 				resourceTypeOptions.find((option) => option.value === brief.resource_type)?.label ??
 				'Not set'
 			);
+		case 'pack_composition': {
+			if (!brief.intended_outcome) return 'Not set';
+			const resources = packPreviewByOutcome[brief.intended_outcome] ?? [];
+			const enabled = resources.filter((resource) => resource.defaultEnabled || resource.required);
+			return `${enabled.length} resources`;
+		}
 		case 'supports':
 			return brief.supports?.length
 				? brief.supports

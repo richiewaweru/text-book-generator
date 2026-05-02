@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { commitPlan, planFromBrief, resolveTopic, reviewTeacherBrief, validateTeacherBrief } = vi.hoisted(() => ({
@@ -227,6 +227,50 @@ describe('TeacherBriefBuilder', () => {
 		expect(screen.queryByRole('button', { name: /solving two-step equations/i })).toBeNull();
 	});
 
+	it('shows build mode split after selecting intended outcome', async () => {
+		resolveTopic.mockResolvedValue(
+			buildResolutionResult('Solving two-step equations', 'Grade 10 fit')
+		);
+
+		render(TeacherBriefBuilder);
+
+		await moveThroughGradeAndSubtopic();
+		await waitFor(() => expect(screen.getByLabelText(/reading level/i)).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /practice a skill/i }));
+
+		await waitFor(() => expect(screen.getByRole('button', { name: /single lesson/i })).toBeTruthy());
+		expect(screen.getByRole('button', { name: /learning pack/i })).toBeTruthy();
+	});
+
+	it('editing build mode resets downstream path state safely', async () => {
+		resolveTopic.mockResolvedValue(
+			buildResolutionResult('Solving two-step equations', 'Grade 10 fit')
+		);
+
+		render(TeacherBriefBuilder);
+
+		await moveThroughGradeAndSubtopic();
+		await waitFor(() => expect(screen.getByLabelText(/reading level/i)).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /understand the idea/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /learning pack/i }));
+		await fireEvent.click(screen.getByLabelText(/vocabulary cards/i));
+		await fireEvent.click(screen.getByRole('button', { name: /continue with 3 resources ->/i }));
+
+		const buildModeStep = screen.getByRole('heading', { name: /build mode/i }).closest('section');
+		if (!buildModeStep) {
+			throw new Error('Expected build mode step container');
+		}
+
+		await fireEvent.click(within(buildModeStep).getByRole('button', { name: /edit/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /single lesson/i }));
+
+		await waitFor(() => expect(screen.getByRole('heading', { name: /resource type/i })).toBeTruthy());
+		expect(screen.queryByText(/pack composition/i)).toBeNull();
+		expect(screen.queryByRole('button', { name: /continue with 3 resources ->/i })).toBeNull();
+	});
+
 	it('shows grade level and grade band in review and plan flow', async () => {
 		resolveTopic.mockResolvedValue(
 			buildResolutionResult('Solving two-step equations', 'Grade 10 fit')
@@ -314,6 +358,7 @@ describe('TeacherBriefBuilder', () => {
 		await waitFor(() => expect(screen.getByLabelText(/reading level/i)).toBeTruthy());
 		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /practice a skill/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /single lesson/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /worksheet/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /standard/i }));
@@ -331,25 +376,10 @@ describe('TeacherBriefBuilder', () => {
 		expect(screen.getByText(/start with the idea/i)).toBeTruthy();
 	});
 
-	it('shows pack preview at review and generates pack directly', async () => {
+	it('runs pack mode flow through composition, review, and generation', async () => {
 		resolveTopic.mockResolvedValue(
 			buildResolutionResult('Solving two-step equations', 'Grade 10 fit')
 		);
-		validateTeacherBrief.mockResolvedValue({
-			is_ready: true,
-			blockers: [],
-			warnings: [],
-			suggestions: []
-		});
-		reviewTeacherBrief.mockResolvedValue({
-			coherent: true,
-			warnings: [],
-			feasibility: {
-				subtopics_fit: true,
-				depth_adequate: true,
-				supports_compatible: true
-			}
-		});
 		planPackFromBrief.mockResolvedValue({
 			pack_id: 'pack-1',
 			learning_job: {
@@ -444,21 +474,25 @@ describe('TeacherBriefBuilder', () => {
 		await waitFor(() => expect(screen.getByLabelText(/reading level/i)).toBeTruthy());
 		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 		await fireEvent.click(screen.getByRole('button', { name: /understand the idea/i }));
-		await fireEvent.click(screen.getByRole('button', { name: /worksheet/i }));
-		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
-		await fireEvent.click(screen.getByRole('button', { name: /standard/i }));
-		await waitFor(() => expect(screen.getByRole('button', { name: /validate brief/i })).toBeTruthy());
-		await fireEvent.click(screen.getByRole('button', { name: /validate brief/i }));
-		await waitFor(() => expect(screen.getByText(/learning pack/i)).toBeTruthy());
-		expect(screen.getByText(/mini lesson/i)).toBeTruthy();
-		expect(screen.getByRole('button', { name: /generate 4 resources ->/i })).toBeTruthy();
-		expect((screen.getByLabelText(/exit ticket/i) as HTMLInputElement).disabled).toBe(true);
 
+		await waitFor(() => expect(screen.getByRole('button', { name: /learning pack/i })).toBeTruthy());
+		await fireEvent.click(screen.getByRole('button', { name: /learning pack/i }));
+
+		expect(screen.getByText(/pack composition/i)).toBeTruthy();
+		expect((screen.getByLabelText(/exit ticket/i) as HTMLInputElement).disabled).toBe(true);
 		await fireEvent.click(screen.getByLabelText(/vocabulary cards/i));
 		await waitFor(() =>
-			expect(screen.getByRole('button', { name: /generate 3 resources ->/i })).toBeTruthy()
+			expect(screen.getByRole('button', { name: /continue with 3 resources ->/i })).toBeTruthy()
 		);
+		await fireEvent.click(screen.getByRole('button', { name: /continue with 3 resources ->/i }));
 
+		await fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /standard/i }));
+
+		await waitFor(() =>
+			expect(screen.getByRole('heading', { name: /pack review/i })).toBeTruthy()
+		);
+		expect(screen.getByText(/mini lesson/i)).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: /generate 3 resources ->/i }));
 		await waitFor(() => expect(planPackFromBrief).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(generatePack).toHaveBeenCalledTimes(1));

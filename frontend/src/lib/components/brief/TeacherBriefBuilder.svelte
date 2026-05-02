@@ -11,10 +11,12 @@
 	import { getProfile } from '$lib/api/profile';
 	import {
 		GRADE_BAND_BY_LEVEL,
-		briefSteps,
 		buildLearnerSummary,
 		defaultClassProfile,
+		packPreviewByOutcome,
 		recommendSupports,
+		recommendSupportsForPack,
+		stepsForMode,
 		stepSummary
 	} from '$lib/brief/config';
 	import GenerationView from '$lib/components/studio/GenerationView.svelte';
@@ -27,6 +29,7 @@
 		BriefBuilderStep,
 		BriefReviewWarning,
 		BriefValidationResult,
+		BuildMode,
 		BuilderWarning,
 		ClassLearningPreference,
 		ClassProfile,
@@ -43,14 +46,16 @@
 	import BriefStepCard from './BriefStepCard.svelte';
 	import ClassProfileStep from './ClassProfileStep.svelte';
 	import DepthStep from './DepthStep.svelte';
+	import BuildModeStep from './BuildModeStep.svelte';
 	import GradeLevelStep from './GradeLevelStep.svelte';
 	import OutcomeStep from './OutcomeStep.svelte';
+	import PackCompositionStep from './PackCompositionStep.svelte';
+	import PackReviewStep from './PackReviewStep.svelte';
 	import PlanReviewStep from './PlanReviewStep.svelte';
 	import ResourceTypeStep from './ResourceTypeStep.svelte';
 	import SubtopicChoiceStep from './SubtopicChoiceStep.svelte';
 	import SupportsStep from './SupportsStep.svelte';
 	import TopicInputStep from './TopicInputStep.svelte';
-	import PackPreviewCard from './PackPreviewCard.svelte';
 
 	type BuilderStage =
 		| 'building'
@@ -63,6 +68,7 @@
 	let stage = $state<BuilderStage>('building');
 	let active_step = $state<BriefBuilderStep>('topic');
 	let completed_steps = $state<BriefBuilderStep[]>([]);
+	let buildMode = $state<BuildMode | null>(null);
 	let brief = $state<Partial<TeacherBrief>>({
 		subtopics: [],
 		supports: [],
@@ -87,20 +93,35 @@
 	let packResponse = $state<PackGenerateResponse | null>(null);
 	let packStatus = $state<PackStatusResponse | null>(null);
 	let packError = $state<string | null>(null);
+	let packEnabledTypes = $state<string[]>([]);
+	let enabledPackResources = $state<PackResourcePreview[]>([]);
 
 	const learnerSummary = $derived(learnerText);
+	const activeSteps = $derived(stepsForMode(buildMode));
 	const reviewReady = $derived(
-		Boolean(
-			brief.subject &&
-				brief.topic &&
-				brief.subtopics?.length &&
-				brief.grade_level &&
-				brief.grade_band &&
-				brief.learner_context &&
-				brief.intended_outcome &&
-				brief.resource_type &&
-				brief.depth
-		)
+		buildMode === 'pack'
+			? Boolean(
+					brief.subject &&
+						brief.topic &&
+						brief.subtopics?.length &&
+						brief.grade_level &&
+						brief.grade_band &&
+						brief.learner_context &&
+						brief.intended_outcome &&
+						brief.depth &&
+						packEnabledTypes.length > 0
+				)
+			: Boolean(
+					brief.subject &&
+						brief.topic &&
+						brief.subtopics?.length &&
+						brief.grade_level &&
+						brief.grade_band &&
+						brief.learner_context &&
+						brief.intended_outcome &&
+						brief.resource_type &&
+						brief.depth
+				)
 	);
 	const briefIsReady = $derived(Boolean(validationResult?.is_ready));
 
@@ -113,6 +134,12 @@
 		nextOutcome = brief.intended_outcome,
 		nextProfile = currentClassProfile()
 	): TeacherBriefSupport[] {
+		if (buildMode === 'pack') {
+			return recommendSupportsForPack({
+				intendedOutcome: nextOutcome,
+				classProfile: nextProfile
+			});
+		}
 		return recommendSupports({
 			resourceType: nextResourceType,
 			intendedOutcome: nextOutcome,
@@ -163,6 +190,26 @@
 		active_step = next;
 	}
 
+	function keepCompletedThrough(step: BriefBuilderStep) {
+		const allSteps: BriefBuilderStep[] = [
+			'topic',
+			'grade_level',
+			'choose_subtopic',
+			'class_profile',
+			'intended_outcome',
+			'build_mode',
+			'resource_type',
+			'pack_composition',
+			'supports',
+			'depth',
+			'review'
+		];
+		const cutoff = allSteps.indexOf(step);
+		if (cutoff < 0) return;
+		const allowed = new Set(allSteps.slice(0, cutoff + 1));
+		completed_steps = completed_steps.filter((item) => allowed.has(item));
+	}
+
 	function editStep(step: BriefBuilderStep) {
 		active_step = step;
 		clearValidation();
@@ -175,7 +222,7 @@
 		return (
 			completed_steps.includes(step) ||
 			step === active_step ||
-			briefSteps.indexOf(step) <= briefSteps.indexOf(active_step)
+			activeSteps.indexOf(step) <= activeSteps.indexOf(active_step)
 		);
 	}
 
@@ -366,15 +413,60 @@
 	}
 
 	function handleOutcomeSelect(value: TeacherBrief['intended_outcome']) {
+		buildMode = null;
+		packEnabledTypes = [];
+		enabledPackResources = [];
 		const nextProfile = currentClassProfile();
-		recommendedSupports = deriveRecommendedSupports(brief.resource_type, value, nextProfile);
+		recommendedSupports = recommendSupports({
+			resourceType: brief.resource_type,
+			intendedOutcome: value,
+			classProfile: nextProfile
+		});
 		brief = {
 			...brief,
 			intended_outcome: value,
 			supports: recommendedSupports
 		};
+		keepCompletedThrough('intended_outcome');
 		clearValidationAndGeneratedState();
-		moveToStep('intended_outcome', 'resource_type');
+		moveToStep('intended_outcome', 'build_mode');
+	}
+
+	function handleBuildModeSelect(mode: BuildMode) {
+		buildMode = mode;
+		keepCompletedThrough('build_mode');
+		clearValidationAndGeneratedState();
+
+		if (mode === 'pack') {
+			const resources = brief.intended_outcome ? stepsForPackOutcome(brief.intended_outcome) : [];
+			const defaultEnabled = resources.filter((resource) => resource.defaultEnabled || resource.required);
+			packEnabledTypes = defaultEnabled.map((resource) => resource.resourceType);
+			enabledPackResources = defaultEnabled;
+			const packSupports = recommendSupportsForPack({
+				intendedOutcome: brief.intended_outcome,
+				classProfile: currentClassProfile()
+			});
+			recommendedSupports = packSupports;
+			brief = { ...brief, resource_type: undefined, supports: packSupports };
+			moveToStep('build_mode', 'pack_composition');
+			return;
+		}
+
+		packEnabledTypes = [];
+		enabledPackResources = [];
+		const singleSupports = recommendSupports({
+			resourceType: brief.resource_type,
+			intendedOutcome: brief.intended_outcome,
+			classProfile: currentClassProfile()
+		});
+		recommendedSupports = singleSupports;
+		brief = { ...brief, supports: singleSupports };
+		moveToStep('build_mode', 'resource_type');
+	}
+
+	function stepsForPackOutcome(outcome: TeacherBrief['intended_outcome']) {
+		if (!outcome) return [];
+		return packPreviewByOutcome[outcome] ?? [];
 	}
 
 	function handleResourceTypeSelect(value: TeacherBrief['resource_type']) {
@@ -387,6 +479,22 @@
 		};
 		clearValidationAndGeneratedState();
 		moveToStep('resource_type', 'supports');
+	}
+
+	function handlePackResourceToggle(resourceType: string, enabled: boolean) {
+		if (enabled) {
+			if (!packEnabledTypes.includes(resourceType)) {
+				packEnabledTypes = [...packEnabledTypes, resourceType];
+			}
+			return;
+		}
+		packEnabledTypes = packEnabledTypes.filter((type) => type !== resourceType);
+	}
+
+	function handlePackCompositionContinue(resources: PackResourcePreview[]) {
+		enabledPackResources = resources;
+		packEnabledTypes = resources.map((resource) => resource.resourceType);
+		moveToStep('pack_composition', 'supports');
 	}
 
 	function toggleSupport(support: TeacherBriefSupport) {
@@ -481,7 +589,7 @@
 	}
 
 	async function handleGeneratePack(enabledResources: PackResourcePreview[]) {
-		if (!validationResult?.is_ready) return;
+		if (!reviewReady) return;
 		loading = true;
 		packError = null;
 		try {
@@ -565,7 +673,7 @@
 				stepLabel="Step 1"
 				active={active_step === 'topic'}
 				completed={completed_steps.includes('topic')}
-				summary={stepSummary('topic', brief, learnerText)}
+				summary={stepSummary('topic', brief, learnerText, buildMode)}
 				onEdit={() => editStep('topic')}
 			>
 				<TopicInputStep
@@ -583,7 +691,7 @@
 					stepLabel="Step 2"
 					active={active_step === 'grade_level'}
 					completed={completed_steps.includes('grade_level')}
-					summary={stepSummary('grade_level', brief, learnerText)}
+					summary={stepSummary('grade_level', brief, learnerText, buildMode)}
 					onEdit={() => editStep('grade_level')}
 				>
 					<GradeLevelStep
@@ -603,7 +711,7 @@
 					stepLabel="Step 3"
 					active={active_step === 'choose_subtopic'}
 					completed={completed_steps.includes('choose_subtopic')}
-					summary={stepSummary('choose_subtopic', brief, learnerText)}
+					summary={stepSummary('choose_subtopic', brief, learnerText, buildMode)}
 					onEdit={() => editStep('choose_subtopic')}
 				>
 					<SubtopicChoiceStep
@@ -626,7 +734,7 @@
 					stepLabel="Step 4"
 					active={active_step === 'class_profile'}
 					completed={completed_steps.includes('class_profile')}
-					summary={stepSummary('class_profile', brief, learnerText)}
+					summary={stepSummary('class_profile', brief, learnerText, buildMode)}
 					onEdit={() => editStep('class_profile')}
 				>
 					<ClassProfileStep
@@ -663,35 +771,70 @@
 					stepLabel="Step 5"
 					active={active_step === 'intended_outcome'}
 					completed={completed_steps.includes('intended_outcome')}
-					summary={stepSummary('intended_outcome', brief, learnerText)}
+					summary={stepSummary('intended_outcome', brief, learnerText, buildMode)}
 					onEdit={() => editStep('intended_outcome')}
 				>
 					<OutcomeStep selected={brief.intended_outcome} onSelect={handleOutcomeSelect} />
 				</BriefStepCard>
 			{/if}
 
-			{#if isVisible('resource_type')}
+			{#if isVisible('build_mode')}
+				<BriefStepCard
+					title="Build Mode"
+					stepLabel="Step 6"
+					active={active_step === 'build_mode'}
+					completed={completed_steps.includes('build_mode')}
+					summary={stepSummary('build_mode', brief, learnerText, buildMode)}
+					onEdit={() => editStep('build_mode')}
+				>
+					<BuildModeStep selected={buildMode ?? undefined} onSelect={handleBuildModeSelect} />
+				</BriefStepCard>
+			{/if}
+
+			{#if isVisible('resource_type') && buildMode === 'single'}
 				<BriefStepCard
 					title="Resource Type"
-					stepLabel="Step 6"
+					stepLabel="Step 7"
 					active={active_step === 'resource_type'}
 					completed={completed_steps.includes('resource_type')}
-					summary={stepSummary('resource_type', brief, learnerText)}
+					summary={stepSummary('resource_type', brief, learnerText, buildMode)}
 					onEdit={() => editStep('resource_type')}
 				>
 					<ResourceTypeStep selected={brief.resource_type} onSelect={handleResourceTypeSelect} />
 				</BriefStepCard>
 			{/if}
 
+			{#if isVisible('pack_composition') && buildMode === 'pack'}
+				<BriefStepCard
+					title="Pack Composition"
+					stepLabel="Step 7"
+					active={active_step === 'pack_composition'}
+					completed={completed_steps.includes('pack_composition')}
+					summary={stepSummary('pack_composition', brief, learnerText, buildMode)}
+					onEdit={() => editStep('pack_composition')}
+				>
+					<PackCompositionStep
+						outcome={brief.intended_outcome}
+						depth={brief.depth ?? 'standard'}
+						enabledResourceTypes={packEnabledTypes}
+						onToggle={handlePackResourceToggle}
+						onContinue={handlePackCompositionContinue}
+					/>
+				</BriefStepCard>
+			{/if}
+
 			{#if isVisible('supports')}
 				<BriefStepCard
 					title="Supports"
-					stepLabel="Step 7"
+					stepLabel="Step 8"
 					active={active_step === 'supports'}
 					completed={completed_steps.includes('supports')}
-					summary={stepSummary('supports', brief, learnerText)}
+					summary={stepSummary('supports', brief, learnerText, buildMode)}
 					onEdit={() => editStep('supports')}
 				>
+					{#if buildMode === 'pack'}
+						<p class="mode-note">Supports apply to all resources in the pack.</p>
+					{/if}
 					<SupportsStep
 						selected={brief.supports ?? []}
 						recommended={recommendedSupports}
@@ -704,66 +847,70 @@
 			{#if isVisible('depth')}
 				<BriefStepCard
 					title="Depth"
-					stepLabel="Step 8"
+					stepLabel="Step 9"
 					active={active_step === 'depth'}
 					completed={completed_steps.includes('depth')}
-					summary={stepSummary('depth', brief, learnerText)}
+					summary={stepSummary('depth', brief, learnerText, buildMode)}
 					onEdit={() => editStep('depth')}
 				>
+					{#if buildMode === 'pack'}
+						<p class="mode-note">Depth applies to standard resources. Exit tickets stay quick.</p>
+					{/if}
 					<DepthStep selected={brief.depth} onSelect={handleDepthSelect} />
 				</BriefStepCard>
 			{/if}
 
 			{#if isVisible('review')}
-				<BriefStepCard
-					title="Review Brief"
-					stepLabel="Step 9"
-					active={active_step === 'review'}
-					completed={completed_steps.includes('review')}
-					summary={stepSummary('review', brief, learnerText)}
-					onEdit={() => editStep('review')}
-				>
-					<BriefReviewCard
-						brief={brief}
-						learnerSummary={learnerSummary}
-						validationResult={validationResult}
-						warnings={warnings}
-						reviewWarnings={reviewWarnings}
-						validating={loading && active_step === 'review'}
-						onValidate={handleValidate}
-						onNotesInput={(value) => {
-							brief = { ...brief, teacher_notes: value };
-							clearValidation();
-						}}
-					/>
+				{#if buildMode === 'pack'}
+					<BriefStepCard
+						title="Pack Review"
+						stepLabel="Step 10"
+						active={active_step === 'review'}
+						completed={completed_steps.includes('review')}
+						summary={stepSummary('review', brief, learnerText, buildMode)}
+						onEdit={() => editStep('review')}
+					>
+						<PackReviewStep
+							brief={brief}
+							enabledResources={enabledPackResources}
+							loading={loading}
+							error={packError}
+							onBack={() => editStep('depth')}
+							onGenerate={() => handleGeneratePack(enabledPackResources)}
+						/>
+					</BriefStepCard>
+				{:else}
+					<BriefStepCard
+						title="Review Brief"
+						stepLabel="Step 10"
+						active={active_step === 'review'}
+						completed={completed_steps.includes('review')}
+						summary={stepSummary('review', brief, learnerText, buildMode)}
+						onEdit={() => editStep('review')}
+					>
+						<BriefReviewCard
+							brief={brief}
+							learnerSummary={learnerSummary}
+							validationResult={validationResult}
+							warnings={warnings}
+							reviewWarnings={reviewWarnings}
+							validating={loading && active_step === 'review'}
+							onValidate={handleValidate}
+							onNotesInput={(value) => {
+								brief = { ...brief, teacher_notes: value };
+								clearValidation();
+							}}
+						/>
 
-					{#if briefIsReady}
-						{#if packError}
-							<p class="notice notice-error">{packError}</p>
-						{/if}
-						<div class="review-actions-grid">
-							<div class="action-card action-card-single">
-								<div class="action-card-header">
-									<p class="action-card-kicker">Single resource</p>
-									<h4 class="action-card-title">Build plan</h4>
-									<p class="action-card-desc">
-										One {brief.resource_type?.replaceAll('_', ' ') ?? 'resource'} at {brief.depth ?? 'standard'} depth.
-									</p>
-								</div>
-								<button
-									type="button"
-									class="action-btn action-btn-single"
-									onclick={handlePlanFromBrief}
-									disabled={loading}
-								>
-									{loading && stage === 'planning' ? 'Planning...' : 'Build plan ->'}
+						{#if briefIsReady}
+							<div class="review-actions">
+								<button type="button" class="primary-action" onclick={handlePlanFromBrief} disabled={loading}>
+									{loading ? 'Planning resource...' : 'Build plan'}
 								</button>
 							</div>
-
-							<PackPreviewCard brief={brief} loading={loading} onGenerate={handleGeneratePack} />
-						</div>
-					{/if}
-				</BriefStepCard>
+						{/if}
+					</BriefStepCard>
+				{/if}
 			{/if}
 		</div>
 	</section>
@@ -841,67 +988,26 @@
 		gap: 1rem;
 	}
 
-	.review-actions-grid {
-		display: grid;
-		grid-template-columns: 1fr 2fr;
-		gap: 1rem;
-		margin-top: 0.75rem;
-		align-items: start;
-	}
-
-	.action-card {
-		display: grid;
-		gap: 1rem;
-		border: 1px solid rgba(36, 52, 63, 0.12);
-		border-radius: 20px;
-		background: white;
-		padding: 1.25rem;
-		align-content: space-between;
-	}
-
-	.action-card-kicker {
-		margin: 0 0 0.3rem;
-		font-size: 0.72rem;
-		font-weight: 700;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		color: #6b7c88;
-	}
-
-	.action-card-title {
-		margin: 0 0 0.3rem;
-		font-size: 1.05rem;
-	}
-
-	.action-card-desc {
-		margin: 0;
-		font-size: 0.88rem;
+	.mode-note {
+		margin: 0 0 0.85rem 0;
 		color: #655c52;
-		line-height: 1.5;
+		font-size: 0.88rem;
 	}
 
-	.action-btn {
+	.review-actions {
+		margin-top: 0.75rem;
+		display: flex;
+		justify-content: flex-end;
+	}
+
+	.primary-action {
 		border: 0;
 		border-radius: 999px;
+		background: #1d9e75;
+		color: white;
 		padding: 0.8rem 1.1rem;
 		font-weight: 700;
 		cursor: pointer;
-		font-size: 0.9rem;
-		transition: opacity 0.15s;
-	}
-
-	.action-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.action-btn-single {
-		background: #24343f;
-		color: white;
-	}
-
-	.action-btn-single:hover:not(:disabled) {
-		opacity: 0.85;
 	}
 
 	@media (max-width: 720px) {
@@ -910,8 +1016,8 @@
 			align-items: stretch;
 		}
 
-		.review-actions-grid {
-			grid-template-columns: 1fr;
+		.review-actions {
+			justify-content: stretch;
 		}
 	}
 </style>

@@ -9,6 +9,7 @@ import type {
 	Tone
 } from './studio';
 import type {
+	BuildMode,
 	BriefBuilderStep,
 	ClassConfidence,
 	ClassLanguageSupport,
@@ -566,6 +567,7 @@ export type GenerationStreamEvent =
 	| ErrorEvent;
 
 export type {
+	BuildMode,
 	BriefBuilderStep,
 	ClassConfidence,
 	ClassLanguageSupport,

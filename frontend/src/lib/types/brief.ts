@@ -24,6 +24,7 @@ export type TeacherBriefSupport =
 	| 'challenge_questions';
 
 export type TeacherBriefDepth = 'quick' | 'standard' | 'deep';
+export type BuildMode = 'single' | 'pack';
 
 export type TeacherGradeLevel =
 	| 'pre_k'
@@ -163,7 +164,9 @@ export type BriefBuilderStep =
 	| 'choose_subtopic'
 	| 'class_profile'
 	| 'intended_outcome'
+	| 'build_mode'
 	| 'resource_type'
+	| 'pack_composition'
 	| 'supports'
 	| 'depth'
 	| 'review';
