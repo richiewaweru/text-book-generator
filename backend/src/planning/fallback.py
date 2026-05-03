@@ -155,6 +155,12 @@ def _section_bridge_label(section: PlanningSectionPlan) -> str:
     return section.focus_note or section.objective or section.title
 
 
+def _spec_safe_components(spec: ResourceSpec, role: str) -> list[str]:
+    candidates = list(ROLE_COMPONENT_MAP.get(role, ("explanation-block",)))
+    allowed = [c for c in candidates if c not in spec.forbidden_components]
+    return (allowed or candidates)[:2]
+
+
 def _fallback_sections(
     *,
     brief: TeacherBrief,
@@ -188,7 +194,7 @@ def _fallback_sections(
                 title=_title_for_role(brief, role, role_focus=role_focus),
                 objective=_section_objective(brief, role, role_focus=role_focus),
                 focus_note=focus_note,
-                selected_components=list(ROLE_COMPONENT_MAP.get(role, ("explanation-block",)))[:2],
+                selected_components=_spec_safe_components(spec, role),
                 rationale=(
                     f"Fallback section for role {role} tuned for "
                     f"{brief.class_profile.reading_level} reading and "
