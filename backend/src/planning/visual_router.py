@@ -20,9 +20,9 @@ from planning.models import (
     VisualPolicy,
 )
 from planning.role_maps import ROLE_COMPONENT_MAP, VISUAL_COMPONENTS
-from pipeline.resources import ResourceTemplate
 from pipeline.types.requests import BlockVisualPlacement
 from pipeline.types.teacher_brief import TeacherBrief
+from resource_specs.schema import ResourceSpec
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ def _system_prompt() -> str:
 def _user_prompt(
     brief: TeacherBrief,
     directives: GenerationDirectives,
-    template: ResourceTemplate,
+    spec: ResourceSpec,
     sections: list[PlanningSectionPlan],
 ) -> str:
     section_lines = "\n".join(
@@ -123,9 +123,9 @@ def _user_prompt(
             f"Learner context: {brief.learner_context}",
             f"Supports: {', '.join(brief.supports) if brief.supports else 'none'}",
             f"Resource type: {brief.resource_type}",
-            f"Visual limit for depth {brief.depth}: {template.visual_policy.max_visuals_by_depth[brief.depth]}",
-            f"Allow diagrams: {template.visual_policy.allow_diagrams}",
-            f"Allow images: {template.visual_policy.allow_images}",
+            f"Visual limit for depth {brief.depth}: {getattr(spec.visuals, brief.depth)}",
+            f"Allow diagrams: {spec.visuals.allow_diagrams}",
+            f"Allow images: {spec.visuals.allow_images}",
             (
                 "Directives: "
                 f"reading_level={directives.reading_level}, explanation_style={directives.explanation_style}, "
@@ -140,7 +140,7 @@ def _user_prompt(
 async def _resolve_with_llm(
     brief: TeacherBrief,
     directives: GenerationDirectives,
-    template: ResourceTemplate,
+    spec: ResourceSpec,
     sections: list[PlanningSectionPlan],
     *,
     model: Any | None,
@@ -160,7 +160,7 @@ async def _resolve_with_llm(
         caller=PLANNING_VISUAL_ROUTER_CALLER,
         agent=agent,
         model=model,
-        user_prompt=_user_prompt(brief, directives, template, sections),
+        user_prompt=_user_prompt(brief, directives, spec, sections),
         slot=get_planning_slot(PLANNING_VISUAL_ROUTER_CALLER),
     )
     output = result.output
@@ -172,7 +172,7 @@ async def _resolve_with_llm(
 async def route_visuals(
     brief: TeacherBrief,
     directives: GenerationDirectives,
-    template: ResourceTemplate,
+    spec: ResourceSpec,
     sections: list[PlanningSectionPlan],
     *,
     model: Any | None = None,
@@ -182,14 +182,14 @@ async def route_visuals(
     llm_decisions = await _resolve_with_llm(
         brief,
         directives,
-        template,
+        spec,
         sections,
         model=model,
         run_llm_fn=run_llm_fn,
         generation_id=generation_id,
     )
-    allow_visuals = "visuals" in brief.supports or template.visual_policy.allow_diagrams
-    max_visuals = template.visual_policy.max_visuals_by_depth[brief.depth]
+    allow_visuals = "visuals" in brief.supports or spec.visuals.allow_diagrams
+    max_visuals = getattr(spec.visuals, brief.depth)
     committed_visuals = 0
 
     for section in sections:

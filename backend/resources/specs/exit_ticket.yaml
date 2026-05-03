@@ -53,6 +53,8 @@ allowed_outcomes: [assess, review]
 depth:
   quick:
     sections: "1"
+    min_sections: 1
+    max_sections: 1
     time_minutes: "5"
     questions: "3"
     note: >
@@ -60,6 +62,8 @@ depth:
       Three questions, one concept, five minutes.
   standard:
     sections: "1-2"
+    min_sections: 1
+    max_sections: 2
     time_minutes: "8-10"
     questions: "4-5"
     note: >
@@ -67,6 +71,8 @@ depth:
       evidence. Still one concept. Max five questions.
   deep:
     sections: "2"
+    min_sections: 2
+    max_sections: 2
     time_minutes: "12-15"
     questions: "5"
     note: >

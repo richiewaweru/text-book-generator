@@ -14,10 +14,9 @@ from planning.role_maps import (
     VISUAL_COMPONENTS,
 )
 from pipeline.contracts import get_section_field_for_component
-from pipeline.resources import ResourceTemplate
 from pipeline.types.requests import count_visual_placements
 from pipeline.types.teacher_brief import TeacherBrief
-from resource_specs.loader import get_spec
+from resource_specs.schema import ResourceSpec
 
 
 def _issue(field: str | None, message: str, severity: str = "blocking") -> PlanValidationIssue:
@@ -103,26 +102,22 @@ def _teacher_notes_issues(
 def validate_plan(
     *,
     brief: TeacherBrief,
-    template: ResourceTemplate,
+    spec: ResourceSpec,
     sections: list[PlanningSectionPlan],
     roles: list[PlanningSectionRole],
 ) -> PlanValidationResult:
     issues: list[PlanValidationIssue] = []
-    depth_limit = template.depth_limits[brief.depth]
+    depth_limit = spec.depth_limit(brief.depth)
     allowed_role_set = set(roles)
-    max_visuals = template.visual_policy.max_visuals_by_depth[brief.depth]
-    try:
-        resource_spec = get_spec(brief.resource_type)
-    except Exception:
-        resource_spec = None
+    max_visuals = getattr(spec.visuals, brief.depth)
 
-    if not (depth_limit.min_components <= len(sections) <= depth_limit.max_components):
+    if not (depth_limit.min_sections <= len(sections) <= depth_limit.max_sections):
         issues.append(
             _issue(
                 "sections",
                 (
-                    f"Section count must stay between {depth_limit.min_components} and "
-                    f"{depth_limit.max_components} for {template.label} at {brief.depth} depth."
+                    f"Section count must stay between {depth_limit.min_sections} and "
+                    f"{depth_limit.max_sections} for {spec.label} at {brief.depth} depth."
                 ),
             )
         )
@@ -178,45 +173,33 @@ def validate_plan(
                 )
             )
 
-        if resource_spec is not None:
-            spec_allowed = resource_spec.all_allowed_components_for_role(section.role)
-            spec_forbidden = resource_spec.forbidden_for_role(section.role)
-            for component in section.selected_components:
-                if component in spec_forbidden:
-                    issues.append(
-                        _issue(
-                            "selected_components",
-                            (
-                                f"Component '{component}' is forbidden in role "
-                                f"'{section.role}' for {resource_spec.label}."
-                            ),
-                        )
+        spec_allowed = spec.all_allowed_components_for_role(section.role)
+        spec_forbidden = spec.forbidden_for_role(section.role)
+        for component in section.selected_components:
+            if component in spec_forbidden:
+                issues.append(
+                    _issue(
+                        "selected_components",
+                        (
+                            f"Component '{component}' is forbidden in role "
+                            f"'{section.role}' for {spec.label}."
+                        ),
                     )
-                elif (
-                    spec_allowed
-                    and component not in spec_allowed
-                    and component not in hallucinated_components
-                ):
-                    issues.append(
-                        _issue(
-                            "selected_components",
-                            (
-                                f"Component '{component}' is not allowed in role "
-                                f"'{section.role}' for {resource_spec.label}."
-                            ),
-                        )
-                    )
-
-        if section.role in {"visual", "discover"} and any(
-            forbidden in template.forbidden_component_roles
-            for forbidden in {"visualize", "guided_teaching_sequence"}
-        ):
-            issues.append(
-                _issue(
-                    "role",
-                    f"Section {section.order} uses role '{section.role}' even though the resource forbids it.",
                 )
-            )
+            elif (
+                spec_allowed
+                and component not in spec_allowed
+                and component not in hallucinated_components
+            ):
+                issues.append(
+                    _issue(
+                        "selected_components",
+                        (
+                            f"Component '{component}' is not allowed in role "
+                            f"'{section.role}' for {spec.label}."
+                        ),
+                    )
+                )
 
         if set(section.selected_components).intersection(VISUAL_COMPONENTS):
             visual_count += 1
@@ -225,36 +208,25 @@ def validate_plan(
         issues.append(
             _issue(
                 "sections",
-                f"Visual count exceeds the {max_visuals} visual limit for {template.label} at {brief.depth} depth.",
+                f"Visual count exceeds the {max_visuals} visual limit for {spec.label} at {brief.depth} depth.",
             )
         )
 
-    for forbidden in template.forbidden_component_roles:
-        forbidden_role = forbidden.strip().lower()
-        if any(forbidden_role in section.role for section in sections):
+    all_selected = {
+        component
+        for section in sections
+        for component in section.selected_components
+    }
+    for forbidden in spec.forbidden_components:
+        if forbidden in all_selected:
             issues.append(
                 _issue(
-                    "role",
-                    f"Forbidden role or role family '{forbidden}' appears in the plan.",
+                    "selected_components",
+                    f"Component '{forbidden}' is forbidden for {spec.label} resources.",
                 )
             )
 
-    if resource_spec is not None:
-        all_selected = {
-            component
-            for section in sections
-            for component in section.selected_components
-        }
-        for forbidden in resource_spec.forbidden_components:
-            if forbidden in all_selected:
-                issues.append(
-                    _issue(
-                        "selected_components",
-                        f"Component '{forbidden}' is forbidden for {resource_spec.label} resources.",
-                    )
-                )
-
-    for obligation in template.required_obligations:
+    for obligation in spec.validation:
         if not _obligation_satisfied(obligation, sections):
             issues.append(
                 _issue(

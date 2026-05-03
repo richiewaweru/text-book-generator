@@ -9,12 +9,14 @@ from generation import service as generation_service
 from planning import routes as planning_routes
 from planning import visual_router as visual_router_mod
 from planning.models import PlanningSectionPlan
+from pipeline.contracts import build_section_generation_manifest
 from pipeline.nodes import content_generator as content_generator_mod
 from pipeline.nodes import curriculum_planner as curriculum_planner_mod
 from pipeline.prompts.content import (
     _section_plan_policy_block,
     _visual_context_block,
     build_content_user_prompt,
+    build_section_system_prompt,
 )
 from pipeline.prompts.curriculum import (
     build_curriculum_enrichment_system_prompt,
@@ -318,8 +320,40 @@ def test_visual_context_uses_placements_for_core_and_monolithic_prompts(
         grade_band="secondary",
         learner_fit="general",
         template_id="guided-concept-path",
+        resource_type="worksheet",
     )
     assert expected in monolithic
+
+
+def test_build_content_user_prompt_includes_role_intent_when_resource_type_provided() -> None:
+    plan = _section_plan(role="practice")
+    prompt = build_content_user_prompt(
+        section_plan=plan,
+        subject="Science",
+        context="Photosynthesis",
+        grade_band="secondary",
+        learner_fit="general",
+        template_id="guided-concept-path",
+        resource_type="worksheet",
+    )
+
+    assert "Section role intent (what this section must achieve):" in prompt
+
+
+def test_build_section_system_prompt_includes_resource_identity_block() -> None:
+    plan = _section_plan(role="practice")
+    manifest = build_section_generation_manifest(
+        template_id="guided-concept-path",
+        section_plan=plan,
+    )
+    prompt = build_section_system_prompt(
+        manifest,
+        resource_type="exit_ticket",
+        resource_intent="Assess end-of-lesson understanding quickly.",
+    )
+
+    assert "You are generating content for a exit ticket." in prompt
+    assert "Resource purpose:" in prompt
 
 
 def test_visual_context_block_targets_only_selected_practice_problems() -> None:

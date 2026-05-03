@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import re
 
-from pipeline.resources.resource_templates import ResourceTemplate
 from pipeline.types.teacher_brief import (
     BriefValidationResult,
     TeacherBrief,
     ValidationMessage,
     ValidationSuggestion,
 )
+from resource_specs.schema import ResourceSpec
 
 _BROADER_SUBTOPIC_TERMS = {
     "algebra",
@@ -60,17 +60,17 @@ def _has_struggling_reader_context(learner_context: str) -> bool:
     return any(marker in normalized for marker in _STRUGGLING_READER_HINTS)
 
 
-def validate_brief(brief: TeacherBrief, template: ResourceTemplate) -> BriefValidationResult:
+def validate_brief(brief: TeacherBrief, spec: ResourceSpec) -> BriefValidationResult:
     blockers: list[ValidationMessage] = []
     warnings: list[ValidationMessage] = []
     suggestions: list[ValidationSuggestion] = []
 
-    if brief.intended_outcome not in template.allowed_outcomes:
+    if brief.intended_outcome not in spec.allowed_outcomes:
         blockers.append(
             _message(
                 field="intended_outcome",
                 message=(
-                    f"{template.label} is not meant for the "
+                    f"{spec.label} is not meant for the "
                     f"'{brief.intended_outcome}' outcome."
                 ),
             )

@@ -1422,6 +1422,7 @@ async def enqueue_generation(
     pack_resource_id: str | None = None,
     pack_resource_label: str | None = None,
     pack_objective: str | None = None,
+    resource_type: str | None = None,
 ) -> GenerationAcceptedResponse:
     _validate_template_and_preset(template_id, preset_id)
     if profile is None:
@@ -1487,6 +1488,7 @@ async def enqueue_generation(
         section_plans=section_plans,
         pack_id=pack_id,
         pack_objective=pack_objective,
+        resource_type=resource_type,
     )
 
     async def run_generation_job() -> None:

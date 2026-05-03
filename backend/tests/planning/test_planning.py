@@ -12,8 +12,8 @@ from planning.service import (
     _resolve_directives,
     _resolve_roles,
 )
-from pipeline.resources import get_resource_template
 from pipeline.types.teacher_brief import TeacherBrief
+from resource_specs.loader import get_spec
 
 
 def build_brief(**overrides) -> TeacherBrief:
@@ -96,25 +96,24 @@ def test_resolve_directives_uses_class_profile_signals() -> None:
     assert directives.brevity == "tight"
 
 
-def test_resolve_roles_filters_to_resource_template() -> None:
-    roles = _resolve_roles(
-        build_brief(
-            intended_outcome="assess",
-            resource_type="quiz",
-            supports=["visuals", "challenge_questions"],
-        )
+def test_resolve_roles_filters_to_resource_spec() -> None:
+    brief = build_brief(
+        intended_outcome="assess",
+        resource_type="quiz",
+        supports=["visuals", "challenge_questions"],
     )
+    roles = _resolve_roles(brief, get_spec(brief.resource_type))
 
     assert "intro" in roles
     assert "summary" in roles
     assert "practice" in roles
-    assert "visual" in roles
+    assert "visual" not in roles
     assert "compare" not in roles
 
 
 def test_validate_plan_rejects_invalid_components() -> None:
     brief = build_brief()
-    template = get_resource_template(brief.resource_type)
+    spec = get_spec(brief.resource_type)
     invalid_sections = [
         PlanningSectionPlan(
             id="section-1",
@@ -129,7 +128,7 @@ def test_validate_plan_rejects_invalid_components() -> None:
 
     result = validate_plan(
         brief=brief,
-        template=template,
+        spec=spec,
         sections=invalid_sections,
         roles=["intro", "practice", "summary"],
     )
@@ -140,7 +139,7 @@ def test_validate_plan_rejects_invalid_components() -> None:
 
 def test_validate_plan_rejects_hallucinated_components() -> None:
     brief = build_brief()
-    template = get_resource_template(brief.resource_type)
+    spec = get_spec(brief.resource_type)
     invalid_sections = [
         PlanningSectionPlan(
             id="section-1",
@@ -155,7 +154,7 @@ def test_validate_plan_rejects_hallucinated_components() -> None:
 
     result = validate_plan(
         brief=brief,
-        template=template,
+        spec=spec,
         sections=invalid_sections,
         roles=["intro", "practice", "summary"],
     )
@@ -334,11 +333,11 @@ def test_fallback_distributes_subtopics_across_content_sections() -> None:
             "Inputs and Outputs",
         ],
     )
-    template = get_resource_template(brief.resource_type)
+    spec = get_spec(brief.resource_type)
 
     result = build_fallback_composition(
         brief=brief,
-        template=template,
+        spec=spec,
         roles=["intro", "explain", "visual", "practice", "summary"],
     )
 
@@ -364,29 +363,30 @@ def test_fallback_warns_when_subtopics_are_condensed() -> None:
             "The Role of Sunlight and Energy",
         ],
     )
-    template = get_resource_template(brief.resource_type)
+    spec = get_spec(brief.resource_type)
 
     result = build_fallback_composition(
         brief=brief,
-        template=template,
+        spec=spec,
         roles=["intro", "explain", "visual", "summary"],
     )
 
     assert result.warning == (
-        "Planning used a deterministic fallback. 4 subtopics were condensed into 2 "
+        "Planning used a deterministic fallback. 4 subtopics were condensed into 1 "
         "content section(s). Review the structure before generating."
     )
-    assert result.sections[1].title.endswith("What is Photosynthesis? + Inputs and Outputs")
-    assert result.sections[2].title.endswith("Chlorophyll + The Role of Sunlight and Energy")
+    assert result.sections[1].title.endswith(
+        "What is Photosynthesis? + Chlorophyll + Inputs and Outputs + The Role of Sunlight and Energy"
+    )
 
 
 def test_fallback_keeps_single_subtopic_across_all_sections() -> None:
     brief = build_brief(resource_type="quick_explainer")
-    template = get_resource_template(brief.resource_type)
+    spec = get_spec(brief.resource_type)
 
     result = build_fallback_composition(
         brief=brief,
-        template=template,
+        spec=spec,
         roles=["intro", "explain", "summary"],
     )
 
@@ -403,11 +403,11 @@ def test_fallback_spec_sets_visual_placements_for_visual_role_sections() -> None
         supports=["visuals"],
         resource_type="worksheet",
     )
-    template = get_resource_template(brief.resource_type)
+    spec = get_spec(brief.resource_type)
 
     spec = build_fallback_spec(
         brief=brief,
-        template=template,
+        spec=spec,
         roles=["intro", "visual", "summary"],
         directives=_resolve_directives(brief),
     )
@@ -426,11 +426,11 @@ def test_fallback_spec_assigns_terms_and_bridges() -> None:
         resource_type="worksheet",
         subtopics=["What is Photosynthesis?", "Chlorophyll", "Inputs and Outputs"],
     )
-    template = get_resource_template(brief.resource_type)
+    spec = get_spec(brief.resource_type)
 
     spec = build_fallback_spec(
         brief=brief,
-        template=template,
+        spec=spec,
         roles=["intro", "explain", "visual", "practice", "summary"],
         directives=_resolve_directives(brief),
     )

@@ -36,6 +36,7 @@ from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.types.requests import needs_diagram_from_placements
 from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, TextbookPipelineState
+from resource_specs.loader import get_spec as get_resource_spec
 from pipeline.types.section_content import (
     DiagramCompareContent,
     DiagramContent,
@@ -138,6 +139,7 @@ def build_diagram_user_prompt(
     section_title: str,
     slot: VisualSlot,
     frame: VisualFrame,
+    resource_context: str | None = None,
 ) -> str:
     must_include = ", ".join(frame.must_include) if frame.must_include else "None"
     avoid = ", ".join(frame.avoid) if frame.avoid else "None"
@@ -146,7 +148,10 @@ def build_diagram_user_prompt(
         primary_brief = frame.generation_goal or slot.content_brief or section_title
     else:
         primary_brief = slot.content_brief or frame.generation_goal or section_title
-    prompt = f"""Section: {section_title}
+    resource_lines = ""
+    if resource_context:
+        resource_lines = f"{resource_context}\n"
+    prompt = f"""{resource_lines}Section: {section_title}
 Slot type: {slot.slot_type.value}
 Sizing: {slot.sizing}
 Target block: {slot.block_target or "section"}
@@ -295,6 +300,23 @@ def _primary_visual_brief(
     if slot.block_target in {None, "section"}:
         return frame.generation_goal or slot.content_brief or section_title
     return slot.content_brief or frame.generation_goal or section_title
+
+
+def _resource_prompt_context(state: TextbookPipelineState) -> str | None:
+    resource_type = state.request.resource_type
+    if not resource_type:
+        return None
+    try:
+        spec = get_resource_spec(resource_type)
+    except Exception:
+        return f"Resource type: {resource_type.replace('_', ' ')}"
+    return "\n".join(
+        [
+            f"Resource type: {resource_type.replace('_', ' ')}",
+            "Resource intent:",
+            spec.intent.strip(),
+        ]
+    )
 
 
 def _terms_from_plan_for_diagram(plan) -> list[str]:
@@ -467,6 +489,7 @@ async def _generate_diagram_output(
                 section_title=section_title,
                 slot=slot,
                 frame=frame,
+                resource_context=_resource_prompt_context(state),
             ),
             generation_mode=state.request.mode,
             retry_policy=retry_policy,
@@ -512,6 +535,7 @@ async def _generate_raw_svg_output(
                 section_title=section_title,
                 slot=slot,
                 frame=frame,
+                resource_context=_resource_prompt_context(state),
             ),
             generation_mode=state.request.mode,
             retry_policy=retry_policy,

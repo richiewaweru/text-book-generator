@@ -12,9 +12,9 @@ from planning.models import (
 )
 from planning.role_maps import ROLE_COMPONENT_MAP
 from planning.visual_router import _derive_visual_placements, _visual_intent
-from pipeline.resources import ResourceTemplate
 from pipeline.types.requests import GenerationMode
 from pipeline.types.teacher_brief import TeacherBrief
+from resource_specs.schema import ResourceSpec
 
 _RUNTIME_TEMPLATE_ID = "guided-concept-path"
 _RUNTIME_PRESET_ID = "blue-classroom"
@@ -38,13 +38,13 @@ def _audience_prefix(brief: TeacherBrief) -> str:
 def _choose_roles(
     *,
     brief: TeacherBrief,
-    template: ResourceTemplate,
+    spec: ResourceSpec,
     roles: list[PlanningSectionRole],
 ) -> list[PlanningSectionRole]:
-    depth_limit = template.depth_limits[brief.depth]
+    depth_limit = spec.depth_limit(brief.depth)
     section_count = max(
-        depth_limit.min_components,
-        min(len(roles), depth_limit.max_components),
+        depth_limit.min_sections,
+        min(len(roles), depth_limit.max_sections),
     )
     chosen_roles = roles[:section_count] or ["intro", "summary"]
     if section_count == 1:
@@ -158,10 +158,10 @@ def _section_bridge_label(section: PlanningSectionPlan) -> str:
 def _fallback_sections(
     *,
     brief: TeacherBrief,
-    template: ResourceTemplate,
+    spec: ResourceSpec,
     roles: list[PlanningSectionRole],
 ) -> list[PlanningSectionPlan]:
-    chosen_roles = _choose_roles(brief=brief, template=template, roles=roles)
+    chosen_roles = _choose_roles(brief=brief, spec=spec, roles=roles)
     subtopics = list(brief.subtopics or [brief.topic])
     assignments = _assign_subtopics_to_sections(chosen_roles, subtopics)
     covered_subtopics = [assignment for assignment in assignments if assignment]
@@ -219,15 +219,15 @@ def _fallback_warning(
 def build_fallback_composition(
     *,
     brief: TeacherBrief,
-    template: ResourceTemplate,
+    spec: ResourceSpec,
     roles: list[PlanningSectionRole],
 ) -> CompositionResult:
-    chosen_roles = _choose_roles(brief=brief, template=template, roles=roles)
+    chosen_roles = _choose_roles(brief=brief, spec=spec, roles=roles)
     subtopics = list(brief.subtopics or [brief.topic])
     return CompositionResult(
-        sections=_fallback_sections(brief=brief, template=template, roles=roles),
+        sections=_fallback_sections(brief=brief, spec=spec, roles=roles),
         lesson_rationale=(
-            f"This fallback keeps the {template.label.lower()} compact and centered on "
+            f"This fallback keeps the {spec.label.lower()} compact and centered on "
             f"{', '.join(subtopics)}."
         ),
         warning=_fallback_warning(brief=brief, roles=chosen_roles),
@@ -318,12 +318,12 @@ def _apply_fallback_enrichment(
 def build_fallback_spec(
     *,
     brief: TeacherBrief,
-    template: ResourceTemplate,
+    spec: ResourceSpec,
     roles: list[PlanningSectionRole],
     directives: GenerationDirectives,
     generation_id: str = "",
 ) -> PlanningGenerationSpec:
-    composition = build_fallback_composition(brief=brief, template=template, roles=roles)
+    composition = build_fallback_composition(brief=brief, spec=spec, roles=roles)
     sections = _apply_fallback_visual_placements(composition.sections, brief)
     sections = _apply_fallback_enrichment(sections, brief)
     return PlanningGenerationSpec(
@@ -333,8 +333,8 @@ def build_fallback_spec(
         mode=_depth_to_mode(brief.depth),
         template_decision=TemplateDecision(
             chosen_id=brief.resource_type,
-            chosen_name=template.label,
-            rationale=f"Teacher selected {template.label}.",
+            chosen_name=spec.label,
+            rationale=f"Teacher selected {spec.label}.",
             fit_score=1.0,
             alternatives=[],
         ),

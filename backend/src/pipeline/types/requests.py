@@ -31,6 +31,7 @@ class PipelineRequest(BaseModel):
     section_plans: list["SectionPlan"] | None = None
     pack_id: str | None = None
     pack_objective: str | None = None
+    resource_type: str | None = None
 
     @property
     def topic(self) -> str:

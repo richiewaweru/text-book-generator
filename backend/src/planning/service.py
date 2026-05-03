@@ -29,9 +29,10 @@ from planning.role_maps import (
 from planning.section_composer import compose_sections
 from planning.visual_router import route_visuals
 from pipeline.contracts import get_generation_guidance, get_lesson_flow
-from pipeline.resources import get_resource_template
 from pipeline.types.requests import GenerationMode
 from pipeline.types.teacher_brief import TeacherBrief
+from resource_specs.loader import get_spec
+from resource_specs.schema import ResourceSpec
 
 PlanningEvent = dict[str, object]
 PlanningEmitter = Callable[[PlanningEvent], Awaitable[None] | None]
@@ -92,17 +93,19 @@ def _resolve_directives(brief: TeacherBrief) -> GenerationDirectives:
     )
 
 
-def _resolve_roles(brief: TeacherBrief) -> list[PlanningSectionRole]:
-    template = get_resource_template(brief.resource_type)
-    allowed_template_roles = [
-        *template.recommended_component_roles,
-        *template.optional_component_roles,
-    ]
-    allowed_roles = [
-        TEMPLATE_ROLE_TO_SECTION_ROLE[role]
-        for role in allowed_template_roles
-        if role in TEMPLATE_ROLE_TO_SECTION_ROLE
-    ]
+def _resolve_roles(brief: TeacherBrief, spec: ResourceSpec) -> list[PlanningSectionRole]:
+    allowed_roles: list[PlanningSectionRole] = []
+    required_roles: list[PlanningSectionRole] = []
+    for section in spec.sections.required:
+        role = section.role
+        if role not in allowed_roles:
+            allowed_roles.append(role)  # type: ignore[arg-type]
+        if role not in required_roles:
+            required_roles.append(role)  # type: ignore[arg-type]
+    for section in spec.sections.optional:
+        role = section.role
+        if role not in allowed_roles:
+            allowed_roles.append(role)  # type: ignore[arg-type]
 
     requested_template_roles = [
         *OUTCOME_ROLE_MAP.get(brief.intended_outcome, ()),
@@ -121,9 +124,13 @@ def _resolve_roles(brief: TeacherBrief) -> list[PlanningSectionRole]:
         if section_role not in resolved:
             resolved.append(section_role)
 
-    if "intro" not in resolved:
+    for required_role in required_roles:
+        if required_role not in resolved:
+            resolved.append(required_role)
+
+    if "intro" in allowed_roles and "intro" not in resolved:
         resolved.insert(0, "intro")
-    if "summary" not in resolved:
+    if "summary" in allowed_roles and "summary" not in resolved:
         resolved.append("summary")
 
     for fallback_role in allowed_roles:
@@ -271,13 +278,13 @@ class PlanningService:
         generation_id: str = "",
         emit: PlanningEmitter | None = None,
     ) -> PlanningGenerationSpec:
-        template = get_resource_template(brief.resource_type)
+        spec = get_spec(brief.resource_type)
         directives = _resolve_directives(brief)
-        roles = _resolve_roles(brief)
+        roles = _resolve_roles(brief, spec)
 
         composition_result = await compose_sections(
             brief,
-            template,
+            spec,
             roles,
             directives,
             model=model,
@@ -286,7 +293,7 @@ class PlanningService:
         )
         validation = validate_plan(
             brief=brief,
-            template=template,
+            spec=spec,
             sections=composition_result.sections,
             roles=roles,
         )
@@ -294,7 +301,7 @@ class PlanningService:
         if not validation.is_valid:
             composition_result = await compose_sections(
                 brief,
-                template,
+                spec,
                 roles,
                 directives,
                 model=model,
@@ -304,7 +311,7 @@ class PlanningService:
             )
             validation = validate_plan(
                 brief=brief,
-                template=template,
+                spec=spec,
                 sections=composition_result.sections,
                 roles=roles,
             )
@@ -313,7 +320,7 @@ class PlanningService:
         if not validation.is_valid:
             composition_result = build_fallback_composition(
                 brief=brief,
-                template=template,
+                spec=spec,
                 roles=roles,
             )
             used_fallback = True
@@ -328,7 +335,7 @@ class PlanningService:
         sections = await route_visuals(
             brief,
             directives,
-            template,
+            spec,
             sections,
             model=model,
             run_llm_fn=run_llm_fn,
@@ -348,8 +355,8 @@ class PlanningService:
             mode=_depth_to_mode(brief.depth),
             template_decision=TemplateDecision(
                 chosen_id=brief.resource_type,
-                chosen_name=template.label,
-                rationale=f"Teacher selected {template.label}.",
+                chosen_name=spec.label,
+                rationale=f"Teacher selected {spec.label}.",
                 fit_score=1.0,
                 alternatives=[],
             ),
@@ -381,11 +388,11 @@ class PlanningService:
         *,
         generation_id: str = "",
     ) -> PlanningGenerationSpec:
-        template = get_resource_template(brief.resource_type)
+        spec = get_spec(brief.resource_type)
         return build_fallback_spec(
             brief=brief,
-            template=template,
-            roles=_resolve_roles(brief),
+            spec=spec,
+            roles=_resolve_roles(brief, spec),
             directives=_resolve_directives(brief),
             generation_id=generation_id,
         )

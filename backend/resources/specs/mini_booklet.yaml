@@ -44,6 +44,8 @@ allowed_outcomes: [understand, review, vocabulary, compare]
 depth:
   quick:
     sections: "2-3"
+    min_sections: 2
+    max_sections: 3
     time_minutes: "10-15"
     questions: "2-4"
     note: >
@@ -52,6 +54,8 @@ depth:
       it is a tighter one.
   standard:
     sections: "3-5"
+    min_sections: 3
+    max_sections: 5
     time_minutes: "25-40"
     questions: "4-8"
     note: >
@@ -59,6 +63,8 @@ depth:
       with enough practice for a student to feel confident.
   deep:
     sections: "5-7"
+    min_sections: 5
+    max_sections: 7
     time_minutes: "45-60"
     questions: "6-10"
     note: >

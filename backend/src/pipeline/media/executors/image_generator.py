@@ -19,6 +19,7 @@ from pipeline.media.runtime_events import (
 from pipeline.media.types import SlotType, VisualFrameResult, VisualFrameResultStatus
 from pipeline.section_content_helpers import section_title
 from pipeline.state import PipelineError, TextbookPipelineState
+from resource_specs.loader import get_spec as get_resource_spec
 
 
 def _image_size_for_frame(slot, frame) -> str:
@@ -237,6 +238,20 @@ async def image_generator(
 
     if sid is None or section is None:
         return {"completed_nodes": ["image_generator"]}
+
+    resource_type = typed.request.resource_type
+    if resource_type:
+        try:
+            resource_spec = get_resource_spec(resource_type)
+            if not resource_spec.visuals.allow_images:
+                outcomes = legacy._with_outcome(typed, sid, "skipped")["diagram_outcomes"]
+                legacy._publish_image_outcome(generation_id, sid, "skipped")
+                return {
+                    "diagram_outcomes": outcomes,
+                    "completed_nodes": ["image_generator"],
+                }
+        except Exception:
+            pass
 
     retry_request = typed.pending_media_retry_for(sid)
     if retry_request is not None and retry_request.executor_node != "image_generator":

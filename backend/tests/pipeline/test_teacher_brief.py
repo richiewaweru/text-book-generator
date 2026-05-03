@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.resources import get_resource_template, validate_brief
+from pipeline.resources import validate_brief
 from pipeline.types.teacher_brief import TeacherBrief
+from resource_specs.loader import get_spec
 
 
 def build_brief(**overrides) -> TeacherBrief:
@@ -50,7 +51,7 @@ def test_resource_templates_accept_valid_briefs(resource_type: str, outcome: str
         supports=[] if resource_type in {"exit_ticket", "quiz"} else ["visuals"],
     )
 
-    result = validate_brief(brief, get_resource_template(brief.resource_type))
+    result = validate_brief(brief, get_spec(brief.resource_type))
 
     assert result.is_ready is True
     assert result.blockers == []
@@ -59,7 +60,7 @@ def test_resource_templates_accept_valid_briefs(resource_type: str, outcome: str
 def test_quick_explainer_rejects_practice_outcome() -> None:
     brief = build_brief(resource_type="quick_explainer", intended_outcome="practice")
 
-    result = validate_brief(brief, get_resource_template(brief.resource_type))
+    result = validate_brief(brief, get_spec(brief.resource_type))
 
     assert result.is_ready is False
     assert any(message.field == "intended_outcome" for message in result.blockers)
@@ -68,7 +69,7 @@ def test_quick_explainer_rejects_practice_outcome() -> None:
 def test_validator_blocks_broad_subtopic() -> None:
     brief = build_brief(subtopics=["Algebra"])
 
-    result = validate_brief(brief, get_resource_template(brief.resource_type))
+    result = validate_brief(brief, get_spec(brief.resource_type))
 
     assert result.is_ready is False
     assert any(message.field == "subtopics" for message in result.blockers)
@@ -81,7 +82,7 @@ def test_validator_warns_about_worked_examples_in_exit_tickets() -> None:
         supports=["worked_examples"],
     )
 
-    result = validate_brief(brief, get_resource_template(brief.resource_type))
+    result = validate_brief(brief, get_spec(brief.resource_type))
 
     assert result.is_ready is True
     assert any(message.field == "supports" for message in result.warnings)

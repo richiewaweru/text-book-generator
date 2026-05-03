@@ -27,6 +27,7 @@ from pipeline.providers.registry import get_node_text_model
 from pipeline.runtime_context import retry_policy_for_node
 from pipeline.runtime_diagnostics import publish_runtime_event
 from pipeline.runtime_policy import resolve_runtime_policy_bundle
+from resource_specs.loader import get_spec as get_resource_spec
 from pipeline.state import (
     FailedSectionRecord,
     NodeFailureDetail,
@@ -223,6 +224,26 @@ def _retry_policy(
     ).retries.for_node(node)
 
 
+def _resource_prompt_context(
+    state: TextbookPipelineState,
+    plan,
+) -> tuple[str | None, str | None]:
+    resource_type = state.request.resource_type
+    if not resource_type:
+        return None, None
+    try:
+        spec = get_resource_spec(resource_type)
+        role_intent: str | None = None
+        if plan is not None:
+            for section_spec in [*spec.sections.required, *spec.sections.optional]:
+                if section_spec.role == plan.role:
+                    role_intent = section_spec.intent
+                    break
+        return spec.intent, role_intent
+    except Exception:
+        return None, None
+
+
 async def _generate_monolithic(
     *,
     state: TextbookPipelineState,
@@ -240,10 +261,15 @@ async def _generate_monolithic(
 ) -> None:
     """Generate one section from the approved manifest."""
     _ = model_overrides
+    resource_intent, role_intent = _resource_prompt_context(state, plan)
     agent = Agent(
         model=model,
         output_type=SectionContent,
-        system_prompt=build_section_system_prompt(manifest),
+        system_prompt=build_section_system_prompt(
+            manifest,
+            resource_type=state.request.resource_type,
+            resource_intent=resource_intent,
+        ),
     )
     base_prompt = build_section_user_prompt(
         plan=plan,
@@ -252,6 +278,7 @@ async def _generate_monolithic(
         grade_band=state.request.grade_band,
         learner_fit=state.request.learner_fit,
         manifest=manifest,
+        role_intent=role_intent,
         rerender_reason=rerender_reason,
     )
 
@@ -282,6 +309,7 @@ async def _generate_monolithic(
                 plan=plan,
                 manifest=manifest,
                 rerender_reason=rerender_reason,
+                role_intent=role_intent,
                 generated=generated,
                 failed_sections=failed_sections,
                 errors=errors,
@@ -308,6 +336,7 @@ def _handle_validation_repair(
     plan,
     manifest,
     rerender_reason,
+    role_intent,
     generated: dict,
     failed_sections: dict,
     errors: list,
@@ -321,19 +350,21 @@ def _handle_validation_repair(
         plan=plan,
         manifest=manifest,
         rerender_reason=rerender_reason,
+        role_intent=role_intent,
     )
 
 
 class _RepairNeeded(Exception):
     """Internal sentinel - never escapes content_generator."""
 
-    def __init__(self, *, exc, agent, model, plan, manifest, rerender_reason):
+    def __init__(self, *, exc, agent, model, plan, manifest, rerender_reason, role_intent):
         self.original_exc = exc
         self.agent = agent
         self.model = model
         self.plan = plan
         self.manifest = manifest
         self.rerender_reason = rerender_reason
+        self.role_intent = role_intent
 
 
 async def _attempt_repair(
@@ -386,6 +417,7 @@ async def _attempt_repair(
                 manifest=repair.manifest,
                 validation_summary=initial_detail.error_message,
                 validation_errors=detailed_errors,
+                role_intent=repair.role_intent,
                 rerender_reason=repair.rerender_reason,
             ),
             section_id=sid,

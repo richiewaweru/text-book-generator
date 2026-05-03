@@ -671,6 +671,30 @@ async def test_image_generator_emits_skipped_outcome_for_non_image_mode(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_image_generator_skips_when_resource_spec_disables_images(tmp_path, monkeypatch) -> None:
+    store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
+    client = FakeImageClient()
+    state = _state(
+        diagram_slot="diagram-block",
+        section_plan=_plan(intent="explain_structure"),
+        section=_section(),
+    ).model_copy(
+        update={
+            "request": _request().model_copy(update={"resource_type": "exit_ticket"}),
+        }
+    )
+    events = _capture_published_events(monkeypatch)
+
+    result = await image_generator(state, _store=store, _client=client)
+
+    assert result["completed_nodes"] == ["image_generator"]
+    assert result["diagram_outcomes"]["s-01"] == "skipped"
+    assert client.prompts == []
+    image_events = _image_events(events)
+    assert image_events and image_events[0][1].outcome == "skipped"
+
+
+@pytest.mark.asyncio
 async def test_image_generator_routes_series_images_to_diagram_series(tmp_path) -> None:
     store = LocalImageStore(base_path=tmp_path, base_url="http://test/images")
     client = FakeImageClient()

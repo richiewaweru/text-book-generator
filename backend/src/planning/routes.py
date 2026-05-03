@@ -29,7 +29,7 @@ from generation.ports.generation_report_repository import GenerationReportReposi
 from generation.ports.generation_repository import GenerationRepository
 from generation.service import enqueue_generation
 from pipeline.contracts import get_contract, list_template_ids
-from pipeline.resources import get_resource_template, validate_brief
+from pipeline.resources import validate_brief
 from pipeline.types.requests import (
     GenerationMode,
     SectionPlan,
@@ -63,6 +63,7 @@ from planning.models import (
     PlanningSectionPlan,
     PlanningTemplateContract,
 )
+from resource_specs.loader import get_spec
 
 import core.events as core_events
 
@@ -502,8 +503,8 @@ async def validate_teacher_brief(
     current_user: User = Depends(get_current_user),
 ) -> BriefValidationResult:
     _ = current_user
-    template = get_resource_template(payload.brief.resource_type)
-    return validate_brief(payload.brief, template)
+    spec = get_spec(payload.brief.resource_type)
+    return validate_brief(payload.brief, spec)
 
 
 @router.post("/brief/review", response_model=BriefReviewResult)
@@ -636,4 +637,5 @@ async def commit_brief(
         planning_warning=committed.warning,
         grade_band=runtime_grade_band,
         learner_fit=learner_fit,
+        resource_type=committed.source_brief.resource_type,
     )

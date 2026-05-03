@@ -431,6 +431,37 @@ async def test_graph_visible_diagram_node_delegates_to_media_executor(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_diagram_generator_skips_when_resource_spec_disables_diagrams() -> None:
+    slot = VisualSlot(
+        slot_id="diagram-series",
+        slot_type="diagram_series",
+        required=True,
+        preferred_render="svg",
+        block_target="section",
+        pedagogical_intent="Show slope visually.",
+        caption="Slope diagrams.",
+        frames=[
+            VisualFrame(
+                slot_id="diagram-series",
+                index=0,
+                label="Slope 3",
+                generation_goal="Draw a coordinate grid with a line showing slope 3.",
+            )
+        ],
+    )
+    state = _base_state(media_plan=MediaPlan(section_id="s-01", slots=[slot])).model_copy(
+        update={
+            "request": _request().model_copy(update={"resource_type": "exit_ticket"}),
+        }
+    )
+
+    result = await diagram_node(state)
+
+    assert result["completed_nodes"] == ["diagram_generator"]
+    assert result["diagram_outcomes"]["s-01"] == "skipped"
+
+
+@pytest.mark.asyncio
 async def test_diagram_generator_writes_raw_svg_to_diagram_series(monkeypatch) -> None:
     monkeypatch.delenv("PIPELINE_RAW_SVG_DIAGRAMS", raising=False)
     slot = VisualSlot(

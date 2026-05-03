@@ -18,6 +18,10 @@ def test_render_includes_intent_and_forbidden_components() -> None:
     assert "Resource intent:" in output
     assert "hook-hero" in output
     assert "explanation-block" in output
+    assert "HARD CONSTRAINT - these components are NEVER permitted for this resource type:" in output
+    assert output.index("HARD CONSTRAINT - these components are NEVER permitted for this resource type:") < output.index(
+        "Depth: standard"
+    )
 
 
 def test_render_includes_active_supports() -> None:
@@ -29,4 +33,3 @@ def test_render_includes_active_supports() -> None:
     )
     assert "Support: worked_examples" in output
     assert "worked-example-card" in output
-

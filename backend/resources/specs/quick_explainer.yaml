@@ -49,6 +49,8 @@ allowed_outcomes: [understand, vocabulary, review]
 depth:
   quick:
     sections: "1-2"
+    min_sections: 1
+    max_sections: 2
     time_minutes: "5-8"
     questions: "0-1"
     note: >
@@ -56,6 +58,8 @@ depth:
       One section. One idea. Used as a vocabulary card or concept note.
   standard:
     sections: "2-3"
+    min_sections: 2
+    max_sections: 3
     time_minutes: "8-15"
     questions: "1-2"
     note: >
@@ -63,6 +67,8 @@ depth:
       Maximum two questions — recall or apply, not extended response.
   deep:
     sections: "2-3"
+    min_sections: 2
+    max_sections: 3
     time_minutes: "12-18"
     questions: "2-3"
     note: >

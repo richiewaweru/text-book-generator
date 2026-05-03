@@ -61,6 +61,8 @@ allowed_outcomes: [practice, review, vocabulary, assess]
 depth:
   quick:
     sections: "1-2"
+    min_sections: 1
+    max_sections: 2
     time_minutes: "5-10"
     questions: "4-6"
     note: >
@@ -68,6 +70,8 @@ depth:
       repeated cleanly. No warm-up section, straight to practice.
   standard:
     sections: "2-4"
+    min_sections: 2
+    max_sections: 4
     time_minutes: "15-25"
     questions: "8-12"
     note: >
@@ -76,6 +80,8 @@ depth:
       Optional: one worked model at the start.
   deep:
     sections: "3-5"
+    min_sections: 3
+    max_sections: 5
     time_minutes: "30-45"
     questions: "12-20"
     note: >

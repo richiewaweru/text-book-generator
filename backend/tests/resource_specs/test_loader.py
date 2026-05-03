@@ -24,4 +24,8 @@ def test_specs_have_required_sections_and_depths() -> None:
     for spec in specs.values():
         assert spec.sections.required
         assert {"quick", "standard", "deep"}.issubset(spec.depth)
-
+        for depth_key in ("quick", "standard", "deep"):
+            depth_variant = spec.depth[depth_key]
+            assert isinstance(depth_variant.min_sections, int)
+            assert isinstance(depth_variant.max_sections, int)
+            assert depth_variant.min_sections <= depth_variant.max_sections

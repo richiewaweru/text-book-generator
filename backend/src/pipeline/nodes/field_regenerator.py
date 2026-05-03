@@ -36,6 +36,7 @@ from pipeline.providers.registry import get_node_text_model
 from pipeline.runtime_context import retry_policy_for_node
 from pipeline.runtime_policy import resolve_runtime_policy_bundle
 from pipeline.state import PipelineError, TextbookPipelineState
+from resource_specs.loader import get_spec as get_resource_spec
 
 _COMPLEX_FIELDS = frozenset(
     {
@@ -78,6 +79,26 @@ def _planned_fields(state: TextbookPipelineState) -> set[str]:
         for component_id in required_components
         if (field_name := get_section_field_for_component(component_id)) is not None
     }
+
+
+def _resource_prompt_context(
+    state: TextbookPipelineState,
+) -> tuple[str | None, str | None]:
+    resource_type = state.request.resource_type
+    plan = state.current_section_plan
+    if not resource_type:
+        return None, None
+    try:
+        spec = get_resource_spec(resource_type)
+        role_intent: str | None = None
+        if plan is not None:
+            for section_spec in [*spec.sections.required, *spec.sections.optional]:
+                if section_spec.role == plan.role:
+                    role_intent = section_spec.intent
+                    break
+        return spec.intent, role_intent
+    except Exception:
+        return None, None
 
 
 async def field_regenerator(
@@ -134,12 +155,15 @@ async def field_regenerator(
     else:
         return {"completed_nodes": ["field_regenerator"]}
 
+    resource_intent, role_intent = _resource_prompt_context(state)
     agent = Agent(
         model=model,
         output_type=str,
         system_prompt=build_field_regen_system_prompt(
             state.contract.id,
             request.block_type,
+            resource_type=state.request.resource_type,
+            resource_intent=resource_intent,
         ),
     )
 
@@ -159,6 +183,7 @@ async def field_regenerator(
                 section=section,
                 failing_field=request.block_type,
                 reason=request.reason,
+                role_intent=role_intent,
             ),
             section_id=sid,
             generation_mode=state.request.mode,

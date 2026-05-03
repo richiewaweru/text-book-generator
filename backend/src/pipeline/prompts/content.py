@@ -4,6 +4,7 @@ Prompt builders for manifest-driven section generation.
 
 from __future__ import annotations
 
+from resource_specs.loader import get_spec as get_resource_spec
 from pipeline.contracts import build_section_generation_manifest
 from pipeline.contracts import get_component_registry_entry
 from pipeline.prompts.shared import capacity_reminder_for_manifest_fields
@@ -179,11 +180,22 @@ def build_content_user_prompt(
     grade_band: str,
     learner_fit: str,
     template_id: str,
+    resource_type: str | None = None,
 ) -> str:
     manifest = build_section_generation_manifest(
         template_id=template_id,
         section_plan=section_plan,
     )
+    role_intent: str | None = None
+    if resource_type:
+        try:
+            resource_spec = get_resource_spec(resource_type)
+            for section_spec in [*resource_spec.sections.required, *resource_spec.sections.optional]:
+                if section_spec.role == section_plan.role:
+                    role_intent = section_spec.intent
+                    break
+        except Exception:
+            role_intent = None
     return build_section_user_prompt(
         plan=section_plan,
         subject=subject,
@@ -191,6 +203,7 @@ def build_content_user_prompt(
         grade_band=grade_band,
         learner_fit=learner_fit,
         manifest=manifest,
+        role_intent=role_intent,
     )
 
 
@@ -213,14 +226,32 @@ def build_core_user_prompt(
     )
 
 
-def build_section_system_prompt(manifest: SectionGenerationManifest) -> str:
+def build_section_system_prompt(
+    manifest: SectionGenerationManifest,
+    *,
+    resource_type: str | None = None,
+    resource_intent: str | None = None,
+) -> str:
     text_fields = manifest.active_text_fields()
     required = [field.field_name for field in manifest.required_fields if not field.external]
     optional = [field.field_name for field in manifest.optional_fields if not field.external]
     field_contracts = _manifest_field_block(text_fields)
     capacity_block = capacity_reminder_for_manifest_fields(text_fields)
 
-    return f"""You generate content for one textbook section from a manifest.
+    identity_block = ""
+    if resource_type and resource_intent:
+        identity_block = f"""You are generating content for a {resource_type.replace('_', ' ')}.
+
+Resource purpose:
+{resource_intent.strip()}
+
+Write content that is faithful to this resource type. Do not add content
+that belongs to a different resource type (for example, do not add concept
+summaries to an exit ticket, and do not add new teaching to practice-only sections).
+
+"""
+
+    return f"""{identity_block}You generate content for one textbook section from a manifest.
 Generate only the fields listed below.
 Do not add fields.
 Do not invent components.
@@ -251,6 +282,7 @@ def build_section_user_prompt(
     grade_band: str,
     learner_fit: str,
     manifest: SectionGenerationManifest,
+    role_intent: str | None = None,
     rerender_reason: str | None = None,
 ) -> str:
     field_names = [
@@ -267,19 +299,31 @@ def build_section_user_prompt(
         f"  focus: {plan.focus}",
         f"  bridges_from: {plan.bridges_from or 'none'}",
         f"  bridges_to: {plan.bridges_to or 'none'}",
-        "",
-        f"Subject: {subject}",
-        f"Context: {context}",
-        f"Grade level: {grade_band}",
-        f"Learner type: {learner_fit}",
-        "",
-        _section_plan_policy_block(plan),
-        "",
-        "Selected text fields:",
-        *(f"- {name}" for name in field_names),
-        "",
-        _visual_context_block(plan),
     ]
+    if role_intent:
+        lines.extend(
+            [
+                "",
+                "Section role intent (what this section must achieve):",
+                role_intent.strip(),
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            f"Subject: {subject}",
+            f"Context: {context}",
+            f"Grade level: {grade_band}",
+            f"Learner type: {learner_fit}",
+            "",
+            _section_plan_policy_block(plan),
+            "",
+            "Selected text fields:",
+            *(f"- {name}" for name in field_names),
+            "",
+            _visual_context_block(plan),
+        ]
+    )
     if rerender_reason:
         lines.extend(
             [
@@ -302,6 +346,7 @@ def build_content_repair_user_prompt(
     manifest: SectionGenerationManifest,
     validation_summary: str,
     validation_errors: list[dict[str, str]] = (),
+    role_intent: str | None = None,
     rerender_reason: str | None = None,
 ) -> str:
     if validation_errors:
@@ -320,6 +365,7 @@ def build_content_repair_user_prompt(
                 grade_band=grade_band,
                 learner_fit=learner_fit,
                 manifest=manifest,
+                role_intent=role_intent,
                 rerender_reason=rerender_reason,
             ),
         ]

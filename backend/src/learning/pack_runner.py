@@ -301,6 +301,7 @@ async def _enqueue_resource(
             pack_resource_id=resource.id,
             pack_resource_label=resource.label,
             pack_objective=pack.pack_learning_plan.objective,
+            resource_type=resource.resource_type,
         )
     except HTTPException as exc:
         if exc.status_code == 429:

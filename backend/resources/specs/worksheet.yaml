@@ -46,6 +46,8 @@ allowed_outcomes: [practice, review, assess, understand, compare, vocabulary]
 depth:
   quick:
     sections: "2-3"
+    min_sections: 2
+    max_sections: 3
     time_minutes: "10-15"
     questions: "3-5"
     note: >
@@ -53,6 +55,8 @@ depth:
       Context is one sentence only. Practice is the entire resource.
   standard:
     sections: "3-5"
+    min_sections: 3
+    max_sections: 5
     time_minutes: "20-30"
     questions: "5-8"
     note: >
@@ -60,6 +64,8 @@ depth:
       example if supports include worked_examples, then graduated practice.
   deep:
     sections: "4-6"
+    min_sections: 4
+    max_sections: 6
     time_minutes: "30-45"
     questions: "8-12"
     note: >

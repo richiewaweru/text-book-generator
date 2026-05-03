@@ -317,6 +317,7 @@ class TestBriefApi:
         assert "Practice: Explain how energy moves through the river food web." in str(captured["context"])
         assert captured["grade_band"] == "secondary"
         assert captured["learner_fit"] == "supported"
+        assert captured["resource_type"] == "worksheet"
         assert '"status":"committed"' in captured["planning_spec_json"]
 
     def test_pipeline_sections_from_planning_spec_preserve_explicit_bridges(self):

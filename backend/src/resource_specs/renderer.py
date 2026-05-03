@@ -27,12 +27,26 @@ def render_spec_for_prompt(
         "",
         "Resource intent:",
         spec.intent.strip(),
-        "",
-        f"Depth: {depth}",
-        f"Target time: {limit.time_minutes} minutes",
-        f"Section count: {limit.sections}",
-        f"Question count: {limit.questions}",
     ]
+
+    if spec.forbidden_components:
+        lines.extend(
+            [
+                "",
+                "HARD CONSTRAINT - these components are NEVER permitted for this resource type:",
+                *[f"- {component}" for component in spec.forbidden_components],
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            f"Depth: {depth}",
+            f"Target time: {limit.time_minutes} minutes",
+            f"Section count: {limit.sections}",
+            f"Question count: {limit.questions}",
+        ]
+    )
     if limit.note:
         lines.append(f"Depth note: {limit.note}")
     if limit.warning:
@@ -42,15 +56,6 @@ def render_spec_for_prompt(
     lines.append("Resource sections and component rules:")
     for section in sections:
         lines.extend(_render_section(section))
-
-    if spec.forbidden_components:
-        lines.extend(
-            [
-                "",
-                "Never use these components for this resource:",
-                *[f"- {component}" for component in spec.forbidden_components],
-            ]
-        )
 
     support_blocks = [
         (key, modification)

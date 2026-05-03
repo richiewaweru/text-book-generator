@@ -27,6 +27,8 @@ class DepthVariant(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     sections: str
+    min_sections: int
+    max_sections: int
     time_minutes: str
     questions: str
     note: str | None = None
@@ -101,4 +103,3 @@ class ResourceSpec(BaseModel):
 
     def depth_limit(self, depth: str) -> DepthVariant:
         return self.depth[depth]
-

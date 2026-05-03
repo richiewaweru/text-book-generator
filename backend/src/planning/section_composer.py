@@ -18,9 +18,8 @@ from planning.models import (
     SectionGenerationNotes,
 )
 from planning.role_maps import ROLE_COMPONENT_MAP
-from pipeline.resources import ResourceTemplate
 from pipeline.types.teacher_brief import TeacherBrief
-from resource_specs.loader import get_spec
+from resource_specs.schema import ResourceSpec
 from resource_specs.renderer import render_spec_for_prompt
 
 
@@ -94,11 +93,11 @@ def _fallback_title(role: PlanningSectionRole, brief: TeacherBrief, order: int) 
 def build_deterministic_composition(
     *,
     brief: TeacherBrief,
-    template: ResourceTemplate,
+    spec: ResourceSpec,
     roles: list[PlanningSectionRole],
 ) -> CompositionResult:
-    depth_limit = template.depth_limits[brief.depth]
-    section_count = max(depth_limit.min_components, min(len(roles), depth_limit.max_components))
+    depth_limit = spec.depth_limit(brief.depth)
+    section_count = max(depth_limit.min_sections, min(len(roles), depth_limit.max_sections))
     chosen_roles = roles[:section_count] or ["intro", "summary"]
 
     sections = [
@@ -108,14 +107,14 @@ def build_deterministic_composition(
             components=list(ROLE_COMPONENT_MAP.get(role, ("explanation-block",)))[:2],
             title=_fallback_title(role, brief, index),
             objective=_section_objective(role, brief),
-            rationale=f"This section uses the {role} role to support the {template.label} resource shape.",
+            rationale=f"This section uses the {role} role to support the {spec.label} resource shape.",
         )
         for index, role in enumerate(chosen_roles, start=1)
     ]
     return CompositionResult(
         sections=sections,
         lesson_rationale=(
-            f"This {template.label.lower()} follows the selected {brief.resource_type} shape and "
+            f"This {spec.label.lower()} follows the selected {brief.resource_type} shape and "
             f"keeps the focus on {', '.join(brief.subtopics)}."
         ),
         warning=None,
@@ -125,16 +124,19 @@ def build_deterministic_composition(
 def _system_prompt() -> str:
     return "\n".join(
         [
-            "You compose a reviewed classroom resource plan from a structured teacher brief.",
+            "You compose a classroom resource plan from a structured teacher brief.",
+            "",
+            "The resource spec below is a HARD CONSTRAINT document - not a suggestion.",
+            "Forbidden components are NEVER selected regardless of role, content, or any other consideration.",
+            "Treat every rule in the spec as absolute. Do not override it.",
+            "",
             "Return JSON only.",
             "Do not write lesson content.",
-            "Use only the allowed planning roles and allowed components for each role.",
             "Keep section count within the stated depth limits.",
             "Titles must be clear and student-facing.",
             "Every section must include at least one selected component.",
             "Each section should explain one focused idea.",
             "Do not create thin sections that cannot stand alone.",
-            "Depth controls the section budget: quick=2-3, standard=3-5, deep=5-7.",
             "If multiple subtopics do not fit cleanly, consolidate related ones and explain that in warning.",
         ]
     )
@@ -150,31 +152,19 @@ def _role_component_lines(roles: list[PlanningSectionRole]) -> str:
 def _user_prompt(
     *,
     brief: TeacherBrief,
-    template: ResourceTemplate,
+    spec: ResourceSpec,
     roles: list[PlanningSectionRole],
     directives: GenerationDirectives,
     repair_instructions: list[str] | None,
 ) -> str:
-    depth_limit = template.depth_limits[brief.depth]
+    depth_limit = spec.depth_limit(brief.depth)
     class_profile = brief.class_profile
-    try:
-        spec_block = render_spec_for_prompt(
-            spec=get_spec(brief.resource_type),
-            depth=brief.depth,
-            active_roles=list(roles),
-            active_supports=list(brief.supports),
-        )
-    except Exception:
-        spec_block = "\n".join(
-            [
-                f"Template label: {template.label}",
-                f"Template description: {template.description}",
-                f"Required obligations: {'; '.join(template.required_obligations) or 'none'}",
-                f"Resolved planning roles: {', '.join(roles)}",
-                "Role component map:",
-                _role_component_lines(roles),
-            ]
-        )
+    spec_block = render_spec_for_prompt(
+        spec=spec,
+        depth=brief.depth,
+        active_roles=list(roles),
+        active_supports=list(brief.supports),
+    )
     parts = [
         f"Subject: {brief.subject}",
         f"Topic: {brief.topic}",
@@ -199,9 +189,9 @@ def _user_prompt(
         spec_block,
         (
             "Depth limits: "
-            f"min sections {depth_limit.min_components}, max sections {depth_limit.max_components}, "
-            f"target time {depth_limit.target_time_minutes}, "
-            f"question range {depth_limit.question_count_range or 'n/a'}"
+            f"min sections {depth_limit.min_sections}, max sections {depth_limit.max_sections}, "
+            f"target time {depth_limit.time_minutes}, "
+            f"question range {depth_limit.questions or 'n/a'}"
         ),
         (
             "Directives: "
@@ -242,7 +232,7 @@ def _user_prompt(
 
 async def compose_sections(
     brief: TeacherBrief,
-    template: ResourceTemplate,
+    spec: ResourceSpec,
     roles: list[PlanningSectionRole],
     directives: GenerationDirectives,
     *,
@@ -252,7 +242,7 @@ async def compose_sections(
     repair_instructions: list[str] | None = None,
 ) -> CompositionResult:
     if model is None or run_llm_fn is None:
-        return build_deterministic_composition(brief=brief, template=template, roles=roles)
+        return build_deterministic_composition(brief=brief, spec=spec, roles=roles)
 
     agent = Agent(
         model=model,
@@ -266,7 +256,7 @@ async def compose_sections(
         model=model,
         user_prompt=_user_prompt(
             brief=brief,
-            template=template,
+            spec=spec,
             roles=roles,
             directives=directives,
             repair_instructions=repair_instructions,
