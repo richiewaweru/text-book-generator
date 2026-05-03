@@ -1,0 +1,130 @@
+{
+  "metadata": {
+    "version": "3.0",
+    "title": "Compound Area Foundations",
+    "subject": "Mathematics"
+  },
+  "lesson": {
+    "lesson_mode": "first_exposure",
+    "resource_type": "lesson"
+  },
+  "applied_lenses": [
+    {
+      "lens_id": "first_exposure",
+      "effects": [
+        "sequence concrete to abstract explanations",
+        "limit independent cognitive jumps in early tasks"
+      ]
+    },
+    {
+      "lens_id": "eal",
+      "effects": [
+        "define technical words before first use",
+        "use short sentence structures throughout"
+      ]
+    }
+  ],
+  "voice": {
+    "register": "simple",
+    "tone": "supportive"
+  },
+  "anchor": {
+    "reuse_scope": "entire_resource"
+  },
+  "sections": [
+    {
+      "section_id": "orient",
+      "title": "What is compound area?",
+      "role": "orient",
+      "visual_required": true,
+      "components": [
+        {
+          "component": "concept_intro",
+          "content_intent": "Define compound shapes in student-friendly language."
+        }
+      ]
+    },
+    {
+      "section_id": "model",
+      "title": "Break shapes into rectangles",
+      "role": "model",
+      "visual_required": true,
+      "components": [
+        {
+          "component": "worked_example",
+          "content_intent": "Show partitioning and area calculation with explicit steps."
+        }
+      ]
+    },
+    {
+      "section_id": "practice",
+      "title": "Guided practice",
+      "role": "practice",
+      "visual_required": true,
+      "components": [
+        {
+          "component": "guided_questions",
+          "content_intent": "Build confidence with warm and medium prompts only."
+        }
+      ]
+    },
+    {
+      "section_id": "summary",
+      "title": "Exit summary",
+      "role": "summary",
+      "visual_required": false,
+      "components": [
+        {
+          "component": "key_takeaways",
+          "content_intent": "Reinforce the 3-step routine for compound area."
+        }
+      ]
+    }
+  ],
+  "question_plan": [
+    {
+      "question_id": "q1",
+      "section_id": "practice",
+      "temperature": "warm",
+      "prompt": "Find the area of an L-shape split into two rectangles.",
+      "expected_answer": "Shows both rectangle areas and sums correctly.",
+      "diagram_required": true
+    },
+    {
+      "question_id": "q2",
+      "section_id": "practice",
+      "temperature": "medium",
+      "prompt": "Choose a valid split and calculate total area.",
+      "expected_answer": "Provides a correct split with accurate total area.",
+      "diagram_required": true
+    }
+  ],
+  "visual_strategy": {
+    "visuals": [
+      {
+        "section_id": "orient",
+        "strategy": "shape decomposition overview",
+        "density": "high"
+      },
+      {
+        "section_id": "model",
+        "strategy": "stepwise diagram annotations",
+        "density": "high"
+      },
+      {
+        "section_id": "practice",
+        "strategy": "question-by-question supporting diagrams",
+        "density": "high"
+      }
+    ]
+  },
+  "answer_key": {
+    "style": "concise_steps"
+  },
+  "teacher_materials": [
+    "answer_key"
+  ],
+  "prior_knowledge": [
+    "rectangle area formula"
+  ]
+}

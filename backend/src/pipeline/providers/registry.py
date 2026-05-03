@@ -41,6 +41,10 @@ DEFAULT_PROFILES_BY_MODE: dict[GenerationMode, dict[ModelSlot, ModelSpec]] = {
             family=ModelFamily.ANTHROPIC,
             model_name="claude-haiku-4-5-20251001",
         ),
+        ModelSlot.PREMIUM: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-haiku-4-5-20251001",
+        ),
     },
     GenerationMode.BALANCED: {
         ModelSlot.FAST: ModelSpec(
@@ -51,6 +55,10 @@ DEFAULT_PROFILES_BY_MODE: dict[GenerationMode, dict[ModelSlot, ModelSpec]] = {
             family=ModelFamily.ANTHROPIC,
             model_name="claude-sonnet-4-6",
         ),
+        ModelSlot.PREMIUM: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
     },
     GenerationMode.STRICT: {
         ModelSlot.FAST: ModelSpec(
@@ -58,6 +66,10 @@ DEFAULT_PROFILES_BY_MODE: dict[GenerationMode, dict[ModelSlot, ModelSpec]] = {
             model_name="claude-sonnet-4-6",
         ),
         ModelSlot.STANDARD: ModelSpec(
+            family=ModelFamily.ANTHROPIC,
+            model_name="claude-sonnet-4-6",
+        ),
+        ModelSlot.PREMIUM: ModelSpec(
             family=ModelFamily.ANTHROPIC,
             model_name="claude-sonnet-4-6",
         ),

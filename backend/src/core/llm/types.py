@@ -7,6 +7,7 @@ from enum import Enum
 class ModelSlot(str, Enum):
     FAST = "fast"
     STANDARD = "standard"
+    PREMIUM = "premium"
 
 
 class ModelFamily(str, Enum):

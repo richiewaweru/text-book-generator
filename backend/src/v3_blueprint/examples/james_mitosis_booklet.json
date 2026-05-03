@@ -1,0 +1,152 @@
+{
+  "metadata": {
+    "version": "3.0",
+    "title": "Mitosis Mini Booklet",
+    "subject": "Biology"
+  },
+  "lesson": {
+    "lesson_mode": "first_exposure",
+    "resource_type": "mini_booklet"
+  },
+  "applied_lenses": [
+    {
+      "lens_id": "first_exposure",
+      "effects": [
+        "sequence stages from orient to guided practice",
+        "maintain explicit stage transitions and recap checkpoints"
+      ]
+    }
+  ],
+  "voice": {
+    "register": "clear",
+    "tone": "scientific_supportive"
+  },
+  "anchor": {
+    "reuse_scope": "entire_resource"
+  },
+  "sections": [
+    {
+      "section_id": "orient",
+      "title": "Why cells divide",
+      "role": "orient",
+      "visual_required": true,
+      "components": [
+        {
+          "component": "context_overview",
+          "content_intent": "Orient learners to purpose of mitosis without reteaching full cell structure."
+        }
+      ]
+    },
+    {
+      "section_id": "explain",
+      "title": "Stages of mitosis",
+      "role": "explain",
+      "visual_required": true,
+      "components": [
+        {
+          "component": "stage_explanations",
+          "content_intent": "Introduce each stage with concise biological markers."
+        }
+      ]
+    },
+    {
+      "section_id": "model",
+      "title": "Worked stage identification",
+      "role": "model",
+      "visual_required": true,
+      "components": [
+        {
+          "component": "worked_example",
+          "content_intent": "Model how to identify stage from cellular evidence."
+        }
+      ]
+    },
+    {
+      "section_id": "diagram_sequence",
+      "title": "Diagram sequence",
+      "role": "visual_sequence",
+      "visual_required": true,
+      "components": [
+        {
+          "component": "diagram_series",
+          "content_intent": "Provide core diagram progression for each mitosis stage."
+        }
+      ]
+    },
+    {
+      "section_id": "practice",
+      "title": "Practice check",
+      "role": "practice",
+      "visual_required": false,
+      "components": [
+        {
+          "component": "short_questions",
+          "content_intent": "Assess stage recognition using concise prompts."
+        }
+      ]
+    },
+    {
+      "section_id": "summary",
+      "title": "Summary",
+      "role": "summary",
+      "visual_required": false,
+      "components": [
+        {
+          "component": "recap",
+          "content_intent": "Summarize stage order and key cues."
+        }
+      ]
+    }
+  ],
+  "question_plan": [
+    {
+      "question_id": "q1",
+      "section_id": "practice",
+      "temperature": "warm",
+      "prompt": "Identify the mitosis stage shown in the image.",
+      "expected_answer": "Names stage and cites one visual cue.",
+      "diagram_required": false
+    },
+    {
+      "question_id": "q2",
+      "section_id": "practice",
+      "temperature": "medium",
+      "prompt": "Order these stage descriptions from earliest to latest.",
+      "expected_answer": "Correctly orders stage progression and justifies sequence.",
+      "diagram_required": false
+    }
+  ],
+  "visual_strategy": {
+    "visuals": [
+      {
+        "section_id": "orient",
+        "strategy": "single orienting cell lifecycle visual",
+        "density": "medium"
+      },
+      {
+        "section_id": "explain",
+        "strategy": "stage-by-stage labeled micrographs",
+        "density": "high"
+      },
+      {
+        "section_id": "model",
+        "strategy": "annotated stage-identification walkthrough",
+        "density": "medium"
+      },
+      {
+        "section_id": "diagram_sequence",
+        "strategy": "diagram_series_core",
+        "density": "high"
+      }
+    ]
+  },
+  "answer_key": {
+    "style": "answer_key"
+  },
+  "teacher_materials": [
+    "answer_key"
+  ],
+  "prior_knowledge": [
+    "cell structure"
+  ]
+}

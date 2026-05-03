@@ -45,10 +45,11 @@ def _env(**kwargs: str | None):
 def test_load_profiles_uses_default_profiles():
     profiles = load_profiles()
 
-    assert set(profiles) == {ModelSlot.FAST, ModelSlot.STANDARD}
+    assert set(profiles) == {ModelSlot.FAST, ModelSlot.STANDARD, ModelSlot.PREMIUM}
     assert profiles[ModelSlot.FAST].family == ModelFamily.ANTHROPIC
     assert profiles[ModelSlot.FAST].model_name == "claude-haiku-4-5-20251001"
     assert profiles[ModelSlot.STANDARD].model_name == "claude-sonnet-4-6"
+    assert profiles[ModelSlot.PREMIUM].model_name == "claude-sonnet-4-6"
 
 
 def test_load_profiles_varies_defaults_by_generation_mode():
@@ -57,8 +58,10 @@ def test_load_profiles_varies_defaults_by_generation_mode():
 
     assert draft_profiles[ModelSlot.FAST].model_name == "claude-haiku-4-5-20251001"
     assert draft_profiles[ModelSlot.STANDARD].model_name == "claude-haiku-4-5-20251001"
+    assert draft_profiles[ModelSlot.PREMIUM].model_name == "claude-haiku-4-5-20251001"
     assert strict_profiles[ModelSlot.FAST].model_name == "claude-sonnet-4-6"
     assert strict_profiles[ModelSlot.STANDARD].model_name == "claude-sonnet-4-6"
+    assert strict_profiles[ModelSlot.PREMIUM].model_name == "claude-sonnet-4-6"
 
 
 def test_slot_env_override_wins_over_code_defaults():
@@ -161,6 +164,22 @@ def test_google_family_uses_google_model():
     assert spec is not None
     assert spec.family == ModelFamily.GOOGLE
     assert spec.model_name == "gemini-2.5-flash"
+
+
+def test_premium_slot_env_override_wins_over_defaults():
+    with _env(
+        PIPELINE_PREMIUM_PROVIDER="openai_compatible",
+        PIPELINE_PREMIUM_MODEL_NAME="gpt-4.1",
+        PIPELINE_PREMIUM_BASE_URL="https://api.openai.com/v1",
+        PIPELINE_PREMIUM_API_KEY_ENV="OPENAI_API_KEY",
+        OPENAI_API_KEY="sk-test",
+    ):
+        spec = load_profiles()[ModelSlot.PREMIUM]
+
+    assert spec.family == ModelFamily.OPENAI_COMPATIBLE
+    assert spec.model_name == "gpt-4.1"
+    assert spec.base_url == "https://api.openai.com/v1"
+    assert spec.api_key_env == "OPENAI_API_KEY"
 
 
 def test_image_provider_defaults_to_gemini():
