@@ -194,7 +194,7 @@ class TelemetryMonitor:
                     trace_id=trace_id,
                     generation_id=generation_id,
                     user_id=user_id,
-                    caller=payload.get("caller") or payload.get("node") or "unknown",
+                    caller=payload.get("caller") or "unknown",
                     slot=payload.get("slot", "unknown"),
                     family=payload.get("family"),
                     model_name=payload.get("model_name"),
@@ -205,8 +205,10 @@ class TelemetryMonitor:
                     latency_ms=payload.get("latency_ms"),
                     tokens_in=payload.get("tokens_in"),
                     tokens_out=payload.get("tokens_out"),
+                    thinking_tokens=payload.get("thinking_tokens"),
                     cost_usd=payload.get("cost_usd"),
                     error=payload.get("error"),
+                    node=payload.get("node"),
                 )
             except Exception:
                 logger.exception(

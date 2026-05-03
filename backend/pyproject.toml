@@ -43,7 +43,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/core", "src/generation", "src/pipeline", "src/planning", "src/telemetry", "src/pdf_export", "src/learning", "src/resource_specs", "src/v3_blueprint"]
+packages = ["src/core", "src/generation", "src/pipeline", "src/planning", "src/telemetry", "src/pdf_export", "src/learning", "src/resource_specs", "src/v3_blueprint", "src/v3_execution", "src/v3_review"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

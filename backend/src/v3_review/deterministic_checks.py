@@ -1,0 +1,574 @@
+from __future__ import annotations
+
+import re
+from collections.abc import Callable
+from typing import Any
+
+from jsonschema import Draft202012Validator
+
+from pipeline.contracts import (
+    get_component_registry_entry,
+    get_section_content_schema,
+    get_section_field_for_component,
+)
+from v3_blueprint.models import ProductionBlueprint
+from v3_execution.component_aliases import canonical_component_id
+from v3_execution.models import DraftPack
+
+from v3_review.models import IssueCategory, RepairExecutor, ReviewIssue, Severity
+
+
+def _issue(
+    *,
+    severity: Severity,
+    category: IssueCategory,
+    message: str,
+    blueprint_ref: str | None = None,
+    generated_ref: str | None = None,
+    executor: RepairExecutor = "assembler",
+    repair_target_id: str | None = None,
+) -> ReviewIssue:
+    return ReviewIssue(
+        severity=severity,
+        category=category,
+        message=message,
+        blueprint_ref=blueprint_ref,
+        generated_ref=generated_ref,
+        suggested_repair_executor=executor,
+        repair_target_id=repair_target_id,
+    )
+
+
+LEAK_PATTERN_STRINGS = [
+    r"section-[a-f0-9]{8}",
+    r"wo_[a-z_]+_\d+",
+    r"anchor_[a-z_]+_\d+",
+    r"\bundefined\b",
+    r"\bnull\b",
+    r"\bTODO\b",
+    r"\[object Object\]",
+    r"\bNaN\b",
+    r"source_work_order_id",
+    r"component_id",
+    r"blueprint_id",
+    r"generation_id",
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+]
+_LEAK_RES = [re.compile(p, re.IGNORECASE) for p in LEAK_PATTERN_STRINGS]
+
+_SKIP_TEXT_KEYS = frozenset(
+    {
+        "image_url",
+        "fallback_image_url",
+        "html_fragment",
+        "diagram",
+        "step_label",
+        "type",
+    }
+)
+
+
+def _walk_student_strings(obj: Any, key: str | None = None) -> list[str]:
+    out: list[str] = []
+    if isinstance(obj, str):
+        lk = (key or "").lower()
+        if lk in _SKIP_TEXT_KEYS or lk.endswith("_url"):
+            return out
+        out.append(obj)
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            kl = str(k).lower()
+            if kl in {"section_id", "template_id"}:
+                continue
+            if kl.endswith("_id") and kl not in {"question_id"}:
+                continue
+            out.extend(_walk_student_strings(v, k))
+    elif isinstance(obj, list):
+        for item in obj:
+            out.extend(_walk_student_strings(item, key))
+    return out
+
+
+def collect_student_facing_text(draft_pack: DraftPack) -> str:
+    parts: list[str] = []
+    for sec in draft_pack.sections:
+        parts.extend(_walk_student_strings(sec))
+    if draft_pack.answer_key:
+        for ent in draft_pack.answer_key.entries:
+            if isinstance(ent, dict):
+                for fld in ("student_answer", "explanation", "working"):
+                    val = ent.get(fld)
+                    if isinstance(val, str):
+                        parts.append(val)
+    return "\n".join(parts)
+
+
+def check_planned_sections_exist(
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+) -> list[ReviewIssue]:
+    planned = [s.section_id for s in blueprint.sections]
+    present = {s.get("section_id") for s in draft_pack.sections if isinstance(s, dict)}
+    issues: list[ReviewIssue] = []
+    for sid in planned:
+        if sid not in present:
+            issues.append(
+                _issue(
+                    severity="blocking",
+                    category="missing_planned_content",
+                    message=f"Planned section '{sid}' missing from draft pack.",
+                    blueprint_ref=f"sections[{sid}]",
+                    generated_ref=sid,
+                    executor="section_writer",
+                    repair_target_id=f"section:{sid}",
+                )
+            )
+    return issues
+
+
+def check_no_extra_sections(
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+) -> list[ReviewIssue]:
+    planned = {s.section_id for s in blueprint.sections}
+    issues: list[ReviewIssue] = []
+    for sec in draft_pack.sections:
+        if not isinstance(sec, dict):
+            continue
+        sid = sec.get("section_id")
+        if sid not in planned:
+            issues.append(
+                _issue(
+                    severity="blocking",
+                    category="extra_unplanned_content",
+                    message=f"Draft contains unplanned section '{sid}'.",
+                    blueprint_ref="sections",
+                    generated_ref=str(sid),
+                    executor="assembler",
+                )
+            )
+    return issues
+
+
+def check_planned_components_exist(
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+) -> list[ReviewIssue]:
+    issues: list[ReviewIssue] = []
+    by_section = {s["section_id"]: s for s in draft_pack.sections if isinstance(s, dict)}
+    for sec_plan in blueprint.sections:
+        bucket = by_section.get(sec_plan.section_id)
+        if bucket is None:
+            continue
+        for comp in sec_plan.components:
+            cid = canonical_component_id(comp.component)
+            field = get_section_field_for_component(cid)
+            if field is None:
+                issues.append(
+                    _issue(
+                        severity="blocking",
+                        category="schema_violation",
+                        message=f"No manifest field mapping for component '{cid}'.",
+                        blueprint_ref=f"sections[{sec_plan.section_id}].components",
+                        generated_ref=cid,
+                        executor="section_writer",
+                        repair_target_id=f"component:{sec_plan.section_id}:{cid}",
+                    )
+                )
+                continue
+            if field not in bucket or bucket[field] in (None, "", {}):
+                issues.append(
+                    _issue(
+                        severity="blocking",
+                        category="missing_planned_content",
+                        message=f"Missing planned component output '{cid}' ({field}).",
+                        blueprint_ref=f"sections[{sec_plan.section_id}].components",
+                        generated_ref=f"{sec_plan.section_id}.{field}",
+                        executor="section_writer",
+                        repair_target_id=f"component:{sec_plan.section_id}:{cid}",
+                    )
+                )
+    return issues
+
+
+def _questions_per_section(blueprint: ProductionBlueprint) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for q in blueprint.question_plan:
+        out[q.section_id] = out.get(q.section_id, 0) + 1
+    return out
+
+
+def check_planned_questions_exist(
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+) -> list[ReviewIssue]:
+    issues: list[ReviewIssue] = []
+    want = _questions_per_section(blueprint)
+    by_section = {s["section_id"]: s for s in draft_pack.sections if isinstance(s, dict)}
+    for sid, n in want.items():
+        bucket = by_section.get(sid)
+        practice = (bucket or {}).get("practice") if bucket else None
+        probs = practice.get("problems") if isinstance(practice, dict) else None
+        got = len(probs) if isinstance(probs, list) else 0
+        if got < n:
+            issues.append(
+                _issue(
+                    severity="blocking",
+                    category="missing_planned_content",
+                    message=f"Section '{sid}' expected {n} practice questions, found {got}.",
+                    blueprint_ref=f"question_plan:{sid}",
+                    generated_ref=f"{sid}.practice",
+                    executor="question_writer",
+                    repair_target_id=f"questions:{sid}",
+                )
+            )
+    return issues
+
+
+def check_no_extra_questions(
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+) -> list[ReviewIssue]:
+    issues: list[ReviewIssue] = []
+    want = _questions_per_section(blueprint)
+    by_section = {s["section_id"]: s for s in draft_pack.sections if isinstance(s, dict)}
+    for sid, bucket in by_section.items():
+        practice = bucket.get("practice") if isinstance(bucket, dict) else None
+        probs = practice.get("problems") if isinstance(practice, dict) else None
+        got = len(probs) if isinstance(probs, list) else 0
+        expected = want.get(sid, 0)
+        if got > expected:
+            issues.append(
+                _issue(
+                    severity="major",
+                    category="extra_unplanned_content",
+                    message=f"Section '{sid}' has {got} practice items but blueprint plans {expected}.",
+                    blueprint_ref="question_plan",
+                    generated_ref=f"{sid}.practice",
+                    executor="question_writer",
+                    repair_target_id=f"questions:{sid}",
+                )
+            )
+    return issues
+
+
+def _section_has_visual_media(bucket: dict[str, Any]) -> bool:
+    if not isinstance(bucket, dict):
+        return False
+    diag = bucket.get("diagram")
+    if isinstance(diag, dict) and diag.get("image_url"):
+        return True
+    ds = bucket.get("diagram_series")
+    if isinstance(ds, dict):
+        diagrams = ds.get("diagrams")
+        if isinstance(diagrams, list) and any(
+            isinstance(d, dict) and d.get("image_url") for d in diagrams
+        ):
+            return True
+    sim = bucket.get("simulation")
+    if isinstance(sim, dict) and (sim.get("html_fragment") or "").strip():
+        return True
+    return False
+
+
+def check_planned_visuals_exist(
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+) -> list[ReviewIssue]:
+    issues: list[ReviewIssue] = []
+    by_section = {s["section_id"]: s for s in draft_pack.sections if isinstance(s, dict)}
+    for sec_plan in blueprint.sections:
+        if not sec_plan.visual_required:
+            continue
+        bucket = by_section.get(sec_plan.section_id)
+        if not _section_has_visual_media(bucket or {}):
+            issues.append(
+                _issue(
+                    severity="blocking",
+                    category="missing_planned_content",
+                    message=f"Section '{sec_plan.section_id}' requires a visual but none is attached.",
+                    blueprint_ref=f"sections[{sec_plan.section_id}].visual_required",
+                    generated_ref=sec_plan.section_id,
+                    executor="visual_executor",
+                    repair_target_id=f"visual:{sec_plan.section_id}",
+                )
+            )
+    return issues
+
+
+def check_visuals_attach_to_valid_targets(
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+) -> list[ReviewIssue]:
+    issues: list[ReviewIssue] = []
+    section_ids = {s.section_id for s in blueprint.sections}
+    for idx, vis in enumerate(blueprint.visual_strategy.visuals):
+        if vis.section_id not in section_ids:
+            issues.append(
+                _issue(
+                    severity="blocking",
+                    category="visual_mismatch",
+                    message=f"Visual strategy entry #{idx} references unknown section '{vis.section_id}'.",
+                    blueprint_ref=f"visual_strategy.visuals[{idx}]",
+                    generated_ref=vis.section_id,
+                    executor="assembler",
+                )
+            )
+    return issues
+
+
+def check_answer_key_entries(
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+) -> list[ReviewIssue]:
+    issues: list[ReviewIssue] = []
+    if not blueprint.question_plan:
+        return issues
+    ak = draft_pack.answer_key
+    if ak is None:
+        issues.append(
+            _issue(
+                severity="blocking",
+                category="answer_key_mismatch",
+                message="Answer key missing but questions are planned.",
+                blueprint_ref="answer_key",
+                executor="answer_key_generator",
+                repair_target_id="answer_key:main",
+            )
+        )
+        return issues
+    include = {q.question_id for q in blueprint.question_plan}
+    present = set()
+    for ent in ak.entries:
+        if isinstance(ent, dict) and ent.get("question_id"):
+            present.add(str(ent["question_id"]))
+    for missing in sorted(include - present):
+        issues.append(
+            _issue(
+                severity="blocking",
+                category="answer_key_mismatch",
+                message=f"Answer key missing entry for question '{missing}'.",
+                blueprint_ref="answer_key_plan.include_question_ids",
+                generated_ref=missing,
+                executor="answer_key_generator",
+                repair_target_id=f"answer_key:{missing}",
+            )
+        )
+    return issues
+
+
+def check_expected_answers_preserved(
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+) -> list[ReviewIssue]:
+    issues: list[ReviewIssue] = []
+    ak = draft_pack.answer_key
+    if ak is None:
+        return issues
+    by_q: dict[str, dict[str, Any]] = {}
+    for ent in ak.entries:
+        if isinstance(ent, dict) and ent.get("question_id"):
+            by_q[str(ent["question_id"])] = ent
+    for pq in blueprint.question_plan:
+        ent = by_q.get(pq.question_id)
+        if not ent:
+            continue
+        student = str(ent.get("student_answer", "")).strip()
+        expected = pq.expected_answer.strip()
+        if expected and expected not in student:
+            issues.append(
+                _issue(
+                    severity="blocking",
+                    category="answer_key_mismatch",
+                    message=(
+                        f"Answer key for '{pq.question_id}' does not preserve blueprint expected answer."
+                    ),
+                    blueprint_ref=f"question_plan[{pq.question_id}].expected_answer",
+                    generated_ref=pq.question_id,
+                    executor="answer_key_generator",
+                    repair_target_id=f"answer_key:{pq.question_id}",
+                )
+            )
+    return issues
+
+
+def check_anchor_facts(
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+) -> list[ReviewIssue]:
+    corpus = collect_student_facing_text(draft_pack).lower()
+    issues: list[ReviewIssue] = []
+    if blueprint.lesson.lesson_mode == "repair" and blueprint.repair_focus is not None:
+        fault = blueprint.repair_focus.fault_line.strip().lower()
+        if fault and fault not in corpus:
+            issues.append(
+                _issue(
+                    severity="blocking",
+                    category="anchor_drift",
+                    message="Repair-lesson fault line does not appear in generated student-facing text.",
+                    blueprint_ref="repair_focus.fault_line",
+                    executor="section_writer",
+                    repair_target_id="repair_focus",
+                )
+            )
+    for pk in blueprint.prior_knowledge:
+        fragment = pk.strip().lower()
+        if len(fragment) < 8:
+            continue
+        if fragment not in corpus:
+            issues.append(
+                _issue(
+                    severity="major",
+                    category="anchor_drift",
+                    message=f"Prior knowledge anchor may be missing from draft: '{pk[:80]}'",
+                    blueprint_ref="prior_knowledge",
+                    executor="section_writer",
+                )
+            )
+    return issues
+
+
+def check_internal_artifact_leaks(draft_pack: DraftPack) -> list[ReviewIssue]:
+    texts = _walk_student_strings(draft_pack.sections)
+    if draft_pack.answer_key:
+        for ent in draft_pack.answer_key.entries:
+            if isinstance(ent, dict):
+                for fld in ("student_answer", "explanation", "working"):
+                    val = ent.get(fld)
+                    if isinstance(val, str):
+                        texts.append(val)
+    issues: list[ReviewIssue] = []
+    for text in texts:
+        for rx in _LEAK_RES:
+            if rx.search(text):
+                issues.append(
+                    _issue(
+                        severity="blocking",
+                        category="internal_artifact_leak",
+                        message=f"Internal artifact pattern matched in student-facing text: {rx.pattern!r}",
+                        generated_ref=text[:120],
+                        executor="section_writer",
+                    )
+                )
+                break
+    return issues
+
+
+def check_lectio_schema_validity(
+    draft_pack: DraftPack,
+    manifest: dict[str, Any],
+) -> list[ReviewIssue]:
+    _ = manifest
+    schema = get_section_content_schema()
+    validator = Draft202012Validator(schema)
+    issues: list[ReviewIssue] = []
+    for sec in draft_pack.sections:
+        if not isinstance(sec, dict):
+            continue
+        sid = sec.get("section_id", "<unknown>")
+        errs = sorted(validator.iter_errors(sec), key=lambda e: list(e.path))
+        for err in errs[:12]:
+            path = ".".join(str(p) for p in err.absolute_path) or "<root>"
+            issues.append(
+                _issue(
+                    severity="blocking",
+                    category="schema_violation",
+                    message=f"Lectio schema violation in section '{sid}' at {path}: {err.message}",
+                    generated_ref=sid,
+                    executor="section_writer",
+                    repair_target_id=f"schema:{sid}",
+                )
+            )
+    return issues
+
+
+def check_component_ids_in_manifest(
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+    manifest: dict[str, Any],
+) -> list[ReviewIssue]:
+    _ = draft_pack
+    _ = manifest
+    issues: list[ReviewIssue] = []
+    seen: set[str] = set()
+    for sec in blueprint.sections:
+        for comp in sec.components:
+            cid = canonical_component_id(comp.component)
+            if cid in seen:
+                continue
+            seen.add(cid)
+            if get_component_registry_entry(cid) is None:
+                issues.append(
+                    _issue(
+                        severity="blocking",
+                        category="schema_violation",
+                        message=f"Component id '{cid}' not present in Lectio manifest.",
+                        blueprint_ref=f"sections[{sec.section_id}].components",
+                        generated_ref=cid,
+                        executor="assembler",
+                    )
+                )
+    return issues
+
+
+CheckFn = Callable[..., list[ReviewIssue]]
+
+RECHECK_MAP: dict[str, list[CheckFn]] = {
+    "section_component": [
+        lambda bp, dp, m: check_planned_components_exist(bp, dp),
+        lambda bp, dp, m: check_anchor_facts(bp, dp),
+        lambda bp, dp, _: check_internal_artifact_leaks(dp),
+        lambda bp, dp, m: check_lectio_schema_validity(dp, m),
+    ],
+    "question": [
+        lambda bp, dp, m: check_planned_questions_exist(bp, dp),
+        lambda bp, dp, m: check_expected_answers_preserved(bp, dp),
+        lambda bp, dp, m: check_anchor_facts(bp, dp),
+    ],
+    "visual": [
+        lambda bp, dp, m: check_planned_visuals_exist(bp, dp),
+        lambda bp, dp, m: check_visuals_attach_to_valid_targets(bp, dp),
+        lambda bp, dp, m: check_anchor_facts(bp, dp),
+    ],
+    "answer_key": [
+        lambda bp, dp, m: check_answer_key_entries(bp, dp),
+        lambda bp, dp, m: check_expected_answers_preserved(bp, dp),
+    ],
+    "assembly": [
+        lambda bp, dp, m: check_planned_sections_exist(bp, dp),
+        lambda bp, dp, m: check_planned_components_exist(bp, dp),
+    ],
+}
+
+
+def run_rechecks_for_target(
+    target_type: str,
+    blueprint: ProductionBlueprint,
+    draft_pack: DraftPack,
+    manifest: dict[str, Any],
+) -> list[ReviewIssue]:
+    checks = RECHECK_MAP.get(target_type, [])
+    out: list[ReviewIssue] = []
+    for fn in checks:
+        out.extend(fn(blueprint, draft_pack, manifest))
+    return out
+
+
+__all__ = [
+    "RECHECK_MAP",
+    "check_anchor_facts",
+    "check_answer_key_entries",
+    "check_component_ids_in_manifest",
+    "check_expected_answers_preserved",
+    "check_internal_artifact_leaks",
+    "check_lectio_schema_validity",
+    "check_no_extra_questions",
+    "check_no_extra_sections",
+    "check_planned_components_exist",
+    "check_planned_questions_exist",
+    "check_planned_sections_exist",
+    "check_planned_visuals_exist",
+    "check_visuals_attach_to_valid_targets",
+    "collect_student_facing_text",
+    "run_rechecks_for_target",
+]

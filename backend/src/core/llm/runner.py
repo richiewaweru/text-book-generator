@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from pydantic_ai.exceptions import ModelHTTPError, UserError
 
 import core.events as core_events
-from core.llm.cost import compute_cost_usd, extract_usage
+from core.llm.cost import compute_cost_usd, extract_thinking_tokens, extract_usage
 from core.llm.transport import effective_text_spec, endpoint_host
 from core.llm.types import ModelFamily, ModelSlot, ModelSpec
 
@@ -153,10 +153,12 @@ async def run_llm(
     retry_policy: RetryPolicy | None = None,
     spec: ModelSpec | None = None,
     model_settings: dict | None = None,
+    node: str | None = None,
 ) -> Any:
     retry_policy = retry_policy or RetryPolicy()
     slot = slot or ModelSlot.FAST
     generation_id = generation_id or trace_id
+    event_node = node if node is not None else caller
 
     catalog_spec = spec or ModelSpec(family=ModelFamily.TEST, model_name="unknown")
     effective_spec = effective_text_spec(catalog_spec=catalog_spec, model=model)
@@ -196,7 +198,7 @@ async def run_llm(
                 trace_id=trace_id,
                 generation_id=generation_id,
                 caller=caller,
-                node=caller,
+                node=event_node,
                 slot=slot.value,
                 family=effective_spec.family.value,
                 model_name=effective_spec.model_name,
@@ -216,6 +218,7 @@ async def run_llm(
             latency_ms = (time.perf_counter() - started_at) * 1000.0
 
             tokens_in, tokens_out = extract_usage(result)
+            thinking_tokens = extract_thinking_tokens(result)
             cost_usd = compute_cost_usd(effective_spec, tokens_in, tokens_out)
 
             _publish_llm_event(
@@ -224,7 +227,7 @@ async def run_llm(
                     trace_id=trace_id,
                     generation_id=generation_id,
                     caller=caller,
-                    node=caller,
+                    node=event_node,
                     slot=slot.value,
                     family=effective_spec.family.value,
                     model_name=effective_spec.model_name,
@@ -234,6 +237,7 @@ async def run_llm(
                     latency_ms=latency_ms,
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
+                    thinking_tokens=thinking_tokens,
                     cost_usd=cost_usd,
                 ),
             )
@@ -246,7 +250,7 @@ async def run_llm(
                     trace_id=trace_id,
                     generation_id=generation_id,
                     caller=caller,
-                    node=caller,
+                    node=event_node,
                     slot=slot.value,
                     family=effective_spec.family.value,
                     model_name=effective_spec.model_name,
@@ -268,7 +272,7 @@ async def run_llm(
                     trace_id=trace_id,
                     generation_id=generation_id,
                     caller=caller,
-                    node=caller,
+                    node=event_node,
                     slot=slot.value,
                     family=effective_spec.family.value,
                     model_name=effective_spec.model_name,

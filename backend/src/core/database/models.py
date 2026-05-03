@@ -154,6 +154,7 @@ class LLMCallModel(Base):
     latency_ms = Column(Float, nullable=True)
     tokens_in = Column(Integer, nullable=True)
     tokens_out = Column(Integer, nullable=True)
+    thinking_tokens = Column(Integer, nullable=True)
     cost_usd = Column(Float, nullable=True)
     error = Column(Text, nullable=True)
     started_at = Column(DateTime, nullable=True)

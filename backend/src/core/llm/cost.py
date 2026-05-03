@@ -8,6 +8,7 @@ from core.llm.transport import endpoint_host
 TOKEN_PRICE_USD_PER_1M_BY_MODEL: dict[str, tuple[float, float]] = {
     "anthropic:claude-haiku-4-5-20251001": (0.25, 1.25),
     "anthropic:claude-sonnet-4-6": (3.0, 15.0),
+    "anthropic:claude-opus-4-6": (15.0, 75.0),
     "test:TestModel": (0.0, 0.0),
 }
 
@@ -49,6 +50,22 @@ def extract_usage(result: Any) -> tuple[int | None, int | None]:
     )
 
     return input_tokens, output_tokens
+
+
+def extract_thinking_tokens(result: Any) -> int | None:
+    """Best-effort thinking token count (e.g. Anthropic extended thinking in usage.details)."""
+    usage_obj = getattr(result, "usage", None)
+    if usage_obj is None:
+        return None
+    usage = usage_obj() if callable(usage_obj) else usage_obj
+    details = getattr(usage, "details", None)
+    if not isinstance(details, dict):
+        return None
+    for key in ("thinking_tokens", "thinking_token_count", "anthropic_thinking_tokens"):
+        val = details.get(key)
+        if isinstance(val, (int, float)):
+            return int(val)
+    return None
 
 
 def compute_cost_usd(

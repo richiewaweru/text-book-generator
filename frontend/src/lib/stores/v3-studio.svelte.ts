@@ -1,0 +1,49 @@
+import type {
+	BlueprintPreviewDTO,
+	CanvasSection,
+	V3ClarificationAnswer,
+	V3ClarificationQuestion,
+	V3InputForm,
+	V3SignalSummary,
+	V3Stage
+} from '$lib/types/v3';
+
+export type V3StudioStore = {
+	stage: V3Stage;
+	form: V3InputForm | null;
+	signals: V3SignalSummary | null;
+	clarifications: V3ClarificationQuestion[];
+	answers: V3ClarificationAnswer[];
+	blueprint: BlueprintPreviewDTO | null;
+	canvas: CanvasSection[];
+	error: string | null;
+	coherenceHint: string | null;
+	streamCancel: (() => void) | null;
+};
+
+export const v3Studio = $state<V3StudioStore>({
+	stage: 'input',
+	form: null,
+	signals: null,
+	clarifications: [],
+	answers: [],
+	blueprint: null,
+	canvas: [],
+	error: null,
+	coherenceHint: null,
+	streamCancel: null
+});
+
+export function resetV3Studio(): void {
+	v3Studio.streamCancel?.();
+	v3Studio.stage = 'input';
+	v3Studio.form = null;
+	v3Studio.signals = null;
+	v3Studio.clarifications = [];
+	v3Studio.answers = [];
+	v3Studio.blueprint = null;
+	v3Studio.canvas = [];
+	v3Studio.error = null;
+	v3Studio.coherenceHint = null;
+	v3Studio.streamCancel = null;
+}

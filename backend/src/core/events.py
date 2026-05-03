@@ -73,7 +73,7 @@ class _LLMCallEvent(BaseModel):
             raise ValueError("caller or node is required")
         if self.caller is None:
             self.caller = self.node
-        if self.node is None or self.node != self.caller:
+        if self.node is None:
             self.node = self.caller
         return self
 
@@ -87,6 +87,7 @@ class LLMCallSucceededEvent(_LLMCallEvent):
     latency_ms: float | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
+    thinking_tokens: int | None = None
     cost_usd: float | None = None
 
 

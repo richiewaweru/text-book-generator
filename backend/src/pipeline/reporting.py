@@ -22,6 +22,7 @@ class GenerationReportLLMAttempt(BaseModel):
     latency_ms: float | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
+    thinking_tokens: int | None = None
     cost_usd: float | None = None
     retryable: bool | None = None
     error: str | None = None
@@ -251,6 +252,7 @@ class GenerationReport(BaseModel):
     sections: list[GenerationReportSection] = Field(default_factory=list)
     generation_nodes: list[GenerationReportNode] = Field(default_factory=list)
     timeline: list[GenerationTimelineEvent] = Field(default_factory=list)
+    coherence_review: dict[str, Any] | None = None
 
     @field_validator(
         "started_at",

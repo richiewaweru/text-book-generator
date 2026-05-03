@@ -1,0 +1,166 @@
+import { fetchEventSource } from '@microsoft/fetch-event-source';
+import { get } from 'svelte/store';
+
+import { ensureOk } from '$lib/api/errors';
+import { apiFetch, buildApiUrl } from '$lib/api/client';
+import { authToken } from '$lib/stores/auth';
+import type {
+	BlueprintPreviewDTO,
+	V3ClarificationAnswer,
+	V3ClarificationQuestion,
+	V3InputForm,
+	V3SignalSummary
+} from '$lib/types/v3';
+
+function bearerHeaders(): Record<string, string> {
+	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+	const token = get(authToken);
+	if (token) headers.Authorization = `Bearer ${token}`;
+	return headers;
+}
+
+export async function extractSignals(form: V3InputForm): Promise<V3SignalSummary> {
+	const res = await apiFetch('/api/v1/v3/signals', {
+		method: 'POST',
+		headers: bearerHeaders(),
+		body: JSON.stringify(form)
+	});
+	await ensureOk(res, 'Could not read your teaching brief.');
+	return res.json() as Promise<V3SignalSummary>;
+}
+
+export async function getClarifications(
+	signals: V3SignalSummary,
+	form: V3InputForm
+): Promise<V3ClarificationQuestion[]> {
+	const res = await apiFetch('/api/v1/v3/clarify', {
+		method: 'POST',
+		headers: bearerHeaders(),
+		body: JSON.stringify({ signals, form })
+	});
+	await ensureOk(res, 'Could not load clarification questions.');
+	return res.json() as Promise<V3ClarificationQuestion[]>;
+}
+
+export async function generateBlueprint(payload: {
+	signals: V3SignalSummary;
+	form: V3InputForm;
+	clarification_answers: V3ClarificationAnswer[];
+}): Promise<BlueprintPreviewDTO> {
+	const res = await apiFetch('/api/v1/v3/blueprint', {
+		method: 'POST',
+		headers: bearerHeaders(),
+		body: JSON.stringify(payload)
+	});
+	await ensureOk(res, 'Could not build the lesson plan.');
+	return res.json() as Promise<BlueprintPreviewDTO>;
+}
+
+export async function adjustBlueprint(payload: {
+	blueprint_id: string;
+	adjustment: string;
+}): Promise<BlueprintPreviewDTO> {
+	const res = await apiFetch('/api/v1/v3/blueprint/adjust', {
+		method: 'POST',
+		headers: bearerHeaders(),
+		body: JSON.stringify(payload)
+	});
+	await ensureOk(res, 'Could not update the lesson plan.');
+	return res.json() as Promise<BlueprintPreviewDTO>;
+}
+
+export async function startV3Generation(payload: {
+	generation_id: string;
+	blueprint_id: string;
+	template_id: string;
+}): Promise<{ generation_id: string }> {
+	const res = await apiFetch('/api/v1/v3/generate/start', {
+		method: 'POST',
+		headers: bearerHeaders(),
+		body: JSON.stringify(payload)
+	});
+	await ensureOk(res, 'Could not start generation.');
+	return res.json() as Promise<{ generation_id: string }>;
+}
+
+export type V3StudioStreamHandlers = {
+	onCoherenceReviewStarted?: () => void;
+	onCoherenceReportReady?: (data: Record<string, unknown>) => void;
+	onResourceFinalised?: (data: Record<string, unknown>) => void;
+	onComponentReady?: (data: Record<string, unknown>) => void;
+	onVisualReady?: (data: Record<string, unknown>) => void;
+	onQuestionReady?: (data: Record<string, unknown>) => void;
+	onComponentPatched?: (data: Record<string, unknown>) => void;
+	onGenerationComplete?: (data: Record<string, unknown>) => void;
+	onGenerationWarning?: (data: Record<string, unknown>) => void;
+	onOpen?: () => void;
+	onError?: (err: unknown) => void;
+};
+
+export function connectV3StudioGenerationStream(
+	generationId: string,
+	handlers: V3StudioStreamHandlers
+): () => void {
+	const ctrl = new AbortController();
+	const url = buildApiUrl(`/api/v1/v3/generations/${encodeURIComponent(generationId)}/events`);
+	const headers: Record<string, string> = {};
+	const token = get(authToken);
+	if (token) headers.Authorization = `Bearer ${token}`;
+
+	fetchEventSource(url, {
+		signal: ctrl.signal,
+		headers,
+		async onopen(response) {
+			if (!response.ok) {
+				throw new Error(`v3 SSE failed: ${response.status}`);
+			}
+			handlers.onOpen?.();
+		},
+		onmessage(msg) {
+			const type = msg.event ?? '';
+			let payload: Record<string, unknown> = {};
+			try {
+				payload = JSON.parse(msg.data ?? '{}') as Record<string, unknown>;
+			} catch {
+				payload = {};
+			}
+			switch (type) {
+				case 'coherence_review_started':
+					handlers.onCoherenceReviewStarted?.();
+					break;
+				case 'coherence_report_ready':
+					handlers.onCoherenceReportReady?.(payload);
+					break;
+				case 'resource_finalised':
+					handlers.onResourceFinalised?.(payload);
+					break;
+				case 'component_ready':
+					handlers.onComponentReady?.(payload);
+					break;
+				case 'visual_ready':
+					handlers.onVisualReady?.(payload);
+					break;
+				case 'question_ready':
+					handlers.onQuestionReady?.(payload);
+					break;
+				case 'component_patched':
+					handlers.onComponentPatched?.(payload);
+					break;
+				case 'generation_complete':
+					handlers.onGenerationComplete?.(payload);
+					break;
+				case 'generation_warning':
+					handlers.onGenerationWarning?.(payload);
+					break;
+				default:
+					break;
+			}
+		},
+		onerror(err) {
+			handlers.onError?.(err);
+			throw err;
+		}
+	});
+
+	return () => ctrl.abort();
+}

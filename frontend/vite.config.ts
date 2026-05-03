@@ -104,7 +104,17 @@ export default defineConfig(({ mode }) => {
 		},*/
 		test: {
 			environment: 'jsdom',
-			globals: true
+			globals: true,
+			/** Threads pool can stall indefinitely on some Windows setups with SvelteKit/Vite. */
+			pool: 'forks',
+			/** Avoid vitest-worker fetch timeouts when pre-bundling bits-ui (date-time utils) under pnpm. */
+			deps: {
+				optimizer: {
+					web: {
+						include: ['bits-ui']
+					}
+				}
+			}
 		}
 	};
 });

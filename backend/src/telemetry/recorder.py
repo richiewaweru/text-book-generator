@@ -636,6 +636,7 @@ class GenerationReportRecorder:
         llm.latency_ms = payload.get("latency_ms")
         llm.tokens_in = payload.get("tokens_in")
         llm.tokens_out = payload.get("tokens_out")
+        llm.thinking_tokens = payload.get("thinking_tokens")
         llm.cost_usd = payload.get("cost_usd")
 
     def _handle_llm_failed(self, payload: dict[str, Any]) -> None:
@@ -653,7 +654,7 @@ class GenerationReportRecorder:
                 return llm_call
 
         llm_call = GenerationReportLLMAttempt(
-            node=self._caller(payload) or payload.get("node", ""),
+            node=payload.get("node") or self._caller(payload) or "",
             attempt=payload["attempt"],
             slot=payload["slot"],
             family=payload.get("family"),
@@ -665,7 +666,7 @@ class GenerationReportRecorder:
 
     def _llm_parent_node(self, payload: dict[str, Any]) -> GenerationReportNode:
         section_id = payload.get("section_id")
-        node_name = self._caller(payload) or payload["node"]
+        node_name = payload.get("node") or self._caller(payload) or "unknown"
         if section_id:
             section = self._ensure_section(section_id)
             return self._ensure_node(

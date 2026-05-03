@@ -443,6 +443,27 @@ export function applyGenerationStreamEvent(
 				terminal: { kind: 'error', message: payload.message }
 			};
 		}
+		case 'component_ready':
+		case 'visual_ready':
+		case 'component_patched':
+		case 'generation_started':
+		case 'draft_pack_ready':
+		case 'generation_complete':
+		case 'work_orders_compiled': {
+			const payload = JSON.parse(data) as Record<string, unknown>;
+			const label =
+				payload.component_id ??
+				payload.visual_id ??
+				payload.generation_id ??
+				type;
+			return {
+				next: {
+					...context,
+					viewerWarning: `v3 stream: ${String(type)} → ${String(label)}`
+				},
+				terminal: null
+			};
+		}
 		default:
 			return { next: context, terminal: null };
 	}

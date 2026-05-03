@@ -16,6 +16,8 @@ from core.dependencies import (
 )
 from core.entities.user import User
 from core.ports.user_repository import UserRepository
+from pydantic import BaseModel
+
 from generation import service as generation_service
 from generation.dependencies import (
     get_document_repository,
@@ -23,6 +25,7 @@ from generation.dependencies import (
 )
 from generation.pdf_export.cleanup import cleanup_files
 from generation.pdf_export.service import PDFExportRequest, export_generation_pdf
+from generation.v3_studio.router import v3_studio_router
 from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_repository import GenerationRepository
 from pipeline.adapter import run_pipeline_streaming
@@ -34,10 +37,20 @@ from pipeline.block_generate import (
 )
 from telemetry.dependencies import get_report_repository
 from telemetry.ports.generation_report_repository import GenerationReportRepository
+from v3_blueprint.models import ProductionBlueprint
+from v3_execution.runtime.runner import sse_event_stream
 
 PipelineCommand = _PipelineCommand
 
+
+class V3GenerateRequest(BaseModel):
+    generation_id: str
+    blueprint_id: str
+    template_id: str = "diagram-led"
+    blueprint: dict
+
 router = APIRouter(prefix="/api/v1", tags=["generation"])
+router.include_router(v3_studio_router)
 
 # Re-export the service-layer symbols that the route tests exercise directly.
 event_bus = core_events.event_bus
@@ -208,6 +221,31 @@ async def get_generation_events(
         generation_service._stream_generation_events(
             generation_id=generation_id,
             gen_repo=gen_repo,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/v3/generate")
+async def trigger_v3_generation(
+    body: V3GenerateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    _ = current_user
+    blueprint = ProductionBlueprint.model_validate(body.blueprint)
+
+    return StreamingResponse(
+        sse_event_stream(
+            blueprint=blueprint,
+            generation_id=body.generation_id,
+            blueprint_id=body.blueprint_id,
+            template_id=body.template_id,
+            trace_id=body.generation_id,
         ),
         media_type="text/event-stream",
         headers={

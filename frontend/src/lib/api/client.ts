@@ -85,6 +85,54 @@ export function connectGenerationEvents(
 	return () => ctrl.abort();
 }
 
+export type V3GeneratePayload = {
+	generation_id: string;
+	blueprint_id: string;
+	template_id?: string;
+	blueprint: Record<string, unknown>;
+};
+
+export function connectV3GenerateStream(
+	payload: V3GeneratePayload,
+	handlers: {
+		onEvent: (eventType: string, data: string) => void;
+		onError: (err: unknown) => void;
+		onOpen?: () => void;
+	}
+): () => void {
+	const ctrl = new AbortController();
+	const url = buildApiUrl('/api/v1/v3/generate');
+	const token = getAuthToken();
+	const headers: Record<string, string> = {
+		'Content-Type': 'application/json'
+	};
+	if (token) {
+		headers.Authorization = `Bearer ${token}`;
+	}
+
+	fetchEventSource(url, {
+		method: 'POST',
+		headers,
+		body: JSON.stringify(payload),
+		signal: ctrl.signal,
+		async onopen(response) {
+			if (!response.ok) {
+				throw new Error(`v3 SSE connection failed: ${response.status}`);
+			}
+			handlers.onOpen?.();
+		},
+		onmessage(msg) {
+			handlers.onEvent(msg.event ?? '', msg.data ?? '');
+		},
+		onerror(err) {
+			handlers.onError(err);
+			throw err;
+		}
+	});
+
+	return () => ctrl.abort();
+}
+
 export async function healthCheck(): Promise<{ status: string; version: string }> {
 	const response = await fetch(buildApiUrl('/health'));
 	return response.json();

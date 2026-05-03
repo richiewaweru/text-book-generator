@@ -1,0 +1,171 @@
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+from v3_blueprint.models import ProductionBlueprint
+
+
+class V3InputForm(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    year_group: str
+    subject: str
+    duration_minutes: int = Field(ge=15, le=180)
+    free_text: str
+
+
+class V3SignalSummary(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    topic: str
+    subtopic: str | None = None
+    prior_knowledge: list[str] = Field(default_factory=list)
+    learner_needs: list[str] = Field(default_factory=list)
+    teacher_goal: str
+    inferred_resource_type: str
+    confidence: Literal["low", "medium", "high"]
+    missing_signals: list[str] = Field(default_factory=list)
+
+
+class V3ClarificationQuestion(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    question: str
+    reason: str
+    optional: bool = False
+
+
+class V3ClarificationAnswer(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    question: str
+    answer: str
+
+
+class V3AppliedLensDTO(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    id: str
+    label: str
+    reason: str
+    effects: list[str] = Field(default_factory=list)
+
+
+class V3ComponentPlanDTO(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    component_id: str
+    teacher_label: str
+    content_intent: str
+
+
+class V3SectionPlanItemDTO(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    id: str
+    title: str
+    order: int
+    learning_intent: str
+    components: list[V3ComponentPlanDTO] = Field(default_factory=list)
+    visual_required: bool = False
+
+
+class V3QuestionPlanDTO(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    id: str
+    difficulty: Literal["warm", "medium", "cold", "transfer"]
+    expected_answer: str
+    diagram_required: bool
+    attaches_to_section_id: str
+    prompt: str = ""
+
+
+class V3AnchorExampleDTO(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    label: str
+    facts: dict[str, str] = Field(default_factory=dict)
+    correct_result: str | None = None
+    reuse_scope: str
+
+
+class BlueprintPreviewDTO(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    blueprint_id: str
+    resource_type: str
+    title: str
+    template_id: str = "diagram-led"
+    lenses: list[V3AppliedLensDTO] = Field(default_factory=list)
+    anchor: V3AnchorExampleDTO | None = None
+    section_plan: list[V3SectionPlanItemDTO] = Field(default_factory=list)
+    question_plan: list[V3QuestionPlanDTO] = Field(default_factory=list)
+    register_summary: str = ""
+    support_summary: list[str] = Field(default_factory=list)
+
+
+class ClarifyRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    signals: V3SignalSummary
+    form: V3InputForm
+
+
+class GenerateBlueprintRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    signals: V3SignalSummary
+    form: V3InputForm
+    clarification_answers: list[V3ClarificationAnswer] = Field(default_factory=list)
+
+
+class AdjustBlueprintRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    blueprint_id: str
+    adjustment: str
+
+
+class V3GenerateStartRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    generation_id: str
+    blueprint_id: str
+    template_id: str = "diagram-led"
+    blueprint: dict[str, Any] | None = None
+
+
+class V3GenerateStartResponse(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    generation_id: str
+
+
+class ProductionBlueprintEnvelope(BaseModel):
+    """LLM structured output wrapper."""
+
+    model_config = {"extra": "forbid"}
+
+    blueprint: ProductionBlueprint
+
+
+__all__ = [
+    "AdjustBlueprintRequest",
+    "BlueprintPreviewDTO",
+    "ClarifyRequest",
+    "GenerateBlueprintRequest",
+    "ProductionBlueprintEnvelope",
+    "V3AppliedLensDTO",
+    "V3ClarificationAnswer",
+    "V3ClarificationQuestion",
+    "V3ComponentPlanDTO",
+    "V3GenerateStartRequest",
+    "V3GenerateStartResponse",
+    "V3InputForm",
+    "V3QuestionPlanDTO",
+    "V3SectionPlanItemDTO",
+    "V3SignalSummary",
+]
