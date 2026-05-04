@@ -29,10 +29,20 @@ def test_get_v3_spec_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert spec.model_name == "claude-opus-test"
 
 
-def test_lesson_architect_thinking_type_is_adaptive() -> None:
+def test_lesson_architect_thinking_type_is_adaptive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("V3_ARCHITECT_MAX_TOKENS", raising=False)
     settings = lesson_architect_model_settings()
     assert settings["anthropic_thinking"]["type"] == "adaptive"
     assert "budget_tokens" not in settings["anthropic_thinking"]
+    assert settings["max_tokens"] == 8000
+
+
+def test_lesson_architect_max_tokens_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("V3_ARCHITECT_MAX_TOKENS", "12000")
+    settings = lesson_architect_model_settings()
+    assert settings["max_tokens"] == 12000
 
 
 def test_answer_key_effective_node_fast_when_answers_present() -> None:

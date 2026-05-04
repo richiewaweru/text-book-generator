@@ -124,18 +124,22 @@ def get_v3_model(node_name: str, *, model_overrides: dict | None = None):
 
 
 def lesson_architect_model_settings() -> dict:
-    """Anthropic adaptive thinking for Lesson Architect.
+    """Model settings for the Lesson Architect Opus call.
 
-    Uses "adaptive" (not deprecated "enabled") per Anthropic guidance:
+    max_tokens: A full ProductionBlueprint is roughly 3000–4000 output tokens.
+    With adaptive thinking, Opus may use additional internal reasoning tokens;
+    8000 gives headroom without fixing spend (Anthropic charges per token used,
+    not the ceiling).
+
+    anthropic_thinking.type = adaptive per Anthropic guidance:
     https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking
-
-    "adaptive" does not accept budget_tokens; the model decides when and
-    how much extended thinking is needed based on task complexity.
+    Do not pass budget_tokens with adaptive (invalid for that type).
     """
     return {
         "anthropic_thinking": {
             "type": "adaptive",
-        }
+        },
+        "max_tokens": int(os.getenv("V3_ARCHITECT_MAX_TOKENS", "8000")),
     }
 
 
