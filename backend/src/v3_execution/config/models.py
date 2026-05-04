@@ -124,10 +124,16 @@ def get_v3_model(node_name: str, *, model_overrides: dict | None = None):
 
 
 def lesson_architect_model_settings() -> dict:
-    """Anthropic extended thinking for Lesson Architect (pydantic-ai AnthropicModelSettings)."""
+    """Anthropic adaptive thinking for Lesson Architect.
+
+    Uses "adaptive" (not deprecated "enabled") per Anthropic guidance:
+    https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking
+
+    "adaptive" lets the model decide when extended thinking is needed.
+    """
     return {
         "anthropic_thinking": {
-            "type": "enabled",
+            "type": "adaptive",
             "budget_tokens": LESSON_ARCHITECT_THINKING_BUDGET_TOKENS,
         }
     }

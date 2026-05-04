@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -37,6 +38,8 @@ from generation.v3_studio.dtos import (
 from generation.v3_studio.preview_mapper import blueprint_to_preview_dto
 from generation.v3_studio.session_store import v3_studio_store
 
+logger = logging.getLogger(__name__)
+
 v3_studio_router = APIRouter(prefix="/v3", tags=["v3-studio"])
 
 
@@ -63,16 +66,31 @@ async def post_blueprint(
     body: GenerateBlueprintRequest,
     current_user: User = Depends(get_current_user),
 ) -> BlueprintPreviewDTO:
-    bp = await generate_production_blueprint(
-        signals=body.signals,
-        form=body.form,
-        clarification_answers=body.clarification_answers,
-        trace_id=str(uuid.uuid4()),
-    )
-    blueprint_id = str(uuid.uuid4())
-    template_id = "diagram-led"
-    await v3_studio_store.put_blueprint(current_user.id, blueprint_id, bp, template_id)
-    return blueprint_to_preview_dto(blueprint_id=blueprint_id, blueprint=bp, template_id=template_id)
+    try:
+        bp = await generate_production_blueprint(
+            signals=body.signals,
+            form=body.form,
+            clarification_answers=body.clarification_answers,
+            trace_id=str(uuid.uuid4()),
+        )
+        blueprint_id = str(uuid.uuid4())
+        template_id = "diagram-led"
+        await v3_studio_store.put_blueprint(current_user.id, blueprint_id, bp, template_id)
+        return blueprint_to_preview_dto(
+            blueprint_id=blueprint_id,
+            blueprint=bp,
+            template_id=template_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Blueprint generation failed user=%s error=%s",
+            current_user.id,
+            str(exc)[:400],
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(exc).__name__}: {str(exc)[:400]}",
+        ) from exc
 
 
 @v3_studio_router.post("/blueprint/adjust", response_model=BlueprintPreviewDTO)

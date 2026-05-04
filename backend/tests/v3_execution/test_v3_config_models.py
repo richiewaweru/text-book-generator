@@ -9,6 +9,7 @@ from v3_execution.config.models import (
     V3_ANSWER_KEY_GENERATOR_HEAVY,
     get_v3_slot,
     get_v3_spec,
+    lesson_architect_model_settings,
 )
 from v3_execution.models import AnswerKeyExecutorWorkOrder, AnswerKeyPlanSpec, WriterQuestion
 
@@ -26,6 +27,11 @@ def test_get_v3_spec_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("V3_PREMIUM_PROVIDER", "anthropic")
     spec = get_v3_spec("v3_lesson_architect")
     assert spec.model_name == "claude-opus-test"
+
+
+def test_lesson_architect_thinking_type_is_adaptive() -> None:
+    settings = lesson_architect_model_settings()
+    assert settings["anthropic_thinking"]["type"] == "adaptive"
 
 
 def test_answer_key_effective_node_fast_when_answers_present() -> None:

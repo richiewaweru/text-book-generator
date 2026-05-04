@@ -157,3 +157,39 @@ async def test_v3_generation_events_forbidden_for_other_user() -> None:
     async with _client() as client:
         resp = await client.get(f"/api/v1/v3/generations/{generation_id}/events")
         assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v3_blueprint_surfaces_exception_details_and_logs() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    payload = {
+        "signals": {
+            "topic": "Area",
+            "subtopic": "Compound area",
+            "prior_knowledge": ["rectangle area"],
+            "learner_needs": [],
+            "teacher_goal": "Build confidence",
+            "inferred_resource_type": "worksheet",
+            "confidence": "medium",
+            "missing_signals": [],
+        },
+        "form": {
+            "year_group": "Year 8",
+            "subject": "Mathematics",
+            "duration_minutes": 50,
+            "free_text": "Teach compound area with scaffolded examples.",
+        },
+        "clarification_answers": [],
+    }
+    with (
+        patch(
+            "generation.v3_studio.router.generate_production_blueprint",
+            side_effect=RuntimeError("architect exploded"),
+        ),
+        patch("generation.v3_studio.router.logger.exception") as logger_exception,
+    ):
+        async with _client() as client:
+            resp = await client.post("/api/v1/v3/blueprint", json=payload)
+    assert resp.status_code == 500
+    assert "RuntimeError: architect exploded" in resp.json()["detail"]
+    logger_exception.assert_called_once()
