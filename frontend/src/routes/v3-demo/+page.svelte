@@ -86,7 +86,7 @@
 	};
 
 	let blueprintText = $state(JSON.stringify(defaultBlueprint, null, 2));
-	let templateId = $state('diagram-led');
+let templateId = $state('guided-concept-path');
 	let generationId = $state(safeRandomId('v3-demo'));
 	let blueprintId = $state('blueprint-demo');
 	let skeleton = $state<SectionSkeleton[]>([]);

@@ -1,0 +1,23 @@
+from __future__ import annotations
+
+from generation.v3_studio.prompts import _manifest_block, build_architect_system_prompt
+
+
+def test_manifest_block_is_guided_concept_filtered() -> None:
+    block = _manifest_block()
+    assert "TEMPLATE: guided-concept-path" in block
+    assert "AVAILABLE COMPONENTS (use only these slugs):" in block
+    assert "REQUIRED in every section:" in block
+    assert "what-next-bridge" in block
+    assert "hook-hero [hook] [REQUIRED]:" in block
+    assert "explanation-block [explanation] [REQUIRED]:" in block
+    assert "concept_intro [explanation]" not in block
+    assert "worked_example [worked_example]" not in block
+
+
+def test_architect_prompt_includes_contract_limits() -> None:
+    prompt = build_architect_system_prompt()
+    assert "COMPONENT BUDGETS (max across entire lesson):" in prompt
+    assert "diagram-block: max 2" in prompt
+    assert "PER-SECTION LIMITS:" in prompt
+    assert "worked-example-card: max 1 per section" in prompt

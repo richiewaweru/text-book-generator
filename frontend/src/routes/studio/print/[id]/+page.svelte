@@ -11,7 +11,7 @@
 	const isPrintMode = $derived(page.url.searchParams.get('print') === 'true');
 	providePrintMode(() => isPrintMode);
 	let canvas = $state<CanvasSection[]>([]);
-	let templateId = $state('diagram-led');
+let templateId = $state('guided-concept-path');
 	let complete = $state(false);
 	let loadError = $state<string | null>(null);
 

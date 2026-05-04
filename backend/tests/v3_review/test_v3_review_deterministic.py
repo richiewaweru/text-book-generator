@@ -36,7 +36,7 @@ def _minimal_draft_pack(*, sections: list[dict], answer_key: GeneratedAnswerKeyB
     return DraftPack(
         generation_id="g1",
         blueprint_id="b1",
-        template_id="diagram-led",
+        template_id="guided-concept-path",
         subject="Mathematics",
         status="draft_ready",
         sections=sections,
@@ -50,7 +50,7 @@ def test_missing_planned_section_emits_blocking() -> None:
     partial_sections = [
         {
             "section_id": bp.sections[0].section_id,
-            "template_id": "diagram-led",
+            "template_id": "guided-concept-path",
             _concept_field(): {"body": "ok", "emphasis": []},
             "diagram": {"image_url": "https://example.com/a.png", "caption": "c", "alt_text": "c"},
         }
@@ -80,7 +80,7 @@ def test_internal_leak_pattern_blocks() -> None:
         sections.append(
             {
                 "section_id": sec_plan.section_id,
-                "template_id": "diagram-led",
+                "template_id": "guided-concept-path",
                 _concept_field(): {"body": leak_body, "emphasis": []},
                 "diagram": {"image_url": "https://example.com/a.png", "caption": "c", "alt_text": "c"},
             }
@@ -127,7 +127,10 @@ def test_extra_questions_major() -> None:
         return {"detail": intent}
 
     for sec_plan in bp.sections:
-        bucket: dict = {"section_id": sec_plan.section_id, "template_id": "diagram-led"}
+        bucket: dict = {
+            "section_id": sec_plan.section_id,
+            "template_id": "guided-concept-path",
+        }
         for comp_planned in sec_plan.components:
             if (
                 sec_plan.section_id == practice_section_id
@@ -204,7 +207,7 @@ async def test_route_repairs_finalises_when_final_checks_patched(
         bp,
         generation_id="g1",
         blueprint_id="b1",
-        template_id="diagram-led",
+        template_id="guided-concept-path",
     )
     dp = _minimal_draft_pack(sections=[], answer_key=None)
     report = CoherenceReport(

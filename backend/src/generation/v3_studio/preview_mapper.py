@@ -22,7 +22,7 @@ def blueprint_to_preview_dto(
     *,
     blueprint_id: str,
     blueprint: ProductionBlueprint,
-    template_id: str = "diagram-led",
+    template_id: str = "guided-concept-path",
 ) -> BlueprintPreviewDTO:
     BlueprintCompiler().compile_all(blueprint)
 

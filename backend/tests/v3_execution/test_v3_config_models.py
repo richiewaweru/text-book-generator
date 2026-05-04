@@ -32,6 +32,7 @@ def test_get_v3_spec_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_lesson_architect_thinking_type_is_adaptive() -> None:
     settings = lesson_architect_model_settings()
     assert settings["anthropic_thinking"]["type"] == "adaptive"
+    assert "budget_tokens" not in settings["anthropic_thinking"]
 
 
 def test_answer_key_effective_node_fast_when_answers_present() -> None:

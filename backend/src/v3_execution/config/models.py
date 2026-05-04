@@ -129,12 +129,12 @@ def lesson_architect_model_settings() -> dict:
     Uses "adaptive" (not deprecated "enabled") per Anthropic guidance:
     https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking
 
-    "adaptive" lets the model decide when extended thinking is needed.
+    "adaptive" does not accept budget_tokens; the model decides when and
+    how much extended thinking is needed based on task complexity.
     """
     return {
         "anthropic_thinking": {
             "type": "adaptive",
-            "budget_tokens": LESSON_ARCHITECT_THINKING_BUDGET_TOKENS,
         }
     }
 

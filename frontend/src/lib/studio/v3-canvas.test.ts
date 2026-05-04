@@ -13,7 +13,7 @@ const blueprintFixture = (): BlueprintPreviewDTO => ({
 	blueprint_id: 'bp-1',
 	resource_type: 'lesson',
 	title: 'Test',
-	template_id: 'diagram-led',
+	template_id: 'guided-concept-path',
 	lenses: [],
 	anchor: null,
 	section_plan: [

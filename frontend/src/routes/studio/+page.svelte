@@ -312,7 +312,7 @@
 		{#if v3Studio.coherenceHint && v3Studio.stage === 'finalising'}
 			<p class="mx-auto max-w-3xl px-4 pt-6 text-center text-sm text-muted-foreground">{v3Studio.coherenceHint}</p>
 		{/if}
-		<V3Canvas sections={v3Studio.canvas} stage={v3Studio.stage} templateId={v3Studio.blueprint?.template_id ?? 'diagram-led'} />
+		<V3Canvas sections={v3Studio.canvas} stage={v3Studio.stage} templateId={v3Studio.blueprint?.template_id ?? 'guided-concept-path'} />
 	{:else if v3Studio.stage === 'complete'}
 		<div class="mx-auto flex max-w-3xl justify-end gap-3 px-4 pt-4">
 			<button
@@ -327,7 +327,7 @@
 		{#if pdfError}
 			<p class="mx-auto max-w-3xl px-4 pt-2 text-center text-sm text-destructive" role="alert">{pdfError}</p>
 		{/if}
-		<V3Canvas sections={v3Studio.canvas} stage="complete" templateId={v3Studio.blueprint?.template_id ?? 'diagram-led'} />
+		<V3Canvas sections={v3Studio.canvas} stage="complete" templateId={v3Studio.blueprint?.template_id ?? 'guided-concept-path'} />
 	{/if}
 
 	{#if v3Studio.error}

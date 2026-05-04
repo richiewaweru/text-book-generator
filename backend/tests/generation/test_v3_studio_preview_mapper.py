@@ -17,7 +17,11 @@ def _example_bp(name: str) -> ProductionBlueprint:
 
 def test_blueprint_to_preview_dto_shape() -> None:
     bp = _example_bp("amara_compound_area.json")
-    dto = blueprint_to_preview_dto(blueprint_id="bid-test", blueprint=bp, template_id="diagram-led")
+    dto = blueprint_to_preview_dto(
+        blueprint_id="bid-test",
+        blueprint=bp,
+        template_id="guided-concept-path",
+    )
     assert dto.blueprint_id == "bid-test"
     assert dto.title == bp.metadata.title
     assert dto.section_plan
@@ -27,6 +31,12 @@ def test_blueprint_to_preview_dto_shape() -> None:
         for comp in sec.components:
             assert comp.teacher_label
             assert comp.component_id
+
+
+def test_blueprint_to_preview_dto_default_template_id() -> None:
+    bp = _example_bp("amara_compound_area.json")
+    dto = blueprint_to_preview_dto(blueprint_id="bid-default", blueprint=bp)
+    assert dto.template_id == "guided-concept-path"
 
 
 @pytest.mark.asyncio

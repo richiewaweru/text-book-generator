@@ -98,7 +98,7 @@ class BlueprintPreviewDTO(BaseModel):
     blueprint_id: str
     resource_type: str
     title: str
-    template_id: str = "diagram-led"
+    template_id: str = "guided-concept-path"
     lenses: list[V3AppliedLensDTO] = Field(default_factory=list)
     anchor: V3AnchorExampleDTO | None = None
     section_plan: list[V3SectionPlanItemDTO] = Field(default_factory=list)
@@ -134,7 +134,7 @@ class V3GenerateStartRequest(BaseModel):
 
     generation_id: str
     blueprint_id: str
-    template_id: str = "diagram-led"
+    template_id: str = "guided-concept-path"
     blueprint: dict[str, Any] | None = None
 
 

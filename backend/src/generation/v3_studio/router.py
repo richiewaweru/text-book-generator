@@ -74,7 +74,7 @@ async def post_blueprint(
             trace_id=str(uuid.uuid4()),
         )
         blueprint_id = str(uuid.uuid4())
-        template_id = "diagram-led"
+        template_id = "guided-concept-path"
         await v3_studio_store.put_blueprint(current_user.id, blueprint_id, bp, template_id)
         return blueprint_to_preview_dto(
             blueprint_id=blueprint_id,

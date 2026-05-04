@@ -35,7 +35,7 @@ def test_compile_execution_bundle() -> None:
         bp,
         generation_id="g1",
         blueprint_id="b1",
-        template_id="diagram-led",
+        template_id="guided-concept-path",
     )
     assert bundle.section_orders
     assert bundle.question_orders
@@ -242,7 +242,7 @@ async def test_runner_with_stubbed_executors(monkeypatch: pytest.MonkeyPatch) ->
         blueprint=bp,
         generation_id="g-x",
         blueprint_id="b-x",
-        template_id="diagram-led",
+        template_id="guided-concept-path",
         emit_event=capture,
         model_overrides=None,
     )

@@ -67,7 +67,7 @@ async def test_v3_generate_start_returns_json_and_sse_stream_closes() -> None:
     blueprint_id = str(uuid.uuid4())
     generation_id = str(uuid.uuid4())
     bp = _example_bp("amara_compound_area.json")
-    await v3_studio_store.put_blueprint(TEST_USER_A.id, blueprint_id, bp, "diagram-led")
+    await v3_studio_store.put_blueprint(TEST_USER_A.id, blueprint_id, bp, "guided-concept-path")
 
     async def fake_pump(queue, *, blueprint, generation_id, blueprint_id, template_id):
         _ = blueprint, generation_id, blueprint_id, template_id
@@ -81,7 +81,7 @@ async def test_v3_generate_start_returns_json_and_sse_stream_closes() -> None:
                 json={
                     "generation_id": generation_id,
                     "blueprint_id": blueprint_id,
-                    "template_id": "diagram-led",
+                    "template_id": "guided-concept-path",
                 },
             )
             assert post.status_code == 200
@@ -105,7 +105,7 @@ async def test_v3_generate_start_conflict_when_generation_id_reused() -> None:
     blueprint_id = str(uuid.uuid4())
     generation_id = str(uuid.uuid4())
     bp = _example_bp("amara_compound_area.json")
-    await v3_studio_store.put_blueprint(TEST_USER_A.id, blueprint_id, bp, "diagram-led")
+    await v3_studio_store.put_blueprint(TEST_USER_A.id, blueprint_id, bp, "guided-concept-path")
 
     async def fake_pump(queue, **_kwargs):
         await queue.put(None)
@@ -137,7 +137,7 @@ async def test_v3_generation_events_forbidden_for_other_user() -> None:
     blueprint_id = str(uuid.uuid4())
     generation_id = str(uuid.uuid4())
     bp = _example_bp("amara_compound_area.json")
-    await v3_studio_store.put_blueprint(TEST_USER_A.id, blueprint_id, bp, "diagram-led")
+    await v3_studio_store.put_blueprint(TEST_USER_A.id, blueprint_id, bp, "guided-concept-path")
 
     async def fake_pump(queue, **_kwargs):
         await queue.put(None)
