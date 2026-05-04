@@ -22,7 +22,7 @@ from generation.v3_studio.dtos import (
     V3InputForm,
     V3SignalSummary,
 )
-from generation.v3_studio.prompts import ADJUST_SYSTEM, ARCHITECT_SYSTEM, CLARIFY_SYSTEM, SIGNAL_SYSTEM
+from generation.v3_studio.prompts import ADJUST_SYSTEM, CLARIFY_SYSTEM, SIGNAL_SYSTEM, build_architect_system_prompt
 
 _CALLER = "v3_studio"
 
@@ -125,7 +125,7 @@ async def generate_production_blueprint(
     agent = Agent(
         model=model,
         output_type=ProductionBlueprintEnvelope,
-        system_prompt=ARCHITECT_SYSTEM,
+        system_prompt=build_architect_system_prompt(),
     )
     clar = clarification_answers or []
     clar_txt = "\n".join(f"Q: {c.question}\nA: {c.answer}" for c in clar)

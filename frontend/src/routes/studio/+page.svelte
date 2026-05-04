@@ -10,6 +10,7 @@
 	import {
 		adjustBlueprint,
 		connectV3StudioGenerationStream,
+		downloadV3GenerationPdf,
 		extractSignals,
 		generateBlueprint,
 		getClarifications,
@@ -24,6 +25,9 @@
 		mergePracticeProblem
 	} from '$lib/studio/v3-canvas';
 	import type { V3ClarificationAnswer, V3InputForm } from '$lib/types/v3';
+
+	let pdfLoading = $state(false);
+	let pdfError = $state<string | null>(null);
 
 	function friendly(err: unknown): string {
 		if (isApiError(err)) return err.detail;
@@ -104,6 +108,7 @@
 		if (!blueprint) return;
 
 		const generationId = crypto.randomUUID();
+		v3Studio.generationId = generationId;
 		v3Studio.canvas = buildCanvasSkeleton(blueprint);
 		v3Studio.stage = 'generating';
 
@@ -250,6 +255,30 @@
 	onDestroy(() => {
 		v3Studio.streamCancel?.();
 	});
+
+	async function handleDownloadPdf() {
+		const gid = v3Studio.generationId;
+		if (!gid) {
+			pdfError = 'No generation id — try generating again.';
+			return;
+		}
+		pdfLoading = true;
+		pdfError = null;
+		try {
+			const canvasPayload = JSON.parse(JSON.stringify(v3Studio.canvas)) as Record<string, unknown>[];
+			await downloadV3GenerationPdf(gid, {
+				school_name: '—',
+				teacher_name: '—',
+				include_toc: false,
+				include_answers: true,
+				canvas_sections: canvasPayload
+			});
+		} catch (err) {
+			pdfError = friendly(err);
+		} finally {
+			pdfLoading = false;
+		}
+	}
 </script>
 
 <div class="min-h-screen bg-background pb-16">
@@ -285,6 +314,19 @@
 		{/if}
 		<V3Canvas sections={v3Studio.canvas} stage={v3Studio.stage} templateId={v3Studio.blueprint?.template_id ?? 'diagram-led'} />
 	{:else if v3Studio.stage === 'complete'}
+		<div class="mx-auto flex max-w-3xl justify-end gap-3 px-4 pt-4">
+			<button
+				type="button"
+				class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+				onclick={handleDownloadPdf}
+				disabled={pdfLoading}
+			>
+				{pdfLoading ? 'Generating PDF…' : 'Download PDF'}
+			</button>
+		</div>
+		{#if pdfError}
+			<p class="mx-auto max-w-3xl px-4 pt-2 text-center text-sm text-destructive" role="alert">{pdfError}</p>
+		{/if}
 		<V3Canvas sections={v3Studio.canvas} stage="complete" templateId={v3Studio.blueprint?.template_id ?? 'diagram-led'} />
 	{/if}
 

@@ -1,0 +1,1153 @@
+{
+  "version": "3.0.0",
+  "phases": {
+    "1": {
+      "id": 1,
+      "name": "Orient",
+      "description": "Set direction, context, purpose, or closure.",
+      "components": [
+        {
+          "id": "section-header",
+          "name": "SectionHeader",
+          "teacher_label": "Section Header",
+          "teacher_description": "Sets the title, subject, and learning objectives for a section.",
+          "cognitive_job": "Orient the learner",
+          "role": "Opens a section with title, subject, objective, and level indicators",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "titleMaxWords": 12,
+            "subtitleMaxWords": 20,
+            "objectiveMaxWords": 30
+          },
+          "section_field": "header",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Full static header"
+          },
+          "shadcn_primitive": "Badge (for level pills)"
+        },
+        {
+          "id": "hook-hero",
+          "name": "HookHero",
+          "teacher_label": "Opening Hook",
+          "teacher_description": "Grabs attention with a question, quote, or fact before the lesson begins.",
+          "cognitive_job": "Create felt need",
+          "role": "Creates felt need before explanation arrives",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "headlineMaxWords": 12,
+            "bodyMaxWords": 80
+          },
+          "section_field": "hook",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Pull quote block with left border"
+          },
+          "shadcn_primitive": "none - pure layout"
+        },
+        {
+          "id": "explanation-block",
+          "name": "ExplanationBlock",
+          "teacher_label": "Core Explanation",
+          "teacher_description": "Main teaching prose that builds understanding step by step.",
+          "cognitive_job": "Build understanding",
+          "role": "Sustained prose that builds a mental model",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "bodyMaxWords": 350,
+            "emphasisMax": 3
+          },
+          "section_field": "explanation",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Static prose"
+          },
+          "shadcn_primitive": "Typography"
+        },
+        {
+          "id": "prerequisite-strip",
+          "name": "PrerequisiteStrip",
+          "teacher_label": "Prerequisites",
+          "teacher_description": "Lists assumed knowledge with optional refresher notes.",
+          "cognitive_job": "Activate prior knowledge",
+          "role": "Lists assumed knowledge with optional refresher pop-ups",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static",
+            "hint-toggle"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "itemsMax": 4
+          },
+          "section_field": "prerequisites",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Inline list of prerequisites"
+          },
+          "shadcn_primitive": "Popover"
+        },
+        {
+          "id": "what-next-bridge",
+          "name": "WhatNextBridge",
+          "teacher_label": "What Next",
+          "teacher_description": "Connects this section to the concept or topic that follows.",
+          "cognitive_job": "Connect forward",
+          "role": "Connects the section forward to what the concept enables",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "bodyMaxWords": 50,
+            "nextMaxWords": 15,
+            "previewMaxWords": 30
+          },
+          "section_field": "what_next",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Static, amber left rule"
+          },
+          "shadcn_primitive": "Card"
+        },
+        {
+          "id": "interview-anchor",
+          "name": "InterviewAnchor",
+          "teacher_label": "Explain Out Loud",
+          "teacher_description": "Prompts learners to rehearse explaining the idea in their own words.",
+          "cognitive_job": "Make knowledge speakable",
+          "role": "Makes knowledge speakable - rehearse explaining the concept",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "promptMaxWords": 35,
+            "audienceMaxWords": 10,
+            "followUpMaxWords": 25
+          },
+          "section_field": "interview",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Static with write-in lines"
+          },
+          "shadcn_primitive": "Card"
+        },
+        {
+          "id": "callout-block",
+          "name": "CalloutBlock",
+          "teacher_label": "Callout",
+          "teacher_description": "Highlighted tip, warning, exam note, or remembered point.",
+          "cognitive_job": "Flag what matters",
+          "role": "Standalone highlighted callout ΓÇö tip, warning, info, or exam note",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "bodyMaxWords": 60,
+            "headingMaxWords": 6
+          },
+          "section_field": "callout",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Bordered callout box"
+          },
+          "shadcn_primitive": "Alert"
+        },
+        {
+          "id": "summary-block",
+          "name": "SummaryBlock",
+          "teacher_label": "Summary",
+          "teacher_description": "Bullet takeaways that close what the section covered.",
+          "cognitive_job": "Consolidate and close",
+          "role": "Lists what this section covered ΓÇö key takeaways as bullets",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "itemsMin": 2,
+            "itemsMax": 5,
+            "itemMaxWords": 25,
+            "closingMaxWords": 30
+          },
+          "section_field": "summary",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Bulleted list with border"
+          },
+          "shadcn_primitive": "Card"
+        },
+        {
+          "id": "section-divider",
+          "name": "SectionDivider",
+          "teacher_label": "Section Divider",
+          "teacher_description": "Named visual break between parts within a lesson.",
+          "cognitive_job": "Signal a phase change",
+          "role": "Named visual break between parts within a section",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "labelMaxWords": 4
+          },
+          "section_field": "divider",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Horizontal rule with label"
+          },
+          "shadcn_primitive": "Separator"
+        },
+        {
+          "id": "video-embed",
+          "name": "VideoEmbed",
+          "teacher_label": "Video",
+          "teacher_description": "Embed a YouTube or Vimeo video with a caption.",
+          "cognitive_job": "Engage through multimedia",
+          "role": "Embeds a video with caption and print fallback",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": true
+          },
+          "capacity": {
+            "captionMaxWords": 40
+          },
+          "section_field": "video_embed",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "QR code or thumbnail based on setting"
+          },
+          "shadcn_primitive": "iframe"
+        }
+      ]
+    },
+    "2": {
+      "id": 2,
+      "name": "Build Knowledge",
+      "description": "Define, compare, organize, or anchor key knowledge.",
+      "components": [
+        {
+          "id": "definition-card",
+          "name": "DefinitionCard",
+          "teacher_label": "Key Term Definition",
+          "teacher_description": "Introduces a term with formal and everyday language side by side.",
+          "cognitive_job": "Anchor formal knowledge",
+          "role": "Anchors a formal term with formal and plain versions",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static",
+            "plain-formal-toggle"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "formalMaxWords": 80,
+            "plainMaxWords": 60,
+            "relatedTermsMax": 3
+          },
+          "section_field": "definition",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Both versions shown"
+          },
+          "shadcn_primitive": "Card + Collapsible"
+        },
+        {
+          "id": "definition-family",
+          "name": "DefinitionFamily",
+          "teacher_label": "Definition Family",
+          "teacher_description": "Groups related terms that belong together conceptually.",
+          "cognitive_job": "Distinguish related concepts",
+          "role": "Groups related terms that belong together conceptually",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static",
+            "accordion"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "definitionsMax": 4,
+            "introMaxWords": 40
+          },
+          "section_field": "definition_family",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "All definitions expanded"
+          },
+          "shadcn_primitive": "Card + Accordion"
+        },
+        {
+          "id": "glossary-rail",
+          "name": "GlossaryRail",
+          "teacher_label": "Glossary Rail",
+          "teacher_description": "Sidebar vocabulary that stays visible while reading.",
+          "cognitive_job": "Retrieve meaning without losing place",
+          "role": "Vocabulary visible in peripheral field, updates by section",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "sticky",
+            "drawer",
+            "inline-strip"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "termsMax": 8,
+            "termsWarning": 6,
+            "definitionMaxWords": 30
+          },
+          "section_field": "glossary",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Inline vocabulary strip at section end"
+          },
+          "shadcn_primitive": "Card + ScrollArea + Sheet"
+        },
+        {
+          "id": "glossary-inline",
+          "name": "GlossaryInline",
+          "teacher_label": "Inline Glossary",
+          "teacher_description": "Short in-text definition pop-up on a key term.",
+          "cognitive_job": "Retrieve meaning in context",
+          "role": "In-text definition pop-up on a defined term",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "hint-toggle"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "definitionMaxWords": 30
+          },
+          "section_field": null,
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Term underlined, definition in footnote"
+          },
+          "shadcn_primitive": "Popover"
+        },
+        {
+          "id": "insight-strip",
+          "name": "InsightStrip",
+          "teacher_label": "Insight Strip",
+          "teacher_description": "Side-by-side comparison of a few values or ideas.",
+          "cognitive_job": "Compare values simultaneously",
+          "role": "Side-by-side comparison of 2-3 related values or concepts",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "cellsMax": 3,
+            "cellsMin": 2,
+            "cellLinesMax": 2
+          },
+          "section_field": "insight_strip",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Static table"
+          },
+          "shadcn_primitive": "CSS Grid"
+        },
+        {
+          "id": "key-fact",
+          "name": "KeyFact",
+          "teacher_label": "Key Fact",
+          "teacher_description": "Prominent stat, formula, or date that anchors the section.",
+          "cognitive_job": "Anchor a critical fact",
+          "role": "Visually prominent stat, formula, or date that anchors the section",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "factMaxWords": 20,
+            "contextMaxWords": 30
+          },
+          "section_field": "key_fact",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Bold bordered fact box"
+          },
+          "shadcn_primitive": "Card"
+        },
+        {
+          "id": "comparison-grid",
+          "name": "ComparisonGrid",
+          "teacher_label": "Comparison Table",
+          "teacher_description": "Compares concepts across shared criteria in a grid.",
+          "cognitive_job": "Compare and classify in parallel",
+          "role": "Holds multiple concepts in view so distinctions become structural",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "columnsMin": 2,
+            "columnsMax": 4,
+            "rowsMax": 6,
+            "criterionMaxWords": 8,
+            "valueMaxWords": 20
+          },
+          "section_field": "comparison_grid",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Static comparison table"
+          },
+          "shadcn_primitive": "CSS Grid + Card"
+        }
+      ]
+    },
+    "3": {
+      "id": 3,
+      "name": "Model",
+      "description": "Show a method, example, or process before independent work.",
+      "components": [
+        {
+          "id": "worked-example-card",
+          "name": "WorkedExampleCard",
+          "teacher_label": "Worked Example",
+          "teacher_description": "Walks through a problem step by step with clear reasoning.",
+          "cognitive_job": "Watch reasoning in action",
+          "role": "Shows reasoning in action step by step, each step justified",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static",
+            "step-reveal",
+            "accordion",
+            "compare"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "stepsMax": 6,
+            "stepsWarning": 4,
+            "stepLabelMaxWords": 12,
+            "stepContentMaxWords": 80
+          },
+          "section_field": "worked_example",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "avoid",
+            "preferredWidth": "full",
+            "fallback": "All steps expanded"
+          },
+          "shadcn_primitive": "Card + Collapsible"
+        },
+        {
+          "id": "process-steps",
+          "name": "ProcessSteps",
+          "teacher_label": "Process Steps",
+          "teacher_description": "Ordered procedure learners should follow every time.",
+          "cognitive_job": "Follow a procedure",
+          "role": "A repeatable procedure where order is non-negotiable",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static",
+            "step-reveal"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "stepsMax": 8,
+            "actionMaxWords": 15,
+            "detailMaxWords": 60
+          },
+          "section_field": "process",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "avoid",
+            "preferredWidth": "full",
+            "fallback": "All steps visible, checkbox squares for print"
+          },
+          "shadcn_primitive": "Card + Separator"
+        }
+      ]
+    },
+    "4": {
+      "id": 4,
+      "name": "Practice and Check",
+      "description": "Let students answer, practise, retrieve, reflect, or show thinking.",
+      "components": [
+        {
+          "id": "practice-stack",
+          "name": "PracticeStack",
+          "teacher_label": "Practice Problems",
+          "teacher_description": "Problems at varied difficulty with progressive hints.",
+          "cognitive_job": "Apply understanding under calibrated difficulty",
+          "role": "Problems at calibrated difficulty with progressive hints and optional solutions",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "hint-toggle",
+            "accordion",
+            "progressive-hints",
+            "flat-list"
+          ],
+          "capabilities": {
+            "acceptsMedia": true,
+            "acceptsQuestions": true,
+            "producesAnswerKey": true,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "problemsMin": 2,
+            "problemsMax": 5,
+            "hintsPerProblemMax": 3,
+            "questionMaxWords": 100,
+            "hintMaxWords": 60
+          },
+          "section_field": "practice",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "avoid",
+            "preferredWidth": "full",
+            "fallback": "All visible, write-in lines rendered; inline answers hidden by default"
+          },
+          "shadcn_primitive": "Accordion + Collapsible"
+        },
+        {
+          "id": "quiz-check",
+          "name": "QuizCheck",
+          "teacher_label": "Quick Check Quiz",
+          "teacher_description": "Short check-for-understanding with immediate feedback.",
+          "cognitive_job": "Verify understanding immediately",
+          "role": "Quick concept check with immediate feedback mid-section",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": true,
+            "acceptsQuestions": true,
+            "producesAnswerKey": true,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "optionsMin": 3,
+            "optionsMax": 4,
+            "questionMaxWords": 60,
+            "optionMaxWords": 20
+          },
+          "section_field": "quiz",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Question and options shown, correct answer marked"
+          },
+          "shadcn_primitive": "Card + Button"
+        },
+        {
+          "id": "reflection-prompt",
+          "name": "ReflectionPrompt",
+          "teacher_label": "Reflection Prompt",
+          "teacher_description": "Open pause that encourages deeper thinking or sharing.",
+          "cognitive_job": "Pause and consolidate",
+          "role": "Pauses forward motion and turns attention inward",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": true,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "promptMaxWords": 40,
+            "spaceMax": 6
+          },
+          "section_field": "reflection",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Prompt with write-in lines"
+          },
+          "shadcn_primitive": "Card"
+        },
+        {
+          "id": "student-textbox",
+          "name": "StudentTextbox",
+          "teacher_label": "Student Textbox",
+          "teacher_description": "Simple write-in space tied to a short prompt.",
+          "cognitive_job": "Record thinking",
+          "role": "Simple write-in box for student responses ΓÇö no framing beyond a prompt",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": true,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "promptMaxWords": 40,
+            "linesMax": 10
+          },
+          "section_field": "student_textbox",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Lined write-in area"
+          },
+          "shadcn_primitive": "Textarea (print: lined box)"
+        },
+        {
+          "id": "short-answer",
+          "name": "ShortAnswerQuestion",
+          "teacher_label": "Short Answer",
+          "teacher_description": "Open question with lines for a written response.",
+          "cognitive_job": "Recall and explain in own words",
+          "role": "Open question with write-in space and optional mark scheme",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": true,
+            "acceptsQuestions": true,
+            "producesAnswerKey": true,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "questionMaxWords": 60,
+            "linesMax": 10,
+            "marksMax": 10
+          },
+          "section_field": "short_answer",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Question with lined answer space, mark allocation shown"
+          },
+          "shadcn_primitive": "Card + Collapsible (mark scheme)"
+        },
+        {
+          "id": "fill-in-blank",
+          "name": "FillInTheBlank",
+          "teacher_label": "Fill in the Blank",
+          "teacher_description": "Cloze passage with blanks for recall, not recognition only.",
+          "cognitive_job": "Retrieve and complete",
+          "role": "Cloze passage with student-completed blanks ΓÇö tests recall not recognition",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static",
+            "hint-toggle"
+          ],
+          "capabilities": {
+            "acceptsMedia": true,
+            "acceptsQuestions": true,
+            "producesAnswerKey": true,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "segmentsMax": 60,
+            "blanksMax": 10,
+            "wordBankMax": 15
+          },
+          "section_field": "fill_in_blank",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Passage with underlined blanks, word bank box below"
+          },
+          "shadcn_primitive": "Input inline"
+        }
+      ]
+    },
+    "5": {
+      "id": 5,
+      "name": "Address Mistakes",
+      "description": "Warn against misconceptions or correct common errors.",
+      "components": [
+        {
+          "id": "pitfall-alert",
+          "name": "PitfallAlert",
+          "teacher_label": "Common Mistake Alert",
+          "teacher_description": "Names a misconception and explains the correct idea.",
+          "cognitive_job": "Inoculate against error",
+          "role": "Names a specific misconception before the learner makes it",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static",
+            "hint-toggle"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": false
+          },
+          "capacity": {
+            "misconceptionMaxWords": 20,
+            "correctionMaxWords": 80,
+            "exampleMaxWords": 40
+          },
+          "section_field": "pitfall",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "avoid",
+            "preferredWidth": "full",
+            "fallback": "Full static, amber left border"
+          },
+          "shadcn_primitive": "Alert + Collapsible"
+        }
+      ]
+    },
+    "6": {
+      "id": 6,
+      "name": "Visualize",
+      "description": "Make spatial, relational, chronological, or visual structure visible.",
+      "components": [
+        {
+          "id": "diagram-block",
+          "name": "DiagramBlock",
+          "teacher_label": "Diagram",
+          "teacher_description": "Labelled visual with optional annotation callouts.",
+          "cognitive_job": "See the structure",
+          "role": "Makes spatial or relational structure visible",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static",
+            "zoom",
+            "hint-toggle"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": true
+          },
+          "capacity": {
+            "calloutsMax": 6,
+            "captionMaxWords": 60
+          },
+          "section_field": "diagram",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "avoid",
+            "preferredWidth": "full",
+            "fallback": "Static SVG 80% width centred"
+          },
+          "shadcn_primitive": "Card + Dialog"
+        },
+        {
+          "id": "diagram-compare",
+          "name": "DiagramCompare",
+          "teacher_label": "Before / After Diagram",
+          "teacher_description": "Compares two diagrams with an interactive or static slider.",
+          "cognitive_job": "See transformation",
+          "role": "Before and after comparison with a drag slider",
+          "subjects": [
+            "history",
+            "science",
+            "mathematics",
+            "geography"
+          ],
+          "behaviour_modes": [
+            "compare"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": true
+          },
+          "capacity": {
+            "captionMaxWords": 60
+          },
+          "section_field": "diagram_compare",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "avoid",
+            "preferredWidth": "full",
+            "fallback": "Both diagrams shown side by side"
+          },
+          "shadcn_primitive": "Slider"
+        },
+        {
+          "id": "diagram-series",
+          "name": "DiagramSeries",
+          "teacher_label": "Diagram Series",
+          "teacher_description": "Sequence of diagrams that tells a visual story.",
+          "cognitive_job": "Follow a visual progression",
+          "role": "A progression of diagrams that tells a sequence",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "step-reveal",
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": true
+          },
+          "capacity": {
+            "diagramsMax": 4
+          },
+          "section_field": "diagram_series",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "avoid",
+            "preferredWidth": "full",
+            "fallback": "All diagrams in sequence with step labels"
+          },
+          "shadcn_primitive": "Tabs or step nav"
+        },
+        {
+          "id": "image-block",
+          "name": "ImageBlock",
+          "teacher_label": "Image",
+          "teacher_description": "Photo, screenshot, or illustration from an uploaded image.",
+          "cognitive_job": "Illustrate with photos or screenshots",
+          "role": "Uploaded raster image with caption and layout options",
+          "subjects": [
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": true
+          },
+          "capacity": {
+            "captionMaxWords": 40,
+            "altMaxWords": 80
+          },
+          "section_field": "image_block",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "allow",
+            "preferredWidth": "full",
+            "fallback": "Static image from embedded data"
+          },
+          "shadcn_primitive": "Card + img"
+        },
+        {
+          "id": "timeline-block",
+          "name": "TimelineBlock",
+          "teacher_label": "Timeline",
+          "teacher_description": "Chronological events with summaries along a spine.",
+          "cognitive_job": "Follow cause and sequence over time",
+          "role": "Turns chronology into a readable instructional spine",
+          "subjects": [
+            "history",
+            "science",
+            "universal"
+          ],
+          "behaviour_modes": [
+            "static",
+            "timeline-scrubber"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": false,
+            "isMedia": true
+          },
+          "capacity": {
+            "eventsMin": 3,
+            "eventsMax": 8,
+            "titleMaxWords": 10,
+            "summaryMaxWords": 50
+          },
+          "section_field": "timeline",
+          "status": "stable",
+          "print": {
+            "breakBehavior": "avoid",
+            "preferredWidth": "full",
+            "fallback": "Vertical event list"
+          },
+          "shadcn_primitive": "Card + Button"
+        }
+      ]
+    },
+    "7": {
+      "id": 7,
+      "name": "Interact",
+      "description": "Let learners manipulate, observe, or explore a concept interactively.",
+      "components": [
+        {
+          "id": "simulation-block",
+          "name": "SimulationBlock",
+          "teacher_label": "Interactive Simulation",
+          "teacher_description": "Manipulable widget where learners discover by experimenting.",
+          "cognitive_job": "Manipulate and discover",
+          "role": "Manipulate a variable and discover the concept through observation",
+          "subjects": [
+            "mathematics",
+            "physics",
+            "chemistry",
+            "statistics"
+          ],
+          "behaviour_modes": [
+            "static"
+          ],
+          "capabilities": {
+            "acceptsMedia": false,
+            "acceptsQuestions": false,
+            "producesAnswerKey": false,
+            "interactive": true,
+            "isMedia": true
+          },
+          "capacity": {
+            "countGuidance": "template-defined"
+          },
+          "section_field": "simulation",
+          "status": "beta",
+          "print": {
+            "breakBehavior": "avoid",
+            "preferredWidth": "full",
+            "fallback": "Static diagram at midstate"
+          },
+          "shadcn_primitive": "iframe sandbox"
+        }
+      ]
+    }
+  }
+}

@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
+from core.auth.jwt_handler import JWTHandler
 from core.auth.middleware import get_current_user
+from core.dependencies import get_jwt_handler, get_settings
 from core.entities.user import User
 from v3_blueprint.models import ProductionBlueprint
 from v3_execution.runtime.runner import sse_event_stream
@@ -17,6 +20,8 @@ from generation.v3_studio.agents import (
     generate_production_blueprint,
     get_clarifications,
 )
+from generation.pdf_export.cleanup import cleanup_files
+from generation.pdf_export.service import PDFExportRequest, export_v3_studio_pdf
 from generation.v3_studio.dtos import (
     AdjustBlueprintRequest,
     BlueprintPreviewDTO,
@@ -26,6 +31,7 @@ from generation.v3_studio.dtos import (
     V3GenerateStartRequest,
     V3GenerateStartResponse,
     V3InputForm,
+    V3PdfExportRequest,
     V3SignalSummary,
 )
 from generation.v3_studio.preview_mapper import blueprint_to_preview_dto
@@ -141,6 +147,7 @@ async def post_v3_generate_start(
     await v3_studio_store.register_generation_stream(
         user_id=current_user.id,
         generation_id=body.generation_id,
+        blueprint_id=body.blueprint_id,
         queue=queue,
     )
     asyncio.create_task(
@@ -184,6 +191,99 @@ async def get_v3_generation_events(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@v3_studio_router.get("/generations/{generation_id}/blueprint", response_model=BlueprintPreviewDTO)
+async def get_v3_generation_blueprint(
+    generation_id: str,
+    current_user: User = Depends(get_current_user),
+) -> BlueprintPreviewDTO:
+    owner = await v3_studio_store.get_generation_owner(generation_id)
+    if owner != current_user.id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    blueprint_id = await v3_studio_store.get_blueprint_id_for_generation(generation_id)
+    stored = await v3_studio_store.get_blueprint_for_generation(generation_id)
+    if stored is None or blueprint_id is None:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+    return blueprint_to_preview_dto(
+        blueprint_id=blueprint_id,
+        blueprint=stored.blueprint,
+        template_id=stored.template_id,
+    )
+
+
+@v3_studio_router.get("/generations/{generation_id}/print-snapshot")
+async def get_v3_print_snapshot(
+    generation_id: str,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    if not await v3_studio_store.owns_generation(current_user.id, generation_id):
+        raise HTTPException(status_code=404, detail="Generation not found")
+    snap = await v3_studio_store.get_print_snapshot(generation_id)
+    if snap is None:
+        raise HTTPException(status_code=404, detail="Print snapshot not available")
+    return snap
+
+
+@v3_studio_router.post("/generations/{generation_id}/export/pdf")
+async def post_v3_export_pdf(
+    generation_id: str,
+    body: V3PdfExportRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    jwt_handler: JWTHandler = Depends(get_jwt_handler),
+):
+    owner = await v3_studio_store.get_generation_owner(generation_id)
+    if owner != current_user.id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    stored = await v3_studio_store.get_blueprint_for_generation(generation_id)
+    if stored is None:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    await v3_studio_store.put_print_snapshot(
+        generation_id,
+        {"sections": body.canvas_sections, "template_id": stored.template_id},
+    )
+
+    auth_token = jwt_handler.create_access_token(current_user.id, current_user.email)
+    pdf_request = PDFExportRequest(
+        school_name=body.school_name,
+        teacher_name=body.teacher_name,
+        date=body.date,
+        include_toc=body.include_toc,
+        include_answers=body.include_answers,
+    )
+    try:
+        result = await export_v3_studio_pdf(
+            generation_id=generation_id,
+            user_id=current_user.id,
+            title=stored.blueprint.metadata.title,
+            subject=stored.blueprint.metadata.subject,
+            template_id=stored.template_id,
+            auth_token=auth_token,
+            request=pdf_request,
+            settings=get_settings(),
+            request_id=getattr(request.state, "request_id", None),
+        )
+    except Exception:
+        await v3_studio_store.delete_print_snapshot(generation_id)
+        raise
+    await v3_studio_store.delete_print_snapshot(generation_id)
+
+    async def _cleanup() -> None:
+        cleanup_files(result.cleanup_paths)
+
+    return FileResponse(
+        path=result.pdf_path,
+        media_type="application/pdf",
+        filename=result.filename,
+        background=BackgroundTask(_cleanup),
+        headers={
+            "X-Page-Count": str(result.page_count),
+            "X-File-Size": str(result.file_size_bytes),
+            "X-Generation-Time-Ms": str(result.generation_time_ms),
         },
     )
 

@@ -20,6 +20,8 @@ class V3StudioSessionStore:
         self._blueprints: dict[tuple[str, str], StoredBlueprint] = {}
         self._queues: dict[str, asyncio.Queue[str | None]] = {}
         self._owners: dict[str, str] = {}
+        self._generation_blueprint: dict[str, str] = {}
+        self._print_snapshots: dict[str, dict] = {}
 
     async def put_blueprint(self, user_id: str, blueprint_id: str, blueprint: ProductionBlueprint, template_id: str) -> None:
         async with self._lock:
@@ -40,11 +42,13 @@ class V3StudioSessionStore:
         *,
         user_id: str,
         generation_id: str,
+        blueprint_id: str,
         queue: asyncio.Queue[str | None],
     ) -> None:
         async with self._lock:
             self._queues[generation_id] = queue
             self._owners[generation_id] = user_id
+            self._generation_blueprint[generation_id] = blueprint_id
 
     async def get_queue(self, generation_id: str) -> asyncio.Queue[str | None] | None:
         async with self._lock:
@@ -54,10 +58,39 @@ class V3StudioSessionStore:
         async with self._lock:
             return self._owners.get(generation_id) == user_id
 
+    async def get_generation_owner(self, generation_id: str) -> str | None:
+        async with self._lock:
+            return self._owners.get(generation_id)
+
+    async def get_blueprint_for_generation(self, generation_id: str) -> StoredBlueprint | None:
+        async with self._lock:
+            user_id = self._owners.get(generation_id)
+            blueprint_id = self._generation_blueprint.get(generation_id)
+        if user_id is None or blueprint_id is None:
+            return None
+        return await self.get_blueprint(user_id, blueprint_id)
+
+    async def get_blueprint_id_for_generation(self, generation_id: str) -> str | None:
+        async with self._lock:
+            return self._generation_blueprint.get(generation_id)
+
+    async def put_print_snapshot(self, generation_id: str, payload: dict) -> None:
+        async with self._lock:
+            self._print_snapshots[generation_id] = payload
+
+    async def get_print_snapshot(self, generation_id: str) -> dict | None:
+        async with self._lock:
+            snap = self._print_snapshots.get(generation_id)
+            return dict(snap) if snap is not None else None
+
+    async def delete_print_snapshot(self, generation_id: str) -> None:
+        async with self._lock:
+            self._print_snapshots.pop(generation_id, None)
+
     async def cleanup_generation(self, generation_id: str) -> None:
+        """Drop the SSE queue when the stream ends; retain owner/blueprint for PDF and lookups."""
         async with self._lock:
             self._queues.pop(generation_id, None)
-            self._owners.pop(generation_id, None)
 
 
 v3_studio_store = V3StudioSessionStore()

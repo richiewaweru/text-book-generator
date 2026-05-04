@@ -18,12 +18,11 @@ async def render_generation_pdf(
     generation_id: str,
     auth_token: str,
     config: PDFExportConfig,
+    render_path: str | None = None,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    render_url = (
-        f"{config.render_base_url}/textbook/{generation_id}"
-        f"?print=true&token={auth_token}"
-    )
+    path_part = render_path if render_path is not None else f"/textbook/{generation_id}"
+    render_url = f"{config.render_base_url}{path_part}?print=true&token={auth_token}"
 
     try:
         async with async_playwright() as playwright:

@@ -15,6 +15,8 @@ export type V3StudioStore = {
 	clarifications: V3ClarificationQuestion[];
 	answers: V3ClarificationAnswer[];
 	blueprint: BlueprintPreviewDTO | null;
+	/** Active v3 generation id after approve (used for PDF export). */
+	generationId: string | null;
 	canvas: CanvasSection[];
 	error: string | null;
 	coherenceHint: string | null;
@@ -28,6 +30,7 @@ export const v3Studio = $state<V3StudioStore>({
 	clarifications: [],
 	answers: [],
 	blueprint: null,
+	generationId: null,
 	canvas: [],
 	error: null,
 	coherenceHint: null,
@@ -42,6 +45,7 @@ export function resetV3Studio(): void {
 	v3Studio.clarifications = [];
 	v3Studio.answers = [];
 	v3Studio.blueprint = null;
+	v3Studio.generationId = null;
 	v3Studio.canvas = [];
 	v3Studio.error = null;
 	v3Studio.coherenceHint = null;

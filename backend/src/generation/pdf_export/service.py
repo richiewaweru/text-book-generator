@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from core.config import Settings
 from core.pdf_export_runtime import pdf_export_telemetry
 from generation.entities.generation import Generation
+from pipeline.types.requests import GenerationMode
 from generation.pdf_export.cleanup import cleanup_files, ensure_temp_dir
 from generation.pdf_export.components.answers import generate_answer_key_pdf
 from generation.pdf_export.components.assembly import (
@@ -54,6 +55,7 @@ async def export_generation_pdf(
     request: PDFExportRequest,
     settings: Settings,
     request_id: str | None = None,
+    render_path: str | None = None,
 ) -> PDFExportResult:
     config = PDFExportConfig(settings)
     if not config.enabled:
@@ -115,6 +117,7 @@ async def export_generation_pdf(
             generation_id=generation.id,
             auth_token=auth_token,
             config=config,
+            render_path=render_path,
         )
         cleanup_paths.append(content_path)
         source_paths.append(content_path)
@@ -187,6 +190,51 @@ async def export_generation_pdf(
         page_count=page_count,
         generation_time_ms=duration_ms,
         cleanup_paths=cleanup_paths + [final_path],
+    )
+
+
+async def export_v3_studio_pdf(
+    *,
+    generation_id: str,
+    user_id: str,
+    title: str,
+    subject: str,
+    template_id: str,
+    auth_token: str,
+    request: PDFExportRequest,
+    settings: Settings,
+    request_id: str | None = None,
+) -> PDFExportResult:
+    """PDF export for v3 Studio: Playwright renders `/studio/print/{generation_id}`."""
+    generation = Generation(
+        id=generation_id,
+        user_id=user_id,
+        subject=title or "Lesson",
+        context=subject or "",
+        mode=GenerationMode.BALANCED,
+        status="completed",
+        requested_template_id=template_id,
+        requested_preset_id="blue-classroom",
+    )
+    document = PipelineDocument(
+        generation_id=generation_id,
+        subject=title or "Lesson",
+        context=subject or "",
+        mode=GenerationMode.BALANCED,
+        template_id=template_id,
+        preset_id="blue-classroom",
+        status="completed",
+        section_manifest=[],
+        sections=[],
+    )
+    return await export_generation_pdf(
+        generation=generation,
+        document=document,
+        auth_token=auth_token,
+        request=request,
+        settings=settings,
+        request_id=request_id,
+        render_path=f"/studio/print/{generation_id}",
     )
 
 

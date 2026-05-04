@@ -20,9 +20,14 @@ from pipeline.types.generation_manifest import (
 from pipeline.types.template_contract import TemplateContractSummary, TemplatePresetSummary
 
 _META_FILES = {
+    "classification",
+    "component-examples",
     "component-field-map",
     "component-registry",
+    "component-schemas",
+    "manifest",
     "preset-registry",
+    "print-rules",
     "section-content-schema",
 }
 
@@ -120,6 +125,17 @@ def _load_section_content_schema() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+@lru_cache(maxsize=None)
+def _load_manifest() -> dict:
+    path = _contracts_dir() / "manifest.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            "manifest.json not found. "
+            "Run: uv run python tools/update_lectio_contracts.py"
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _required_components(contract: dict) -> list[str]:
     template_id = contract.get("id")
     required = contract.get("required_components")
@@ -207,6 +223,11 @@ def get_lesson_flow(template_id: str) -> list[str]:
 
 def get_section_content_schema() -> dict:
     return _load_section_content_schema()
+
+
+def get_manifest() -> dict:
+    """Lectio v3 component manifest (phases, roles, cognitive jobs)."""
+    return _load_manifest()
 
 
 def get_component_registry_entry(component_id: str) -> dict | None:

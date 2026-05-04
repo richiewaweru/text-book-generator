@@ -1,0 +1,218 @@
+{
+  "components": {
+    "section-header": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Full static header"
+    },
+    "hook-hero": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Pull quote block with left border"
+    },
+    "explanation-block": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Static prose"
+    },
+    "prerequisite-strip": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Inline list of prerequisites"
+    },
+    "what-next-bridge": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Static, amber left rule"
+    },
+    "interview-anchor": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Static with write-in lines"
+    },
+    "callout-block": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Bordered callout box"
+    },
+    "summary-block": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Bulleted list with border"
+    },
+    "section-divider": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Horizontal rule with label"
+    },
+    "definition-card": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Both versions shown"
+    },
+    "definition-family": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "All definitions expanded"
+    },
+    "glossary-rail": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Inline vocabulary strip at section end"
+    },
+    "glossary-inline": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Term underlined, definition in footnote"
+    },
+    "insight-strip": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Static table"
+    },
+    "key-fact": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Bold bordered fact box"
+    },
+    "comparison-grid": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Static comparison table"
+    },
+    "worked-example-card": {
+      "breakBehavior": "avoid",
+      "preferredWidth": "full",
+      "fallback": "All steps expanded"
+    },
+    "process-steps": {
+      "breakBehavior": "avoid",
+      "preferredWidth": "full",
+      "fallback": "All steps visible, checkbox squares for print"
+    },
+    "practice-stack": {
+      "breakBehavior": "avoid",
+      "preferredWidth": "full",
+      "fallback": "All visible, write-in lines rendered; inline answers hidden by default"
+    },
+    "quiz-check": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Question and options shown, correct answer marked"
+    },
+    "reflection-prompt": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Prompt with write-in lines"
+    },
+    "student-textbox": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Lined write-in area"
+    },
+    "short-answer": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Question with lined answer space, mark allocation shown"
+    },
+    "fill-in-blank": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Passage with underlined blanks, word bank box below"
+    },
+    "pitfall-alert": {
+      "breakBehavior": "avoid",
+      "preferredWidth": "full",
+      "fallback": "Full static, amber left border"
+    },
+    "diagram-block": {
+      "breakBehavior": "avoid",
+      "preferredWidth": "full",
+      "fallback": "Static SVG 80% width centred"
+    },
+    "diagram-compare": {
+      "breakBehavior": "avoid",
+      "preferredWidth": "full",
+      "fallback": "Both diagrams shown side by side"
+    },
+    "diagram-series": {
+      "breakBehavior": "avoid",
+      "preferredWidth": "full",
+      "fallback": "All diagrams in sequence with step labels"
+    },
+    "video-embed": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "QR code or thumbnail based on setting"
+    },
+    "image-block": {
+      "breakBehavior": "allow",
+      "preferredWidth": "full",
+      "fallback": "Static image from embedded data"
+    },
+    "timeline-block": {
+      "breakBehavior": "avoid",
+      "preferredWidth": "full",
+      "fallback": "Vertical event list"
+    },
+    "simulation-block": {
+      "breakBehavior": "avoid",
+      "preferredWidth": "full",
+      "fallback": "Static diagram at midstate"
+    }
+  },
+  "templates": {
+    "classification": [
+      "Print as a wide classification table.",
+      "Use flat practice so the learner can write directly below the contrast."
+    ],
+    "compare-and-apply": [
+      "Render the comparison as a static table in print.",
+      "Keep the apply practice directly after the contrast."
+    ],
+    "concept-compact": [
+      "Expand accordion content in print.",
+      "Keep the order compact and uninterrupted."
+    ],
+    "diagram-led": [
+      "Print all diagrams in sequence with their stage captions.",
+      "Expand the process steps below the sequence."
+    ],
+    "formal-track": [
+      "Render as a clean static worksheet-like page.",
+      "Avoid introducing any interaction-dependent supports."
+    ],
+    "guided-concept-path": [
+      "Expand step-based content for print.",
+      "Flatten the glossary rail into inline vocabulary notes at the end of the section."
+    ],
+    "guided-discovery": [
+      "Replace simulation with its fallback diagram.",
+      "Flatten glossary rail into inline notes at section end.",
+      "Expand step-reveal worked examples for print."
+    ],
+    "interactive-lab": [
+      "Replace simulation with its fallback diagram.",
+      "Add a note indicating the interactive is available online."
+    ],
+    "low-load": [
+      "Keep the same chunked order in print.",
+      "Render practice in flat list order with space preserved."
+    ],
+    "open-canvas": [
+      "Expand all collapsible content. Render write-in lines for student inputs."
+    ],
+    "procedure": [
+      "Expand the full process sequence in print.",
+      "Keep practice directly below the method."
+    ],
+    "timeline": [
+      "Flatten the timeline into a vertical event list in print.",
+      "Keep reflection and practice below the full chronology."
+    ],
+    "visual-led": [
+      "Render the diagram as a full-width static figure in print.",
+      "Expand process steps in print so no interaction is required."
+    ]
+  }
+}

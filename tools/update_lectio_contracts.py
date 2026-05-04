@@ -8,9 +8,14 @@ import shutil
 from pathlib import Path
 
 META_CONTRACTS = {
+    "classification.json",
+    "component-examples.json",
     "component-field-map.json",
     "component-registry.json",
+    "component-schemas.json",
+    "manifest.json",
     "preset-registry.json",
+    "print-rules.json",
     "section-content-schema.json",
 }
 

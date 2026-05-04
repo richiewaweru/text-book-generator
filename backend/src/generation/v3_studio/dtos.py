@@ -144,6 +144,19 @@ class V3GenerateStartResponse(BaseModel):
     generation_id: str
 
 
+class V3PdfExportRequest(BaseModel):
+    """PDF export for v3 Studio (includes canvas snapshot for Playwright print route)."""
+
+    model_config = {"extra": "forbid"}
+
+    school_name: str = Field(min_length=1)
+    teacher_name: str = Field(min_length=1)
+    date: str | None = None
+    include_toc: bool = True
+    include_answers: bool = True
+    canvas_sections: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class ProductionBlueprintEnvelope(BaseModel):
     """LLM structured output wrapper."""
 
@@ -164,6 +177,7 @@ __all__ = [
     "V3ComponentPlanDTO",
     "V3GenerateStartRequest",
     "V3GenerateStartResponse",
+    "V3PdfExportRequest",
     "V3InputForm",
     "V3QuestionPlanDTO",
     "V3SectionPlanItemDTO",

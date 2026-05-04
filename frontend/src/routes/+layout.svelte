@@ -16,6 +16,10 @@
 	const isPrintTextbookRoute = $derived(
 		page.url.pathname.startsWith('/textbook/') && page.url.searchParams.get('print') === 'true'
 	);
+	const isPrintStudioRoute = $derived(
+		page.url.pathname.startsWith('/studio/print/') && page.url.searchParams.get('print') === 'true'
+	);
+	const isPrintShellRoute = $derived(isPrintTextbookRoute || isPrintStudioRoute);
 
 	onMount(() => {
 		void bootstrapAuth(fetchCurrentUser);
@@ -24,7 +28,7 @@
 	$effect(() => {
 		if (!initialized.current) return;
 		const path = page.url.pathname;
-		if (isPrintTextbookRoute) {
+		if (isPrintShellRoute) {
 			return;
 		}
 
@@ -44,7 +48,7 @@
 	<title>Textbook Agent</title>
 </svelte:head>
 
-{#if !isPrintTextbookRoute}
+{#if !isPrintShellRoute}
 	<header>
 		<nav>
 			<div class="nav-left">
@@ -70,7 +74,7 @@
 {/if}
 
 <main>
-	{#if initialized.current || isPrintTextbookRoute}
+	{#if initialized.current || isPrintShellRoute}
 		{@render children()}
 	{:else}
 		<p>Loading session...</p>

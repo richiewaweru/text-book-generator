@@ -164,3 +164,34 @@ export function connectV3StudioGenerationStream(
 
 	return () => ctrl.abort();
 }
+
+export type V3PdfExportBody = {
+	school_name: string;
+	teacher_name: string;
+	date?: string | null;
+	include_toc: boolean;
+	include_answers: boolean;
+	canvas_sections: Record<string, unknown>[];
+};
+
+export async function downloadV3GenerationPdf(
+	generationId: string,
+	body: V3PdfExportBody
+): Promise<void> {
+	const res = await apiFetch(
+		`/api/v1/v3/generations/${encodeURIComponent(generationId)}/export/pdf`,
+		{
+			method: 'POST',
+			headers: bearerHeaders(),
+			body: JSON.stringify(body)
+		}
+	);
+	await ensureOk(res, 'Failed to export PDF.');
+	const blob = await res.blob();
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = `lesson-${generationId}.pdf`;
+	a.click();
+	URL.revokeObjectURL(url);
+}
