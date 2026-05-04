@@ -44,7 +44,7 @@ def get_lens(lens_id: str) -> LensSchema:
 
 def format_lenses_for_prompt() -> str:
     lines = ["Pedagogical lenses — apply those that fit the teacher's signals:"]
-    for lens in get_all_lenses():
+    for lens in sorted(get_all_lenses(), key=lambda item: item.id):
         lines.append(f"\n  {lens.id} ({lens.label}) — {lens.applies_when.strip()}")
         lines.append("  Principles:")
         for principle in lens.reasoning_principles[:3]:

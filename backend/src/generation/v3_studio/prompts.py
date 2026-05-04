@@ -1,5 +1,6 @@
 """Prompt templates for V3 Studio LLM steps."""
 
+from functools import lru_cache
 from pipeline.contracts import get_manifest
 
 SIGNAL_SYSTEM = """You extract structured teaching signals from a short teacher brief.
@@ -16,12 +17,11 @@ ADJUST_SYSTEM = """You revise the given ProductionBlueprint JSON according to th
 Preserve IDs where possible; keep schema valid. Output the full revised blueprint."""
 
 
-def _format_manifest_for_prompt() -> str:
-    """Format manifest.json into a compact component list for the architect."""
+@lru_cache(maxsize=1)
+def _manifest_block() -> str:
+    """Extract planning-relevant manifest data for the Lesson Architect."""
     manifest = get_manifest()
-    lines: list[str] = [
-        "Available Lectio components (use only these slugs as component ids in the blueprint):"
-    ]
+    lines: list[str] = ["AVAILABLE COMPONENTS (use only these slugs):"]
     phases_raw = manifest.get("phases")
     items: list[tuple[str, dict]]
     if isinstance(phases_raw, dict):
@@ -42,17 +42,17 @@ def _format_manifest_for_prompt() -> str:
     for phase_key, phase_group in items:
         phase_num = phase_group.get("id", phase_key)
         phase_name = phase_group.get("name", "")
-        lines.append(f"\n  Phase {phase_num} — {phase_name}:")
+        lines.append(f"\nPhase {phase_num} — {phase_name}:")
         for component in phase_group.get("components") or []:
             if not isinstance(component, dict):
                 continue
             cid = str(component.get("id", "") or "")
+            section_field = str(component.get("section_field", "") or "—")
             role = str(component.get("role", "") or "")
             cognitive_job = str(component.get("cognitive_job", "") or "")
             if not cid:
                 continue
-            suffix = f" [{cognitive_job}]" if cognitive_job else ""
-            lines.append(f"    {cid}: {role}{suffix}")
+            lines.append(f"  {cid} [{section_field}]: {role} — {cognitive_job}")
     return "\n".join(lines)
 
 
@@ -60,18 +60,22 @@ def build_architect_system_prompt() -> str:
     """System prompt for the lesson architect, including live Lectio manifest and lenses."""
     from generation.v3_lenses.loader import format_lenses_for_prompt
 
-    manifest_block = _format_manifest_for_prompt()
+    manifest_block = _manifest_block()
     lenses_block = format_lenses_for_prompt()
     return f"""You are a lesson architect. Output ONLY a valid ProductionBlueprint matching the schema.
 
 {manifest_block}
+
+CONSTRAINT: Each section_field (shown in brackets above) may appear at
+most once per section. Never plan two components with the same
+section_field in the same section.
 
 {lenses_block}
 
 Rules:
 - Only use component slugs from the component list above. Never invent new slugs.
 - metadata: version "3.0", title, subject (from teacher subject)
-- lesson: lesson_mode first_exposure|consolidation|repair, resource_type lesson|mini_booklet
+- lesson: lesson_mode first_exposure|consolidation|repair|retrieval|transfer, resource_type lesson|mini_booklet
 - applied_lenses: min 1 lens with lens_id and effects (non-empty strings); choose lens_ids from the pedagogical lenses section where possible
 - voice: register (simple|balanced|formal etc), optional tone
 - anchor: reuse_scope string
