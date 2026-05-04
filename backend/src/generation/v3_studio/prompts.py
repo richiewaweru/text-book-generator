@@ -6,15 +6,74 @@ from pathlib import Path
 
 from pipeline.contracts import get_manifest
 
-SIGNAL_SYSTEM = """You extract structured teaching signals from a short teacher brief.
-Infer topic, subtopic, prior knowledge, learner needs, teacher goal, and resource type.
-resource_type must be one of: lesson, mini_booklet (default lesson).
-missing_signals lists signal dimensions still uncertain (max 5 short phrases).
-confidence reflects how complete the brief was."""
+SIGNAL_SYSTEM = """You extract structured teaching signals from a structured teacher form.
+
+The form already provides lesson_mode, learner_level, support_needs, prior_knowledge_level,
+intended_outcome, grade_level, subject, duration_minutes, topic, and subtopics.
+
+Do NOT re-infer these from free text. Read them directly from the form fields.
+
+Your job:
+- Confirm the teaching topic (short, specific).
+- Optionally select ONE subtopic string (or null) if the form subtopics are empty or too broad.
+- Summarise teacher_goal in one clear sentence.
+- Set inferred_resource_type to one of: lesson, mini_booklet (default lesson).
+- Populate missing_signals ONLY if topic is genuinely ambiguous or contradictory.
+"""
 
 CLARIFY_SYSTEM = """You write at most 2 short clarification questions for the teacher.
 Each question has question text, reason why you're asking, and optional=true only if skippable.
-Return fewer questions if signals are already strong."""
+
+The form already includes lesson_mode, learner_level, reading_level, language_support,
+prior_knowledge_level, intended_outcome, support_needs, and learning_preferences.
+Do NOT ask about those.
+
+Only ask if the topic is unclear, contradictory, or missing key details that block planning.
+Return fewer questions (including zero) if signals are already strong.
+"""
+
+REASONING_SCAFFOLD = """
+REASONING STEPS — work through these in order before producing the blueprint.
+Keep each answer short. The goal is to lock in decisions before building.
+
+STEP 1 — LEARNER
+  Who is this class? What is their level and what are their main barriers?
+  What does their support profile mean for content density and visual load?
+  (Answer in 2 sentences.)
+
+STEP 2 — CONCEPT
+  What is the core concept in one sentence?
+  What is the single hardest step for this learner to understand?
+  What misconception most commonly arises here?
+  (Answer in 3 sentences.)
+
+STEP 3 — SEQUENCE
+  Given the lesson_mode and learner_level, write the teaching sequence
+  as an ordered list of 4–6 moves.
+  Each move should be one verb phrase: "Orient the learner to...",
+  "Explain how to...", "Model with...", "Practice...".
+  (Answer as a numbered list.)
+
+STEP 4 — COMPONENTS
+  Map each sequence move to one or two component slugs from the manifest.
+  Check section_field — no two components with the same field in one section.
+  (Answer as: move → slug [field].)
+
+STEP 5 — VISUALS
+  For each section, answer yes or no: does this concept require visual
+  support here? Spatial and procedural steps need visuals.
+  Definitions and warnings usually do not.
+  (Answer as: section → yes/no, one word reason.)
+
+STEP 6 — QUESTIONS
+  What is the right difficulty progression given this learner?
+  Write one sentence per question: difficulty, what cognitive move it tests,
+  whether it needs a diagram.
+  (Answer as: Q1 warm — ..., Q2 medium — ... etc.)
+
+Now produce the ProductionBlueprint JSON exactly matching the schema.
+Do not include the reasoning steps in the JSON output.
+"""
 
 ADJUST_SYSTEM = """You revise the given ProductionBlueprint JSON according to the teacher's plain-language instruction.
 Preserve IDs where possible; keep schema valid. Output the full revised blueprint."""
@@ -110,8 +169,11 @@ section_field in the same section.
 
 {lenses_block}
 
+{REASONING_SCAFFOLD}
+
 Rules:
 - Only use component slugs from the component list above. Never invent new slugs.
+- Treat FormLensHints in the user prompt as authoritative for lesson_mode and learner/context constraints.
 - metadata: version "3.0", title, subject (from teacher subject)
 - lesson: lesson_mode first_exposure|consolidation|repair|retrieval|transfer, resource_type lesson|mini_booklet
 - applied_lenses: min 1 lens with lens_id and effects (non-empty strings); choose lens_ids from the pedagogical lenses section where possible

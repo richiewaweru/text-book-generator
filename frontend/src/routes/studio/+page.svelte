@@ -2,6 +2,7 @@
 	import { onDestroy } from 'svelte';
 
 	import V3InputSurface from '$lib/components/studio/V3InputSurface.svelte';
+	import V3PlanningState from '$lib/components/studio/V3PlanningState.svelte';
 	import V3SignalConfirmation from '$lib/components/studio/V3SignalConfirmation.svelte';
 	import V3Clarification from '$lib/components/studio/V3Clarification.svelte';
 	import V3BlueprintPreview from '$lib/components/studio/V3BlueprintPreview.svelte';
@@ -24,6 +25,7 @@
 		mergeDiagramFrame,
 		mergePracticeProblem
 	} from '$lib/studio/v3-canvas';
+	import { hasRequiredStructuredFields } from '$lib/studio/v3-clarify';
 	import type { V3ClarificationAnswer, V3InputForm } from '$lib/types/v3';
 
 	let pdfLoading = $state(false);
@@ -53,6 +55,11 @@
 		const signals = v3Studio.signals;
 		const form = v3Studio.form;
 		if (!signals || !form) return;
+
+		if (hasRequiredStructuredFields(form)) {
+			await runLessonArchitect();
+			return;
+		}
 
 		if (signals.missing_signals.length > 0) {
 			v3Studio.stage = 'planning';
@@ -302,10 +309,7 @@
 	{:else if v3Studio.stage === 'clarifying' && v3Studio.clarifications.length}
 		<V3Clarification questions={v3Studio.clarifications} onAnswered={handleClarificationAnswered} />
 	{:else if v3Studio.stage === 'planning'}
-		<div class="mx-auto max-w-xl px-4 py-20 text-center">
-			<p class="text-lg font-medium">Planning your lesson…</p>
-			<p class="mt-2 text-sm text-muted-foreground">This may take a moment.</p>
-		</div>
+		<V3PlanningState form={v3Studio.form} />
 	{:else if v3Studio.stage === 'reviewing' && v3Studio.blueprint}
 		<V3BlueprintPreview blueprint={v3Studio.blueprint} onApprove={handleBlueprintApproved} onAdjust={handleBlueprintAdjust} />
 	{:else if v3Studio.stage === 'generating' || v3Studio.stage === 'finalising'}

@@ -1,7 +1,29 @@
 export interface V3InputForm {
-	year_group: string;
+	// Step 1
+	grade_level: string;
 	subject: string;
 	duration_minutes: number;
+
+	// Step 2
+	topic: string;
+	subtopics: string[];
+	prior_knowledge: string;
+
+	// Step 3
+	lesson_mode: 'first_exposure' | 'consolidation' | 'repair' | 'retrieval' | 'transfer' | 'other';
+	lesson_mode_other: string;
+	intended_outcome: 'understand' | 'practise' | 'review' | 'assess' | 'other';
+	intended_outcome_other: string;
+
+	// Step 4
+	learner_level: 'below_grade' | 'on_grade' | 'above_grade' | 'mixed';
+	reading_level: 'below_grade' | 'on_grade' | 'above_grade' | 'mixed';
+	language_support: 'none' | 'some_ell' | 'many_ell';
+	prior_knowledge_level: 'new_topic' | 'some_background' | 'reviewing';
+	support_needs: string[];
+	learning_preferences: ('visual' | 'step_by_step' | 'discussion' | 'hands_on' | 'challenge')[];
+
+	// Step 5
 	free_text: string;
 }
 

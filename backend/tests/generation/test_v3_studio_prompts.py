@@ -21,3 +21,10 @@ def test_architect_prompt_includes_contract_limits() -> None:
     assert "diagram-block: max 2" in prompt
     assert "PER-SECTION LIMITS:" in prompt
     assert "worked-example-card: max 1 per section" in prompt
+
+
+def test_architect_prompt_includes_reasoning_scaffold() -> None:
+    prompt = build_architect_system_prompt()
+    assert "REASONING STEPS" in prompt
+    assert "STEP 1 — LEARNER" in prompt
+    assert "Now produce the ProductionBlueprint JSON" in prompt

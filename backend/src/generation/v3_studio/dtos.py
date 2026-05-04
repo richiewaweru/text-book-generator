@@ -10,10 +10,49 @@ from v3_blueprint.models import ProductionBlueprint
 class V3InputForm(BaseModel):
     model_config = {"extra": "forbid"}
 
-    year_group: str
+    # Step 1 — Basics
+    grade_level: str  # e.g. "Grade 9"
     subject: str
-    duration_minutes: int = Field(ge=15, le=180)
-    free_text: str
+    duration_minutes: int = Field(ge=15, le=90)
+
+    # Step 2 — Concept
+    topic: str  # raw topic text
+    subtopics: list[str] = Field(default_factory=list)  # resolved subtopics
+    prior_knowledge: str = ""  # what they've already covered
+
+    # Step 3 — Lesson shape
+    lesson_mode: Literal[
+        "first_exposure",
+        "consolidation",
+        "repair",
+        "retrieval",
+        "transfer",
+        "other",
+    ] = "first_exposure"
+    lesson_mode_other: str = ""  # when lesson_mode == "other"
+
+    intended_outcome: Literal[
+        "understand",
+        "practise",
+        "review",
+        "assess",
+        "other",
+    ] = "understand"
+    intended_outcome_other: str = ""  # when intended_outcome == "other"
+
+    # Step 4 — Class profile
+    learner_level: Literal["below_grade", "on_grade", "above_grade", "mixed"] = "on_grade"
+    reading_level: Literal["below_grade", "on_grade", "above_grade", "mixed"] = "on_grade"
+    language_support: Literal["none", "some_ell", "many_ell"] = "none"
+    prior_knowledge_level: Literal["new_topic", "some_background", "reviewing"] = "new_topic"
+
+    support_needs: list[str] = Field(default_factory=list)
+    learning_preferences: list[
+        Literal["visual", "step_by_step", "discussion", "hands_on", "challenge"]
+    ] = Field(default_factory=list)
+
+    # Step 5 — Optional intent
+    free_text: str = ""  # anything not captured above
 
 
 class V3SignalSummary(BaseModel):

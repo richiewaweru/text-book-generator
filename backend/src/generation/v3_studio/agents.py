@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from core.llm.runner import run_llm
+from core.llm.runner import RetryPolicy
 from v3_blueprint.compiler import BlueprintCompiler
 from v3_blueprint.models import ProductionBlueprint
 from v3_execution.config import (
@@ -14,6 +15,7 @@ from v3_execution.config import (
     get_v3_spec,
     lesson_architect_model_settings,
 )
+from v3_execution.config.timeouts import V3_TIMEOUTS
 
 from generation.v3_studio.dtos import (
     ProductionBlueprintEnvelope,
@@ -33,6 +35,52 @@ class ClarifyEnvelope(BaseModel):
     questions: list[V3ClarificationQuestion] = Field(default_factory=list)
 
 
+def form_to_lens_hints(form: V3InputForm) -> str:
+    hints = [f"lesson_mode: {form.lesson_mode}"]
+    if form.lesson_mode_other.strip():
+        hints.append(f"lesson_mode_detail: {form.lesson_mode_other.strip()}")
+    hints.append(f"intended_outcome: {form.intended_outcome}")
+    if form.intended_outcome_other.strip():
+        hints.append(f"intended_outcome_detail: {form.intended_outcome_other.strip()}")
+    hints.append(f"learner_level: {form.learner_level}")
+    hints.append(f"reading_level: {form.reading_level}")
+    hints.append(f"language_support: {form.language_support}")
+    hints.append(f"prior_knowledge_level: {form.prior_knowledge_level}")
+    if form.support_needs:
+        hints.append(f"support_needs: {', '.join(form.support_needs)}")
+    if form.learning_preferences:
+        hints.append(f"learning_preferences: {', '.join(form.learning_preferences)}")
+    if form.subtopics:
+        hints.append(f"subtopics: {', '.join(form.subtopics)}")
+    if form.prior_knowledge.strip():
+        hints.append(f"prior_knowledge: {form.prior_knowledge.strip()}")
+    return "\n".join(hints)
+
+
+def has_required_structured_fields(form: V3InputForm) -> bool:
+    if not form.grade_level.strip():
+        return False
+    if not form.subject.strip():
+        return False
+    if not form.topic.strip() or len(form.topic.strip()) < 3:
+        return False
+    if not (15 <= form.duration_minutes <= 90):
+        return False
+    if not form.lesson_mode.strip():
+        return False
+    if not form.learner_level.strip():
+        return False
+    if not form.reading_level.strip():
+        return False
+    if not form.language_support.strip():
+        return False
+    if not form.prior_knowledge_level.strip():
+        return False
+    if not form.intended_outcome.strip():
+        return False
+    return True
+
+
 async def extract_signals(form: V3InputForm, *, trace_id: str | None = None) -> V3SignalSummary:
     node = "v3_signal_extractor"
     tid = trace_id or str(uuid.uuid4())
@@ -45,10 +93,23 @@ async def extract_signals(form: V3InputForm, *, trace_id: str | None = None) -> 
         system_prompt=SIGNAL_SYSTEM,
     )
     user = (
-        f"Year group: {form.year_group}\n"
+        f"Grade level: {form.grade_level}\n"
         f"Subject: {form.subject}\n"
-        f"Duration minutes: {form.duration_minutes}\n\n"
-        f"Teacher intent:\n{form.free_text.strip()}"
+        f"Duration minutes: {form.duration_minutes}\n"
+        f"Topic: {form.topic}\n"
+        f"Subtopics: {', '.join(form.subtopics) if form.subtopics else '(none)'}\n"
+        f"Prior knowledge: {form.prior_knowledge or '(none)'}\n"
+        f"Lesson mode: {form.lesson_mode}\n"
+        f"Lesson mode other: {form.lesson_mode_other or '(none)'}\n"
+        f"Intended outcome: {form.intended_outcome}\n"
+        f"Intended outcome other: {form.intended_outcome_other or '(none)'}\n"
+        f"Learner level: {form.learner_level}\n"
+        f"Reading level: {form.reading_level}\n"
+        f"Language support: {form.language_support}\n"
+        f"Prior knowledge level: {form.prior_knowledge_level}\n"
+        f"Support needs: {', '.join(form.support_needs) if form.support_needs else '(none)'}\n"
+        f"Learning preferences: {', '.join(form.learning_preferences) if form.learning_preferences else '(none)'}\n\n"
+        f"Additional notes (optional):\n{form.free_text.strip() or '(none)'}"
     )
     result = await run_llm(
         trace_id=tid,
@@ -61,6 +122,7 @@ async def extract_signals(form: V3InputForm, *, trace_id: str | None = None) -> 
         spec=spec,
         section_id=None,
         node=node,
+        retry_policy=RetryPolicy(call_timeout_seconds=float(V3_TIMEOUTS["signal_extractor"])),
     )
     raw = result.output
     if isinstance(raw, V3SignalSummary):
@@ -74,6 +136,9 @@ async def get_clarifications(
     *,
     trace_id: str | None = None,
 ) -> list[V3ClarificationQuestion]:
+    if has_required_structured_fields(form) and not signals.missing_signals:
+        return []
+
     node = "v3_clarify"
     tid = trace_id or str(uuid.uuid4())
     model = get_v3_model(node)
@@ -96,6 +161,7 @@ async def get_clarifications(
         spec=spec,
         section_id=None,
         node=node,
+        retry_policy=RetryPolicy(call_timeout_seconds=float(V3_TIMEOUTS["clarification"])),
     )
     raw = result.output
     if hasattr(raw, "questions"):
@@ -129,9 +195,11 @@ async def generate_production_blueprint(
     )
     clar = clarification_answers or []
     clar_txt = "\n".join(f"Q: {c.question}\nA: {c.answer}" for c in clar)
+    form_lens_hints = form_to_lens_hints(form)
     user = (
         f"Signals:\n{signals.model_dump_json(indent=2)}\n\n"
         f"Form:\n{form.model_dump_json(indent=2)}\n\n"
+        f"FormLensHints:\n{form_lens_hints or '(none)'}\n\n"
         f"Clarifications:\n{clar_txt or '(none)'}"
     )
     result = await run_llm(
@@ -146,6 +214,7 @@ async def generate_production_blueprint(
         section_id=None,
         node=node,
         model_settings=lesson_architect_model_settings(),
+        retry_policy=RetryPolicy(call_timeout_seconds=float(V3_TIMEOUTS["lesson_architect"])),
     )
     raw = result.output
     envelope = raw if isinstance(raw, ProductionBlueprintEnvelope) else None
