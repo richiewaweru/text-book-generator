@@ -86,6 +86,9 @@ export async function startV3Generation(payload: {
 export type V3StudioStreamHandlers = {
 	onCoherenceReviewStarted?: () => void;
 	onCoherenceReportReady?: (data: Record<string, unknown>) => void;
+	onDraftPackReady?: (data: Record<string, unknown>) => void;
+	onFinalPackReady?: (data: Record<string, unknown>) => void;
+	onDraftStatusUpdated?: (data: Record<string, unknown>) => void;
 	onResourceFinalised?: (data: Record<string, unknown>) => void;
 	onComponentReady?: (data: Record<string, unknown>) => void;
 	onVisualReady?: (data: Record<string, unknown>) => void;
@@ -131,6 +134,15 @@ export function connectV3StudioGenerationStream(
 				case 'coherence_report_ready':
 					handlers.onCoherenceReportReady?.(payload);
 					break;
+				case 'draft_pack_ready':
+					handlers.onDraftPackReady?.(payload);
+					break;
+				case 'final_pack_ready':
+					handlers.onFinalPackReady?.(payload);
+					break;
+				case 'draft_status_updated':
+					handlers.onDraftStatusUpdated?.(payload);
+					break;
 				case 'resource_finalised':
 					handlers.onResourceFinalised?.(payload);
 					break;
@@ -171,7 +183,7 @@ export type V3PdfExportBody = {
 	date?: string | null;
 	include_toc: boolean;
 	include_answers: boolean;
-	canvas_sections: Record<string, unknown>[];
+	pack_sections: Record<string, unknown>[];
 };
 
 export async function downloadV3GenerationPdf(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
@@ -37,7 +38,10 @@ from generation.v3_studio.dtos import (
 )
 from generation.v3_studio.preview_mapper import blueprint_to_preview_dto
 from generation.v3_studio.session_store import v3_studio_store
+from telemetry.dependencies import get_v3_trace_repository
 from telemetry.service import telemetry_monitor
+from telemetry.v3_trace.repository import V3TraceRepository
+from telemetry.v3_trace.writer import V3TraceWriter
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +140,7 @@ async def _pump_sse_to_queue(
     generation_id: str,
     blueprint_id: str,
     template_id: str,
+    trace_writer: V3TraceWriter | None = None,
 ) -> None:
     try:
         async for chunk in sse_event_stream(
@@ -143,7 +148,8 @@ async def _pump_sse_to_queue(
             generation_id=generation_id,
             blueprint_id=blueprint_id,
             template_id=template_id,
-            trace_id=generation_id,
+            trace_id=trace_writer.trace_id if trace_writer is not None else generation_id,
+            trace_writer=trace_writer,
         ):
             await queue.put(chunk)
     except asyncio.CancelledError:
@@ -158,6 +164,7 @@ async def _pump_sse_to_queue(
 async def post_v3_generate_start(
     body: V3GenerateStartRequest,
     current_user: User = Depends(get_current_user),
+    trace_repo: V3TraceRepository = Depends(get_v3_trace_repository),
 ) -> V3GenerateStartResponse:
     existing = await v3_studio_store.get_queue(body.generation_id)
     if existing is not None:
@@ -174,6 +181,52 @@ async def post_v3_generate_start(
     else:
         raise HTTPException(status_code=404, detail="Blueprint not found for user")
 
+    trace_id = str(uuid.uuid4())
+    trace_writer = V3TraceWriter(
+        repository=trace_repo,
+        trace_id=trace_id,
+        generation_id=body.generation_id,
+    )
+    try:
+        await trace_writer.start_run(
+            user_id=current_user.id,
+            blueprint_id=body.blueprint_id,
+            template_id=template_id,
+            title=blueprint.metadata.title,
+            subject=blueprint.metadata.subject,
+        )
+        component_count = sum(len(section.components) for section in blueprint.sections)
+        visual_required_count = sum(1 for section in blueprint.sections if section.visual_required)
+        lenses = [lens.lens_id for lens in blueprint.applied_lenses]
+        await trace_writer.record_blueprint_snapshot(
+            blueprint_id=body.blueprint_id,
+            template_id=template_id,
+            section_count=len(blueprint.sections),
+            section_ids=[section.section_id for section in blueprint.sections],
+            component_count=component_count,
+            visual_required_count=visual_required_count,
+            question_count=len(blueprint.question_plan),
+            lenses=lenses,
+        )
+        await telemetry_monitor.initialise_v3_recorder(
+            generation_id=body.generation_id,
+            user_id=str(current_user.id),
+            blueprint_title=blueprint.metadata.title,
+            subject=blueprint.metadata.subject,
+            template_id=template_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "v3 trace init failed generation_id=%s trace_id=%s error=%s",
+            body.generation_id,
+            trace_id,
+            str(exc)[:400],
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Could not start generation because telemetry could not be initialized.",
+        ) from exc
+
     queue: asyncio.Queue[str | None] = asyncio.Queue()
     await v3_studio_store.register_generation_stream(
         user_id=current_user.id,
@@ -188,6 +241,7 @@ async def post_v3_generate_start(
             generation_id=body.generation_id,
             blueprint_id=body.blueprint_id,
             template_id=template_id,
+            trace_writer=trace_writer,
         )
     )
     return V3GenerateStartResponse(generation_id=body.generation_id)
@@ -286,7 +340,7 @@ async def post_v3_export_pdf(
 
     await v3_studio_store.put_print_snapshot(
         generation_id,
-        {"sections": body.canvas_sections, "template_id": stored.template_id},
+        {"sections": body.pack_sections, "template_id": stored.template_id},
     )
 
     auth_token = jwt_handler.create_access_token(current_user.id, current_user.email)
@@ -328,6 +382,58 @@ async def post_v3_export_pdf(
             "X-Generation-Time-Ms": str(result.generation_time_ms),
         },
     )
+
+
+def _compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
+    report = trace.get("report") or {}
+    summary = report.get("summary") if isinstance(report, dict) else {}
+    if not isinstance(summary, dict):
+        summary = {}
+    return {
+        "trace_id": trace.get("trace_id"),
+        "generation_id": trace.get("generation_id"),
+        "status": trace.get("status"),
+        "title": trace.get("title"),
+        "subject": trace.get("subject"),
+        "template_id": trace.get("template_id"),
+        "booklet_status": report.get("booklet_status"),
+        "draft_available": report.get("draft_available"),
+        "final_available": report.get("final_available"),
+        "classroom_ready": report.get("classroom_ready"),
+        "export_allowed": report.get("export_allowed"),
+        "summary": summary,
+        "events": trace.get("events", []),
+    }
+
+
+@v3_studio_router.get("/generations/{generation_id}/trace")
+async def get_v3_generation_trace(
+    generation_id: str,
+    current_user: User = Depends(get_current_user),
+    trace_repo: V3TraceRepository = Depends(get_v3_trace_repository),
+) -> dict[str, Any]:
+    run = await trace_repo.get_run_by_generation(generation_id)
+    if run is None or run.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    trace = await trace_repo.get_full_trace(run.trace_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return _compact_trace(trace)
+
+
+@v3_studio_router.get("/traces/{trace_id}")
+async def get_v3_trace_by_id(
+    trace_id: str,
+    current_user: User = Depends(get_current_user),
+    trace_repo: V3TraceRepository = Depends(get_v3_trace_repository),
+) -> dict[str, Any]:
+    run = await trace_repo.get_run(trace_id)
+    if run is None or run.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    trace = await trace_repo.get_full_trace(trace_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return _compact_trace(trace)
 
 
 __all__ = ["v3_studio_router"]

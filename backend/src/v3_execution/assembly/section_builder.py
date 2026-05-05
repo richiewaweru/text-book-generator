@@ -10,6 +10,7 @@ from v3_execution.models import (
     GeneratedComponentBlock,
     GeneratedQuestionBlock,
     GeneratedVisualBlock,
+    SectionAssemblyDiagnostic,
 )
 
 
@@ -23,8 +24,9 @@ class V3SectionBuilder:
         *,
         template_id: str,
         answer_key: GeneratedAnswerKeyBlock | None = None,
-    ) -> tuple[list[dict[str, Any]], list[str]]:
+    ) -> tuple[list[dict[str, Any]], list[str], list[SectionAssemblyDiagnostic]]:
         warnings: list[str] = []
+        diagnostics: list[SectionAssemblyDiagnostic] = []
 
         comps_by_section: dict[str, list[GeneratedComponentBlock]] = defaultdict(list)
         for block in sorted(component_blocks, key=lambda b: (b.section_id, b.position)):
@@ -53,10 +55,13 @@ class V3SectionBuilder:
                 "section_id": section_id,
                 "template_id": template_id,
             }
+            section_warnings: list[str] = []
+            missing_components: list[str] = []
+            missing_visuals: list[str] = []
 
             planned_components = section_plan.components
             if not planned_components:
-                warnings.append(f"Section {section_id} has no planned components.")
+                section_warnings.append(f"Section {section_id} has no planned components.")
 
             emitted_fields: set[str] = set()
 
@@ -71,10 +76,17 @@ class V3SectionBuilder:
                     None,
                 )
                 if block is None:
-                    raise RuntimeError(f"Missing component output for {comp.component}@{section_id}")
+                    missing_components.append(planned_id)
+                    section_warnings.append(
+                        f"Missing component output for {planned_id}@{section_id}; section rendered without it."
+                    )
+                    continue
                 field = block.section_field
                 if field in emitted_fields:
-                    raise RuntimeError(f"Duplicate mapping for section_field {field} in {section_id}")
+                    section_warnings.append(
+                        f"Duplicate mapping for section_field {field} in {section_id}; keeping first value."
+                    )
+                    continue
                 emitted_fields.add(field)
                 bucket[field] = block.data
 
@@ -110,7 +122,10 @@ class V3SectionBuilder:
 
             visuals_for_section = visuals_by_attachment.get(section_id, [])
             if section_plan.visual_required and not visuals_for_section:
-                raise RuntimeError(f"Missing visuals for section {section_id}")
+                missing_visuals.append("required_visual")
+                section_warnings.append(
+                    f"Missing visuals for section {section_id}; section rendered without required visual."
+                )
 
             diagrams = [v for v in visuals_for_section if v.image_url]
 
@@ -148,9 +163,34 @@ class V3SectionBuilder:
                 sim = simulations[0]
                 bucket["simulation"] = {"html_fragment": sim.html_content or "", "caption": sim.caption or ""}
 
-            sections_out.append(bucket)
+            renderable = any(key not in {"section_id", "template_id"} for key in bucket)
+            if not renderable:
+                section_warnings.append(
+                    f"Section {section_id} has no renderable content after assembly."
+                )
 
-        return sections_out, warnings
+            if not renderable:
+                status = "failed"
+            elif missing_components or missing_visuals:
+                status = "incomplete"
+            else:
+                status = "complete"
+
+            diagnostic = SectionAssemblyDiagnostic(
+                section_id=section_id,
+                status=status,
+                renderable=renderable,
+                missing_components=missing_components,
+                missing_visuals=missing_visuals,
+                warnings=section_warnings,
+            )
+            diagnostics.append(diagnostic)
+            warnings.extend(section_warnings)
+
+            if renderable:
+                sections_out.append(bucket)
+
+        return sections_out, warnings, diagnostics
 
 
 __all__ = ["V3SectionBuilder"]

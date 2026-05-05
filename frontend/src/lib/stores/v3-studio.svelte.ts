@@ -1,6 +1,8 @@
 import type {
 	BlueprintPreviewDTO,
+	BookletStatus,
 	CanvasSection,
+	V3DraftPack,
 	V3ClarificationAnswer,
 	V3ClarificationQuestion,
 	V3InputForm,
@@ -18,6 +20,11 @@ export type V3StudioStore = {
 	/** Active v3 generation id after approve (used for PDF export). */
 	generationId: string | null;
 	canvas: CanvasSection[];
+	draftPack: V3DraftPack | null;
+	finalPack: V3DraftPack | null;
+	activePack: V3DraftPack | null;
+	bookletStatus: BookletStatus;
+	bookletIssues: Array<Record<string, unknown>>;
 	error: string | null;
 	coherenceHint: string | null;
 	streamCancel: (() => void) | null;
@@ -32,6 +39,11 @@ export const v3Studio = $state<V3StudioStore>({
 	blueprint: null,
 	generationId: null,
 	canvas: [],
+	draftPack: null,
+	finalPack: null,
+	activePack: null,
+	bookletStatus: 'streaming_preview',
+	bookletIssues: [],
 	error: null,
 	coherenceHint: null,
 	streamCancel: null
@@ -47,6 +59,11 @@ export function resetV3Studio(): void {
 	v3Studio.blueprint = null;
 	v3Studio.generationId = null;
 	v3Studio.canvas = [];
+	v3Studio.draftPack = null;
+	v3Studio.finalPack = null;
+	v3Studio.activePack = null;
+	v3Studio.bookletStatus = 'streaming_preview';
+	v3Studio.bookletIssues = [];
 	v3Studio.error = null;
 	v3Studio.coherenceHint = null;
 	v3Studio.streamCancel = null;

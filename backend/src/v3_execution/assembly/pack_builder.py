@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from v3_blueprint.models import ProductionBlueprint
-from v3_execution.models import DraftPack, GeneratedAnswerKeyBlock
+from v3_execution.models import (
+    BookletStatus,
+    DraftPack,
+    GeneratedAnswerKeyBlock,
+    SectionAssemblyDiagnostic,
+)
 
 
 class V3PackBuilder:
@@ -15,21 +20,21 @@ class V3PackBuilder:
         sections: list[dict],
         answer_key: GeneratedAnswerKeyBlock | None,
         warnings: list[str],
-        failed_reason: str | None = None,
+        booklet_status: BookletStatus,
+        section_diagnostics: list[SectionAssemblyDiagnostic] | None = None,
+        booklet_issues: list[dict[str, object]] | None = None,
     ) -> DraftPack:
-        lifecycle = "failed" if failed_reason else ("partial" if warnings else "draft_ready")
-        if failed_reason:
-            warnings = [*warnings, failed_reason]
-
         return DraftPack(
             generation_id=generation_id,
             blueprint_id=blueprint_id,
             template_id=template_id,
             subject=blueprint.metadata.subject,
-            status=lifecycle,  # type: ignore[arg-type]
+            status=booklet_status,
             sections=sections,
             answer_key=answer_key,
             warnings=warnings,
+            section_diagnostics=section_diagnostics or [],
+            booklet_issues=booklet_issues or [],
         )
 
 

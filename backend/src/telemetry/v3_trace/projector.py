@@ -2,19 +2,29 @@ from __future__ import annotations
 
 from telemetry.v3_trace.event_types import (
     ANSWER_KEY_COMPLETED,
+    BOOKLET_STATUS_ASSIGNED,
     BLUEPRINT_ADJUSTED,
     BLUEPRINT_GENERATED,
+    BLUEPRINT_SNAPSHOT_SAVED,
     COHERENCE_REVIEWED,
+    COHERENCE_REPORT_READY,
+    DRAFT_PACK_READY,
     GENERATION_COMPLETED,
     GENERATION_FAILED,
+    GENERATION_START_REQUESTED,
     GENERATION_STARTED,
     QUESTIONS_COMPLETED,
+    REPAIR_SUMMARY_READY,
     REPAIR_ATTEMPTED,
     REPAIR_ESCALATED,
+    RESOURCE_FINALISED,
     SECTION_COMPLETED,
     SECTION_FAILED,
+    EXECUTION_SUMMARY_READY,
+    FINAL_PACK_READY,
     VISUAL_COMPLETED,
     VISUAL_FAILED,
+    WORK_ORDERS_COMPILED,
 )
 
 
@@ -40,6 +50,9 @@ def project_report(events: list[dict]) -> dict:
         if event_type == BLUEPRINT_GENERATED:
             report["blueprint"] = payload
 
+        elif event_type == BLUEPRINT_SNAPSHOT_SAVED:
+            report["blueprint"] = payload
+
         elif event_type == BLUEPRINT_ADJUSTED:
             if report.get("blueprint_adjustments") is None:
                 report["blueprint_adjustments"] = []
@@ -47,6 +60,21 @@ def project_report(events: list[dict]) -> dict:
 
         elif event_type == GENERATION_STARTED:
             report["generation"] = payload
+
+        elif event_type == GENERATION_START_REQUESTED:
+            report["generation"] = payload
+
+        elif event_type == WORK_ORDERS_COMPILED:
+            report["work_orders"] = payload
+
+        elif event_type == EXECUTION_SUMMARY_READY:
+            report["execution_summary"] = payload
+
+        elif event_type == DRAFT_PACK_READY:
+            report["draft"] = payload
+
+        elif event_type == BOOKLET_STATUS_ASSIGNED:
+            report["booklet_status"] = payload
 
         elif event_type == SECTION_COMPLETED:
             report["execution"]["sections"].append(
@@ -112,10 +140,19 @@ def project_report(events: list[dict]) -> dict:
         elif event_type == COHERENCE_REVIEWED:
             report["review"] = payload
 
+        elif event_type == COHERENCE_REPORT_READY:
+            report["review"] = payload
+
+        elif event_type == REPAIR_SUMMARY_READY:
+            report["repair_summary"] = payload
+
         elif event_type in (REPAIR_ATTEMPTED, REPAIR_ESCALATED):
             report["repairs"].append(payload)
 
-        elif event_type in (GENERATION_COMPLETED, GENERATION_FAILED):
+        elif event_type == FINAL_PACK_READY:
+            report["final_pack"] = payload
+
+        elif event_type in (GENERATION_COMPLETED, GENERATION_FAILED, RESOURCE_FINALISED):
             report["terminal"] = payload
             report["llm_summary"] = payload.get("llm_summary", {})
 

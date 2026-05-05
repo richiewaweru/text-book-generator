@@ -32,22 +32,16 @@ def _rebuild_draft_pack(
     draft_pack: DraftPack,
 ) -> DraftPack:
     assembler = V3SectionBuilder()
-    try:
-        sections, asm_warnings = assembler.build_sections(
-            blueprint,
-            execution_result.component_blocks,
-            execution_result.question_blocks,
-            execution_result.visual_blocks,
-            template_id=draft_pack.template_id,
-            answer_key=execution_result.answer_key,
-        )
-        warnings = list(execution_result.warnings)
-        warnings.extend(asm_warnings)
-        failed_reason = None
-    except RuntimeError as exc:
-        sections = []
-        failed_reason = str(exc)
-        warnings = [*execution_result.warnings, failed_reason]
+    sections, asm_warnings, section_diagnostics = assembler.build_sections(
+        blueprint,
+        execution_result.component_blocks,
+        execution_result.question_blocks,
+        execution_result.visual_blocks,
+        template_id=draft_pack.template_id,
+        answer_key=execution_result.answer_key,
+    )
+    warnings = list(execution_result.warnings)
+    warnings.extend(asm_warnings)
 
     pack_builder = V3PackBuilder()
     return pack_builder.build(
@@ -58,7 +52,9 @@ def _rebuild_draft_pack(
         sections=sections,
         answer_key=execution_result.answer_key,
         warnings=warnings,
-        failed_reason=failed_reason,
+        booklet_status="draft_ready",
+        section_diagnostics=section_diagnostics,
+        booklet_issues=draft_pack.booklet_issues,
     )
 
 
@@ -386,12 +382,8 @@ async def route_repairs(
     else:
         report.status = "passed"
 
+    report.issues = final_issues
     refresh_issue_counts(report)
-
-    await emit_event(
-        v3_events.RESOURCE_FINALISED,
-        {"generation_id": gid, "status": report.status},
-    )
 
     return current_pack, report
 

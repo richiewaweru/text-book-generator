@@ -15,6 +15,8 @@ ANSWER_KEY_STARTED = "answer_key_started"
 ANSWER_KEY_READY = "answer_key_ready"
 ASSEMBLY_STARTED = "assembly_started"
 DRAFT_PACK_READY = "draft_pack_ready"
+FINAL_PACK_READY = "final_pack_ready"
+DRAFT_STATUS_UPDATED = "draft_status_updated"
 COMPONENT_PATCHED = "component_patched"
 GENERATION_COMPLETE = "generation_complete"
 GENERATION_WARNING = "generation_warning"
@@ -50,6 +52,8 @@ __all__ = [
     "DETERMINISTIC_REVIEW_COMPLETE",
     "DETERMINISTIC_REVIEW_STARTED",
     "DRAFT_PACK_READY",
+    "DRAFT_STATUS_UPDATED",
+    "FINAL_PACK_READY",
     "GENERATION_COMPLETE",
     "GENERATION_STARTED",
     "GENERATION_WARNING",

@@ -257,7 +257,28 @@ class CompiledWorkOrders(BaseModel):
     answer_key_order: AnswerKeyExecutorWorkOrder | None = None
 
 
-DraftPackLifecycle = Literal["draft_ready", "partial", "failed"]
+BookletStatus = Literal[
+    "streaming_preview",
+    "draft_ready",
+    "draft_with_warnings",
+    "draft_needs_review",
+    "final_ready",
+    "final_with_warnings",
+    "failed_unusable",
+]
+
+SectionAssemblyStatus = Literal["complete", "incomplete", "failed"]
+
+
+class SectionAssemblyDiagnostic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    section_id: str
+    status: SectionAssemblyStatus
+    renderable: bool
+    missing_components: list[str] = Field(default_factory=list)
+    missing_visuals: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class DraftPack(BaseModel):
@@ -267,10 +288,12 @@ class DraftPack(BaseModel):
     blueprint_id: str
     template_id: str
     subject: str
-    status: DraftPackLifecycle
+    status: BookletStatus
     sections: list[dict[str, Any]]
     answer_key: GeneratedAnswerKeyBlock | None = None
     warnings: list[str] = Field(default_factory=list)
+    section_diagnostics: list[SectionAssemblyDiagnostic] = Field(default_factory=list)
+    booklet_issues: list[dict[str, Any]] = Field(default_factory=list)
 
     def to_json_preview(self, *, indent: int | None = None) -> str:
         payload = self.model_dump(mode="json", exclude_none=True)
@@ -284,9 +307,11 @@ __all__ = [
     "AnswerKeyExecutorWorkOrder",
     "AnswerKeyPlanSpec",
     "AnswerKeyStyle",
+    "BookletStatus",
     "CompiledWorkOrders",
     "DraftPack",
-    "DraftPackLifecycle",
+    "SectionAssemblyDiagnostic",
+    "SectionAssemblyStatus",
     "ExecutionResult",
     "ExecutorOutcome",
     "GeneratedAnswerKeyBlock",

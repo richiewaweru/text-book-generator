@@ -15,3 +15,17 @@ REPAIR_ESCALATED = "repair_escalated"
 
 GENERATION_COMPLETED = "generation_completed"
 GENERATION_FAILED = "generation_failed"
+
+# Strategic v3 trace-first checkpoints
+GENERATION_START_REQUESTED = "generation_start_requested"
+BLUEPRINT_SNAPSHOT_SAVED = "blueprint_snapshot_saved"
+WORK_ORDERS_COMPILED = "work_orders_compiled"
+EXECUTION_SUMMARY_READY = "execution_summary_ready"
+DRAFT_PACK_READY = "draft_pack_ready"
+BOOKLET_STATUS_ASSIGNED = "booklet_status_assigned"
+COHERENCE_REPORT_READY = "coherence_report_ready"
+REPAIR_SUMMARY_READY = "repair_summary_ready"
+FINAL_PACK_READY = "final_pack_ready"
+RESOURCE_FINALISED = "resource_finalised"
+GENERATION_TIMEOUT = "generation_timeout"
+GENERATION_CANCELLED = "generation_cancelled"

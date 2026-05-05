@@ -5,9 +5,15 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from core.events import event_bus
+from telemetry.v3_trace import event_types as trace_events
+from telemetry.v3_trace.writer import V3TraceWriter
 from v3_blueprint.models import ProductionBlueprint
 from v3_execution.assembly.pack_builder import V3PackBuilder
 from v3_execution.assembly.section_builder import V3SectionBuilder
+from v3_execution.booklet_status import (
+    collect_fatal_issue_categories,
+    derive_booklet_status,
+)
 from v3_execution.compile_orders import compile_execution_bundle
 from v3_execution.config import make_semaphores
 from v3_execution.config.timeouts import V3_TIMEOUTS
@@ -16,6 +22,7 @@ from v3_execution.executors.question_writer import execute_questions
 from v3_execution.executors.section_writer import execute_section
 from v3_execution.executors.visual_executor import execute_visual
 from v3_execution.models import (
+    BookletStatus,
     CompiledWorkOrders,
     ExecutionResult,
     GeneratedComponentBlock,
@@ -28,6 +35,53 @@ from v3_execution.runtime import events
 from v3_review import coherence_report_to_generation_summary, route_repairs, run_coherence_review
 
 
+def _summarize_status_reason(status: str) -> str:
+    messages = {
+        "draft_ready": "Draft assembled; consistency review pending.",
+        "draft_with_warnings": "Draft assembled with minor warnings.",
+        "draft_needs_review": "Draft rendered, but major issues remain after review/repair.",
+        "final_ready": "Final booklet passed review and is ready.",
+        "final_with_warnings": "Final booklet is ready with minor warnings.",
+        "failed_unusable": "No usable booklet could be assembled.",
+        "streaming_preview": "Generation is still streaming preview content.",
+    }
+    return messages.get(status, "Booklet status updated.")
+
+
+def _status_flags(status: str, section_count: int) -> tuple[bool, bool, bool, bool]:
+    draft_available = section_count > 0 and status != "failed_unusable"
+    final_available = status in {"final_ready", "final_with_warnings"}
+    classroom_ready = final_available
+    export_allowed = status in {
+        "final_ready",
+        "final_with_warnings",
+        "draft_ready",
+        "draft_with_warnings",
+        "draft_needs_review",
+    }
+    return draft_available, final_available, classroom_ready, export_allowed
+
+
+def _terminal_process_status(*, resource_status: str, booklet_status: str) -> str:
+    if booklet_status == "final_ready":
+        return "completed"
+    if booklet_status == "final_with_warnings":
+        return "completed_with_warnings"
+    if booklet_status in {"draft_ready", "draft_with_warnings", "draft_needs_review"}:
+        return "failed_finalisation"
+    if resource_status == "failed":
+        return "failed"
+    return "failed_unusable"
+
+
+def _missing_summary(items: list[list[str]]) -> dict[str, int]:
+    summary: dict[str, int] = {}
+    for values in items:
+        for value in values:
+            summary[value] = summary.get(value, 0) + 1
+    return summary
+
+
 async def run_generation(
     *,
     blueprint: ProductionBlueprint,
@@ -37,7 +91,20 @@ async def run_generation(
     emit_event: Callable[[str, dict[str, Any]], Awaitable[None]],
     trace_id: str | None = None,
     model_overrides: dict | None = None,
+    trace_writer: V3TraceWriter | None = None,
 ) -> ExecutionResult:
+    def _booklet_issues_from_report(report: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "issue_id": issue.issue_id,
+                "severity": issue.severity,
+                "category": issue.category,
+                "message": issue.message,
+                "section_id": issue.generated_ref,
+            }
+            for issue in report.issues
+        ]
+
     async def _inner() -> ExecutionResult:
         bundle = compile_execution_bundle(
             blueprint,
@@ -49,6 +116,13 @@ async def run_generation(
             events.WORK_ORDERS_COMPILED,
             {"generation_id": generation_id, "blueprint_id": blueprint_id},
         )
+        if trace_writer is not None:
+            await trace_writer.record_work_orders(
+                section_order_count=len(bundle.section_orders),
+                visual_order_count=len(bundle.visual_orders),
+                question_order_count=len(bundle.question_orders),
+                answer_key_required=bundle.answer_key_order is not None,
+            )
 
         result = ExecutionResult(
             generation_id=generation_id,
@@ -165,11 +239,24 @@ async def run_generation(
         except Exception as exc:  # noqa: BLE001
             result.warnings.append(f"answer_key: {exc}")
 
+        if trace_writer is not None:
+            sections_attempted = len(bundle.section_orders)
+            sections_succeeded = len({block.section_id for block in result.component_blocks})
+            await trace_writer.record_execution_summary(
+                sections_attempted=sections_attempted,
+                sections_succeeded=sections_succeeded,
+                sections_failed=max(sections_attempted - sections_succeeded, 0),
+                components_planned=sum(len(order.section.components) for order in bundle.section_orders),
+                components_delivered=len(result.component_blocks),
+                questions_planned=sum(len(order.questions) for order in bundle.question_orders),
+                questions_delivered=len(result.question_blocks),
+                visuals_planned=len(bundle.visual_orders),
+                visuals_delivered=len(result.visual_blocks),
+                warnings=list(result.warnings),
+            )
+
         await emit_event(events.ASSEMBLY_STARTED, {"generation_id": generation_id})
         assembler = V3SectionBuilder()
-
-        assembly_failed = False
-        assembly_error = ""
 
         def _build_sections():
             return assembler.build_sections(
@@ -182,23 +269,27 @@ async def run_generation(
             )
 
         try:
-            sections, asm_warnings = await asyncio.wait_for(
+            sections, asm_warnings, section_diagnostics = await asyncio.wait_for(
                 asyncio.to_thread(_build_sections),
                 timeout=V3_TIMEOUTS["assembly"],
             )
             result.warnings.extend(asm_warnings)
-        except RuntimeError as exc:
-            assembly_failed = True
-            assembly_error = str(exc)
+        except Exception as exc:  # noqa: BLE001
             sections = []
-            result.warnings.append(assembly_error)
-        except asyncio.TimeoutError:
-            assembly_failed = True
-            assembly_error = f"assembly timeout ({V3_TIMEOUTS['assembly']}s)"
-            sections = []
-            result.warnings.append(assembly_error)
+            section_diagnostics = []
+            result.warnings.append(f"assembly: {exc}")
 
         pack_builder = V3PackBuilder()
+        initial_booklet_status = derive_booklet_status(
+            draft_section_count=len(sections),
+            render_valid=bool(sections),
+            review_done=False,
+            finalised=False,
+            blocking_count=0,
+            major_count=0,
+            minor_count=0,
+            fatal_issue_categories=set(),
+        )
         draft_pack = pack_builder.build(
             blueprint=blueprint,
             generation_id=generation_id,
@@ -207,19 +298,55 @@ async def run_generation(
             sections=sections,
             answer_key=result.answer_key,
             warnings=list(result.warnings),
-            failed_reason=assembly_error if assembly_failed else None,
+            booklet_status=initial_booklet_status,  # type: ignore[arg-type]
+            section_diagnostics=section_diagnostics,
         )
 
         await emit_event(
             events.DRAFT_PACK_READY,
             {
                 "generation_id": generation_id,
-                "section_count": len(sections),
-                "draft_preview": draft_pack.to_json_preview(),
+                "booklet_status": draft_pack.status,
+                "section_count": len(draft_pack.sections),
+                "pack": draft_pack.model_dump(mode="json", exclude_none=True),
             },
         )
+        if trace_writer is not None:
+            incomplete_sections = [
+                diag.section_id
+                for diag in section_diagnostics
+                if diag.status in {"incomplete", "failed"}
+            ]
+            await trace_writer.record_draft_pack(
+                booklet_status=draft_pack.status,
+                planned_section_count=len(blueprint.sections),
+                assembled_section_count=len(draft_pack.sections),
+                renderable=bool(draft_pack.sections),
+                incomplete_sections=incomplete_sections,
+                missing_components_summary=_missing_summary(
+                    [diag.missing_components for diag in section_diagnostics]
+                ),
+                missing_visuals_summary=_missing_summary(
+                    [diag.missing_visuals for diag in section_diagnostics]
+                ),
+                warnings=list(draft_pack.warnings),
+            )
+            draft_available, final_available, classroom_ready, export_allowed = _status_flags(
+                draft_pack.status,
+                len(draft_pack.sections),
+            )
+            await trace_writer.record_booklet_status(
+                booklet_status=draft_pack.status,
+                reason=_summarize_status_reason(draft_pack.status),
+                draft_available=draft_available,
+                final_available=final_available,
+                classroom_ready=classroom_ready,
+                export_allowed=export_allowed,
+            )
 
         coherence_report_payload: dict | None = None
+        resource_final_status = "failed"
+        artifact_status: BookletStatus = draft_pack.status
         try:
             async with sem["llm_coherence_reviewer"]:
 
@@ -251,14 +378,147 @@ async def run_generation(
                     _coherence(),
                     timeout=V3_TIMEOUTS["coherence_pipeline"],
                 )
+                finalised = coherence_report.status in {"passed", "passed_with_warnings"}
+                fatal_categories = collect_fatal_issue_categories(coherence_report.issues)
+                artifact_status = derive_booklet_status(
+                    draft_section_count=len(draft_pack.sections),
+                    render_valid=bool(draft_pack.sections),
+                    review_done=True,
+                    finalised=finalised,
+                    blocking_count=coherence_report.blocking_count,
+                    major_count=coherence_report.major_count,
+                    minor_count=coherence_report.minor_count,
+                    fatal_issue_categories=fatal_categories,
+                )  # type: ignore[assignment]
+                draft_pack = draft_pack.model_copy(
+                    update={
+                        "status": artifact_status,
+                        "booklet_issues": _booklet_issues_from_report(coherence_report),
+                    }
+                )
                 coherence_report_payload = coherence_report_to_generation_summary(coherence_report)
+                resource_final_status = coherence_report.status
+                if trace_writer is not None:
+                    await trace_writer.record_review_summary(
+                        minor_count=coherence_report.minor_count,
+                        major_count=coherence_report.major_count,
+                        blocking_count=coherence_report.blocking_count,
+                        repair_target_count=len(coherence_report.repair_targets),
+                        fatal_categories=sorted(fatal_categories),
+                        llm_review_used=coherence_report.llm_review_passed,
+                    )
+                    attempted_count = sum(coherence_report.repair_attempts.values())
+                    succeeded_count = len(coherence_report.repaired_target_ids)
+                    await trace_writer.record_repair_summary(
+                        attempted_count=attempted_count,
+                        succeeded_count=succeeded_count,
+                        failed_count=max(attempted_count - succeeded_count, 0),
+                        repaired_target_ids=list(coherence_report.repaired_target_ids),
+                        remaining_minor_count=coherence_report.minor_count,
+                        remaining_major_count=coherence_report.major_count,
+                        remaining_blocking_count=coherence_report.blocking_count,
+                    )
+                    draft_available, final_available, classroom_ready, export_allowed = _status_flags(
+                        artifact_status,
+                        len(draft_pack.sections),
+                    )
+                    await trace_writer.record_booklet_status(
+                        booklet_status=artifact_status,
+                        reason=_summarize_status_reason(artifact_status),
+                        draft_available=draft_available,
+                        final_available=final_available,
+                        classroom_ready=classroom_ready,
+                        export_allowed=export_allowed,
+                    )
+
+                if artifact_status in {"final_ready", "final_with_warnings"}:
+                    await emit_event(
+                        events.FINAL_PACK_READY,
+                        {
+                            "generation_id": generation_id,
+                            "booklet_status": artifact_status,
+                            "pack": draft_pack.model_dump(mode="json", exclude_none=True),
+                        },
+                    )
+                    if trace_writer is not None:
+                        draft_available, final_available, classroom_ready, export_allowed = _status_flags(
+                            artifact_status,
+                            len(draft_pack.sections),
+                        )
+                        await trace_writer.record_final_pack(
+                            booklet_status=artifact_status,
+                            final_section_count=len(draft_pack.sections),
+                            warnings=list(draft_pack.warnings),
+                            classroom_ready=classroom_ready,
+                            export_allowed=export_allowed,
+                        )
+                else:
+                    await emit_event(
+                        events.DRAFT_STATUS_UPDATED,
+                        {
+                            "generation_id": generation_id,
+                            "booklet_status": artifact_status,
+                            "pack": draft_pack.model_dump(mode="json", exclude_none=True),
+                        },
+                    )
         except Exception as exc:  # noqa: BLE001
             result.warnings.append(f"coherence_review: {exc}")
+            artifact_status = draft_pack.status
+            await emit_event(
+                events.DRAFT_STATUS_UPDATED,
+                {
+                    "generation_id": generation_id,
+                    "booklet_status": artifact_status,
+                    "pack": draft_pack.model_dump(mode="json", exclude_none=True),
+                    "message": "Coherence review did not complete; draft remains available.",
+                },
+            )
+            if trace_writer is not None:
+                draft_available, final_available, classroom_ready, export_allowed = _status_flags(
+                    artifact_status,
+                    len(draft_pack.sections),
+                )
+                await trace_writer.record_booklet_status(
+                    booklet_status=artifact_status,
+                    reason="Coherence review did not complete; draft remains available.",
+                    draft_available=draft_available,
+                    final_available=final_available,
+                    classroom_ready=classroom_ready,
+                    export_allowed=export_allowed,
+                )
+
+        await emit_event(
+            events.RESOURCE_FINALISED,
+            {
+                "generation_id": generation_id,
+                "status": resource_final_status,
+                "booklet_status": artifact_status,
+            },
+        )
+        if trace_writer is not None:
+            draft_available, final_available, classroom_ready, export_allowed = _status_flags(
+                artifact_status,
+                len(draft_pack.sections),
+            )
+            await trace_writer.record_terminal(
+                terminal_event_type=trace_events.RESOURCE_FINALISED,
+                process_status=_terminal_process_status(
+                    resource_status=resource_final_status,
+                    booklet_status=artifact_status,
+                ),
+                booklet_status=artifact_status,
+                draft_available=draft_available,
+                final_available=final_available,
+                classroom_ready=classroom_ready,
+                export_allowed=export_allowed,
+                error_summary=None,
+            )
 
         await emit_event(
             events.GENERATION_COMPLETE,
             {
                 "generation_id": generation_id,
+                "booklet_status": artifact_status,
                 "warnings": result.warnings,
                 **({"coherence_review": coherence_report_payload} if coherence_report_payload else {}),
             },
@@ -268,12 +528,28 @@ async def run_generation(
     try:
         return await asyncio.wait_for(_inner(), timeout=V3_TIMEOUTS["generation_total"])
     except asyncio.TimeoutError:
+        timeout_message = (
+            f"generation_total: exceeded {V3_TIMEOUTS['generation_total']}s cap"
+        )
+        if trace_writer is not None:
+            await trace_writer.record_terminal(
+                terminal_event_type=trace_events.GENERATION_TIMEOUT,
+                process_status="generation_timeout",
+                booklet_status="failed_unusable",
+                draft_available=False,
+                final_available=False,
+                classroom_ready=False,
+                export_allowed=False,
+                error_summary=timeout_message,
+            )
+        await emit_event(
+            events.GENERATION_WARNING,
+            {"generation_id": generation_id, "message": timeout_message},
+        )
         return ExecutionResult(
             generation_id=generation_id,
             blueprint_id=blueprint_id,
-            warnings=[
-                f"generation_total: exceeded {V3_TIMEOUTS['generation_total']}s cap",
-            ],
+            warnings=[timeout_message],
         )
 
 
@@ -285,6 +561,7 @@ async def sse_event_stream(
     template_id: str,
     trace_id: str | None = None,
     model_overrides: dict | None = None,
+    trace_writer: V3TraceWriter | None = None,
 ) -> AsyncIterator[str]:
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -305,6 +582,7 @@ async def sse_event_stream(
                 emit_event=emit,
                 trace_id=trace_id or generation_id,
                 model_overrides=model_overrides,
+                trace_writer=trace_writer,
             )
         except Exception as exc:  # noqa: BLE001
             await emit(

@@ -38,6 +38,41 @@ class V3TraceRepository:
             session.add(run)
             await session.commit()
 
+    async def start_run(
+        self,
+        *,
+        trace_id: str,
+        generation_id: str,
+        user_id: str,
+        title: str | None = None,
+        subject: str | None = None,
+        template_id: str | None = None,
+        start_event_type: str,
+        start_event_payload: dict,
+        phase: str = "start",
+    ) -> None:
+        async with self._session_factory() as session:
+            run = V3TraceRunModel(
+                trace_id=trace_id,
+                generation_id=generation_id,
+                user_id=user_id,
+                title=title,
+                subject=subject,
+                template_id=template_id,
+                status="generating",
+            )
+            session.add(run)
+            event = V3TraceEventModel(
+                id=str(uuid.uuid4()),
+                trace_id=trace_id,
+                sequence=1,
+                phase=phase,
+                event_type=start_event_type,
+                payload=start_event_payload,
+            )
+            session.add(event)
+            await session.commit()
+
     async def bind_generation(
         self,
         *,

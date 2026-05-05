@@ -7,6 +7,7 @@
 	import V3Clarification from '$lib/components/studio/V3Clarification.svelte';
 	import V3BlueprintPreview from '$lib/components/studio/V3BlueprintPreview.svelte';
 	import V3Canvas from '$lib/components/studio/V3Canvas.svelte';
+	import V3BookletPackView from '$lib/components/studio/V3BookletPackView.svelte';
 
 	import {
 		adjustBlueprint,
@@ -25,16 +26,30 @@
 		mergeDiagramFrame,
 		mergePracticeProblem
 	} from '$lib/studio/v3-canvas';
+	import { getBookletExportPolicy, isBookletStatus } from '$lib/studio/v3-booklet';
 	import { hasRequiredStructuredFields } from '$lib/studio/v3-clarify';
-	import type { V3ClarificationAnswer, V3InputForm } from '$lib/types/v3';
+	import type { BookletStatus, V3ClarificationAnswer, V3DraftPack, V3InputForm } from '$lib/types/v3';
 
 	let pdfLoading = $state(false);
 	let pdfError = $state<string | null>(null);
+	let pdfConfirming = $state(false);
+	const currentExportPolicy = $derived(getBookletExportPolicy(v3Studio.bookletStatus));
 
 	function friendly(err: unknown): string {
 		if (isApiError(err)) return err.detail;
 		if (err instanceof Error) return err.message;
 		return 'Something went wrong. Try again.';
+	}
+
+	function parsePack(payload: unknown): V3DraftPack | null {
+		if (typeof payload !== 'object' || payload === null) return null;
+		const candidate = (payload as { pack?: unknown }).pack;
+		if (typeof candidate !== 'object' || candidate === null) return null;
+		return candidate as V3DraftPack;
+	}
+
+	function statusFromPayload(payload: Record<string, unknown>, fallback: BookletStatus): BookletStatus {
+		return isBookletStatus(payload.booklet_status) ? payload.booklet_status : fallback;
 	}
 
 	async function handleInputSubmit(form: V3InputForm) {
@@ -117,6 +132,11 @@
 		const generationId = crypto.randomUUID();
 		v3Studio.generationId = generationId;
 		v3Studio.canvas = buildCanvasSkeleton(blueprint);
+		v3Studio.draftPack = null;
+		v3Studio.finalPack = null;
+		v3Studio.activePack = null;
+		v3Studio.bookletStatus = 'streaming_preview';
+		v3Studio.bookletIssues = [];
 		v3Studio.stage = 'generating';
 
 		try {
@@ -142,8 +162,36 @@
 					typeof data.repair_target_count === 'number' ? data.repair_target_count : 0;
 				v3Studio.coherenceHint =
 					repairs > 0
-						? `Consistency pass: ${blocking} blocking issues flagged — refining (${repairs} repair targets).`
+						? `Consistency pass: ${blocking} blocking issues flagged - refining (${repairs} repair targets).`
 						: 'Consistency review finished.';
+			},
+			onDraftPackReady: (data) => {
+				const pack = parsePack(data);
+				if (!pack) return;
+				const status = statusFromPayload(data, pack.status);
+				v3Studio.draftPack = pack;
+				v3Studio.activePack = pack;
+				v3Studio.bookletStatus = status;
+				v3Studio.bookletIssues = Array.isArray(pack.booklet_issues) ? pack.booklet_issues : [];
+			},
+			onFinalPackReady: (data) => {
+				const pack = parsePack(data);
+				if (!pack) return;
+				const status = statusFromPayload(data, pack.status);
+				v3Studio.finalPack = pack;
+				v3Studio.activePack = pack;
+				v3Studio.bookletStatus = status;
+				v3Studio.bookletIssues = Array.isArray(pack.booklet_issues) ? pack.booklet_issues : [];
+			},
+			onDraftStatusUpdated: (data) => {
+				const status = statusFromPayload(data, v3Studio.bookletStatus);
+				const pack = parsePack(data);
+				if (pack) {
+					v3Studio.draftPack = pack;
+					v3Studio.activePack = pack;
+					v3Studio.bookletIssues = Array.isArray(pack.booklet_issues) ? pack.booklet_issues : [];
+				}
+				v3Studio.bookletStatus = status;
 			},
 			onResourceFinalised: () => {
 				v3Studio.streamCancel?.();
@@ -266,19 +314,38 @@
 	async function handleDownloadPdf() {
 		const gid = v3Studio.generationId;
 		if (!gid) {
-			pdfError = 'No generation id — try generating again.';
+			pdfError = 'No generation id - try generating again.';
 			return;
+		}
+		if (!v3Studio.activePack) {
+			pdfError = 'No assembled pack is available yet.';
+			return;
+		}
+		const policy = currentExportPolicy;
+		if (!policy.enabled) {
+			pdfError = 'Export is unavailable for the current booklet status.';
+			return;
+		}
+		if (policy.requiresConfirm && !pdfConfirming) {
+			pdfConfirming = true;
+			const proceed = window.confirm(
+				'This draft needs review before classroom use. Export this draft anyway?'
+			);
+			pdfConfirming = false;
+			if (!proceed) return;
 		}
 		pdfLoading = true;
 		pdfError = null;
 		try {
-			const canvasPayload = JSON.parse(JSON.stringify(v3Studio.canvas)) as Record<string, unknown>[];
+			const packPayload = JSON.parse(
+				JSON.stringify(v3Studio.activePack.sections)
+			) as Record<string, unknown>[];
 			await downloadV3GenerationPdf(gid, {
-				school_name: '—',
-				teacher_name: '—',
+				school_name: '-',
+				teacher_name: '-',
 				include_toc: false,
 				include_answers: true,
-				canvas_sections: canvasPayload
+				pack_sections: packPayload
 			});
 		} catch (err) {
 			pdfError = friendly(err);
@@ -312,26 +379,40 @@
 		<V3PlanningState form={v3Studio.form} />
 	{:else if v3Studio.stage === 'reviewing' && v3Studio.blueprint}
 		<V3BlueprintPreview blueprint={v3Studio.blueprint} onApprove={handleBlueprintApproved} onAdjust={handleBlueprintAdjust} />
-	{:else if v3Studio.stage === 'generating' || v3Studio.stage === 'finalising'}
-		{#if v3Studio.coherenceHint && v3Studio.stage === 'finalising'}
-			<p class="mx-auto max-w-3xl px-4 pt-6 text-center text-sm text-muted-foreground">{v3Studio.coherenceHint}</p>
+	{:else if v3Studio.stage === 'generating' || v3Studio.stage === 'finalising' || v3Studio.stage === 'complete'}
+		{#if v3Studio.activePack}
+			<div class="mx-auto flex max-w-4xl justify-end gap-3 px-4 pt-4">
+				<button
+					type="button"
+					class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+					onclick={handleDownloadPdf}
+					disabled={pdfLoading || !currentExportPolicy.enabled}
+				>
+					{pdfLoading ? 'Generating PDF...' : currentExportPolicy.label}
+				</button>
+			</div>
 		{/if}
-		<V3Canvas sections={v3Studio.canvas} stage={v3Studio.stage} templateId={v3Studio.blueprint?.template_id ?? 'guided-concept-path'} />
-	{:else if v3Studio.stage === 'complete'}
-		<div class="mx-auto flex max-w-3xl justify-end gap-3 px-4 pt-4">
-			<button
-				type="button"
-				class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
-				onclick={handleDownloadPdf}
-				disabled={pdfLoading}
-			>
-				{pdfLoading ? 'Generating PDF…' : 'Download PDF'}
-			</button>
-		</div>
 		{#if pdfError}
 			<p class="mx-auto max-w-3xl px-4 pt-2 text-center text-sm text-destructive" role="alert">{pdfError}</p>
 		{/if}
-		<V3Canvas sections={v3Studio.canvas} stage="complete" templateId={v3Studio.blueprint?.template_id ?? 'guided-concept-path'} />
+		{#if v3Studio.coherenceHint && v3Studio.stage === 'finalising'}
+			<p class="mx-auto max-w-3xl px-4 pt-6 text-center text-sm text-muted-foreground">{v3Studio.coherenceHint}</p>
+		{/if}
+		{#if v3Studio.activePack}
+			<V3BookletPackView
+				pack={v3Studio.activePack}
+				status={v3Studio.bookletStatus}
+				issues={v3Studio.bookletIssues}
+			/>
+			<details class="mx-auto max-w-4xl px-4 pb-6">
+				<summary class="cursor-pointer text-sm font-medium text-muted-foreground">Show generation progress</summary>
+				<div class="pt-4">
+					<V3Canvas sections={v3Studio.canvas} stage={v3Studio.stage} templateId={v3Studio.blueprint?.template_id ?? 'guided-concept-path'} />
+				</div>
+			</details>
+		{:else}
+			<V3Canvas sections={v3Studio.canvas} stage={v3Studio.stage} templateId={v3Studio.blueprint?.template_id ?? 'guided-concept-path'} />
+		{/if}
 	{/if}
 
 	{#if v3Studio.error}

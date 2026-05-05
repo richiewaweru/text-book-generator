@@ -260,6 +260,6 @@ async def test_route_repairs_finalises_when_final_checks_patched(
         model_overrides=None,
     )
 
-    assert v3_events.RESOURCE_FINALISED in emitted
+    assert v3_events.RESOURCE_FINALISED not in emitted
     assert out_pack.generation_id == dp.generation_id
     assert out_report.status == "passed"

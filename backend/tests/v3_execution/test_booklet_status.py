@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+from v3_execution.booklet_status import derive_booklet_status
+
+
+def test_no_sections_is_failed_unusable() -> None:
+    status = derive_booklet_status(
+        draft_section_count=0,
+        render_valid=False,
+        review_done=False,
+        finalised=False,
+        blocking_count=0,
+        major_count=0,
+        minor_count=0,
+        fatal_issue_categories=set(),
+    )
+    assert status == "failed_unusable"
+
+
+def test_review_not_done_with_draft_is_draft_ready() -> None:
+    status = derive_booklet_status(
+        draft_section_count=2,
+        render_valid=True,
+        review_done=False,
+        finalised=False,
+        blocking_count=0,
+        major_count=0,
+        minor_count=0,
+        fatal_issue_categories=set(),
+    )
+    assert status == "draft_ready"
+
+
+def test_minor_issues_before_finalisation_is_draft_with_warnings() -> None:
+    status = derive_booklet_status(
+        draft_section_count=2,
+        render_valid=True,
+        review_done=True,
+        finalised=False,
+        blocking_count=0,
+        major_count=0,
+        minor_count=1,
+        fatal_issue_categories=set(),
+    )
+    assert status == "draft_with_warnings"
+
+
+def test_major_issue_keeps_draft_needs_review() -> None:
+    status = derive_booklet_status(
+        draft_section_count=2,
+        render_valid=True,
+        review_done=True,
+        finalised=False,
+        blocking_count=0,
+        major_count=1,
+        minor_count=0,
+        fatal_issue_categories=set(),
+    )
+    assert status == "draft_needs_review"
+
+
+def test_finalised_with_no_issues_is_final_ready() -> None:
+    status = derive_booklet_status(
+        draft_section_count=2,
+        render_valid=True,
+        review_done=True,
+        finalised=True,
+        blocking_count=0,
+        major_count=0,
+        minor_count=0,
+        fatal_issue_categories=set(),
+    )
+    assert status == "final_ready"
+
+
+def test_finalised_with_minor_issues_is_final_with_warnings() -> None:
+    status = derive_booklet_status(
+        draft_section_count=2,
+        render_valid=True,
+        review_done=True,
+        finalised=True,
+        blocking_count=0,
+        major_count=0,
+        minor_count=2,
+        fatal_issue_categories=set(),
+    )
+    assert status == "final_with_warnings"
+
+
+def test_fatal_categories_force_failed_unusable() -> None:
+    status = derive_booklet_status(
+        draft_section_count=2,
+        render_valid=True,
+        review_done=True,
+        finalised=True,
+        blocking_count=0,
+        major_count=0,
+        minor_count=0,
+        fatal_issue_categories={"internal_artifact_leak"},
+    )
+    assert status == "failed_unusable"

@@ -133,6 +133,39 @@ export interface CanvasSection {
 	mergedFields: Record<string, unknown>;
 }
 
+export type BookletStatus =
+	| 'streaming_preview'
+	| 'draft_ready'
+	| 'draft_with_warnings'
+	| 'draft_needs_review'
+	| 'final_ready'
+	| 'final_with_warnings'
+	| 'failed_unusable';
+
+export type SectionAssemblyStatus = 'complete' | 'incomplete' | 'failed';
+
+export interface SectionAssemblyDiagnostic {
+	section_id: string;
+	status: SectionAssemblyStatus;
+	renderable: boolean;
+	missing_components: string[];
+	missing_visuals: string[];
+	warnings: string[];
+}
+
+export interface V3DraftPack {
+	generation_id: string;
+	blueprint_id: string;
+	template_id: string;
+	subject: string;
+	status: BookletStatus;
+	sections: Record<string, unknown>[];
+	answer_key?: Record<string, unknown> | null;
+	warnings: string[];
+	section_diagnostics: SectionAssemblyDiagnostic[];
+	booklet_issues: Array<Record<string, unknown>>;
+}
+
 export type V3Stage =
 	| 'input'
 	| 'confirming'
