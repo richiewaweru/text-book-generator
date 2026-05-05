@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, JSON, String, Text
@@ -174,3 +175,42 @@ class LessonShareModel(Base):
     expires_at = Column(DateTime, nullable=False, index=True)
     allow_download = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
+
+
+class V3TraceRunModel(Base):
+    """One row per V3 studio session. Bound to generation_id once started."""
+
+    __tablename__ = "v3_trace_runs"
+
+    trace_id = Column(String, primary_key=True)
+    generation_id = Column(String, nullable=True, index=True, unique=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String, nullable=True)
+    subject = Column(String, nullable=True)
+    template_id = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="pending", index=True)
+    report_json = Column(JSON_DOCUMENT_TYPE, nullable=True)
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    events = relationship(
+        "V3TraceEventModel",
+        back_populates="run",
+        order_by="V3TraceEventModel.sequence",
+    )
+
+
+class V3TraceEventModel(Base):
+    """Append-only actionable events for a V3 trace run."""
+
+    __tablename__ = "v3_trace_events"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    trace_id = Column(String, ForeignKey("v3_trace_runs.trace_id"), nullable=False, index=True)
+    sequence = Column(Integer, nullable=False)
+    phase = Column(String, nullable=False, index=True)
+    event_type = Column(String, nullable=False, index=True)
+    payload = Column(JSON_DOCUMENT_TYPE, nullable=False)
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+
+    run = relationship("V3TraceRunModel", back_populates="events")
