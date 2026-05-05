@@ -46,7 +46,7 @@ PipelineCommand = _PipelineCommand
 class V3GenerateRequest(BaseModel):
     generation_id: str
     blueprint_id: str
-    template_id: str = "diagram-led"
+    template_id: str = "guided-concept-path"
     blueprint: dict
 
 router = APIRouter(prefix="/api/v1", tags=["generation"])

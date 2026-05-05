@@ -15,7 +15,7 @@ from core.entities.user import User
 from pipeline.api import PipelineDocument
 from telemetry.dependencies import get_llm_call_repository
 from telemetry.dtos.usage import LLMUsageBreakdownItem, LLMUsageResponse
-from telemetry.service import telemetry_monitor
+from telemetry.service import TelemetryMonitor, telemetry_monitor
 
 
 def _now() -> datetime:
@@ -220,3 +220,42 @@ async def test_llm_usage_route_scopes_to_authenticated_user() -> None:
             "trace_id": "planning-trace-1",
         }
     ]
+
+
+async def test_v3_recorder_initializes_and_finalizes_on_resource_finalised() -> None:
+    generation_id = "telemetry-v3-finalize"
+    report_repo = InMemoryReportRepo()
+
+    monitor = TelemetryMonitor()
+
+    async def load_report_repo():
+        return report_repo
+
+    monitor.configure(report_repository_factory=load_report_repo)
+    await monitor.initialise_v3_recorder(
+        generation_id=generation_id,
+        user_id=TEST_USER.id,
+        blueprint_title="Triangles",
+        subject="Mathematics",
+        template_id="guided-concept-path",
+    )
+    await monitor._handle_event(  # noqa: SLF001
+        {
+            "type": "generation_complete",
+            "generation_id": generation_id,
+            "coherence_review": {"status": "repair_required", "blocking_count": 2},
+        }
+    )
+    await monitor._handle_event(  # noqa: SLF001
+        {
+            "type": "resource_finalised",
+            "generation_id": generation_id,
+            "status": "passed_with_warnings",
+        }
+    )
+
+    report = await report_repo.load_report(generation_id)
+    assert report.pipeline_version == "v3"
+    assert report.status == "completed"
+    assert report.quality_passed is True
+    assert report.coherence_review == {"status": "repair_required", "blocking_count": 2}

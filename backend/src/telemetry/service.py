@@ -60,11 +60,53 @@ _REPORT_EVENT_TYPES = {
     "error",
 }
 
+_V3_REPORT_EVENT_TYPES = {
+    "generation_started",
+    "work_orders_compiled",
+    "section_writing_started",
+    "component_ready",
+    "questions_started",
+    "question_ready",
+    "visual_generation_started",
+    "visual_ready",
+    "answer_key_started",
+    "answer_key_ready",
+    "assembly_started",
+    "draft_pack_ready",
+    "coherence_review_started",
+    "deterministic_review_started",
+    "deterministic_review_complete",
+    "llm_review_started",
+    "llm_review_complete",
+    "llm_review_skipped",
+    "coherence_report_ready",
+    "repair_started",
+    "component_patched",
+    "repair_failed",
+    "repair_escalated",
+    "resource_finalised",
+    "generation_complete",
+    "generation_warning",
+}
+
 
 @dataclass
 class _TraceRegistration:
     user_id: str
     source: str
+
+
+@dataclass
+class _V3GenerationDescriptor:
+    id: str
+    subject: str
+    context: str
+    requested_template_id: str
+    requested_preset_id: str
+    section_count: int
+    created_at: datetime
+    user_id: str
+    pipeline_version: str = "v3"
 
 
 class _TraceRegistry:
@@ -217,7 +259,7 @@ class TelemetryMonitor:
                     generation_id,
                 )
 
-        if event_type in _REPORT_EVENT_TYPES and generation_id:
+        if event_type in (_REPORT_EVENT_TYPES | _V3_REPORT_EVENT_TYPES) and generation_id:
             recorder = await self._ensure_recorder(generation_id)
             if recorder is None:
                 return
@@ -241,8 +283,56 @@ class TelemetryMonitor:
                 self._recorders.pop(generation_id, None)
                 self._registry.close(generation_id)
                 return
+            if event_type == "resource_finalised":
+                await recorder.apply_event(payload)
+                status = payload.get("status")
+                quality_passed = status in {"passed", "passed_with_warnings"}
+                await recorder.finalize_runtime_success(
+                    quality_passed=quality_passed,
+                    generation_time_seconds=await self._generation_time_seconds(generation_id),
+                )
+                recorder.log_final_summary()
+                self._recorders.pop(generation_id, None)
+                self._registry.close(generation_id)
+                return
+            if event_type == "generation_warning":
+                await recorder.apply_event(payload)
+                await recorder.finalize_failure(
+                    error=payload.get("message", "Generation failed"),
+                    generation_time_seconds=await self._generation_time_seconds(generation_id),
+                )
+                recorder.log_final_summary()
+                self._recorders.pop(generation_id, None)
+                self._registry.close(generation_id)
+                return
 
             await recorder.apply_event(payload)
+
+    async def initialise_v3_recorder(
+        self,
+        *,
+        generation_id: str,
+        user_id: str,
+        blueprint_title: str,
+        subject: str,
+        template_id: str,
+    ) -> None:
+        if generation_id in self._recorders:
+            return
+        recorder = GenerationReportRecorder(
+            generation=_V3GenerationDescriptor(
+                id=generation_id,
+                user_id=user_id,
+                subject=subject,
+                context=blueprint_title,
+                requested_template_id=template_id,
+                requested_preset_id="v3-default",
+                section_count=0,
+                created_at=datetime.now(timezone.utc),
+            ),
+            repository=await self._get_report_repository(),
+        )
+        self._recorders[generation_id] = recorder
 
     async def _ensure_recorder(self, generation_id: str) -> GenerationReportRecorder | None:
         existing = self._recorders.get(generation_id)

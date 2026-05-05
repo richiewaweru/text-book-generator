@@ -37,6 +37,7 @@ from generation.v3_studio.dtos import (
 )
 from generation.v3_studio.preview_mapper import blueprint_to_preview_dto
 from generation.v3_studio.session_store import v3_studio_store
+from telemetry.service import telemetry_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,16 @@ async def get_v3_generation_events(
     queue = await v3_studio_store.get_queue(generation_id)
     if queue is None:
         raise HTTPException(status_code=404, detail="Generation stream not found")
+    stored = await v3_studio_store.get_blueprint_for_generation(generation_id)
+    if stored is None:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+    await telemetry_monitor.initialise_v3_recorder(
+        generation_id=generation_id,
+        user_id=str(current_user.id),
+        blueprint_title=stored.blueprint.metadata.title,
+        subject=stored.blueprint.metadata.subject,
+        template_id=stored.template_id,
+    )
 
     async def event_generator():
         try:

@@ -253,6 +253,7 @@ class GenerationReport(BaseModel):
     generation_nodes: list[GenerationReportNode] = Field(default_factory=list)
     timeline: list[GenerationTimelineEvent] = Field(default_factory=list)
     coherence_review: dict[str, Any] | None = None
+    pipeline_version: Literal["v2", "v3"] = "v2"
 
     @field_validator(
         "started_at",

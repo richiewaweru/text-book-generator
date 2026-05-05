@@ -42,6 +42,11 @@ _TIMELINE_EVENT_TYPES: frozenset[str] = frozenset(
         "section_failed",
         "section_final",
         "complete",
+        "generation_started",
+        "generation_complete",
+        "resource_finalised",
+        "generation_warning",
+        "coherence_report_ready",
     }
 )
 
@@ -94,6 +99,7 @@ class GenerationReportRecorder:
             section_count=generation.section_count,
             started_at=generation.created_at,
             summary=GenerationReportSummary(),
+            pipeline_version=getattr(generation, "pipeline_version", "v2"),
         )
         self._sections: dict[str, GenerationReportSection] = {}
         self._generation_nodes: dict[tuple[str, int | None], GenerationReportNode] = {}
@@ -195,6 +201,22 @@ class GenerationReportRecorder:
             error=error,
             generation_time_seconds=generation_time_seconds,
         )
+        await self._persist()
+
+    async def finalize_runtime_success(
+        self,
+        *,
+        quality_passed: bool | None = None,
+        generation_time_seconds: float | None = None,
+    ) -> None:
+        self._report.status = "completed"
+        self._report.quality_passed = quality_passed
+        self._report.generation_time_seconds = generation_time_seconds
+        self._report.completed_at = self._report.completed_at or _utc_now()
+        self._finalize_incomplete_sections(final_status="completed")
+        self._report.outcome = self._derive_outcome(final_status="completed")
+        self._update_wall_time()
+        self._refresh_summary()
         await self._persist()
 
     def build_success_snapshot(
@@ -299,6 +321,24 @@ class GenerationReportRecorder:
             self._handle_complete(payload)
         elif event_type == "error":
             self._handle_error(payload)
+        elif event_type == "generation_started":
+            self._handle_pipeline_start(payload)
+        elif event_type == "section_writing_started":
+            self._handle_section_started(payload)
+        elif event_type == "questions_started":
+            self._handle_section_started(payload)
+        elif event_type == "component_ready":
+            self._handle_component_ready(payload)
+        elif event_type == "question_ready":
+            self._handle_section_started(payload)
+        elif event_type == "generation_complete":
+            self._handle_generation_complete(payload)
+        elif event_type == "generation_warning":
+            self._handle_generation_warning(payload)
+        elif event_type == "resource_finalised":
+            self._handle_resource_finalised(payload)
+        elif event_type == "coherence_report_ready":
+            self._handle_coherence_report_ready(payload)
 
         self._refresh_summary()
         await self._persist()
@@ -1014,6 +1054,44 @@ class GenerationReportRecorder:
         self._report.completed_at = _as_utc(payload.get("completed_at")) or self._report.completed_at
         self._report.final_error = payload.get("message", self._report.final_error)
         self._update_wall_time()
+
+    def _handle_component_ready(self, payload: dict[str, Any]) -> None:
+        section_id = payload.get("section_id")
+        if not section_id:
+            return
+        section = self._ensure_section(section_id)
+        section.status = "running"
+        field_name = payload.get("section_field")
+        if isinstance(field_name, str) and field_name:
+            delivered = set(section.delivered_components)
+            delivered.add(field_name)
+            section.delivered_components = sorted(delivered)
+            self._refresh_section_expectations(section)
+
+    def _handle_generation_complete(self, payload: dict[str, Any]) -> None:
+        self._report.status = "completed"
+        self._report.completed_at = _utc_now()
+        coherence_review = payload.get("coherence_review")
+        if isinstance(coherence_review, dict):
+            self._report.coherence_review = coherence_review
+        self._update_wall_time()
+
+    def _handle_generation_warning(self, payload: dict[str, Any]) -> None:
+        self._report.final_error = payload.get("message", self._report.final_error)
+
+    def _handle_resource_finalised(self, payload: dict[str, Any]) -> None:
+        status = payload.get("status")
+        if status in {"passed", "passed_with_warnings"}:
+            self._report.quality_passed = True
+        elif status in {"escalated", "repair_required"}:
+            self._report.quality_passed = False
+
+    def _handle_coherence_report_ready(self, payload: dict[str, Any]) -> None:
+        self._report.coherence_review = {
+            "status": payload.get("status"),
+            "blocking_count": payload.get("blocking_count"),
+            "repair_target_count": payload.get("repair_target_count"),
+        }
 
     def _delivered_components(self, section_payload: dict[str, Any]) -> list[str]:
         return sorted(

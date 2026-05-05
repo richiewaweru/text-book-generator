@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
+from core.events import event_bus
 from v3_blueprint.models import ProductionBlueprint
 from v3_execution.assembly.pack_builder import V3PackBuilder
 from v3_execution.assembly.section_builder import V3SectionBuilder
@@ -291,6 +292,7 @@ async def sse_event_stream(
         body = dict(payload)
         body["type"] = event_type
         await queue.put(events.format_sse_payload(event_type, body))
+        event_bus.publish(generation_id, body)
 
     async def worker() -> None:
         try:
