@@ -131,6 +131,21 @@ class V3AnchorExampleDTO(BaseModel):
     reuse_scope: str
 
 
+class V3LearnerContextDTO(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    grade_level: str
+    subject: str
+    duration_minutes: int
+    lesson_mode: str
+    learner_level: str
+    reading_level: str
+    language_support: str
+    prior_knowledge_level: str
+    support_needs: list[str] = Field(default_factory=list)
+    prior_knowledge: str
+
+
 class BlueprintPreviewDTO(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -144,6 +159,7 @@ class BlueprintPreviewDTO(BaseModel):
     question_plan: list[V3QuestionPlanDTO] = Field(default_factory=list)
     register_summary: str = ""
     support_summary: list[str] = Field(default_factory=list)
+    learner_context: V3LearnerContextDTO | None = None
 
 
 class ClarifyRequest(BaseModel):
@@ -218,6 +234,7 @@ __all__ = [
     "V3GenerateStartResponse",
     "V3PdfExportRequest",
     "V3InputForm",
+    "V3LearnerContextDTO",
     "V3QuestionPlanDTO",
     "V3SectionPlanItemDTO",
     "V3SignalSummary",

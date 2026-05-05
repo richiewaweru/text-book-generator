@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from generation.v3_studio.dtos import V3InputForm
 from v3_blueprint.models import ProductionBlueprint
 
 from generation.v3_studio.preview_mapper import blueprint_to_preview_dto
@@ -37,6 +38,37 @@ def test_blueprint_to_preview_dto_default_template_id() -> None:
     bp = _example_bp("amara_compound_area.json")
     dto = blueprint_to_preview_dto(blueprint_id="bid-default", blueprint=bp)
     assert dto.template_id == "guided-concept-path"
+    assert dto.learner_context is None
+
+
+def test_blueprint_to_preview_dto_includes_learner_context_when_form_provided() -> None:
+    bp = _example_bp("amara_compound_area.json")
+    form = V3InputForm(
+        grade_level="Grade 8",
+        subject="Mathematics",
+        duration_minutes=50,
+        topic="Compound area",
+        subtopics=["L-shapes"],
+        prior_knowledge="Rectangle area",
+        lesson_mode="first_exposure",
+        learner_level="on_grade",
+        reading_level="on_grade",
+        language_support="some_ell",
+        prior_knowledge_level="some_background",
+        support_needs=["visuals"],
+        learning_preferences=[],
+        free_text="",
+    )
+    dto = blueprint_to_preview_dto(
+        blueprint_id="bid-with-context",
+        blueprint=bp,
+        template_id="guided-concept-path",
+        form=form,
+    )
+    assert dto.learner_context is not None
+    assert dto.learner_context.grade_level == "Grade 8"
+    assert dto.learner_context.subject == "Mathematics"
+    assert dto.learner_context.support_needs == ["visuals"]
 
 
 @pytest.mark.asyncio

@@ -206,3 +206,63 @@ async def test_v3_blueprint_surfaces_exception_details_and_logs() -> None:
     assert resp.status_code == 500
     assert "RuntimeError: architect exploded" in resp.json()["detail"]
     logger_exception.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_v3_blueprint_adjust_preserves_learner_context() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    bp = _example_bp("amara_compound_area.json")
+    payload = {
+        "signals": {
+            "topic": "Area",
+            "subtopic": "Compound area",
+            "prior_knowledge": ["rectangle area"],
+            "learner_needs": [],
+            "teacher_goal": "Build confidence",
+            "inferred_resource_type": "worksheet",
+            "confidence": "medium",
+            "missing_signals": [],
+        },
+        "form": {
+            "grade_level": "Grade 8",
+            "subject": "Mathematics",
+            "duration_minutes": 50,
+            "topic": "Compound area (L-shapes)",
+            "subtopics": ["L-shapes"],
+            "prior_knowledge": "Rectangle area",
+            "lesson_mode": "first_exposure",
+            "lesson_mode_other": "",
+            "intended_outcome": "understand",
+            "intended_outcome_other": "",
+            "learner_level": "on_grade",
+            "reading_level": "on_grade",
+            "language_support": "none",
+            "prior_knowledge_level": "some_background",
+            "support_needs": ["visuals"],
+            "learning_preferences": [],
+            "free_text": "Teach compound area with scaffolded examples.",
+        },
+        "clarification_answers": [],
+    }
+    with (
+        patch("generation.v3_studio.router.generate_production_blueprint", return_value=bp),
+        patch("generation.v3_studio.router.adjust_production_blueprint", return_value=bp),
+    ):
+        async with _client() as client:
+            create_resp = await client.post("/api/v1/v3/blueprint", json=payload)
+            assert create_resp.status_code == 200
+            created = create_resp.json()
+            assert created["learner_context"]["grade_level"] == "Grade 8"
+            blueprint_id = created["blueprint_id"]
+
+            adjust_resp = await client.post(
+                "/api/v1/v3/blueprint/adjust",
+                json={
+                    "blueprint_id": blueprint_id,
+                    "adjustment": "Tighten practice section.",
+                },
+            )
+            assert adjust_resp.status_code == 200
+            adjusted = adjust_resp.json()
+            assert adjusted["learner_context"]["grade_level"] == "Grade 8"
+            assert adjusted["learner_context"]["support_needs"] == ["visuals"]

@@ -76,11 +76,18 @@ async def post_blueprint(
         )
         blueprint_id = str(uuid.uuid4())
         template_id = "guided-concept-path"
-        await v3_studio_store.put_blueprint(current_user.id, blueprint_id, bp, template_id)
+        await v3_studio_store.put_blueprint(
+            current_user.id,
+            blueprint_id,
+            bp,
+            template_id,
+            form=body.form,
+        )
         return blueprint_to_preview_dto(
             blueprint_id=blueprint_id,
             blueprint=bp,
             template_id=template_id,
+            form=body.form,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
@@ -108,12 +115,17 @@ async def post_blueprint_adjust(
         trace_id=str(uuid.uuid4()),
     )
     await v3_studio_store.put_blueprint(
-        current_user.id, body.blueprint_id, revised, stored.template_id
+        current_user.id,
+        body.blueprint_id,
+        revised,
+        stored.template_id,
+        form=stored.form,
     )
     return blueprint_to_preview_dto(
         blueprint_id=body.blueprint_id,
         blueprint=revised,
         template_id=stored.template_id,
+        form=stored.form,
     )
 
 
@@ -240,6 +252,7 @@ async def get_v3_generation_blueprint(
         blueprint_id=blueprint_id,
         blueprint=stored.blueprint,
         template_id=stored.template_id,
+        form=stored.form,
     )
 
 

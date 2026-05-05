@@ -8,6 +8,8 @@ from generation.v3_studio.dtos import (
     V3AnchorExampleDTO,
     V3AppliedLensDTO,
     V3ComponentPlanDTO,
+    V3InputForm,
+    V3LearnerContextDTO,
     V3QuestionPlanDTO,
     V3SectionPlanItemDTO,
 )
@@ -23,6 +25,7 @@ def blueprint_to_preview_dto(
     blueprint_id: str,
     blueprint: ProductionBlueprint,
     template_id: str = "guided-concept-path",
+    form: V3InputForm | None = None,
 ) -> BlueprintPreviewDTO:
     BlueprintCompiler().compile_all(blueprint)
 
@@ -97,6 +100,21 @@ def blueprint_to_preview_dto(
             reuse_scope=blueprint.anchor.reuse_scope,
         )
 
+    learner_context: V3LearnerContextDTO | None = None
+    if form is not None:
+        learner_context = V3LearnerContextDTO(
+            grade_level=form.grade_level,
+            subject=form.subject,
+            duration_minutes=form.duration_minutes,
+            lesson_mode=form.lesson_mode,
+            learner_level=form.learner_level,
+            reading_level=form.reading_level,
+            language_support=form.language_support,
+            prior_knowledge_level=form.prior_knowledge_level,
+            support_needs=list(form.support_needs),
+            prior_knowledge=form.prior_knowledge,
+        )
+
     return BlueprintPreviewDTO(
         blueprint_id=blueprint_id,
         resource_type=blueprint.lesson.resource_type,
@@ -108,6 +126,7 @@ def blueprint_to_preview_dto(
         question_plan=question_plan,
         register_summary=register_summary,
         support_summary=support_summary[:8],
+        learner_context=learner_context,
     )
 
 
