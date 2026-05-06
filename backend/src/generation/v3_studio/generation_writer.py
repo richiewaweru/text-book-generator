@@ -23,6 +23,45 @@ def _is_export_allowed(booklet_status: str) -> bool:
     }
 
 
+def _sections_from_document(document_json: Any) -> list[dict[str, Any]]:
+    if not isinstance(document_json, dict):
+        return []
+    sections = document_json.get("sections")
+    if not isinstance(sections, list):
+        return []
+    return [section for section in sections if isinstance(section, dict)]
+
+
+def _count_delivered_visuals(sections: list[dict[str, Any]]) -> int:
+    delivered = 0
+    for section in sections:
+        diagram = section.get("diagram")
+        if isinstance(diagram, dict) and isinstance(diagram.get("image_url"), str):
+            if diagram.get("image_url"):
+                delivered += 1
+    return delivered
+
+
+def _count_delivered_questions(sections: list[dict[str, Any]]) -> int:
+    delivered = 0
+    for section in sections:
+        practice = section.get("practice")
+        if isinstance(practice, dict):
+            items = practice.get("items")
+            if isinstance(items, list):
+                delivered += sum(1 for item in items if isinstance(item, dict))
+            problems = practice.get("problems")
+            if isinstance(problems, list):
+                delivered += sum(1 for item in problems if isinstance(item, dict))
+        quiz = section.get("quiz")
+        if isinstance(quiz, dict):
+            delivered += 1
+        check = section.get("check")
+        if isinstance(check, dict):
+            delivered += 1
+    return delivered
+
+
 class V3GenerationWriter:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -36,17 +75,25 @@ class V3GenerationWriter:
         context: str,
         template_id: str,
         section_count: int,
+        planned_visuals: int = 0,
+        planned_questions: int = 0,
+        component_count: int | None = None,
     ) -> None:
         async with self._session_factory() as session:
             model = await session.get(GenerationModel, generation_id)
-            report_json = self._default_report(section_count=section_count)
+            report_json = self._default_report(
+                section_count=section_count,
+                planned_visuals=planned_visuals,
+                planned_questions=planned_questions,
+                planned_components=component_count or 0,
+            )
             if model is None:
                 model = GenerationModel(
                     id=generation_id,
                     user_id=user_id,
                     subject=subject,
                     context=context,
-                    mode="balanced",
+                    mode="v3",
                     status="running",
                     requested_template_id=template_id,
                     resolved_template_id=template_id,
@@ -61,7 +108,7 @@ class V3GenerationWriter:
                 model.user_id = user_id
                 model.subject = subject
                 model.context = context
-                model.mode = "balanced"
+                model.mode = "v3"
                 model.status = "running"
                 model.requested_template_id = template_id
                 model.resolved_template_id = template_id
@@ -98,18 +145,50 @@ class V3GenerationWriter:
             report = self._coerce_report(model.report_json, section_count=model.section_count or 0)
             coherence = payload.get("coherence_review")
             if isinstance(coherence, dict):
-                report["coherence"] = {
-                    "status": coherence.get("status"),
-                    "issues": coherence.get("issues", []),
-                    "repair_targets": coherence.get("repair_targets", []),
-                    "repaired_target_ids": coherence.get("repaired_target_ids", []),
-                }
+                existing_coherence = report.get("coherence")
+                if not isinstance(existing_coherence, dict):
+                    existing_coherence = {}
+                if isinstance(coherence.get("issues"), list):
+                    report["coherence"] = coherence
+                else:
+                    existing_coherence["status"] = coherence.get("status")
+                    report["coherence"] = existing_coherence
                 summary = report.get("summary", {})
                 if isinstance(summary, dict):
                     summary["blocking_issues"] = int(coherence.get("blocking_count") or 0)
                     summary["major_issues"] = int(coherence.get("major_count") or 0)
                     summary["minor_issues"] = int(coherence.get("minor_count") or 0)
                     report["summary"] = summary
+            model.report_json = report
+            await session.commit()
+
+    async def write_coherence_result(
+        self,
+        generation_id: str,
+        coherence_dict: dict[str, Any],
+    ) -> None:
+        async with self._session_factory() as session:
+            model = await session.get(GenerationModel, generation_id)
+            if model is None:
+                return
+            report = self._coerce_report(model.report_json, section_count=model.section_count or 0)
+            report["coherence"] = coherence_dict
+
+            summary = report.get("summary", {})
+            if not isinstance(summary, dict):
+                summary = {}
+            summary["blocking_issues"] = int(coherence_dict.get("blocking_count") or 0)
+            summary["major_issues"] = int(coherence_dict.get("major_count") or 0)
+            summary["minor_issues"] = int(coherence_dict.get("minor_count") or 0)
+            repair_targets = coherence_dict.get("repair_targets")
+            repaired_target_ids = coherence_dict.get("repaired_target_ids")
+            summary["repair_target_count"] = (
+                len(repair_targets) if isinstance(repair_targets, list) else 0
+            )
+            summary["repaired_target_count"] = (
+                len(repaired_target_ids) if isinstance(repaired_target_ids, list) else 0
+            )
+            report["summary"] = summary
             model.report_json = report
             await session.commit()
 
@@ -122,6 +201,19 @@ class V3GenerationWriter:
             booklet_status = str(payload.get("booklet_status") or "")
             report = self._coerce_report(model.report_json, section_count=model.section_count or 0)
             report["booklet_status"] = booklet_status or report.get("booklet_status", "streaming_preview")
+
+            summary = report.get("summary", {})
+            if not isinstance(summary, dict):
+                summary = {}
+            planned_sections = int(summary.get("planned_sections") or model.section_count or 0)
+            planned_visuals = int(summary.get("planned_visuals") or 0)
+            planned_questions = int(summary.get("planned_questions") or 0)
+            sections = _sections_from_document(model.document_json)
+            assembled_sections = len(sections)
+            ready_sections = assembled_sections
+            missing_sections = max(planned_sections - assembled_sections, 0)
+            delivered_visuals = _count_delivered_visuals(sections)
+            delivered_questions = _count_delivered_questions(sections)
 
             if status in {"passed", "passed_with_warnings"}:
                 model.status = "completed"
@@ -136,10 +228,17 @@ class V3GenerationWriter:
                 model.quality_passed = False
                 report["process_status"] = "failed"
 
-            summary = report.get("summary")
-            if isinstance(summary, dict):
-                summary["export_allowed"] = _is_export_allowed(str(report.get("booklet_status") or ""))
-                report["summary"] = summary
+            summary["planned_sections"] = planned_sections
+            summary["assembled_sections"] = assembled_sections
+            summary["ready_sections"] = ready_sections
+            summary["missing_sections"] = missing_sections
+            summary["failed_sections"] = missing_sections
+            summary["planned_visuals"] = planned_visuals
+            summary["delivered_visuals"] = delivered_visuals
+            summary["planned_questions"] = planned_questions
+            summary["delivered_questions"] = delivered_questions
+            summary["export_allowed"] = _is_export_allowed(str(report.get("booklet_status") or ""))
+            report["summary"] = summary
 
             model.completed_at = _utc_now_naive()
             model.report_json = report
@@ -189,6 +288,19 @@ class V3GenerationWriter:
             model.report_json = report
             await session.commit()
 
+    async def get_document_json(
+        self,
+        generation_id: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        async with self._session_factory() as session:
+            model = await session.get(GenerationModel, generation_id)
+            if model is None or model.user_id != user_id:
+                return None
+            if not isinstance(model.document_json, dict):
+                return None
+            return deepcopy(model.document_json)
+
     async def _write_pack_event(
         self,
         *,
@@ -205,39 +317,66 @@ class V3GenerationWriter:
             if model is None:
                 return
             booklet_status = str(payload.get("booklet_status") or pack.get("status") or "streaming_preview")
-            planned_sections = model.section_count or 0
-            assembled_sections = len(pack.get("sections", [])) if isinstance(pack.get("sections"), list) else 0
-
             model.document_json = {"kind": "v3_booklet_pack", **pack}
-            report = self._coerce_report(model.report_json, section_count=planned_sections)
-            report["process_status"] = process_status
-            report["booklet_status"] = booklet_status
+
+            report = self._coerce_report(model.report_json, section_count=model.section_count or 0)
             summary = report.get("summary", {})
             if not isinstance(summary, dict):
                 summary = {}
+            planned_sections = int(summary.get("planned_sections") or model.section_count or 0)
+            planned_visuals = int(summary.get("planned_visuals") or 0)
+            planned_questions = int(summary.get("planned_questions") or 0)
+            sections = _sections_from_document(model.document_json)
+            assembled_sections = len(sections)
+            missing_sections = max(planned_sections - assembled_sections, 0)
+            delivered_visuals = _count_delivered_visuals(sections)
+            delivered_questions = _count_delivered_questions(sections)
+
+            report["process_status"] = process_status
+            report["booklet_status"] = booklet_status
             summary["planned_sections"] = planned_sections
             summary["assembled_sections"] = assembled_sections
-            summary["failed_sections"] = max(planned_sections - assembled_sections, 0)
+            summary["ready_sections"] = assembled_sections
+            summary["missing_sections"] = missing_sections
+            summary["failed_sections"] = missing_sections
+            summary["planned_visuals"] = planned_visuals
+            summary["delivered_visuals"] = delivered_visuals
+            summary["planned_questions"] = planned_questions
+            summary["delivered_questions"] = delivered_questions
             summary["export_allowed"] = _is_export_allowed(booklet_status)
             report["summary"] = summary
             model.report_json = report
             await session.commit()
 
-    def _default_report(self, *, section_count: int) -> dict[str, Any]:
+    def _default_report(
+        self,
+        *,
+        section_count: int,
+        planned_visuals: int = 0,
+        planned_questions: int = 0,
+        planned_components: int = 0,
+    ) -> dict[str, Any]:
         return {
+            "pipeline_version": "v3",
+            "report_schema": "v3_generation_report_v1",
             "process_status": "running",
             "booklet_status": "streaming_preview",
             "summary": {
                 "planned_sections": section_count,
                 "assembled_sections": 0,
+                "ready_sections": 0,
+                "missing_sections": section_count,
                 "failed_sections": 0,
-                "planned_visuals": 0,
+                "planned_components": planned_components,
+                "planned_visuals": planned_visuals,
                 "delivered_visuals": 0,
-                "planned_questions": 0,
+                "planned_questions": planned_questions,
                 "delivered_questions": 0,
                 "blocking_issues": 0,
                 "major_issues": 0,
                 "minor_issues": 0,
+                "repair_target_count": 0,
+                "repaired_target_count": 0,
                 "export_allowed": False,
             },
             "sections": [],
@@ -255,6 +394,8 @@ class V3GenerationWriter:
 
     def _merge_report(self, current: Any, baseline: dict[str, Any]) -> dict[str, Any]:
         report = self._coerce_report(current, section_count=baseline["summary"]["planned_sections"])
+        report["pipeline_version"] = baseline["pipeline_version"]
+        report["report_schema"] = baseline["report_schema"]
         if not isinstance(report.get("pdf"), dict):
             report["pdf"] = baseline["pdf"]
         if not isinstance(report.get("coherence"), dict):
@@ -268,6 +409,8 @@ class V3GenerationWriter:
             report = deepcopy(current)
         else:
             report = self._default_report(section_count=section_count)
+        report.setdefault("pipeline_version", "v3")
+        report.setdefault("report_schema", "v3_generation_report_v1")
         report.setdefault("process_status", "running")
         report.setdefault("booklet_status", "streaming_preview")
         report.setdefault("sections", [])
@@ -292,7 +435,10 @@ class V3GenerationWriter:
             summary = {}
         summary.setdefault("planned_sections", section_count)
         summary.setdefault("assembled_sections", 0)
+        summary.setdefault("ready_sections", 0)
+        summary.setdefault("missing_sections", section_count)
         summary.setdefault("failed_sections", 0)
+        summary.setdefault("planned_components", 0)
         summary.setdefault("planned_visuals", 0)
         summary.setdefault("delivered_visuals", 0)
         summary.setdefault("planned_questions", 0)
@@ -300,6 +446,8 @@ class V3GenerationWriter:
         summary.setdefault("blocking_issues", 0)
         summary.setdefault("major_issues", 0)
         summary.setdefault("minor_issues", 0)
+        summary.setdefault("repair_target_count", 0)
+        summary.setdefault("repaired_target_count", 0)
         summary.setdefault("export_allowed", False)
         report["summary"] = summary
         return report

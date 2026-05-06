@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app import app
 from core.auth.middleware import get_current_user
-from core.database.models import UserModel
+from core.database.models import GenerationModel, UserModel
 from core.database.session import async_session_factory
 from core.entities.user import User
 from generation.v3_studio.session_store import v3_studio_store
@@ -68,6 +68,36 @@ async def _ensure_user(user: User) -> None:
                 )
             )
             await session.commit()
+
+
+async def _upsert_generation_row(
+    *,
+    generation_id: str,
+    user_id: str,
+    document_json: dict | None,
+) -> None:
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        if model is None:
+            model = GenerationModel(
+                id=generation_id,
+                user_id=user_id,
+                subject="Math",
+                context="Algebra",
+                mode="v3",
+                status="running",
+                requested_template_id="guided-concept-path",
+                resolved_template_id="guided-concept-path",
+                requested_preset_id="v3-studio",
+                resolved_preset_id="v3-studio",
+                report_json={},
+                document_json=document_json,
+            )
+            session.add(model)
+        else:
+            model.user_id = user_id
+            model.document_json = document_json
+        await session.commit()
 
 
 def _client() -> AsyncClient:
@@ -401,7 +431,71 @@ async def test_v3_trace_endpoints_are_user_scoped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_v3_pdf_export_surfaces_actionable_error_detail_and_cleans_snapshot() -> None:
+async def test_v3_document_endpoint_returns_persisted_document_for_owner() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    generation_id = str(uuid.uuid4())
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json={
+            "kind": "v3_booklet_pack",
+            "generation_id": generation_id,
+            "template_id": "guided-concept-path",
+            "status": "draft_ready",
+            "sections": [{"section_id": "s-1", "header": {"title": "Intro"}}],
+        },
+    )
+
+    async with _client() as client:
+        resp = await client.get(f"/api/v1/v3/generations/{generation_id}/document")
+    assert resp.status_code == 200
+    assert resp.json()["sections"][0]["section_id"] == "s-1"
+
+
+@pytest.mark.asyncio
+async def test_v3_document_endpoint_forbidden_for_other_user() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+    await _ensure_user(TEST_USER_B)
+
+    generation_id = str(uuid.uuid4())
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json={
+            "kind": "v3_booklet_pack",
+            "generation_id": generation_id,
+            "sections": [{"section_id": "s-1"}],
+        },
+    )
+
+    app.dependency_overrides[get_current_user] = _override_user_b
+    async with _client() as client:
+        resp = await client.get(f"/api/v1/v3/generations/{generation_id}/document")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v3_document_endpoint_missing_when_document_has_no_sections() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    generation_id = str(uuid.uuid4())
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json={"kind": "v3_booklet_pack", "sections": []},
+    )
+
+    async with _client() as client:
+        resp = await client.get(f"/api/v1/v3/generations/{generation_id}/document")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v3_pdf_export_surfaces_actionable_error_detail() -> None:
     app.dependency_overrides[get_current_user] = _override_user_a
     await _ensure_user(TEST_USER_A)
 
@@ -414,6 +508,21 @@ async def test_v3_pdf_export_surfaces_actionable_error_detail_and_cleans_snapsho
         generation_id=generation_id,
         blueprint_id=blueprint_id,
         queue=asyncio.Queue(),
+    )
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json={
+            "kind": "v3_booklet_pack",
+            "generation_id": generation_id,
+            "template_id": "guided-concept-path",
+            "status": "draft_ready",
+            "subject": "Math",
+            "sections": [{"section_id": "orient", "header": {"title": "Intro"}}],
+            "warnings": [],
+            "section_diagnostics": [],
+            "booklet_issues": [],
+        },
     )
 
     with patch(
@@ -428,7 +537,6 @@ async def test_v3_pdf_export_surfaces_actionable_error_detail_and_cleans_snapsho
                     "teacher_name": "Teacher",
                     "include_toc": False,
                     "include_answers": True,
-                    "pack_sections": [{"section_id": "orient", "header": {"title": "Intro"}}],
                 },
             )
 
@@ -436,7 +544,6 @@ async def test_v3_pdf_export_surfaces_actionable_error_detail_and_cleans_snapsho
     detail = resp.json()["detail"]
     assert detail.startswith("RuntimeError:")
     assert "playwright timed out" in detail
-    assert await v3_studio_store.get_print_snapshot(generation_id) is None
 
 
 @pytest.mark.asyncio
@@ -451,8 +558,16 @@ async def test_pump_sse_parses_events_and_dispatches_generation_writer() -> None
             'data: {"generation_id":"gen-1","booklet_status":"draft_ready","pack":{"generation_id":"gen-1","blueprint_id":"bp-1","template_id":"guided-concept-path","subject":"Mathematics","status":"draft_ready","sections":[],"warnings":[],"section_diagnostics":[],"booklet_issues":[]}}\n\n'
         )
         yield (
+            'event: coherence_report_ready\n'
+            'data: {"generation_id":"gen-1","status":"repair_required","coherence_report":{"status":"repair_required","blocking_count":2,"major_count":0,"minor_count":0,"issues":[{"issue_id":"i-1"}],"repair_targets":[],"repaired_target_ids":[]}}\n\n'
+        )
+        yield (
             'event: generation_complete\n'
             'data: {"generation_id":"gen-1","coherence_review":{"status":"passed","blocking_count":0}}\n\n'
+        )
+        yield (
+            'event: coherence_report_ready\n'
+            'data: {"generation_id":"gen-1","status":"passed","blocking_count":0,"repair_target_count":0}\n\n'
         )
         yield (
             'event: resource_finalised\n'
@@ -470,6 +585,7 @@ async def test_pump_sse_parses_events_and_dispatches_generation_writer() -> None
         )
 
     generation_writer.write_draft.assert_awaited_once()
+    assert generation_writer.write_coherence_result.await_count == 2
     generation_writer.write_generation_complete.assert_awaited_once()
     generation_writer.write_resource_finalised.assert_awaited_once()
 

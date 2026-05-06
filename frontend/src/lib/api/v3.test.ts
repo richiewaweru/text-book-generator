@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { fetchEventSourceMock, capturedOptions } = vi.hoisted(() => {
+const { fetchEventSourceMock, capturedOptions, apiFetchMock } = vi.hoisted(() => {
 	let options: Record<string, unknown> | null = null;
 	return {
 		fetchEventSourceMock: vi.fn((_url: string, init: Record<string, unknown>) => {
 			options = init;
 		}),
+		apiFetchMock: vi.fn(),
 		capturedOptions: {
 			get current() {
 				return options;
@@ -18,11 +19,23 @@ vi.mock('@microsoft/fetch-event-source', () => ({
 	fetchEventSource: fetchEventSourceMock
 }));
 
-import { connectV3StudioGenerationStream } from './v3';
+vi.mock('$lib/api/client', () => ({
+	apiFetch: apiFetchMock,
+	buildApiUrl: (path: string) => path
+}));
+
+vi.mock('$lib/api/errors', () => ({
+	ensureOk: async (response: Response, message: string) => {
+		if (!response.ok) throw new Error(message);
+	}
+}));
+
+import { connectV3StudioGenerationStream, fetchV3Document } from './v3';
 
 describe('connectV3StudioGenerationStream', () => {
 	beforeEach(() => {
 		fetchEventSourceMock.mockClear();
+		apiFetchMock.mockReset();
 	});
 
 	it('routes new pack events to dedicated handlers', () => {
@@ -55,5 +68,22 @@ describe('connectV3StudioGenerationStream', () => {
 		expect(onFinalPackReady).toHaveBeenCalledTimes(1);
 		expect(onDraftStatusUpdated).toHaveBeenCalledTimes(1);
 		expect(onSectionWriterFailed).toHaveBeenCalledTimes(1);
+	});
+
+	it('fetches persisted V3 document payload from API', async () => {
+		apiFetchMock.mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				kind: 'v3_booklet_pack',
+				sections: [{ section_id: 's-1' }]
+			})
+		});
+
+		const doc = await fetchV3Document('gen-1');
+		expect(apiFetchMock).toHaveBeenCalledWith('/api/v1/v3/generations/gen-1/document', {
+			method: 'GET',
+			headers: { 'Content-Type': 'application/json' }
+		});
+		expect(doc.sections).toHaveLength(1);
 	});
 });

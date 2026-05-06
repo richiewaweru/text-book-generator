@@ -8,10 +8,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy import select
 from starlette.background import BackgroundTask
 
 from core.auth.jwt_handler import JWTHandler
 from core.auth.middleware import get_current_user
+from core.database.models import GenerationModel
 from core.database.session import async_session_factory
 from core.dependencies import get_jwt_handler, get_settings
 from core.entities.user import User
@@ -176,6 +178,13 @@ async def _pump_sse_to_queue(
         if event_type == "generation_complete":
             await generation_writer.write_generation_complete(generation_id, payload)
             return
+        if event_type == "coherence_report_ready":
+            coherence = payload.get("coherence_report")
+            if isinstance(coherence, dict):
+                await generation_writer.write_coherence_result(generation_id, coherence)
+            else:
+                await generation_writer.write_coherence_result(generation_id, payload)
+            return
         if event_type == "resource_finalised":
             await generation_writer.write_resource_finalised(generation_id, payload)
             return
@@ -274,6 +283,9 @@ async def post_v3_generate_start(
             context=blueprint.metadata.title,
             template_id=template_id,
             section_count=len(blueprint.sections),
+            planned_visuals=visual_required_count,
+            planned_questions=len(blueprint.question_plan),
+            component_count=component_count,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
@@ -371,6 +383,21 @@ async def get_v3_generation_blueprint(
     )
 
 
+@v3_studio_router.get("/generations/{generation_id}/document")
+async def get_v3_generation_document(
+    generation_id: str,
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    generation_writer = V3GenerationWriter(async_session_factory)
+    document_json = await generation_writer.get_document_json(generation_id, current_user.id)
+    if document_json is None:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    sections = document_json.get("sections")
+    if not isinstance(sections, list) or not sections:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return document_json
+
+
 @v3_studio_router.get("/generations/{generation_id}/print-snapshot")
 async def get_v3_print_snapshot(
     generation_id: str,
@@ -393,16 +420,23 @@ async def post_v3_export_pdf(
     jwt_handler: JWTHandler = Depends(get_jwt_handler),
 ):
     generation_writer = V3GenerationWriter(async_session_factory)
-    owner = await v3_studio_store.get_generation_owner(generation_id)
-    if owner != current_user.id:
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(GenerationModel).where(GenerationModel.id == generation_id)
+        )
+        model = result.scalar_one_or_none()
+    if model is None or model.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
-    stored = await v3_studio_store.get_blueprint_for_generation(generation_id)
-    if stored is None:
-        raise HTTPException(status_code=404, detail="Blueprint not found")
-
-    await v3_studio_store.put_print_snapshot(
-        generation_id,
-        {"sections": body.pack_sections, "template_id": stored.template_id},
+    document_json = await generation_writer.get_document_json(generation_id, current_user.id)
+    if document_json is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    sections = document_json.get("sections")
+    if not isinstance(sections, list) or not sections:
+        raise HTTPException(status_code=404, detail="Document not found")
+    template_id = (
+        model.resolved_template_id
+        or model.requested_template_id
+        or "guided-concept-path"
     )
 
     auth_token = jwt_handler.create_access_token(current_user.id, current_user.email)
@@ -417,16 +451,15 @@ async def post_v3_export_pdf(
         result = await export_v3_studio_pdf(
             generation_id=generation_id,
             user_id=current_user.id,
-            title=stored.blueprint.metadata.title,
-            subject=stored.blueprint.metadata.subject,
-            template_id=stored.template_id,
+            title=model.subject or "Lesson",
+            subject=model.context or "",
+            template_id=template_id,
             auth_token=auth_token,
             request=pdf_request,
             settings=get_settings(),
             request_id=getattr(request.state, "request_id", None),
         )
     except Exception as exc:  # noqa: BLE001
-        await v3_studio_store.delete_print_snapshot(generation_id)
         try:
             await generation_writer.write_pdf_status(
                 generation_id,
@@ -443,7 +476,6 @@ async def post_v3_export_pdf(
             status_code=500,
             detail=f"{type(exc).__name__}: {str(exc)[:300]}",
         ) from exc
-    await v3_studio_store.delete_print_snapshot(generation_id)
     try:
         await generation_writer.write_pdf_status(
             generation_id,

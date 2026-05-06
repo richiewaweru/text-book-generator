@@ -20,9 +20,9 @@ let templateId = $state('guided-concept-path');
 		if (!generationId) return;
 		try {
 			const res = await apiFetch(
-				`/api/v1/v3/generations/${encodeURIComponent(generationId)}/print-snapshot`
+				`/api/v1/v3/generations/${encodeURIComponent(generationId)}/document`
 			);
-			await ensureOk(res, 'Print snapshot unavailable.');
+			await ensureOk(res, 'Document unavailable for print.');
 			const data = (await res.json()) as { sections?: unknown[]; template_id?: string };
 			canvas = Array.isArray(data.sections) ? mapPackSectionsToCanvas(data.sections) : [];
 			if (typeof data.template_id === 'string' && data.template_id) {

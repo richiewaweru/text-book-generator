@@ -101,6 +101,17 @@ export type V3StudioStreamHandlers = {
 	onError?: (err: unknown) => void;
 };
 
+export type V3DocumentResponse = Record<string, unknown>;
+
+export async function fetchV3Document(generationId: string): Promise<V3DocumentResponse> {
+	const res = await apiFetch(`/api/v1/v3/generations/${encodeURIComponent(generationId)}/document`, {
+		method: 'GET',
+		headers: bearerHeaders()
+	});
+	await ensureOk(res, 'Could not load generated document.');
+	return res.json() as Promise<V3DocumentResponse>;
+}
+
 export function connectV3StudioGenerationStream(
 	generationId: string,
 	handlers: V3StudioStreamHandlers
@@ -187,7 +198,6 @@ export type V3PdfExportBody = {
 	date?: string | null;
 	include_toc: boolean;
 	include_answers: boolean;
-	pack_sections: Record<string, unknown>[];
 };
 
 export async function downloadV3GenerationPdf(

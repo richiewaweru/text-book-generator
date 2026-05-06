@@ -378,6 +378,16 @@ async def run_generation(
                     _coherence(),
                     timeout=V3_TIMEOUTS["coherence_pipeline"],
                 )
+                await emit_event(
+                    events.COHERENCE_REPORT_READY,
+                    {
+                        "generation_id": generation_id,
+                        "status": coherence_report.status,
+                        "blocking_count": coherence_report.blocking_count,
+                        "repair_target_count": len(coherence_report.repair_targets),
+                        "coherence_report": coherence_report.model_dump(mode="json"),
+                    },
+                )
                 finalised = coherence_report.status in {"passed", "passed_with_warnings"}
                 fatal_categories = collect_fatal_issue_categories(coherence_report.issues)
                 artifact_status = derive_booklet_status(

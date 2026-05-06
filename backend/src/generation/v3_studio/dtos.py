@@ -200,7 +200,7 @@ class V3GenerateStartResponse(BaseModel):
 
 
 class V3PdfExportRequest(BaseModel):
-    """PDF export for v3 Studio (includes assembled pack snapshot for Playwright print route)."""
+    """PDF export for v3 Studio backed by persisted generation documents."""
 
     model_config = {"extra": "forbid"}
 
@@ -209,7 +209,6 @@ class V3PdfExportRequest(BaseModel):
     date: str | None = None
     include_toc: bool = True
     include_answers: bool = True
-    pack_sections: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProductionBlueprintEnvelope(BaseModel):
