@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import create_app
 from core.auth.middleware import get_current_user
-from core.database.models import UserModel
+from core.database.models import GenerationModel, UserModel
 from core.database.session import get_async_session
 from core.entities.user import User
 from generation.dependencies import get_document_repository, get_generation_repository
@@ -216,3 +216,65 @@ async def test_document_and_report_routes_load_json_backed_persistence(
     assert report_response.status_code == 200
     assert report_response.json()["generation_id"] == generation_id
     assert report_response.json()["outcome"] == "partial"
+
+
+@pytest.mark.asyncio
+async def test_document_route_prefers_v3_document_json_when_present(
+    generation_repo: SqlGenerationRepository,
+    document_repo: SqlDocumentRepository,
+    db_session: AsyncSession,
+) -> None:
+    generation_id = "gen-route-v3"
+    generation = Generation(
+        id=generation_id,
+        user_id=TEST_USER.id,
+        subject="Science",
+        context="Cells",
+        mode="balanced",
+        requested_template_id="guided-concept-path",
+        requested_preset_id="v3-studio",
+        section_count=1,
+    )
+    await generation_repo.create(generation)
+    generation.document_path = await document_repo.save_document(_document(generation_id))
+
+    model = await db_session.get(GenerationModel, generation_id)
+    assert model is not None
+    model.document_json = {
+        "kind": "v3_booklet_pack",
+        "generation_id": generation_id,
+        "template_id": "guided-concept-path",
+        "status": "final_ready",
+        "sections": [{"section_id": "s-v3", "header": {"title": "V3 Intro"}}],
+    }
+    await db_session.commit()
+
+    app = create_app()
+
+    async def override_current_user() -> User:
+        return TEST_USER
+
+    async def override_generation_repo():
+        return generation_repo
+
+    async def override_document_repo():
+        return document_repo
+
+    async def override_async_session():
+        yield db_session
+
+    app.dependency_overrides[get_current_user] = override_current_user
+    app.dependency_overrides[get_generation_repository] = override_generation_repo
+    app.dependency_overrides[get_document_repository] = override_document_repo
+    app.dependency_overrides[get_async_session] = override_async_session
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            document_response = await client.get(f"/api/v1/generations/{generation_id}/document")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert document_response.status_code == 200
+    payload = document_response.json()
+    assert payload["kind"] == "v3_booklet_pack"
+    assert payload["sections"][0]["section_id"] == "s-v3"

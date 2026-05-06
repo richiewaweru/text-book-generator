@@ -19,5 +19,10 @@ describe('mapPackSectionsToCanvas', () => {
 		expect(canvas[0]?.mergedFields).toEqual(source[0]);
 		expect(canvas[0]?.components).toEqual([]);
 	});
-});
 
+	it('falls back to section_id for title when header title is missing', () => {
+		const source = [{ section_id: 'practice-1', title: 'Legacy Title' }];
+		const canvas = mapPackSectionsToCanvas(source);
+		expect(canvas[0]?.title).toBe('practice-1');
+	});
+});

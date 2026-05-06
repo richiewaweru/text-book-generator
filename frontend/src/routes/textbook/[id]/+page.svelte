@@ -3,6 +3,7 @@
 	import { providePrintMode } from 'lectio';
 	import '$lib/styles/print.css';
 	import LectioDocumentView from '$lib/components/LectioDocumentView.svelte';
+	import V3Canvas from '$lib/components/studio/V3Canvas.svelte';
 	import {
 		applyGenerationStreamEvent,
 		type GenerationStreamContext
@@ -15,8 +16,11 @@
 		connectGenerationEvents,
 		downloadGenerationPdf,
 		getGenerationDetail,
-		getGenerationDocument
+		getGenerationDocument,
+		type GenerationDocumentResponse,
+		type V3BookletDocumentResponse
 	} from '$lib/api/client';
+	import { mapPackSectionsToCanvas } from '$lib/studio/v3-print-canvas';
 	import { downloadLessonDocument, exportToLessonDocument } from '$lib/generation/export-document';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import type { PDFExportRequest } from '$lib/types';
@@ -33,7 +37,7 @@
 	providePrintMode(() => isPrintMode);
 
 	let detail = $state<GenerationDetail | null>(null);
-	let document = $state<GenerationDocument | null>(null);
+	let document = $state<GenerationDocumentResponse | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let streamState = $state<'idle' | 'connected' | 'reconnecting' | 'complete'>('idle');
@@ -57,7 +61,18 @@
 	let cancelStream: (() => void) | null = null;
 	let streamClosedTerminally = false;
 	let streamErrorRecoveryAttempted = false;
-	const sectionSlots = $derived(buildSectionSlots(document, plannedSections, sectionSignals));
+	const legacyDocument = $derived(
+		isV3BookletDocument(document) ? null : (document as GenerationDocument | null)
+	);
+	const v3Document = $derived(
+		isV3BookletDocument(document) ? (document as V3BookletDocumentResponse) : null
+	);
+	const v3CanvasSections = $derived(
+		v3Document && Array.isArray(v3Document.sections)
+			? mapPackSectionsToCanvas(v3Document.sections)
+			: []
+	);
+	const sectionSlots = $derived(buildSectionSlots(legacyDocument, plannedSections, sectionSignals));
 	const readySectionCount = $derived(
 		sectionSlots.filter((slot) => slot.status === 'ready').length
 	);
@@ -78,8 +93,8 @@
 	const progressStageLabel = $derived(
 		progressUpdate?.stage ? progressUpdate.stage.replaceAll('_', ' ') : null
 	);
-	const sectionTitleMap = $derived(buildSectionTitleMap(document));
-	const weakSections = $derived(buildWeakSectionSummaries(document, sectionTitleMap));
+	const sectionTitleMap = $derived(buildSectionTitleMap(legacyDocument));
+	const weakSections = $derived(buildWeakSectionSummaries(legacyDocument, sectionTitleMap));
 	const canExportPdf = $derived(detail?.status === 'completed' && !!document && !isPrintMode);
 	const printReady = $derived(
 		!!document &&
@@ -87,6 +102,17 @@
 			detail?.status === 'completed' &&
 			(sectionSlots.length === 0 || sectionSlots.every((slot) => slot.status === 'ready'))
 	);
+
+	function isV3BookletDocument(
+		value: GenerationDocumentResponse | null
+	): value is V3BookletDocumentResponse {
+		return (
+			typeof value === 'object' &&
+			value !== null &&
+			'kind' in value &&
+			value.kind === 'v3_booklet_pack'
+		);
+	}
 
 	function formatSeconds(seconds: number | null | undefined): string {
 		if (seconds === null || seconds === undefined) return 'Pending';
@@ -113,7 +139,7 @@
 	): { terminal: { kind: 'complete' | 'generation_failed' | 'error'; message?: string | null } | null } {
 		const result = applyGenerationStreamEvent(
 			{
-				document,
+				document: legacyDocument,
 				plannedSections,
 				qcSummary,
 				progressUpdate,
@@ -217,11 +243,19 @@
 			}));
 	}
 
-	function applyGenerationSnapshot(nextDetail: GenerationDetail, nextDocument: GenerationDocument) {
+	function applyGenerationSnapshot(nextDetail: GenerationDetail, nextDocument: GenerationDocumentResponse) {
+		detail = nextDetail;
+		if (isV3BookletDocument(nextDocument)) {
+			document = nextDocument;
+			const sectionCount = Array.isArray(nextDocument.sections) ? nextDocument.sections.length : 0;
+			plannedSections = nextDetail.section_count ?? (sectionCount > 0 ? sectionCount : null);
+			qcSummary = null;
+			return;
+		}
+
 		const normalizedDocument = normalizeDocument(nextDocument);
 		const manifestCount = normalizedDocument.section_manifest.length;
 		const sectionCount = normalizedDocument.sections.length;
-		detail = nextDetail;
 		document = normalizedDocument;
 		plannedSections =
 			nextDetail.section_count ?? (manifestCount > 0 ? manifestCount : sectionCount > 0 ? sectionCount : null);
@@ -493,11 +527,11 @@
 			<div class="warning"><strong>Viewer warning:</strong> {viewerWarning}</div>
 		{/if}
 
-		{#if document?.failed_sections?.length}
+		{#if legacyDocument?.failed_sections?.length}
 			<section class="failed-sections">
 				<h2>Sections Not Completed</h2>
 				<ul>
-					{#each document.failed_sections as failed}
+					{#each legacyDocument.failed_sections as failed}
 						<li>
 							<div class="section-summary">
 								<strong>{failed.title}</strong>
@@ -530,12 +564,18 @@
 		<div class="error"><strong>Error:</strong> {error}</div>
 	{:else if loading}
 		<p>Loading generation...</p>
-	{:else if document}
+	{:else if v3Document}
+		<V3Canvas
+			sections={v3CanvasSections}
+			stage="complete"
+			templateId={v3Document.template_id ?? detail?.resolved_template_id ?? detail?.requested_template_id ?? 'guided-concept-path'}
+		/>
+	{:else if legacyDocument}
 		<LectioDocumentView
-			{document}
+			document={legacyDocument}
 			sectionSlots={sectionSlots}
 			onExportForBuilder={() => {
-				const currentDocument = document;
+				const currentDocument = legacyDocument;
 				if (!currentDocument) return;
 				const lesson = exportToLessonDocument(currentDocument);
 				downloadLessonDocument(lesson);

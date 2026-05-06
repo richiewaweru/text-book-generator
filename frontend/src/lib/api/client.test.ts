@@ -54,14 +54,14 @@ describe('client API helpers', () => {
 	it('loads the structured document endpoint', async () => {
 		const fetchMock = vi.fn().mockResolvedValue(
 			new Response(
-					JSON.stringify({
-						generation_id: 'gen-123',
-						subject: 'Calculus',
-						context: 'Limits',
-						mode: 'balanced',
-						template_id: 'guided-concept-path',
-						preset_id: 'blue-classroom',
-						status: 'running',
+				JSON.stringify({
+					generation_id: 'gen-123',
+					subject: 'Calculus',
+					context: 'Limits',
+					mode: 'balanced',
+					template_id: 'guided-concept-path',
+					preset_id: 'blue-classroom',
+					status: 'running',
 					section_manifest: [],
 					sections: [],
 					failed_sections: [],
@@ -83,6 +83,33 @@ describe('client API helpers', () => {
 		await getGenerationDocument('gen-123');
 
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/generations/gen-123/document');
+	});
+
+	it('loads v3 booklet documents from the same endpoint', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					kind: 'v3_booklet_pack',
+					generation_id: 'gen-v3',
+					template_id: 'guided-concept-path',
+					status: 'final_ready',
+					sections: [{ section_id: 's-1', header: { title: 'Intro' } }]
+				}),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				}
+			)
+		);
+		vi.stubGlobal('fetch', fetchMock);
+
+		const payload = await getGenerationDocument('gen-v3');
+
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/generations/gen-v3/document');
+		expect(payload).toMatchObject({
+			kind: 'v3_booklet_pack',
+			generation_id: 'gen-v3'
+		});
 	});
 
 	it('builds an EventSource URL without a token query string', () => {

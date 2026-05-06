@@ -4,7 +4,8 @@
 	import {
 		connectGenerationEvents,
 		getGenerationDetail,
-		getGenerationDocument
+		getGenerationDocument,
+		type GenerationDocumentResponse
 	} from '$lib/api/client';
 	import { gradeBandLabel, gradeLevelLabel } from '$lib/brief/config';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
@@ -316,7 +317,14 @@
 			getGenerationDetail(id),
 			getGenerationDocument(id)
 		]);
+		if (isV3BookletDocument(nextDocument)) {
+			throw new Error('This generation uses the V3 booklet format and cannot render in this view.');
+		}
 		applyGenerationSnapshot(nextDetail, nextDocument);
+	}
+
+	function isV3BookletDocument(value: GenerationDocumentResponse): value is { kind: 'v3_booklet_pack' } {
+		return typeof value === 'object' && value !== null && 'kind' in value && value.kind === 'v3_booklet_pack';
 	}
 
 	async function finalizeStream(token: number, id: string, nextError: string | null = null) {

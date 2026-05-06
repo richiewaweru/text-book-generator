@@ -8,11 +8,10 @@ export function mapPackSectionsToCanvas(sections: unknown[]): CanvasSection[] {
 				? (section.header as Record<string, unknown>)
 				: null;
 		const headerTitle = typeof header?.title === 'string' ? header.title : '';
-		const fallbackTitle = typeof section.title === 'string' ? section.title : '';
 		const sectionId = section.section_id ?? `section-${index + 1}`;
 		return {
 			id: String(sectionId),
-			title: headerTitle || fallbackTitle || `Section ${index + 1}`,
+			title: headerTitle || String(sectionId),
 			teacher_labels: '',
 			order: index,
 			components: [],
@@ -22,4 +21,3 @@ export function mapPackSectionsToCanvas(sections: unknown[]): CanvasSection[] {
 		};
 	});
 }
-

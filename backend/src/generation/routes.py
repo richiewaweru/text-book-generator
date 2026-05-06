@@ -5,10 +5,13 @@ import asyncio
 import core.events as core_events
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
 
 from core.auth.jwt_handler import JWTHandler
 from core.auth.middleware import get_current_user
+from core.database.models import GenerationModel
+from core.database.session import get_async_session
 from core.dependencies import (
     get_jwt_handler,
     get_settings,
@@ -141,10 +144,20 @@ async def get_generation_document(
     current_user: User = Depends(get_current_user),
     gen_repo: GenerationRepository = Depends(get_generation_repository),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    session: AsyncSession = Depends(get_async_session),
 ):
     generation = await gen_repo.find_by_id(generation_id)
     if generation is None or generation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
+
+    model = await session.get(GenerationModel, generation_id)
+    if model is not None and model.user_id == current_user.id and isinstance(model.document_json, dict):
+        document_json = model.document_json
+        if document_json.get("kind") == "v3_booklet_pack":
+            sections = document_json.get("sections")
+            if isinstance(sections, list) and sections:
+                return document_json
+
     document_ref = generation.document_path or generation.id
     try:
         document = await document_repo.load_document(document_ref)

@@ -38,10 +38,21 @@ export async function getGenerationDetail(id: string): Promise<GenerationDetail>
 	return response.json();
 }
 
-export async function getGenerationDocument(id: string): Promise<GenerationDocument> {
+export interface V3BookletDocumentResponse {
+	kind: 'v3_booklet_pack';
+	generation_id?: string;
+	template_id?: string;
+	status?: string;
+	sections?: unknown[];
+	[key: string]: unknown;
+}
+
+export type GenerationDocumentResponse = GenerationDocument | V3BookletDocumentResponse;
+
+export async function getGenerationDocument(id: string): Promise<GenerationDocumentResponse> {
 	const response = await apiFetch(`/api/v1/generations/${id}/document`);
 	await ensureOk(response, 'Failed to fetch document.');
-	return response.json();
+	return response.json() as Promise<GenerationDocumentResponse>;
 }
 
 export function buildGenerationEventsUrl(id: string): string {
