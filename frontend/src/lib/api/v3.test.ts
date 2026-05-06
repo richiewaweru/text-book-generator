@@ -30,7 +30,12 @@ vi.mock('$lib/api/errors', () => ({
 	}
 }));
 
-import { connectV3StudioGenerationStream, fetchV3Document } from './v3';
+import {
+	connectV3StudioGenerationStream,
+	fetchV3Document,
+	getV3GenerationDetail,
+	getV3Generations
+} from './v3';
 
 describe('connectV3StudioGenerationStream', () => {
 	beforeEach(() => {
@@ -85,5 +90,33 @@ describe('connectV3StudioGenerationStream', () => {
 			headers: { 'Content-Type': 'application/json' }
 		});
 		expect(doc.sections).toHaveLength(1);
+	});
+
+	it('loads V3 generation history from the V3 endpoint', async () => {
+		apiFetchMock.mockResolvedValue({
+			ok: true,
+			json: async () => [{ id: 'gen-1', status: 'completed' }]
+		});
+
+		const rows = await getV3Generations();
+		expect(apiFetchMock).toHaveBeenCalledWith('/api/v1/v3/generations?limit=20&offset=0', {
+			method: 'GET',
+			headers: { 'Content-Type': 'application/json' }
+		});
+		expect(rows).toHaveLength(1);
+	});
+
+	it('loads V3 generation detail from the V3 endpoint', async () => {
+		apiFetchMock.mockResolvedValue({
+			ok: true,
+			json: async () => ({ id: 'gen-1', status: 'completed' })
+		});
+
+		const row = await getV3GenerationDetail('gen-1');
+		expect(apiFetchMock).toHaveBeenCalledWith('/api/v1/v3/generations/gen-1', {
+			method: 'GET',
+			headers: { 'Content-Type': 'application/json' }
+		});
+		expect(row.id).toBe('gen-1');
 	});
 });

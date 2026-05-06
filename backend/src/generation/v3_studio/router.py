@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -33,6 +34,8 @@ from generation.v3_studio.dtos import (
     BlueprintPreviewDTO,
     ClarifyRequest,
     GenerateBlueprintRequest,
+    V3GenerationDetailDTO,
+    V3GenerationHistoryItemDTO,
     V3ClarificationQuestion,
     V3GenerateStartRequest,
     V3GenerateStartResponse,
@@ -51,6 +54,49 @@ from telemetry.v3_trace.writer import V3TraceWriter
 logger = logging.getLogger(__name__)
 
 v3_studio_router = APIRouter(prefix="/v3", tags=["v3-studio"])
+
+
+def _iso(dt: datetime | None) -> str | None:
+    return dt.isoformat() if isinstance(dt, datetime) else None
+
+
+def _document_section_count(document_json: Any) -> int:
+    if not isinstance(document_json, dict):
+        return 0
+    sections = document_json.get("sections")
+    if not isinstance(sections, list):
+        return 0
+    return len([section for section in sections if isinstance(section, dict)])
+
+
+def _booklet_status(model: GenerationModel) -> str:
+    if isinstance(model.report_json, dict):
+        value = model.report_json.get("booklet_status")
+        if isinstance(value, str) and value:
+            return value
+    if isinstance(model.document_json, dict):
+        value = model.document_json.get("status")
+        if isinstance(value, str) and value:
+            return value
+    return "streaming_preview"
+
+
+def _generation_title(model: GenerationModel) -> str:
+    if isinstance(model.context, str) and model.context.strip():
+        return model.context.strip()
+    if isinstance(model.report_json, dict):
+        candidate = model.report_json.get("title")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return model.subject
+
+
+def _template_id(model: GenerationModel) -> str:
+    return (
+        model.resolved_template_id
+        or model.requested_template_id
+        or "guided-concept-path"
+    )
 
 
 @v3_studio_router.post("/signals", response_model=V3SignalSummary)
@@ -320,6 +366,61 @@ async def post_v3_generate_start(
     return V3GenerateStartResponse(generation_id=body.generation_id)
 
 
+@v3_studio_router.get("/generations", response_model=list[V3GenerationHistoryItemDTO])
+async def list_v3_generations(
+    current_user: User = Depends(get_current_user),
+    limit: int = 20,
+    offset: int = 0,
+) -> list[V3GenerationHistoryItemDTO]:
+    generation_writer = V3GenerationWriter(async_session_factory)
+    models = await generation_writer.list_by_user(
+        current_user.id,
+        limit=max(1, min(limit, 100)),
+        offset=max(0, offset),
+    )
+    items: list[V3GenerationHistoryItemDTO] = []
+    for model in models:
+        items.append(
+            V3GenerationHistoryItemDTO(
+                id=model.id,
+                subject=model.subject,
+                title=_generation_title(model),
+                status=model.status,
+                booklet_status=_booklet_status(model),
+                section_count=int(model.section_count or 0),
+                document_section_count=_document_section_count(model.document_json),
+                template_id=_template_id(model),
+                created_at=_iso(model.created_at),
+                completed_at=_iso(model.completed_at),
+            )
+        )
+    return items
+
+
+@v3_studio_router.get("/generations/{generation_id}", response_model=V3GenerationDetailDTO)
+async def get_v3_generation_detail(
+    generation_id: str,
+    current_user: User = Depends(get_current_user),
+) -> V3GenerationDetailDTO:
+    generation_writer = V3GenerationWriter(async_session_factory)
+    model = await generation_writer.get_generation_model(generation_id, current_user.id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    return V3GenerationDetailDTO(
+        id=model.id,
+        subject=model.subject,
+        title=_generation_title(model),
+        status=model.status,
+        booklet_status=_booklet_status(model),
+        template_id=_template_id(model),
+        section_count=int(model.section_count or 0),
+        document_section_count=_document_section_count(model.document_json),
+        report_json=model.report_json if isinstance(model.report_json, dict) else {},
+        created_at=_iso(model.created_at),
+        completed_at=_iso(model.completed_at),
+    )
+
+
 @v3_studio_router.get("/generations/{generation_id}/events")
 async def get_v3_generation_events(
     generation_id: str,
@@ -451,8 +552,8 @@ async def post_v3_export_pdf(
         result = await export_v3_studio_pdf(
             generation_id=generation_id,
             user_id=current_user.id,
-            title=model.subject or "Lesson",
-            subject=model.context or "",
+            title=model.context or model.subject or "Lesson",
+            subject=model.subject or "",
             template_id=template_id,
             auth_token=auth_token,
             request=pdf_request,

@@ -75,6 +75,13 @@ async def _upsert_generation_row(
     generation_id: str,
     user_id: str,
     document_json: dict | None,
+    report_json: dict | None = None,
+    mode: str = "v3",
+    requested_preset_id: str = "v3-studio",
+    status: str = "running",
+    subject: str = "Math",
+    context: str = "Algebra",
+    section_count: int | None = None,
 ) -> None:
     async with async_session_factory() as session:
         model = await session.get(GenerationModel, generation_id)
@@ -82,21 +89,30 @@ async def _upsert_generation_row(
             model = GenerationModel(
                 id=generation_id,
                 user_id=user_id,
-                subject="Math",
-                context="Algebra",
-                mode="v3",
-                status="running",
+                subject=subject,
+                context=context,
+                mode=mode,
+                status=status,
                 requested_template_id="guided-concept-path",
                 resolved_template_id="guided-concept-path",
-                requested_preset_id="v3-studio",
-                resolved_preset_id="v3-studio",
-                report_json={},
+                requested_preset_id=requested_preset_id,
+                resolved_preset_id=requested_preset_id,
+                report_json=report_json or {},
                 document_json=document_json,
+                section_count=section_count,
             )
             session.add(model)
         else:
             model.user_id = user_id
             model.document_json = document_json
+            model.report_json = report_json or {}
+            model.mode = mode
+            model.status = status
+            model.subject = subject
+            model.context = context
+            model.requested_preset_id = requested_preset_id
+            model.resolved_preset_id = requested_preset_id
+            model.section_count = section_count
         await session.commit()
 
 
@@ -491,6 +507,122 @@ async def test_v3_document_endpoint_missing_when_document_has_no_sections() -> N
 
     async with _client() as client:
         resp = await client.get(f"/api/v1/v3/generations/{generation_id}/document")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v3_generation_list_and_detail_are_user_scoped_and_v3_filtered() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+    await _ensure_user(TEST_USER_B)
+
+    a_v3_id = str(uuid.uuid4())
+    a_v3_preset_id = str(uuid.uuid4())
+    a_v2_id = str(uuid.uuid4())
+    b_v3_id = str(uuid.uuid4())
+
+    await _upsert_generation_row(
+        generation_id=a_v3_id,
+        user_id=TEST_USER_A.id,
+        document_json={
+            "kind": "v3_booklet_pack",
+            "status": "final_ready",
+            "sections": [{"section_id": "s-1"}],
+        },
+        report_json={"booklet_status": "final_ready"},
+        mode="v3",
+        requested_preset_id="v3-studio",
+        status="completed",
+        subject="Science",
+        context="Photosynthesis",
+        section_count=3,
+    )
+    await _upsert_generation_row(
+        generation_id=a_v3_preset_id,
+        user_id=TEST_USER_A.id,
+        document_json={
+            "kind": "v3_booklet_pack",
+            "status": "draft_ready",
+            "sections": [{"section_id": "s-2"}],
+        },
+        report_json={"booklet_status": "draft_ready"},
+        mode="balanced",
+        requested_preset_id="v3-studio",
+        status="running",
+        subject="Math",
+        context="Fractions",
+        section_count=2,
+    )
+    await _upsert_generation_row(
+        generation_id=a_v2_id,
+        user_id=TEST_USER_A.id,
+        document_json=None,
+        report_json={},
+        mode="balanced",
+        requested_preset_id="blue-classroom",
+        status="completed",
+    )
+    await _upsert_generation_row(
+        generation_id=b_v3_id,
+        user_id=TEST_USER_B.id,
+        document_json={
+            "kind": "v3_booklet_pack",
+            "status": "final_ready",
+            "sections": [{"section_id": "s-3"}],
+        },
+        report_json={"booklet_status": "final_ready"},
+        mode="v3",
+        requested_preset_id="v3-studio",
+        status="completed",
+    )
+
+    async with _client() as client:
+        list_resp = await client.get("/api/v1/v3/generations")
+        assert list_resp.status_code == 200
+        payload = list_resp.json()
+        ids = [item["id"] for item in payload]
+        assert a_v3_id in ids
+        assert a_v3_preset_id in ids
+        assert a_v2_id not in ids
+        assert b_v3_id not in ids
+        assert payload[0]["id"] == a_v3_preset_id
+        assert payload[1]["id"] == a_v3_id
+
+        detail_resp = await client.get(f"/api/v1/v3/generations/{a_v3_id}")
+        assert detail_resp.status_code == 200
+        detail = detail_resp.json()
+        assert detail["id"] == a_v3_id
+        assert detail["title"] == "Photosynthesis"
+        assert detail["booklet_status"] == "final_ready"
+        assert detail["section_count"] == 3
+        assert detail["document_section_count"] == 1
+
+    app.dependency_overrides[get_current_user] = _override_user_b
+    async with _client() as client:
+        forbidden = await client.get(f"/api/v1/v3/generations/{a_v3_id}")
+        assert forbidden.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v3_generation_detail_returns_404_for_non_v3_row() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    generation_id = str(uuid.uuid4())
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json={
+            "kind": "pipeline_document",
+            "sections": [{"section_id": "s-1"}],
+        },
+        mode="balanced",
+        requested_preset_id="blue-classroom",
+        status="completed",
+    )
+
+    async with _client() as client:
+        resp = await client.get(f"/api/v1/v3/generations/{generation_id}")
     assert resp.status_code == 404
 
 

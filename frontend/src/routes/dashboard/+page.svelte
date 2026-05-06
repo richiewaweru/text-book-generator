@@ -2,31 +2,24 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { fromStore } from 'svelte/store';
-	import { basePresetMap, templateRegistryMap } from 'lectio';
 	import { isApiError } from '$lib/api/errors';
 	import { getOnboardingRoute, resolveDashboardProfileFailure } from '$lib/auth/routing';
-	import { getGenerations } from '$lib/api/client';
+	import { getV3Generations } from '$lib/api/v3';
 	import { getPacks } from '$lib/api/learning-pack';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import { getProfile } from '$lib/api/profile';
 	import { authUser, logout } from '$lib/stores/auth';
-	import { getTextbookRoute } from '$lib/navigation/textbook';
-	import type { TeacherProfile, GenerationHistoryItem } from '$lib/types';
+	import type { TeacherProfile } from '$lib/types';
+	import type { V3GenerationHistoryItem } from '$lib/types/v3';
 	import type { PackStatusResponse } from '$lib/types/learning-pack';
 
 	const user = fromStore(authUser);
 
 	let profile = $state<TeacherProfile | null>(null);
-	let pastGenerations = $state<GenerationHistoryItem[]>([]);
+	let v3Generations = $state<V3GenerationHistoryItem[]>([]);
 	let recentPacks = $state<PackStatusResponse[]>([]);
 	let loadingProfile = $state(true);
 	let profileErrorMessage = $state<string | null>(null);
-	const savedGenerations = $derived(
-		pastGenerations.filter((generation) => generation.status === 'completed')
-	);
-	const activeGenerations = $derived(
-		pastGenerations.filter((generation) => generation.status !== 'completed')
-	);
 
 	onMount(async () => {
 		try {
@@ -49,8 +42,8 @@
 		}
 
 		try {
-			const [generations, packs] = await Promise.all([getGenerations(), getPacks()]);
-			pastGenerations = generations;
+			const [generations, packs] = await Promise.all([getV3Generations(), getPacks()]);
+			v3Generations = generations;
 			recentPacks = packs;
 		} catch (err) {
 			if (isApiError(err) && err.status === 401) {
@@ -60,12 +53,8 @@
 		}
 	});
 
-	function templateName(templateId: string | null): string {
-		return (templateId && templateRegistryMap[templateId]?.contract.name) ?? templateId ?? 'Unknown template';
-	}
-
-	function presetName(presetId: string | null): string {
-		return (presetId && basePresetMap[presetId]?.name) ?? presetId ?? 'Unknown preset';
+	function v3OpenRoute(generationId: string): string {
+		return `/studio/generations/${generationId}`;
 	}
 </script>
 
@@ -194,55 +183,28 @@
 			</section>
 		{/if}
 
-		{#if savedGenerations.length > 0}
+		{#if v3Generations.length > 0}
 			<section class="history-section">
-				<h2>Saved Books</h2>
+				<h2>Saved V3 Books</h2>
 				<ul class="history-list">
-					{#each savedGenerations as gen}
+					{#each v3Generations as gen}
 						<li class="history-item">
 							<div class="history-info">
-								<p class="history-subject">{gen.subject}</p>
+								<p class="history-subject">{gen.title || gen.subject}</p>
 								<div class="history-meta">
 									<span class="status status-{gen.status}">{gen.status}</span>
-									<span>{templateName(gen.resolved_template_id ?? gen.requested_template_id)}</span>
-									<span>{presetName(gen.resolved_preset_id ?? gen.requested_preset_id)}</span>
+									<span>{gen.subject}</span>
+									<span>{gen.booklet_status}</span>
+									<span>{gen.document_section_count}/{gen.section_count} sections</span>
 								</div>
 								{#if gen.status === 'failed'}
 									<p class="failure-copy">
-										{friendlyGenerationErrorMessage(null, gen.error_type, gen.error_code)}
+										{friendlyGenerationErrorMessage(null, null, null)}
 									</p>
 								{/if}
 							</div>
 							<div class="history-actions">
-								<a href={getTextbookRoute(gen.id)} class="view-link">Open</a>
-							</div>
-						</li>
-					{/each}
-				</ul>
-			</section>
-		{/if}
-
-		{#if activeGenerations.length > 0}
-			<section class="history-section">
-				<h2>Generation Activity</h2>
-				<ul class="history-list">
-					{#each activeGenerations as gen}
-						<li class="history-item">
-							<div class="history-info">
-								<p class="history-subject">{gen.subject}</p>
-								<div class="history-meta">
-									<span class="status status-{gen.status}">{gen.status}</span>
-									<span>{templateName(gen.resolved_template_id ?? gen.requested_template_id)}</span>
-									<span>{presetName(gen.resolved_preset_id ?? gen.requested_preset_id)}</span>
-								</div>
-								{#if gen.status === 'failed'}
-									<p class="failure-copy">
-										{friendlyGenerationErrorMessage(null, gen.error_type, gen.error_code)}
-									</p>
-								{/if}
-							</div>
-							<div class="history-actions">
-								<a href={getTextbookRoute(gen.id)} class="view-link">Open</a>
+								<a href={v3OpenRoute(gen.id)} class="view-link">Open</a>
 							</div>
 						</li>
 					{/each}

@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.database.models import GenerationModel
@@ -300,6 +301,42 @@ class V3GenerationWriter:
             if not isinstance(model.document_json, dict):
                 return None
             return deepcopy(model.document_json)
+
+    async def list_by_user(
+        self,
+        user_id: str,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[GenerationModel]:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(GenerationModel)
+                .where(
+                    GenerationModel.user_id == user_id,
+                    or_(
+                        GenerationModel.mode == "v3",
+                        GenerationModel.requested_preset_id == "v3-studio",
+                    ),
+                )
+                .order_by(GenerationModel.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            return list(result.scalars().all())
+
+    async def get_generation_model(
+        self,
+        generation_id: str,
+        user_id: str,
+    ) -> GenerationModel | None:
+        async with self._session_factory() as session:
+            model = await session.get(GenerationModel, generation_id)
+            if model is None or model.user_id != user_id:
+                return None
+            if model.mode != "v3" and model.requested_preset_id != "v3-studio":
+                return None
+            return model
 
     async def _write_pack_event(
         self,

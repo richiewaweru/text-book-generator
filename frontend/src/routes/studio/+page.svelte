@@ -33,6 +33,7 @@
 	} from '$lib/studio/v3-canvas';
 	import { mapPackSectionsToCanvas } from '$lib/studio/v3-print-canvas';
 	import { getBookletExportPolicy, isBookletStatus } from '$lib/studio/v3-booklet';
+	import { coerceV3DocumentToPack } from '$lib/studio/v3-document';
 	import { hasRequiredStructuredFields } from '$lib/studio/v3-clarify';
 	import type { BookletStatus, V3ClarificationAnswer, V3DraftPack, V3InputForm } from '$lib/types/v3';
 
@@ -58,88 +59,12 @@
 		return isBookletStatus(payload.booklet_status) ? payload.booklet_status : fallback;
 	}
 
-	function deriveDocumentStatus(
-		document: Record<string, unknown>,
-		fallback: BookletStatus = 'draft_needs_review'
-	): BookletStatus {
-		if (isBookletStatus(document.status)) return document.status;
-		const sections = document.sections;
-		if (Array.isArray(sections) && sections.length > 0) return fallback;
-		return 'failed_unusable';
-	}
-
-	function coerceDocumentPack(generationId: string, document: Record<string, unknown>): V3DraftPack | null {
-		const rawSections = document.sections;
-		if (!Array.isArray(rawSections) || rawSections.length === 0) return null;
-		const sections = rawSections.filter(
-			(section): section is Record<string, unknown> =>
-				typeof section === 'object' && section !== null
-		);
-		if (sections.length === 0) return null;
-		const templateId =
-			typeof document.template_id === 'string' && document.template_id
-				? document.template_id
-				: (v3Studio.blueprint?.template_id ?? 'guided-concept-path');
-		const warnings = Array.isArray(document.warnings)
-			? document.warnings.map((warning) => String(warning))
-			: [];
-		const sectionDiagnostics = Array.isArray(document.section_diagnostics)
-			? document.section_diagnostics
-					.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-					.map((item) => {
-						const status =
-							item.status === 'complete' || item.status === 'incomplete' || item.status === 'failed'
-								? item.status
-								: 'incomplete';
-						return {
-							section_id: typeof item.section_id === 'string' ? item.section_id : '',
-							status: status as 'complete' | 'incomplete' | 'failed',
-							renderable: Boolean(item.renderable),
-							missing_components: Array.isArray(item.missing_components)
-								? item.missing_components.map((value) => String(value))
-								: [],
-							missing_visuals: Array.isArray(item.missing_visuals)
-								? item.missing_visuals.map((value) => String(value))
-								: [],
-							warnings: Array.isArray(item.warnings)
-								? item.warnings.map((value) => String(value))
-								: []
-						};
-					})
-			: [];
-		const bookletIssues = Array.isArray(document.booklet_issues)
-			? document.booklet_issues.filter(
-					(item): item is Record<string, unknown> => typeof item === 'object' && item !== null
-				)
-			: [];
-		const answerKey =
-			typeof document.answer_key === 'object' && document.answer_key !== null
-				? (document.answer_key as Record<string, unknown>)
-				: null;
-		return {
-			generation_id:
-				typeof document.generation_id === 'string' && document.generation_id
-					? document.generation_id
-					: generationId,
-			blueprint_id:
-				typeof document.blueprint_id === 'string' && document.blueprint_id
-					? document.blueprint_id
-					: '',
-			template_id: templateId,
-			subject: typeof document.subject === 'string' ? document.subject : '',
-			status: deriveDocumentStatus(document),
-			sections,
-			answer_key: answerKey,
-			warnings,
-			section_diagnostics: sectionDiagnostics,
-			booklet_issues: bookletIssues
-		};
-	}
-
 	async function hydrateFromDocument(generationId: string): Promise<boolean> {
 		try {
 			const document = await fetchV3Document(generationId);
-			const pack = coerceDocumentPack(generationId, document);
+			const pack = coerceV3DocumentToPack(generationId, document, {
+				templateId: v3Studio.blueprint?.template_id ?? 'guided-concept-path'
+			});
 			if (!pack) return false;
 			v3Studio.draftPack = pack;
 			v3Studio.activePack = pack;
@@ -149,6 +74,10 @@
 			v3Studio.bookletStatus = pack.status;
 			v3Studio.bookletIssues = pack.booklet_issues;
 			v3Studio.canvas = mapPackSectionsToCanvas(pack.sections);
+			if (pack.status !== 'streaming_preview') {
+				v3Studio.coherenceHint = null;
+				v3Studio.stage = 'complete';
+			}
 			return true;
 		} catch {
 			return false;

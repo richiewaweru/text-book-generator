@@ -32,9 +32,10 @@ const { authStore } = vi.hoisted(() => {
 	};
 });
 
-const { getProfile, getGenerations } = vi.hoisted(() => ({
+const { getProfile, getV3Generations, getPacks } = vi.hoisted(() => ({
 	getProfile: vi.fn(),
-	getGenerations: vi.fn()
+	getV3Generations: vi.fn(),
+	getPacks: vi.fn()
 }));
 
 vi.mock('lectio', () => ({
@@ -50,8 +51,12 @@ vi.mock('$lib/api/profile', () => ({
 	getProfile
 }));
 
-vi.mock('$lib/api/client', () => ({
-	getGenerations
+vi.mock('$lib/api/v3', () => ({
+	getV3Generations
+}));
+
+vi.mock('$lib/api/learning-pack', () => ({
+	getPacks
 }));
 
 vi.mock('$lib/api/errors', () => ({
@@ -66,10 +71,6 @@ vi.mock('$lib/auth/routing', () => ({
 vi.mock('$lib/stores/auth', () => ({
 	authUser: authStore,
 	logout: vi.fn()
-}));
-
-vi.mock('$lib/navigation/textbook', () => ({
-	getTextbookRoute: (id: string) => `/textbook/${id}`
 }));
 
 vi.mock('$lib/generation/error-messages', () => ({
@@ -105,7 +106,8 @@ describe('dashboard teacher profile summary', () => {
 			created_at: '2026-04-06T00:00:00Z',
 			updated_at: '2026-04-06T00:00:00Z'
 		});
-		getGenerations.mockResolvedValue([]);
+		getV3Generations.mockResolvedValue([]);
+		getPacks.mockResolvedValue([]);
 	});
 
 	afterEach(() => {
@@ -126,5 +128,30 @@ describe('dashboard teacher profile summary', () => {
 		expect(screen.getByText(/planning goals/i)).toBeTruthy();
 		expect(screen.queryByText(/learning style/i)).toBeNull();
 		expect(screen.queryByText(/learner description/i)).toBeNull();
+	});
+
+	it('loads V3 generation history and links open to the completed V3 viewer route', async () => {
+		getV3Generations.mockResolvedValueOnce([
+			{
+				id: 'gen-v3-1',
+				subject: 'Mathematics',
+				title: 'Quadratic review',
+				status: 'completed',
+				booklet_status: 'final_ready',
+				section_count: 5,
+				document_section_count: 5,
+				template_id: 'guided-concept-path',
+				created_at: '2026-05-01T00:00:00Z',
+				completed_at: '2026-05-01T00:05:00Z'
+			}
+		]);
+
+		render(DashboardPage);
+
+		await waitFor(() => expect(getV3Generations).toHaveBeenCalledTimes(1));
+		expect(getV3Generations).toHaveBeenCalledWith();
+
+		const openLink = await screen.findByRole('link', { name: 'Open' });
+		expect(openLink.getAttribute('href')).toBe('/studio/generations/gen-v3-1');
 	});
 });

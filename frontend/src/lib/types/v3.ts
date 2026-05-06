@@ -100,6 +100,33 @@ export interface BlueprintPreviewDTO {
 	support_summary: string[];
 }
 
+export interface V3GenerationHistoryItem {
+	id: string;
+	subject: string;
+	title: string;
+	status: string;
+	booklet_status: string;
+	section_count: number;
+	document_section_count: number;
+	template_id: string;
+	created_at: string | null;
+	completed_at: string | null;
+}
+
+export interface V3GenerationDetail {
+	id: string;
+	subject: string;
+	title: string;
+	status: string;
+	booklet_status: string;
+	template_id: string;
+	section_count: number;
+	document_section_count: number;
+	report_json: Record<string, unknown>;
+	created_at: string | null;
+	completed_at: string | null;
+}
+
 export type ComponentStatus = 'pending' | 'generating' | 'ready' | 'patched' | 'failed';
 
 export interface CanvasComponent {

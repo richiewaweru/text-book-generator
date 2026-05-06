@@ -6,6 +6,8 @@ import { apiFetch, buildApiUrl } from '$lib/api/client';
 import { authToken } from '$lib/stores/auth';
 import type {
 	BlueprintPreviewDTO,
+	V3GenerationDetail,
+	V3GenerationHistoryItem,
 	V3ClarificationAnswer,
 	V3ClarificationQuestion,
 	V3InputForm,
@@ -110,6 +112,24 @@ export async function fetchV3Document(generationId: string): Promise<V3DocumentR
 	});
 	await ensureOk(res, 'Could not load generated document.');
 	return res.json() as Promise<V3DocumentResponse>;
+}
+
+export async function getV3Generations(limit = 20, offset = 0): Promise<V3GenerationHistoryItem[]> {
+	const res = await apiFetch(`/api/v1/v3/generations?limit=${limit}&offset=${offset}`, {
+		method: 'GET',
+		headers: bearerHeaders()
+	});
+	await ensureOk(res, 'Could not load V3 generation history.');
+	return res.json() as Promise<V3GenerationHistoryItem[]>;
+}
+
+export async function getV3GenerationDetail(generationId: string): Promise<V3GenerationDetail> {
+	const res = await apiFetch(`/api/v1/v3/generations/${encodeURIComponent(generationId)}`, {
+		method: 'GET',
+		headers: bearerHeaders()
+	});
+	await ensureOk(res, 'Could not load V3 generation detail.');
+	return res.json() as Promise<V3GenerationDetail>;
 }
 
 export function connectV3StudioGenerationStream(

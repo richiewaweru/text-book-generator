@@ -211,6 +211,37 @@ class V3PdfExportRequest(BaseModel):
     include_answers: bool = True
 
 
+class V3GenerationHistoryItemDTO(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    id: str
+    subject: str
+    title: str
+    status: str
+    booklet_status: str
+    section_count: int
+    document_section_count: int
+    template_id: str
+    created_at: str | None = None
+    completed_at: str | None = None
+
+
+class V3GenerationDetailDTO(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    id: str
+    subject: str
+    title: str
+    status: str
+    booklet_status: str
+    template_id: str
+    section_count: int
+    document_section_count: int
+    report_json: dict[str, Any]
+    created_at: str | None = None
+    completed_at: str | None = None
+
+
 class ProductionBlueprintEnvelope(BaseModel):
     """LLM structured output wrapper."""
 
@@ -231,6 +262,8 @@ __all__ = [
     "V3ComponentPlanDTO",
     "V3GenerateStartRequest",
     "V3GenerateStartResponse",
+    "V3GenerationDetailDTO",
+    "V3GenerationHistoryItemDTO",
     "V3PdfExportRequest",
     "V3InputForm",
     "V3LearnerContextDTO",
