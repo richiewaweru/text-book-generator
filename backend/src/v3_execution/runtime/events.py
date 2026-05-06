@@ -6,6 +6,7 @@ from typing import Any
 GENERATION_STARTED = "generation_started"
 WORK_ORDERS_COMPILED = "work_orders_compiled"
 SECTION_WRITING_STARTED = "section_writing_started"
+SECTION_WRITER_FAILED = "section_writer_failed"
 COMPONENT_READY = "component_ready"
 QUESTIONS_STARTED = "questions_started"
 QUESTION_READY = "question_ready"
@@ -67,6 +68,7 @@ __all__ = [
     "REPAIR_STARTED",
     "RESOURCE_FINALISED",
     "SECTION_WRITING_STARTED",
+    "SECTION_WRITER_FAILED",
     "VISUAL_GENERATION_STARTED",
     "VISUAL_READY",
     "WORK_ORDERS_COMPILED",

@@ -5,6 +5,7 @@
 	import V3Canvas from '$lib/components/studio/V3Canvas.svelte';
 	import { apiFetch } from '$lib/api/client';
 	import { ensureOk } from '$lib/api/errors';
+	import { mapPackSectionsToCanvas } from '$lib/studio/v3-print-canvas';
 	import type { CanvasSection } from '$lib/types/v3';
 
 	const generationId = $derived(page.params.id ?? '');
@@ -22,8 +23,8 @@ let templateId = $state('guided-concept-path');
 				`/api/v1/v3/generations/${encodeURIComponent(generationId)}/print-snapshot`
 			);
 			await ensureOk(res, 'Print snapshot unavailable.');
-			const data = (await res.json()) as { sections?: CanvasSection[]; template_id?: string };
-			canvas = Array.isArray(data.sections) ? data.sections : [];
+			const data = (await res.json()) as { sections?: unknown[]; template_id?: string };
+			canvas = Array.isArray(data.sections) ? mapPackSectionsToCanvas(data.sections) : [];
 			if (typeof data.template_id === 'string' && data.template_id) {
 				templateId = data.template_id;
 			}

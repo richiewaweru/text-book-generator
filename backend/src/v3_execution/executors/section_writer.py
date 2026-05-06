@@ -10,6 +10,7 @@ from v3_execution.llm_helpers import run_json_agent
 from v3_execution.models import ExecutorOutcome, GeneratedComponentBlock
 from v3_execution.prompts.section_writer import build_section_writer_prompt
 from v3_execution.config.retries import V3_MAX_RETRIES
+from v3_execution.runtime import events
 from v3_execution.runtime.retry_runner import run_with_retries
 from v3_execution.runtime.validation import validate_component_batch
 from v3_execution.models import SectionWriterWorkOrder
@@ -108,6 +109,15 @@ async def execute_section(
         max_retries=V3_MAX_RETRIES["section_writer"],
     )
     if not outcome.ok:
+        await emit_event(
+            events.SECTION_WRITER_FAILED,
+            {
+                "generation_id": generation_id,
+                "section_id": order.section.id,
+                "errors": list(outcome.errors),
+                "warnings": list(outcome.warnings),
+            },
+        )
         raise RuntimeError(
             "; ".join(outcome.errors) or "section writer failed"
         )

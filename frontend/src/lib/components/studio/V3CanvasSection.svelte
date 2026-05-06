@@ -45,4 +45,9 @@
 	{/if}
 
 	<V3LectioSectionEmbed {templateId} sectionId={section.id} title={section.title} mergedFields={section.mergedFields} />
+
+	<details class="rounded border border-border/40 bg-background/60 p-2">
+		<summary class="cursor-pointer text-xs font-medium text-muted-foreground">Inspect section</summary>
+		<pre class="mt-2 overflow-auto whitespace-pre-wrap text-[11px]">{JSON.stringify(section.mergedFields, null, 2)}</pre>
+	</details>
 </div>

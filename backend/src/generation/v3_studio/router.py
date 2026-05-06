@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from typing import Any
@@ -11,6 +12,7 @@ from starlette.background import BackgroundTask
 
 from core.auth.jwt_handler import JWTHandler
 from core.auth.middleware import get_current_user
+from core.database.session import async_session_factory
 from core.dependencies import get_jwt_handler, get_settings
 from core.entities.user import User
 from v3_blueprint.models import ProductionBlueprint
@@ -37,6 +39,7 @@ from generation.v3_studio.dtos import (
     V3SignalSummary,
 )
 from generation.v3_studio.preview_mapper import blueprint_to_preview_dto
+from generation.v3_studio.generation_writer import V3GenerationWriter
 from generation.v3_studio.session_store import v3_studio_store
 from telemetry.dependencies import get_v3_trace_repository
 from telemetry.service import telemetry_monitor
@@ -141,7 +144,45 @@ async def _pump_sse_to_queue(
     blueprint_id: str,
     template_id: str,
     trace_writer: V3TraceWriter | None = None,
+    generation_writer: V3GenerationWriter | None = None,
 ) -> None:
+    def _parse_sse_chunk(chunk: str) -> tuple[str | None, dict[str, Any] | None]:
+        event_type: str | None = None
+        data_lines: list[str] = []
+        for line in chunk.splitlines():
+            if line.startswith("event:"):
+                event_type = line.partition(":")[2].strip() or None
+            elif line.startswith("data:"):
+                data_lines.append(line.partition(":")[2].strip())
+        if not data_lines:
+            return event_type, None
+        try:
+            payload = json.loads("\n".join(data_lines))
+        except json.JSONDecodeError:
+            return event_type, None
+        if not isinstance(payload, dict):
+            return event_type, None
+        return event_type, payload
+
+    async def _write_generation_snapshot(event_type: str, payload: dict[str, Any]) -> None:
+        if generation_writer is None:
+            return
+        if event_type in {"draft_pack_ready", "draft_status_updated"}:
+            await generation_writer.write_draft(generation_id, payload)
+            return
+        if event_type == "final_pack_ready":
+            await generation_writer.write_final(generation_id, payload)
+            return
+        if event_type == "generation_complete":
+            await generation_writer.write_generation_complete(generation_id, payload)
+            return
+        if event_type == "resource_finalised":
+            await generation_writer.write_resource_finalised(generation_id, payload)
+            return
+        if event_type == "generation_warning":
+            message = str(payload.get("message") or "Generation warning")
+            await generation_writer.write_failure(generation_id, message=message)
+
     try:
         async for chunk in sse_event_stream(
             blueprint=blueprint,
@@ -151,6 +192,16 @@ async def _pump_sse_to_queue(
             trace_id=trace_writer.trace_id if trace_writer is not None else generation_id,
             trace_writer=trace_writer,
         ):
+            event_type, payload = _parse_sse_chunk(chunk)
+            if event_type and payload is not None:
+                try:
+                    await _write_generation_snapshot(event_type, payload)
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "v3 generation writer failed generation_id=%s event_type=%s",
+                        generation_id,
+                        event_type,
+                    )
             await queue.put(chunk)
     except asyncio.CancelledError:
         raise
@@ -187,6 +238,7 @@ async def post_v3_generate_start(
         trace_id=trace_id,
         generation_id=body.generation_id,
     )
+    generation_writer = V3GenerationWriter(async_session_factory)
     try:
         await trace_writer.start_run(
             user_id=current_user.id,
@@ -215,6 +267,14 @@ async def post_v3_generate_start(
             subject=blueprint.metadata.subject,
             template_id=template_id,
         )
+        await generation_writer.upsert_started(
+            generation_id=body.generation_id,
+            user_id=current_user.id,
+            subject=blueprint.metadata.subject,
+            context=blueprint.metadata.title,
+            template_id=template_id,
+            section_count=len(blueprint.sections),
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "v3 trace init failed generation_id=%s trace_id=%s error=%s",
@@ -242,6 +302,7 @@ async def post_v3_generate_start(
             blueprint_id=body.blueprint_id,
             template_id=template_id,
             trace_writer=trace_writer,
+            generation_writer=generation_writer,
         )
     )
     return V3GenerateStartResponse(generation_id=body.generation_id)
@@ -331,6 +392,7 @@ async def post_v3_export_pdf(
     current_user: User = Depends(get_current_user),
     jwt_handler: JWTHandler = Depends(get_jwt_handler),
 ):
+    generation_writer = V3GenerationWriter(async_session_factory)
     owner = await v3_studio_store.get_generation_owner(generation_id)
     if owner != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
@@ -363,10 +425,36 @@ async def post_v3_export_pdf(
             settings=get_settings(),
             request_id=getattr(request.state, "request_id", None),
         )
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
         await v3_studio_store.delete_print_snapshot(generation_id)
-        raise
+        try:
+            await generation_writer.write_pdf_status(
+                generation_id,
+                status="failed",
+                error=f"{type(exc).__name__}: {str(exc)[:300]}",
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Failed to persist PDF failure status generation_id=%s",
+                generation_id,
+            )
+        logger.exception("PDF export failed generation_id=%s", generation_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(exc).__name__}: {str(exc)[:300]}",
+        ) from exc
     await v3_studio_store.delete_print_snapshot(generation_id)
+    try:
+        await generation_writer.write_pdf_status(
+            generation_id,
+            status="completed",
+            error=None,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to persist PDF completion status generation_id=%s",
+            generation_id,
+        )
 
     async def _cleanup() -> None:
         cleanup_files(result.cleanup_paths)

@@ -28,4 +28,11 @@
 	{:else if component.status === 'failed'}
 		<p class="text-sm text-destructive">Could not generate this block.</p>
 	{/if}
+
+	{#if component.data}
+		<details class="mt-2 rounded border border-border/40 bg-background/60 p-2">
+			<summary class="cursor-pointer text-xs font-medium text-muted-foreground">Inspect data</summary>
+			<pre class="mt-2 overflow-auto whitespace-pre-wrap text-[11px]">{JSON.stringify(component.data, null, 2)}</pre>
+		</details>
+	{/if}
 </div>

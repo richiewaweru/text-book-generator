@@ -29,11 +29,13 @@ describe('connectV3StudioGenerationStream', () => {
 		const onDraftPackReady = vi.fn();
 		const onFinalPackReady = vi.fn();
 		const onDraftStatusUpdated = vi.fn();
+		const onSectionWriterFailed = vi.fn();
 
 		connectV3StudioGenerationStream('gen-1', {
 			onDraftPackReady,
 			onFinalPackReady,
-			onDraftStatusUpdated
+			onDraftStatusUpdated,
+			onSectionWriterFailed
 		});
 
 		const onmessage = capturedOptions.current?.onmessage as
@@ -44,9 +46,14 @@ describe('connectV3StudioGenerationStream', () => {
 		onmessage?.({ event: 'draft_pack_ready', data: '{"pack":{"sections":[]}}' });
 		onmessage?.({ event: 'final_pack_ready', data: '{"pack":{"sections":[]}}' });
 		onmessage?.({ event: 'draft_status_updated', data: '{"booklet_status":"draft_ready"}' });
+		onmessage?.({
+			event: 'section_writer_failed',
+			data: '{"section_id":"sec-1","errors":["boom"],"warnings":[]}'
+		});
 
 		expect(onDraftPackReady).toHaveBeenCalledTimes(1);
 		expect(onFinalPackReady).toHaveBeenCalledTimes(1);
 		expect(onDraftStatusUpdated).toHaveBeenCalledTimes(1);
+		expect(onSectionWriterFailed).toHaveBeenCalledTimes(1);
 	});
 });

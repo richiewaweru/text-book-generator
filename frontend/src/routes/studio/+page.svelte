@@ -21,8 +21,12 @@
 	import { isApiError } from '$lib/api/errors';
 	import { resetV3Studio, v3Studio } from '$lib/stores/v3-studio.svelte';
 	import {
+		applyComponentPatchedToCanvas,
+		applyComponentReadyToCanvas,
+		applySectionWriterFailedToCanvas
+	} from '$lib/studio/v3-stream-state';
+	import {
 		buildCanvasSkeleton,
-		mergeComponentField,
 		mergeDiagramFrame,
 		mergePracticeProblem
 	} from '$lib/studio/v3-canvas';
@@ -199,24 +203,19 @@
 				v3Studio.stage = 'complete';
 			},
 			onComponentReady: (data) => {
-				const sid = String(data.section_id ?? '');
-				const cid = String(data.component_id ?? '');
-				const field = String(data.section_field ?? '');
-				const raw = data.data;
-				const pdata =
-					typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
-				if (!sid || !cid || !field) return;
-				v3Studio.canvas = v3Studio.canvas.map((s) =>
-					s.id !== sid
-						? s
-						: {
-								...s,
-								mergedFields: mergeComponentField(s.mergedFields, field, pdata),
-								components: s.components.map((c) =>
-									c.id === cid ? { ...c, status: 'ready' as const, data: pdata } : c
-								)
-							}
-				);
+				const next = applyComponentReadyToCanvas(v3Studio.canvas, data);
+				v3Studio.canvas = next.canvas;
+				if (next.warning) {
+					console.warn('component_ready warning', data);
+					v3Studio.error = next.warning;
+				}
+			},
+			onSectionWriterFailed: (data) => {
+				const next = applySectionWriterFailedToCanvas(v3Studio.canvas, data);
+				v3Studio.canvas = next.canvas;
+				if (next.warning) {
+					v3Studio.error = next.warning;
+				}
 			},
 			onVisualReady: (data) => {
 				const sid = String(data.attaches_to ?? '');
@@ -262,24 +261,12 @@
 				);
 			},
 			onComponentPatched: (data) => {
-				const sid = String(data.section_id ?? '');
-				const cid = String(data.component_id ?? '');
-				const field = String(data.section_field ?? '');
-				const raw = data.data;
-				const pdata =
-					typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
-				if (!sid || !cid || !field) return;
-				v3Studio.canvas = v3Studio.canvas.map((s) =>
-					s.id !== sid
-						? s
-						: {
-								...s,
-								mergedFields: mergeComponentField(s.mergedFields, field, pdata),
-								components: s.components.map((c) =>
-									c.id === cid ? { ...c, status: 'patched' as const, data: pdata } : c
-								)
-							}
-				);
+				const next = applyComponentPatchedToCanvas(v3Studio.canvas, data);
+				v3Studio.canvas = next.canvas;
+				if (next.warning) {
+					console.warn('component_patched warning', data);
+					v3Studio.error = next.warning;
+				}
 			},
 			onGenerationWarning: (data) => {
 				v3Studio.error = friendly(data.message ?? 'Generation warning');

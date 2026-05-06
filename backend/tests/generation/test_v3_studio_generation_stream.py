@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -14,6 +15,7 @@ from core.database.models import UserModel
 from core.database.session import async_session_factory
 from core.entities.user import User
 from generation.v3_studio.session_store import v3_studio_store
+from generation.v3_studio.router import _pump_sse_to_queue
 from telemetry.v3_trace import event_types as trace_events
 from telemetry.v3_trace.repository import V3TraceRepository
 
@@ -396,3 +398,83 @@ async def test_v3_trace_endpoints_are_user_scoped() -> None:
     async with _client() as client:
         other_user_resp = await client.get(f"/api/v1/v3/generations/{generation_id}/trace")
         assert other_user_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v3_pdf_export_surfaces_actionable_error_detail_and_cleans_snapshot() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    blueprint_id = str(uuid.uuid4())
+    generation_id = str(uuid.uuid4())
+    bp = _example_bp("amara_compound_area.json")
+    await v3_studio_store.put_blueprint(TEST_USER_A.id, blueprint_id, bp, "guided-concept-path")
+    await v3_studio_store.register_generation_stream(
+        user_id=TEST_USER_A.id,
+        generation_id=generation_id,
+        blueprint_id=blueprint_id,
+        queue=asyncio.Queue(),
+    )
+
+    with patch(
+        "generation.v3_studio.router.export_v3_studio_pdf",
+        side_effect=RuntimeError("playwright timed out while rendering print page"),
+    ):
+        async with _client() as client:
+            resp = await client.post(
+                f"/api/v1/v3/generations/{generation_id}/export/pdf",
+                json={
+                    "school_name": "School",
+                    "teacher_name": "Teacher",
+                    "include_toc": False,
+                    "include_answers": True,
+                    "pack_sections": [{"section_id": "orient", "header": {"title": "Intro"}}],
+                },
+            )
+
+    assert resp.status_code == 500
+    detail = resp.json()["detail"]
+    assert detail.startswith("RuntimeError:")
+    assert "playwright timed out" in detail
+    assert await v3_studio_store.get_print_snapshot(generation_id) is None
+
+
+@pytest.mark.asyncio
+async def test_pump_sse_parses_events_and_dispatches_generation_writer() -> None:
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    generation_writer = AsyncMock()
+    bp = _example_bp("amara_compound_area.json")
+
+    async def fake_stream(**_kwargs):
+        yield (
+            'event: draft_pack_ready\n'
+            'data: {"generation_id":"gen-1","booklet_status":"draft_ready","pack":{"generation_id":"gen-1","blueprint_id":"bp-1","template_id":"guided-concept-path","subject":"Mathematics","status":"draft_ready","sections":[],"warnings":[],"section_diagnostics":[],"booklet_issues":[]}}\n\n'
+        )
+        yield (
+            'event: generation_complete\n'
+            'data: {"generation_id":"gen-1","coherence_review":{"status":"passed","blocking_count":0}}\n\n'
+        )
+        yield (
+            'event: resource_finalised\n'
+            'data: {"generation_id":"gen-1","status":"passed","booklet_status":"final_ready"}\n\n'
+        )
+
+    with patch("generation.v3_studio.router.sse_event_stream", new=fake_stream):
+        await _pump_sse_to_queue(
+            queue,
+            blueprint=bp,
+            generation_id="gen-1",
+            blueprint_id="bp-1",
+            template_id="guided-concept-path",
+            generation_writer=generation_writer,
+        )
+
+    generation_writer.write_draft.assert_awaited_once()
+    generation_writer.write_generation_complete.assert_awaited_once()
+    generation_writer.write_resource_finalised.assert_awaited_once()
+
+    streamed: list[str | None] = []
+    while not queue.empty():
+        streamed.append(queue.get_nowait())
+    assert any(isinstance(item, str) and "draft_pack_ready" in item for item in streamed)
+    assert streamed[-1] is None
