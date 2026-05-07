@@ -14,7 +14,7 @@
 	},
 	"dependencies": {
 		"@microsoft/fetch-event-source": "^2.0.1",
-		"bits-ui": "^2.11.0",
+		"bits-ui": "^2.18.1",
 		"clsx": "^2.1.1",
 		"dompurify": "^3.3.3",
 		"katex": "^0.16.22",
