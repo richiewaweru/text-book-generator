@@ -10,7 +10,7 @@ from v3_execution.runtime import events as v3_events
 from v3_review.deterministic_checks import (
     check_anchor_facts,
     check_answer_key_entries,
-    check_component_ids_in_manifest,
+    check_component_ids_in_lectio_contract,
     check_expected_answers_preserved,
     check_internal_artifact_leaks,
     check_lectio_schema_validity,
@@ -32,7 +32,6 @@ EmitFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 async def run_coherence_review(
     blueprint: ProductionBlueprint,
     draft_pack: DraftPack,
-    manifest: dict[str, Any],
     emit_event: EmitFn,
     *,
     trace_id: str | None = None,
@@ -57,8 +56,8 @@ async def run_coherence_review(
     det_issues += check_expected_answers_preserved(blueprint, draft_pack)
     det_issues += check_anchor_facts(blueprint, draft_pack)
     det_issues += check_internal_artifact_leaks(draft_pack)
-    det_issues += check_lectio_schema_validity(draft_pack, manifest)
-    det_issues += check_component_ids_in_manifest(blueprint, draft_pack, manifest)
+    det_issues += check_lectio_schema_validity(draft_pack)
+    det_issues += check_component_ids_in_lectio_contract(blueprint, draft_pack)
 
     await emit_event(
         v3_events.DETERMINISTIC_REVIEW_COMPLETE,

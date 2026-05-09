@@ -252,7 +252,6 @@ async def test_route_repairs_finalises_when_final_checks_patched(
         bp,
         bundle,
         dp,
-        {},
         capture,
         exec_result,
         trace_id="t",

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from v3_execution.prompts.formatting import (
     format_consistency_rules,
     format_source_of_truth,
@@ -10,19 +8,87 @@ from v3_execution.prompts.formatting import (
 from v3_execution.models import SectionWriterWorkOrder
 
 
+def format_formatting_policy_legend(policy: dict) -> str:
+    """
+    Emit the format type vocabulary once at the top of the prompt.
+    This tells the writer what format labels mean.
+    """
+    if not policy:
+        return ""
+    lines = ["FORMAT TYPE LEGEND (referenced in component contracts below):"]
+    for fmt_name, fmt_desc in policy.items():
+        lines.append(f"  {fmt_name}: {fmt_desc}")
+    return "\n".join(lines)
+
+
+def format_component_contract_for_writer(card: dict, content_intent: str) -> str:
+    """
+    Format a single component card into a compact writer-facing contract block.
+    """
+    cid = card.get("component_id", "")
+    field = card.get("section_field", "")
+    role = card.get("role", "")
+    cj = card.get("cognitive_job", "")
+    field_contracts: dict = card.get("field_contracts", {})
+    constraints: list = card.get("component_constraints", [])
+    examples: list = card.get("examples", [])
+
+    lines = [
+        f"{cid} → section field: {field}",
+        f"Intent: {content_intent}",
+        f"Purpose: {role}",
+        f"Cognitive job: {cj}",
+    ]
+
+    if field_contracts:
+        lines.append("Field contracts:")
+        for fname, fdef in field_contracts.items():
+            fmt = fdef.get("format", "")
+            desc = fdef.get("description", "")
+            fconstraints: list = fdef.get("constraints", [])
+            optional_tag = " (optional)" if fdef.get("required") is False else ""
+            lines.append(f"  {fname}{optional_tag} [{fmt}]")
+            if desc:
+                lines.append(f"    {desc}")
+            for fc in fconstraints:
+                lines.append(f"    constraint: {fc}")
+    else:
+        lines.append("Field contracts: none declared — follow section_field name as the key.")
+
+    if constraints:
+        lines.append("Component constraints:")
+        for c in constraints:
+            lines.append(f"  - {c}")
+
+    if examples:
+        import json as _json
+
+        ex = examples[0]
+        lines.append("Example output:")
+        lines.append(f"  {_json.dumps(ex, ensure_ascii=False)}")
+
+    return "\n".join(lines)
+
+
 def build_section_writer_prompt(order: SectionWriterWorkOrder) -> str:
+    from pipeline.contracts import get_formatting_policy
+
     components_list = "\n".join(
         f"- {c.teacher_label or c.component_id} ({c.component_id}): {c.content_intent}"
         for c in order.section.components
     )
-    field_map = json.dumps(
-        {
-            c.component_id: order.manifest_components.get(c.component_id, {})
-            for c in order.section.components
-        },
-        indent=2,
-        default=str,
+
+    policy = get_formatting_policy()
+    policy_block = format_formatting_policy_legend(policy)
+
+    contract_blocks = "\n\n".join(
+        format_component_contract_for_writer(
+            order.component_cards.get(c.component_id, {}),
+            c.content_intent,
+        )
+        for c in order.section.components
     )
+
     return f"""You are a section writer, not a lesson planner.
 
 Your job is to generate component content for one section of a lesson.
@@ -60,15 +126,19 @@ CONSISTENCY RULES:
 SECTION CONSTRAINTS:
 {chr(10).join(f"- {c}" for c in order.section.constraints) or "- none"}
 
-MANIFEST SCHEMA HINT (per component JSON contract):
-{field_map}
+{policy_block}
+
+LECTIO COMPONENT CONTRACTS:
+{contract_blocks}
 
 STRICT RULES:
 - Generate only the components listed above. Do not add others.
-- Do not add diagrams, questions, or visuals. Those are separate.
+- Do not add diagrams, questions, or visuals. Those are handled separately.
 - Do not change anchor facts, units, or fixed terms.
 - Do not change question difficulty or numbering.
-Return JSON ONLY with shape:
+- Each section_field key in your output must exactly match the
+  "section field" shown in the component contract above.
+Return JSON ONLY with this exact shape:
 {{"fields": {{
   "<section_field snake_case>": {{ ...matching component schema }},
   ...
@@ -76,4 +146,29 @@ Return JSON ONLY with shape:
 """
 
 
-__all__ = ["build_section_writer_prompt"]
+def build_section_writer_retry_prompt(
+    order: SectionWriterWorkOrder,
+    prior_errors: list[str],
+) -> str:
+    """
+    Build a retry prompt with focused correction guidance.
+    """
+    base_prompt = build_section_writer_prompt(order)
+    error_lines = "\n".join(f"  - {e}" for e in prior_errors[:8])
+    correction_block = f"""RETRY CORRECTION — your previous attempt had these problems:
+{error_lines}
+
+Fix ONLY the problems listed above. Do not change anything else.
+Re-read the LECTIO COMPONENT CONTRACTS below and correct the identified fields.
+"""
+    first_newline = base_prompt.index("\n")
+    return (
+        base_prompt[: first_newline + 1]
+        + "\n"
+        + correction_block
+        + "\n"
+        + base_prompt[first_newline + 1 :]
+    )
+
+
+__all__ = ["build_section_writer_prompt", "build_section_writer_retry_prompt"]

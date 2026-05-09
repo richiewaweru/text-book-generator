@@ -25,6 +25,7 @@ _META_FILES = {
     "component-field-map",
     "component-registry",
     "component-schemas",
+    "lectio-content-contract",
     "manifest",
     "preset-registry",
     "print-rules",
@@ -134,6 +135,81 @@ def _load_manifest() -> dict:
             "Run: uv run python tools/update_lectio_contracts.py"
         )
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+@lru_cache(maxsize=None)
+def _load_lectio_content_contract() -> dict:
+    """Load the unified Lectio content contract (lectio-content-contract.json)."""
+    path = _contracts_dir() / "lectio-content-contract.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            "lectio-content-contract.json not found in backend/contracts/. "
+            "Run: uv run python tools/update_lectio_contracts.py"
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def get_component_card(component_id: str) -> dict | None:
+    """
+    Return the full component card for the given component_id from
+    lectio-content-contract.json, or None if the component is unknown.
+
+    A card contains: component_id, section_field, role, cognitive_job,
+    capacity, capabilities, field_contracts, component_constraints, examples,
+    print_behavior.
+
+    Use this instead of get_component_registry_entry() in V3 code paths.
+    """
+    return _load_lectio_content_contract().get("component_cards", {}).get(component_id)
+
+
+def get_planner_index() -> dict:
+    """
+    Return the planner_index from lectio-content-contract.json.
+
+    Shape:
+      {
+        "component_ids": [...],
+        "phase_map": {
+          "1": { "name": "Orient", "description": "...", "components": [...] },
+          ...
+        }
+      }
+
+    Use this in the architect prompt instead of reading manifest.json phases.
+    """
+    return _load_lectio_content_contract().get("planner_index", {})
+
+
+def get_template_contract(template_id: str) -> dict | None:
+    """
+    Return template metadata from lectio-content-contract.json for the given
+    template_id, or None if the template is unknown.
+
+    Shape:
+      {
+        "always_present": [...],
+        "available_components": [...],
+        "component_budget": { "diagram-block": 2, ... },
+        "max_per_section": { "worked-example-card": 1, ... }
+      }
+
+    Use this instead of reading guided-concept-path.json directly.
+    """
+    return _load_lectio_content_contract().get("templates", {}).get(template_id)
+
+
+def get_formatting_policy() -> dict:
+    """
+    Return the format type legend from lectio-content-contract.json.
+
+    Keys are format type names (e.g. "block_markdown", "plain_phrase_list").
+    Values are human-readable descriptions of what each format means.
+
+    Emit this once at the top of the section writer prompt as a legend,
+    not per-component.
+    """
+    return _load_lectio_content_contract().get("formatting_policy", {})
 
 
 def _required_components(contract: dict) -> list[str]:
@@ -492,3 +568,4 @@ def clear_cache() -> None:
     _load_component_registry.cache_clear()
     _load_preset_registry.cache_clear()
     _load_section_content_schema.cache_clear()
+    _load_lectio_content_contract.cache_clear()

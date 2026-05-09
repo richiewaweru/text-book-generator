@@ -193,12 +193,10 @@ async def test_runner_with_stubbed_executors(monkeypatch: pytest.MonkeyPatch) ->
     async def stub_coherence_review(
         blueprint,
         draft_pack,
-        manifest,
         emit_event,
         **_kwargs: object,
     ) -> CoherenceReport:
         _ = blueprint
-        _ = manifest
         _ = emit_event
         return CoherenceReport(
             blueprint_id=draft_pack.blueprint_id,
@@ -215,14 +213,12 @@ async def test_runner_with_stubbed_executors(monkeypatch: pytest.MonkeyPatch) ->
         blueprint,
         work_orders,
         draft_pack,
-        manifest,
         emit_event,
         execution_result,
         **_kwargs: object,
     ):
         _ = blueprint
         _ = work_orders
-        _ = manifest
         _ = execution_result
         _ = emit_event
         return draft_pack, report
@@ -348,12 +344,10 @@ async def test_runner_emits_draft_status_updated_when_blocking_issues_remain(
     async def stub_coherence_review(
         blueprint,
         draft_pack,
-        manifest,
         emit_event,
         **_kwargs: object,
     ) -> CoherenceReport:
         _ = blueprint
-        _ = manifest
         _ = emit_event
         issue = ReviewIssue(
             severity="blocking",
@@ -379,14 +373,12 @@ async def test_runner_emits_draft_status_updated_when_blocking_issues_remain(
         blueprint,
         work_orders,
         draft_pack,
-        manifest,
         emit_event,
         execution_result,
         **_kwargs: object,
     ):
         _ = blueprint
         _ = work_orders
-        _ = manifest
         _ = emit_event
         _ = execution_result
         return draft_pack, report
@@ -500,12 +492,10 @@ async def test_runner_records_strategic_trace_checkpoints(
     async def stub_coherence_review(
         blueprint,
         draft_pack,
-        manifest,
         emit_event,
         **_kwargs: object,
     ) -> CoherenceReport:
         _ = blueprint
-        _ = manifest
         _ = emit_event
         issue = ReviewIssue(
             severity="minor",
@@ -529,12 +519,11 @@ async def test_runner_records_strategic_trace_checkpoints(
         blueprint,
         work_orders,
         draft_pack,
-        manifest,
         emit_event,
         execution_result,
         **_kwargs: object,
     ):
-        _ = report, blueprint, work_orders, manifest, emit_event, execution_result
+        _ = report, blueprint, work_orders, emit_event, execution_result
         return draft_pack, report
 
     monkeypatch.setattr("v3_execution.runtime.runner.run_coherence_review", stub_coherence_review)

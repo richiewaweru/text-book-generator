@@ -29,7 +29,6 @@ from v3_execution.models import (
     GeneratedQuestionBlock,
     GeneratedVisualBlock,
 )
-from pipeline.contracts import _load_component_registry
 
 from v3_execution.runtime import events
 from v3_review import coherence_report_to_generation_summary, route_repairs, run_coherence_review
@@ -351,11 +350,9 @@ async def run_generation(
             async with sem["llm_coherence_reviewer"]:
 
                 async def _coherence():
-                    manifest = _load_component_registry()
                     coherence_report = await run_coherence_review(
                         blueprint,
                         draft_pack,
-                        manifest,
                         emit_event,
                         trace_id=trace_id or generation_id,
                         generation_id=generation_id,
@@ -366,7 +363,6 @@ async def run_generation(
                         blueprint,
                         bundle,
                         draft_pack,
-                        manifest,
                         emit_event,
                         execution_result=result,
                         trace_id=trace_id or generation_id,

@@ -5,9 +5,23 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-LessonMode = Literal["first_exposure", "consolidation", "repair"]
+LessonMode = Literal[
+    "first_exposure",  # learner meets concept for the first time
+    "consolidation",  # revisiting known content to deepen or connect
+    "repair",  # targeting a known misconception or gap
+    "retrieval",  # low-cue recall practice with minimal new explanation
+    "transfer",  # applying understanding to an unfamiliar context
+]
 QuestionTemperature = Literal["warm", "medium", "cold", "transfer"]
-ResourceType = Literal["lesson", "mini_booklet"]
+ResourceType = Literal[
+    "lesson",  # fallback only — no spec file; architect uses judgment
+    "mini_booklet",  # full guided lesson with scaffolding (spec exists)
+    "worksheet",  # practice resource; concept already taught (spec exists)
+    "quiz",  # formal assessment (spec exists)
+    "exit_ticket",  # short end-of-lesson check (spec exists)
+    "practice_set",  # drill-style repetition (spec exists)
+    "quick_explainer",  # focused concept clarification (spec exists)
+]
 
 
 class BlueprintMetadata(BaseModel):

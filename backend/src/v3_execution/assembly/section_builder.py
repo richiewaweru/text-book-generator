@@ -12,6 +12,7 @@ from v3_execution.models import (
     GeneratedVisualBlock,
     SectionAssemblyDiagnostic,
 )
+from v3_execution.runtime.lectio_validation import validate_section_content
 
 
 class V3SectionBuilder:
@@ -188,6 +189,11 @@ class V3SectionBuilder:
             warnings.extend(section_warnings)
 
             if renderable:
+                _validated_bucket, _schema_errors = validate_section_content(bucket)
+                if _schema_errors:
+                    bucket["_schema_warnings"] = _schema_errors
+                elif _validated_bucket is not None:
+                    bucket = _validated_bucket
                 sections_out.append(bucket)
 
         return sections_out, warnings, diagnostics

@@ -265,7 +265,6 @@ async def route_repairs(
     blueprint: ProductionBlueprint,
     work_orders: CompiledWorkOrders,
     draft_pack: DraftPack,
-    manifest: dict[str, Any],
     emit_event: EmitFn,
     execution_result: ExecutionResult,
     *,
@@ -317,7 +316,6 @@ async def route_repairs(
                 target.target_type,
                 blueprint,
                 current_pack,
-                manifest,
             )
             if not any(i.severity == "blocking" for i in recheck_issues):
                 report.repaired_target_ids.append(target.target_id)

@@ -37,7 +37,7 @@ def check_anchor_units_present(
 def validate_component_block(
     block: GeneratedComponentBlock,
     work_order: SectionWriterWorkOrder,
-    manifest_components: dict | None = None,
+    component_cards: dict | None = None,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -45,15 +45,17 @@ def validate_component_block(
     if block.component_id not in planned_ids:
         errors.append(f"Unplanned component: {block.component_id}")
 
-    expected_field = get_section_field_for_component(block.component_id)
+    expected_field: str | None = None
+    if component_cards and block.component_id in component_cards:
+        card = component_cards[block.component_id] or {}
+        expected_field = card.get("section_field")
+    else:
+        expected_field = get_section_field_for_component(block.component_id)
     if expected_field and block.section_field != expected_field:
-        errors.append(f"section_field mismatch for {block.component_id}")
-
-    if manifest_components and block.component_id in manifest_components:
-        reg = manifest_components.get(block.component_id) or {}
-        if isinstance(reg, dict) and reg.get("sectionField"):
-            if block.section_field != reg["sectionField"]:
-                errors.append(f"manifest sectionField mismatch for {block.component_id}")
+        errors.append(
+            f"section_field mismatch for {block.component_id}: "
+            f"expected '{expected_field}', got '{block.section_field}'"
+        )
 
     for comp in work_order.section.components:
         if comp.uses_anchor_id:
@@ -105,14 +107,14 @@ def validate_component_batch(
     blocks: Iterable[GeneratedComponentBlock],
     order: SectionWriterWorkOrder,
     *,
-    manifest_components: dict | None = None,
+    component_cards: dict | None = None,
 ) -> list[str]:
     errors: list[str] = []
     blocks_list = list(blocks)
     planned = {c.component_id for c in order.section.components}
     seen: set[str] = set()
     for block in blocks_list:
-        errors.extend(validate_component_block(block, order, manifest_components))
+        errors.extend(validate_component_block(block, order, component_cards=component_cards))
         seen.add(block.component_id)
     missing = planned - seen
     for mid in missing:

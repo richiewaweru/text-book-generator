@@ -116,8 +116,7 @@ async def test_generate_blueprint_passes_retry_policy_timeout(monkeypatch: pytes
     assert retry_policy is not None
     assert getattr(retry_policy, "call_timeout_seconds", None) is not None
     user_prompt = str(captured.get("user_prompt", ""))
-    assert "FormLensHints:" in user_prompt
-    assert "lesson_mode: first_exposure" in user_prompt
+    assert "RESOURCE SPEC — treat structural rules as hard constraints:" in user_prompt
 
 
 def test_form_to_lens_hints_contains_key_fields() -> None:

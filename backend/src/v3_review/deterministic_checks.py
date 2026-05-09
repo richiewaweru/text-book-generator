@@ -4,11 +4,8 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from jsonschema import Draft202012Validator
-
 from pipeline.contracts import (
-    get_component_registry_entry,
-    get_section_content_schema,
+    get_component_card,
     get_section_field_for_component,
 )
 from v3_blueprint.models import ProductionBlueprint
@@ -456,39 +453,43 @@ def check_internal_artifact_leaks(draft_pack: DraftPack) -> list[ReviewIssue]:
 
 def check_lectio_schema_validity(
     draft_pack: DraftPack,
-    manifest: dict[str, Any],
 ) -> list[ReviewIssue]:
-    _ = manifest
-    schema = get_section_content_schema()
-    validator = Draft202012Validator(schema)
+    from v3_execution.runtime.lectio_validation import validate_section_content
+
     issues: list[ReviewIssue] = []
     for sec in draft_pack.sections:
         if not isinstance(sec, dict):
             continue
         sid = sec.get("section_id", "<unknown>")
-        errs = sorted(validator.iter_errors(sec), key=lambda e: list(e.path))
-        for err in errs[:12]:
-            path = ".".join(str(p) for p in err.absolute_path) or "<root>"
+        for warn in sec.get("_schema_warnings", []):
             issues.append(
                 _issue(
-                    severity="blocking",
+                    severity="minor",
                     category="schema_violation",
-                    message=f"Lectio schema violation in section '{sid}' at {path}: {err.message}",
+                    message=f"Section '{sid}' assembly schema warning: {warn}",
                     generated_ref=sid,
-                    executor="section_writer",
-                    repair_target_id=f"schema:{sid}",
+                    executor="assembler",
+                )
+            )
+        _, errors = validate_section_content(sec)
+        for err in errors[:12]:
+            issues.append(
+                _issue(
+                    severity="major",
+                    category="schema_violation",
+                    message=f"Section '{sid}': {err}",
+                    generated_ref=sid,
+                    executor="assembler",
                 )
             )
     return issues
 
 
-def check_component_ids_in_manifest(
+def check_component_ids_in_lectio_contract(
     blueprint: ProductionBlueprint,
     draft_pack: DraftPack,
-    manifest: dict[str, Any],
 ) -> list[ReviewIssue]:
     _ = draft_pack
-    _ = manifest
     issues: list[ReviewIssue] = []
     seen: set[str] = set()
     for sec in blueprint.sections:
@@ -497,15 +498,20 @@ def check_component_ids_in_manifest(
             if cid in seen:
                 continue
             seen.add(cid)
-            if get_component_registry_entry(cid) is None:
+            if get_component_card(cid) is None:
                 issues.append(
                     _issue(
                         severity="blocking",
-                        category="schema_violation",
-                        message=f"Component id '{cid}' not present in Lectio manifest.",
+                        category="unknown_component",
+                        message=(
+                            f"Component '{cid}' in blueprint section '{sec.section_id}' "
+                            "is not present in lectio-content-contract.json. "
+                            "Check component slugs and Lectio version."
+                        ),
                         blueprint_ref=f"sections[{sec.section_id}].components",
                         generated_ref=cid,
                         executor="assembler",
+                        repair_target_id=sec.section_id,
                     )
                 )
     return issues
@@ -515,28 +521,28 @@ CheckFn = Callable[..., list[ReviewIssue]]
 
 RECHECK_MAP: dict[str, list[CheckFn]] = {
     "section_component": [
-        lambda bp, dp, m: check_planned_components_exist(bp, dp),
-        lambda bp, dp, m: check_anchor_facts(bp, dp),
-        lambda bp, dp, _: check_internal_artifact_leaks(dp),
-        lambda bp, dp, m: check_lectio_schema_validity(dp, m),
+        lambda bp, dp: check_planned_components_exist(bp, dp),
+        lambda bp, dp: check_anchor_facts(bp, dp),
+        lambda bp, dp: check_internal_artifact_leaks(dp),
+        lambda bp, dp: check_lectio_schema_validity(dp),
     ],
     "question": [
-        lambda bp, dp, m: check_planned_questions_exist(bp, dp),
-        lambda bp, dp, m: check_expected_answers_preserved(bp, dp),
-        lambda bp, dp, m: check_anchor_facts(bp, dp),
+        lambda bp, dp: check_planned_questions_exist(bp, dp),
+        lambda bp, dp: check_expected_answers_preserved(bp, dp),
+        lambda bp, dp: check_anchor_facts(bp, dp),
     ],
     "visual": [
-        lambda bp, dp, m: check_planned_visuals_exist(bp, dp),
-        lambda bp, dp, m: check_visuals_attach_to_valid_targets(bp, dp),
-        lambda bp, dp, m: check_anchor_facts(bp, dp),
+        lambda bp, dp: check_planned_visuals_exist(bp, dp),
+        lambda bp, dp: check_visuals_attach_to_valid_targets(bp, dp),
+        lambda bp, dp: check_anchor_facts(bp, dp),
     ],
     "answer_key": [
-        lambda bp, dp, m: check_answer_key_entries(bp, dp),
-        lambda bp, dp, m: check_expected_answers_preserved(bp, dp),
+        lambda bp, dp: check_answer_key_entries(bp, dp),
+        lambda bp, dp: check_expected_answers_preserved(bp, dp),
     ],
     "assembly": [
-        lambda bp, dp, m: check_planned_sections_exist(bp, dp),
-        lambda bp, dp, m: check_planned_components_exist(bp, dp),
+        lambda bp, dp: check_planned_sections_exist(bp, dp),
+        lambda bp, dp: check_planned_components_exist(bp, dp),
     ],
 }
 
@@ -545,12 +551,11 @@ def run_rechecks_for_target(
     target_type: str,
     blueprint: ProductionBlueprint,
     draft_pack: DraftPack,
-    manifest: dict[str, Any],
 ) -> list[ReviewIssue]:
     checks = RECHECK_MAP.get(target_type, [])
     out: list[ReviewIssue] = []
     for fn in checks:
-        out.extend(fn(blueprint, draft_pack, manifest))
+        out.extend(fn(blueprint, draft_pack))
     return out
 
 
@@ -558,7 +563,7 @@ __all__ = [
     "RECHECK_MAP",
     "check_anchor_facts",
     "check_answer_key_entries",
-    "check_component_ids_in_manifest",
+    "check_component_ids_in_lectio_contract",
     "check_expected_answers_preserved",
     "check_internal_artifact_leaks",
     "check_lectio_schema_validity",

@@ -1,677 +1,340 @@
 {
   "section-header": {
     "id": "section-header",
-    "name": "SectionHeader",
-    "purpose": "Opens a section with title, subject, objective, and level indicators",
-    "teacher_label": "Section Header",
-    "teacher_description": "Sets the title, subject, and learning objectives for a section.",
+    "sectionField": "header",
+    "role": "Opens a section with title, subject, objective, and level indicators",
     "cognitive_job": "Orient the learner",
-    "section_field": "header",
-    "group": 1,
-    "status": "stable",
+    "generation_hint": "Orient the learner",
     "capacity": {
       "titleMaxWords": 12,
       "subtitleMaxWords": 20,
       "objectiveMaxWords": 30
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Full static header",
-    "generation_hint": "Generate header content that opens a section with title, subject, objective, and level indicators. Prioritize orient the learner with concise, learner-ready wording."
+    }
   },
   "hook-hero": {
     "id": "hook-hero",
-    "name": "HookHero",
-    "purpose": "Creates felt need before explanation arrives",
-    "teacher_label": "Opening Hook",
-    "teacher_description": "Grabs attention with a question, quote, or fact before the lesson begins.",
+    "sectionField": "hook",
+    "role": "Creates felt need before explanation arrives",
     "cognitive_job": "Create felt need",
-    "section_field": "hook",
-    "group": 1,
-    "status": "stable",
+    "generation_hint": "Create felt need",
     "capacity": {
       "headlineMaxWords": 12,
       "bodyMaxWords": 80
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Pull quote block with left border",
-    "generation_hint": "Generate hook content that creates felt need before explanation arrives. Prioritize create felt need with concise, learner-ready wording."
+    }
   },
   "explanation-block": {
     "id": "explanation-block",
-    "name": "ExplanationBlock",
-    "purpose": "Sustained prose that builds a mental model",
-    "teacher_label": "Core Explanation",
-    "teacher_description": "Main teaching prose that builds understanding step by step.",
+    "sectionField": "explanation",
+    "role": "Sustained prose that builds a mental model",
     "cognitive_job": "Build understanding",
-    "section_field": "explanation",
-    "group": 1,
-    "status": "stable",
+    "generation_hint": "Build understanding",
     "capacity": {
       "bodyMaxWords": 350,
       "emphasisMax": 3
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Static prose",
-    "generation_hint": "Generate explanation content that sustained prose that builds a mental model. Prioritize build understanding with concise, learner-ready wording."
+    }
   },
   "prerequisite-strip": {
     "id": "prerequisite-strip",
-    "name": "PrerequisiteStrip",
-    "purpose": "Lists assumed knowledge with optional refresher pop-ups",
-    "teacher_label": "Prerequisites",
-    "teacher_description": "Lists assumed knowledge with optional refresher notes.",
+    "sectionField": "prerequisites",
+    "role": "Lists assumed knowledge with optional refresher pop-ups",
     "cognitive_job": "Activate prior knowledge",
-    "section_field": "prerequisites",
-    "group": 1,
-    "status": "stable",
+    "generation_hint": "Activate prior knowledge",
     "capacity": {
       "itemsMax": 4
-    },
-    "behaviour_modes": [
-      "static",
-      "hint-toggle"
-    ],
-    "print_fallback": "Inline list of prerequisites",
-    "generation_hint": "Generate prerequisites content that lists assumed knowledge with optional refresher pop-ups. Prioritize activate prior knowledge with concise, learner-ready wording."
+    }
   },
   "what-next-bridge": {
     "id": "what-next-bridge",
-    "name": "WhatNextBridge",
-    "purpose": "Connects the section forward to what the concept enables",
-    "teacher_label": "What Next",
-    "teacher_description": "Connects this section to the concept or topic that follows.",
+    "sectionField": "what_next",
+    "role": "Connects the section forward to what the concept enables",
     "cognitive_job": "Connect forward",
-    "section_field": "what_next",
-    "group": 1,
-    "status": "stable",
+    "generation_hint": "Connect forward",
     "capacity": {
       "bodyMaxWords": 50,
       "nextMaxWords": 15,
       "previewMaxWords": 30
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Static, amber left rule",
-    "generation_hint": "Generate what_next content that connects the section forward to what the concept enables. Prioritize connect forward with concise, learner-ready wording."
+    }
   },
   "interview-anchor": {
     "id": "interview-anchor",
-    "name": "InterviewAnchor",
-    "purpose": "Makes knowledge speakable - rehearse explaining the concept",
-    "teacher_label": "Explain Out Loud",
-    "teacher_description": "Prompts learners to rehearse explaining the idea in their own words.",
+    "sectionField": "interview",
+    "role": "Makes knowledge speakable - rehearse explaining the concept",
     "cognitive_job": "Make knowledge speakable",
-    "section_field": "interview",
-    "group": 1,
-    "status": "stable",
+    "generation_hint": "Make knowledge speakable",
     "capacity": {
       "promptMaxWords": 35,
       "audienceMaxWords": 10,
       "followUpMaxWords": 25
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Static with write-in lines",
-    "generation_hint": "Generate interview content that makes knowledge speakable - rehearse explaining the concept. Prioritize make knowledge speakable with concise, learner-ready wording."
+    }
   },
   "callout-block": {
     "id": "callout-block",
-    "name": "CalloutBlock",
-    "purpose": "Standalone highlighted callout ΓÇö tip, warning, info, or exam note",
-    "teacher_label": "Callout",
-    "teacher_description": "Highlighted tip, warning, exam note, or remembered point.",
+    "sectionField": "callout",
+    "role": "Standalone highlighted callout ΓÇö tip, warning, info, or exam note",
     "cognitive_job": "Flag what matters",
-    "section_field": "callout",
-    "group": 1,
-    "status": "stable",
+    "generation_hint": "Flag what matters",
     "capacity": {
       "bodyMaxWords": 60,
       "headingMaxWords": 6
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Bordered callout box",
-    "generation_hint": "Generate callout content that standalone highlighted callout γçö tip, warning, info, or exam note. Prioritize flag what matters with concise, learner-ready wording."
+    }
   },
   "summary-block": {
     "id": "summary-block",
-    "name": "SummaryBlock",
-    "purpose": "Lists what this section covered ΓÇö key takeaways as bullets",
-    "teacher_label": "Summary",
-    "teacher_description": "Bullet takeaways that close what the section covered.",
+    "sectionField": "summary",
+    "role": "Lists what this section covered ΓÇö key takeaways as bullets",
     "cognitive_job": "Consolidate and close",
-    "section_field": "summary",
-    "group": 1,
-    "status": "stable",
+    "generation_hint": "Consolidate and close",
     "capacity": {
       "itemsMin": 2,
       "itemsMax": 5,
       "itemMaxWords": 25,
       "closingMaxWords": 30
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Bulleted list with border",
-    "generation_hint": "Generate summary content that lists what this section covered γçö key takeaways as bullets. Prioritize consolidate and close with concise, learner-ready wording."
+    }
   },
   "section-divider": {
     "id": "section-divider",
-    "name": "SectionDivider",
-    "purpose": "Named visual break between parts within a section",
-    "teacher_label": "Section Divider",
-    "teacher_description": "Named visual break between parts within a lesson.",
+    "sectionField": "divider",
+    "role": "Named visual break between parts within a section",
     "cognitive_job": "Signal a phase change",
-    "section_field": "divider",
-    "group": 1,
-    "status": "stable",
+    "generation_hint": "Signal a phase change",
     "capacity": {
       "labelMaxWords": 4
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Horizontal rule with label",
-    "generation_hint": "Generate divider content that named visual break between parts within a section. Prioritize signal a phase change with concise, learner-ready wording."
+    }
   },
   "definition-card": {
     "id": "definition-card",
-    "name": "DefinitionCard",
-    "purpose": "Anchors a formal term with formal and plain versions",
-    "teacher_label": "Key Term Definition",
-    "teacher_description": "Introduces a term with formal and everyday language side by side.",
+    "sectionField": "definition",
+    "role": "Anchors a formal term with formal and plain versions",
     "cognitive_job": "Anchor formal knowledge",
-    "section_field": "definition",
-    "group": 2,
-    "status": "stable",
+    "generation_hint": "Anchor formal knowledge",
     "capacity": {
       "formalMaxWords": 80,
       "plainMaxWords": 60,
       "relatedTermsMax": 3
-    },
-    "behaviour_modes": [
-      "static",
-      "plain-formal-toggle"
-    ],
-    "print_fallback": "Both versions shown",
-    "generation_hint": "Generate definition content that anchors a formal term with formal and plain versions. Prioritize anchor formal knowledge with concise, learner-ready wording."
+    }
   },
   "definition-family": {
     "id": "definition-family",
-    "name": "DefinitionFamily",
-    "purpose": "Groups related terms that belong together conceptually",
-    "teacher_label": "Definition Family",
-    "teacher_description": "Groups related terms that belong together conceptually.",
+    "sectionField": "definition_family",
+    "role": "Groups related terms that belong together conceptually",
     "cognitive_job": "Distinguish related concepts",
-    "section_field": "definition_family",
-    "group": 2,
-    "status": "stable",
+    "generation_hint": "Distinguish related concepts",
     "capacity": {
       "definitionsMax": 4,
       "introMaxWords": 40
-    },
-    "behaviour_modes": [
-      "static",
-      "accordion"
-    ],
-    "print_fallback": "All definitions expanded",
-    "generation_hint": "Generate definition_family content that groups related terms that belong together conceptually. Prioritize distinguish related concepts with concise, learner-ready wording."
+    }
   },
   "glossary-rail": {
     "id": "glossary-rail",
-    "name": "GlossaryRail",
-    "purpose": "Vocabulary visible in peripheral field, updates by section",
-    "teacher_label": "Glossary Rail",
-    "teacher_description": "Sidebar vocabulary that stays visible while reading.",
+    "sectionField": "glossary",
+    "role": "Vocabulary visible in peripheral field, updates by section",
     "cognitive_job": "Retrieve meaning without losing place",
-    "section_field": "glossary",
-    "group": 2,
-    "status": "stable",
+    "generation_hint": "Retrieve meaning without losing place",
     "capacity": {
       "termsMax": 8,
       "termsWarning": 6,
       "definitionMaxWords": 30
-    },
-    "behaviour_modes": [
-      "sticky",
-      "drawer",
-      "inline-strip"
-    ],
-    "print_fallback": "Inline vocabulary strip at section end",
-    "generation_hint": "Generate glossary content that vocabulary visible in peripheral field, updates by section. Prioritize retrieve meaning without losing place with concise, learner-ready wording."
-  },
-  "glossary-inline": {
-    "id": "glossary-inline",
-    "name": "GlossaryInline",
-    "purpose": "In-text definition pop-up on a defined term",
-    "teacher_label": "Inline Glossary",
-    "teacher_description": "Short in-text definition pop-up on a key term.",
-    "cognitive_job": "Retrieve meaning in context",
-    "section_field": null,
-    "group": 2,
-    "status": "stable",
-    "capacity": {
-      "definitionMaxWords": 30
-    },
-    "behaviour_modes": [
-      "hint-toggle"
-    ],
-    "print_fallback": "Term underlined, definition in footnote",
-    "generation_hint": null
+    }
   },
   "insight-strip": {
     "id": "insight-strip",
-    "name": "InsightStrip",
-    "purpose": "Side-by-side comparison of 2-3 related values or concepts",
-    "teacher_label": "Insight Strip",
-    "teacher_description": "Side-by-side comparison of a few values or ideas.",
+    "sectionField": "insight_strip",
+    "role": "Side-by-side comparison of 2-3 related values or concepts",
     "cognitive_job": "Compare values simultaneously",
-    "section_field": "insight_strip",
-    "group": 2,
-    "status": "stable",
+    "generation_hint": "Compare values simultaneously",
     "capacity": {
       "cellsMax": 3,
       "cellsMin": 2,
       "cellLinesMax": 2
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Static table",
-    "generation_hint": "Generate insight_strip content that side-by-side comparison of 2-3 related values or concepts. Prioritize compare values simultaneously with concise, learner-ready wording."
+    }
   },
   "key-fact": {
     "id": "key-fact",
-    "name": "KeyFact",
-    "purpose": "Visually prominent stat, formula, or date that anchors the section",
-    "teacher_label": "Key Fact",
-    "teacher_description": "Prominent stat, formula, or date that anchors the section.",
+    "sectionField": "key_fact",
+    "role": "Visually prominent stat, formula, or date that anchors the section",
     "cognitive_job": "Anchor a critical fact",
-    "section_field": "key_fact",
-    "group": 2,
-    "status": "stable",
+    "generation_hint": "Anchor a critical fact",
     "capacity": {
       "factMaxWords": 20,
       "contextMaxWords": 30
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Bold bordered fact box",
-    "generation_hint": "Generate key_fact content that visually prominent stat, formula, or date that anchors the section. Prioritize anchor a critical fact with concise, learner-ready wording."
+    }
   },
   "comparison-grid": {
     "id": "comparison-grid",
-    "name": "ComparisonGrid",
-    "purpose": "Holds multiple concepts in view so distinctions become structural",
-    "teacher_label": "Comparison Table",
-    "teacher_description": "Compares concepts across shared criteria in a grid.",
+    "sectionField": "comparison_grid",
+    "role": "Holds multiple concepts in view so distinctions become structural",
     "cognitive_job": "Compare and classify in parallel",
-    "section_field": "comparison_grid",
-    "group": 2,
-    "status": "stable",
+    "generation_hint": "Compare and classify in parallel",
     "capacity": {
       "columnsMin": 2,
       "columnsMax": 4,
       "rowsMax": 6,
       "criterionMaxWords": 8,
       "valueMaxWords": 20
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Static comparison table",
-    "generation_hint": "Generate comparison_grid content that holds multiple concepts in view so distinctions become structural. Prioritize compare and classify in parallel with concise, learner-ready wording."
+    }
   },
   "worked-example-card": {
     "id": "worked-example-card",
-    "name": "WorkedExampleCard",
-    "purpose": "Shows reasoning in action step by step, each step justified",
-    "teacher_label": "Worked Example",
-    "teacher_description": "Walks through a problem step by step with clear reasoning.",
+    "sectionField": "worked_example",
+    "role": "Shows reasoning in action step by step, each step justified",
     "cognitive_job": "Watch reasoning in action",
-    "section_field": "worked_example",
-    "group": 3,
-    "status": "stable",
+    "generation_hint": "Watch reasoning in action",
     "capacity": {
       "stepsMax": 6,
       "stepsWarning": 4,
       "stepLabelMaxWords": 12,
       "stepContentMaxWords": 80
-    },
-    "behaviour_modes": [
-      "static",
-      "step-reveal",
-      "accordion",
-      "compare"
-    ],
-    "print_fallback": "All steps expanded",
-    "generation_hint": "Generate worked_example content that shows reasoning in action step by step, each step justified. Prioritize watch reasoning in action with concise, learner-ready wording."
+    }
   },
   "process-steps": {
     "id": "process-steps",
-    "name": "ProcessSteps",
-    "purpose": "A repeatable procedure where order is non-negotiable",
-    "teacher_label": "Process Steps",
-    "teacher_description": "Ordered procedure learners should follow every time.",
+    "sectionField": "process",
+    "role": "A repeatable procedure where order is non-negotiable",
     "cognitive_job": "Follow a procedure",
-    "section_field": "process",
-    "group": 3,
-    "status": "stable",
+    "generation_hint": "Follow a procedure",
     "capacity": {
       "stepsMax": 8,
       "actionMaxWords": 15,
       "detailMaxWords": 60
-    },
-    "behaviour_modes": [
-      "static",
-      "step-reveal"
-    ],
-    "print_fallback": "All steps visible, checkbox squares for print",
-    "generation_hint": "Generate process content that a repeatable procedure where order is non-negotiable. Prioritize follow a procedure with concise, learner-ready wording."
+    }
   },
   "practice-stack": {
     "id": "practice-stack",
-    "name": "PracticeStack",
-    "purpose": "Problems at calibrated difficulty with progressive hints and optional solutions",
-    "teacher_label": "Practice Problems",
-    "teacher_description": "Problems at varied difficulty with progressive hints.",
+    "sectionField": "practice",
+    "role": "Problems at calibrated difficulty with progressive hints and optional solutions",
     "cognitive_job": "Apply understanding under calibrated difficulty",
-    "section_field": "practice",
-    "group": 4,
-    "status": "stable",
+    "generation_hint": "Apply understanding under calibrated difficulty",
     "capacity": {
       "problemsMin": 2,
       "problemsMax": 5,
       "hintsPerProblemMax": 3,
       "questionMaxWords": 100,
       "hintMaxWords": 60
-    },
-    "behaviour_modes": [
-      "hint-toggle",
-      "accordion",
-      "progressive-hints",
-      "flat-list"
-    ],
-    "print_fallback": "All visible, write-in lines rendered; inline answers hidden by default",
-    "generation_hint": "Generate practice content that problems at calibrated difficulty with progressive hints and optional solutions. Prioritize apply understanding under calibrated difficulty with concise, learner-ready wording."
+    }
   },
   "quiz-check": {
     "id": "quiz-check",
-    "name": "QuizCheck",
-    "purpose": "Quick concept check with immediate feedback mid-section",
-    "teacher_label": "Quick Check Quiz",
-    "teacher_description": "Short check-for-understanding with immediate feedback.",
+    "sectionField": "quiz",
+    "role": "Quick concept check with immediate feedback mid-section",
     "cognitive_job": "Verify understanding immediately",
-    "section_field": "quiz",
-    "group": 4,
-    "status": "stable",
+    "generation_hint": "Verify understanding immediately",
     "capacity": {
       "optionsMin": 3,
       "optionsMax": 4,
       "questionMaxWords": 60,
       "optionMaxWords": 20
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Question and options shown, correct answer marked",
-    "generation_hint": "Generate quiz content that quick concept check with immediate feedback mid-section. Prioritize verify understanding immediately with concise, learner-ready wording."
+    }
   },
   "reflection-prompt": {
     "id": "reflection-prompt",
-    "name": "ReflectionPrompt",
-    "purpose": "Pauses forward motion and turns attention inward",
-    "teacher_label": "Reflection Prompt",
-    "teacher_description": "Open pause that encourages deeper thinking or sharing.",
+    "sectionField": "reflection",
+    "role": "Pauses forward motion and turns attention inward",
     "cognitive_job": "Pause and consolidate",
-    "section_field": "reflection",
-    "group": 4,
-    "status": "stable",
+    "generation_hint": "Pause and consolidate",
     "capacity": {
       "promptMaxWords": 40,
       "spaceMax": 6
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Prompt with write-in lines",
-    "generation_hint": "Generate reflection content that pauses forward motion and turns attention inward. Prioritize pause and consolidate with concise, learner-ready wording."
+    }
   },
   "student-textbox": {
     "id": "student-textbox",
-    "name": "StudentTextbox",
-    "purpose": "Simple write-in box for student responses ΓÇö no framing beyond a prompt",
-    "teacher_label": "Student Textbox",
-    "teacher_description": "Simple write-in space tied to a short prompt.",
+    "sectionField": "student_textbox",
+    "role": "Simple write-in box for student responses ΓÇö no framing beyond a prompt",
     "cognitive_job": "Record thinking",
-    "section_field": "student_textbox",
-    "group": 4,
-    "status": "stable",
+    "generation_hint": "Record thinking",
     "capacity": {
       "promptMaxWords": 40,
       "linesMax": 10
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Lined write-in area",
-    "generation_hint": "Generate student_textbox content that simple write-in box for student responses γçö no framing beyond a prompt. Prioritize record thinking with concise, learner-ready wording."
+    }
   },
   "short-answer": {
     "id": "short-answer",
-    "name": "ShortAnswerQuestion",
-    "purpose": "Open question with write-in space and optional mark scheme",
-    "teacher_label": "Short Answer",
-    "teacher_description": "Open question with lines for a written response.",
+    "sectionField": "short_answer",
+    "role": "Open question with write-in space and optional mark scheme",
     "cognitive_job": "Recall and explain in own words",
-    "section_field": "short_answer",
-    "group": 4,
-    "status": "stable",
+    "generation_hint": "Recall and explain in own words",
     "capacity": {
       "questionMaxWords": 60,
       "linesMax": 10,
       "marksMax": 10
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Question with lined answer space, mark allocation shown",
-    "generation_hint": "Generate short_answer content that open question with write-in space and optional mark scheme. Prioritize recall and explain in own words with concise, learner-ready wording."
+    }
   },
   "fill-in-blank": {
     "id": "fill-in-blank",
-    "name": "FillInTheBlank",
-    "purpose": "Cloze passage with student-completed blanks ΓÇö tests recall not recognition",
-    "teacher_label": "Fill in the Blank",
-    "teacher_description": "Cloze passage with blanks for recall, not recognition only.",
+    "sectionField": "fill_in_blank",
+    "role": "Cloze passage with student-completed blanks ΓÇö tests recall not recognition",
     "cognitive_job": "Retrieve and complete",
-    "section_field": "fill_in_blank",
-    "group": 4,
-    "status": "stable",
+    "generation_hint": "Retrieve and complete",
     "capacity": {
       "segmentsMax": 60,
       "blanksMax": 10,
       "wordBankMax": 15
-    },
-    "behaviour_modes": [
-      "static",
-      "hint-toggle"
-    ],
-    "print_fallback": "Passage with underlined blanks, word bank box below",
-    "generation_hint": "Generate fill_in_blank content that cloze passage with student-completed blanks γçö tests recall not recognition. Prioritize retrieve and complete with concise, learner-ready wording."
+    }
   },
   "pitfall-alert": {
     "id": "pitfall-alert",
-    "name": "PitfallAlert",
-    "purpose": "Names a specific misconception before the learner makes it",
-    "teacher_label": "Common Mistake Alert",
-    "teacher_description": "Names a misconception and explains the correct idea.",
+    "sectionField": "pitfall",
+    "role": "Names a specific misconception before the learner makes it",
     "cognitive_job": "Inoculate against error",
-    "section_field": "pitfall",
-    "group": 5,
-    "status": "stable",
+    "generation_hint": "Inoculate against error",
     "capacity": {
       "misconceptionMaxWords": 20,
       "correctionMaxWords": 80,
       "exampleMaxWords": 40
-    },
-    "behaviour_modes": [
-      "static",
-      "hint-toggle"
-    ],
-    "print_fallback": "Full static, amber left border",
-    "generation_hint": "Generate pitfall content that names a specific misconception before the learner makes it. Prioritize inoculate against error with concise, learner-ready wording."
+    }
   },
   "diagram-block": {
     "id": "diagram-block",
-    "name": "DiagramBlock",
-    "purpose": "Makes spatial or relational structure visible",
-    "teacher_label": "Diagram",
-    "teacher_description": "Labelled visual with optional annotation callouts.",
+    "sectionField": "diagram",
+    "role": "Makes spatial or relational structure visible",
     "cognitive_job": "See the structure",
-    "section_field": "diagram",
-    "group": 6,
-    "status": "stable",
+    "generation_hint": "See the structure",
     "capacity": {
       "calloutsMax": 6,
       "captionMaxWords": 60
-    },
-    "behaviour_modes": [
-      "static",
-      "zoom",
-      "hint-toggle"
-    ],
-    "print_fallback": "Static SVG 80% width centred",
-    "generation_hint": "Write a caption that precisely describes the visual ΓÇö name every labeled element, the relationship or structure being shown, and what the student should notice first. Use present tense. Max 60 words. A good caption works as a standalone description of the image: someone reading it knows exactly what is drawn without having read the section. Do not describe the topic in general terms ΓÇö describe what is visible."
+    }
   },
   "diagram-compare": {
     "id": "diagram-compare",
-    "name": "DiagramCompare",
-    "purpose": "Before and after comparison with a drag slider",
-    "teacher_label": "Before / After Diagram",
-    "teacher_description": "Compares two diagrams with an interactive or static slider.",
+    "sectionField": "diagram_compare",
+    "role": "Before and after comparison with a drag slider",
     "cognitive_job": "See transformation",
-    "section_field": "diagram_compare",
-    "group": 6,
-    "status": "stable",
+    "generation_hint": "See transformation",
     "capacity": {
       "captionMaxWords": 60
-    },
-    "behaviour_modes": [
-      "compare"
-    ],
-    "print_fallback": "Both diagrams shown side by side",
-    "generation_hint": "Write a caption that precisely names what is being compared, what is visible in each state, and exactly what changes between them ΓÇö name the specific element that transforms, not just that a change occurs. Use present tense. Max 60 words. The caption must describe both images as if the student cannot see the labels: name the before state, name the after state, name the difference."
+    }
   },
   "diagram-series": {
     "id": "diagram-series",
-    "name": "DiagramSeries",
-    "purpose": "A progression of diagrams that tells a sequence",
-    "teacher_label": "Diagram Series",
-    "teacher_description": "Sequence of diagrams that tells a visual story.",
+    "sectionField": "diagram_series",
+    "role": "A progression of diagrams that tells a sequence",
     "cognitive_job": "Follow a visual progression",
-    "section_field": "diagram_series",
-    "group": 6,
-    "status": "stable",
+    "generation_hint": "Follow a visual progression",
     "capacity": {
       "diagramsMax": 4
-    },
-    "behaviour_modes": [
-      "step-reveal",
-      "static"
-    ],
-    "print_fallback": "All diagrams in sequence with step labels",
-    "generation_hint": "Write a series title that describes the full progression shown across all steps, and a caption for each step that names the specific state of the diagram at that moment ΓÇö what is drawn, what has changed from the previous step, and what the student should be able to see. Use present tense throughout. Each step caption must stand alone as a description of that frame: someone reading it knows exactly what that step shows. Max 60 words per caption. Do not repeat the step label as the caption."
-  },
-  "video-embed": {
-    "id": "video-embed",
-    "name": "VideoEmbed",
-    "purpose": "Embeds a video with caption and print fallback",
-    "teacher_label": "Video",
-    "teacher_description": "Embed a YouTube or Vimeo video with a caption.",
-    "cognitive_job": "Engage through multimedia",
-    "section_field": "video_embed",
-    "group": 1,
-    "status": "stable",
-    "capacity": {
-      "captionMaxWords": 40
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "QR code or thumbnail based on setting",
-    "generation_hint": "Generate video_embed content that embeds a video with caption and print fallback. Prioritize engage through multimedia with concise, learner-ready wording."
-  },
-  "image-block": {
-    "id": "image-block",
-    "name": "ImageBlock",
-    "purpose": "Uploaded raster image with caption and layout options",
-    "teacher_label": "Image",
-    "teacher_description": "Photo, screenshot, or illustration from an uploaded image.",
-    "cognitive_job": "Illustrate with photos or screenshots",
-    "section_field": "image_block",
-    "group": 6,
-    "status": "stable",
-    "capacity": {
-      "captionMaxWords": 40,
-      "altMaxWords": 80
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Static image from embedded data",
-    "generation_hint": "Generate image_block content that uploaded raster image with caption and layout options. Prioritize illustrate with photos or screenshots with concise, learner-ready wording."
+    }
   },
   "timeline-block": {
     "id": "timeline-block",
-    "name": "TimelineBlock",
-    "purpose": "Turns chronology into a readable instructional spine",
-    "teacher_label": "Timeline",
-    "teacher_description": "Chronological events with summaries along a spine.",
+    "sectionField": "timeline",
+    "role": "Turns chronology into a readable instructional spine",
     "cognitive_job": "Follow cause and sequence over time",
-    "section_field": "timeline",
-    "group": 6,
-    "status": "stable",
+    "generation_hint": "Follow cause and sequence over time",
     "capacity": {
       "eventsMin": 3,
       "eventsMax": 8,
       "titleMaxWords": 10,
       "summaryMaxWords": 50
-    },
-    "behaviour_modes": [
-      "static",
-      "timeline-scrubber"
-    ],
-    "print_fallback": "Vertical event list",
-    "generation_hint": "Generate timeline content that turns chronology into a readable instructional spine. Prioritize follow cause and sequence over time with concise, learner-ready wording."
+    }
   },
   "simulation-block": {
     "id": "simulation-block",
-    "name": "SimulationBlock",
-    "purpose": "Manipulate a variable and discover the concept through observation",
-    "teacher_label": "Interactive Simulation",
-    "teacher_description": "Manipulable widget where learners discover by experimenting.",
+    "sectionField": "simulation",
+    "role": "Manipulate a variable and discover the concept through observation",
     "cognitive_job": "Manipulate and discover",
-    "section_field": "simulation",
-    "group": 7,
-    "status": "beta",
+    "generation_hint": "Manipulate and discover",
     "capacity": {
       "countGuidance": "template-defined"
-    },
-    "behaviour_modes": [
-      "static"
-    ],
-    "print_fallback": "Static diagram at midstate",
-    "generation_hint": "Generate simulation content that manipulate a variable and discover the concept through observation. Prioritize manipulate and discover with concise, learner-ready wording."
+    }
   }
 }

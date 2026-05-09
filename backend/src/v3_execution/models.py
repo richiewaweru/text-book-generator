@@ -153,7 +153,15 @@ class SectionWriterWorkOrder(BaseModel):
     support_adaptations: list[str] = Field(default_factory=list)
     source_of_truth: list[SourceOfTruthEntry] = Field(default_factory=list)
     consistency_rules: list[str] = Field(default_factory=list)
-    manifest_components: dict[str, Any] = Field(default_factory=dict)
+    component_cards: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Component cards from lectio-content-contract.json keyed by component_id. "
+            "Each card contains section_field, field_contracts, component_constraints, "
+            "role, cognitive_job, and one compact example. "
+            "Used by the section writer prompt and validation layer."
+        ),
+    )
     template_id: str
 
 

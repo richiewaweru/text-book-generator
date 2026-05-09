@@ -173,7 +173,65 @@ async def get_clarifications(
 
 
 def _validate_blueprint(bp: ProductionBlueprint) -> None:
-    BlueprintCompiler().compile_all(bp)
+    """
+    Validate the architect-produced blueprint and raise structured errors.
+    """
+    from pydantic import ValidationError
+
+    try:
+        compiler_result = BlueprintCompiler().compile_all(bp)
+    except ValidationError as exc:
+        field_errors = [f"  {'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()]
+        raise RuntimeError(
+            f"Blueprint structure invalid ({len(field_errors)} error(s)):\n"
+            + "\n".join(field_errors)
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(f"Blueprint compiler raised unexpected error: {exc}") from exc
+
+    if isinstance(compiler_result, list) and compiler_result:
+        formatted = "\n".join(f"  - {e}" for e in compiler_result)
+        raise RuntimeError(
+            f"Blueprint failed domain validation:\n{formatted}\n"
+            "Check component slugs, section_field uniqueness, and question_plan."
+        )
+
+
+def _render_resource_spec(
+    inferred_resource_type: str | None,
+    duration_minutes: int,
+) -> str:
+    """
+    Render the resource spec for the inferred resource type into a prompt-ready string.
+
+    Falls back to 'lesson' if the resource type is unknown or has no spec.
+    Infers depth from duration: under 20 min → quick, over 45 min → deep, else standard.
+    active_roles and active_supports are left empty — the architect decides those.
+    """
+    from resource_specs.loader import get_spec, list_spec_ids
+    from resource_specs.renderer import render_spec_for_prompt
+
+    resource_type = (inferred_resource_type or "lesson").lower().strip().replace(" ", "_")
+
+    available = list_spec_ids()
+    if resource_type not in available:
+        resource_type = "lesson"
+
+    depth = "quick" if duration_minutes < 20 else "deep" if duration_minutes > 45 else "standard"
+
+    try:
+        spec = get_spec(resource_type)
+        return render_spec_for_prompt(
+            spec,
+            depth=depth,
+            active_roles=[],
+            active_supports=[],
+        )
+    except Exception:
+        return (
+            f"Resource type: {resource_type}\n"
+            "(No detailed spec available for this type — use judgment based on resource intent.)"
+        )
 
 
 async def generate_production_blueprint(
@@ -195,12 +253,17 @@ async def generate_production_blueprint(
     )
     clar = clarification_answers or []
     clar_txt = "\n".join(f"Q: {c.question}\nA: {c.answer}" for c in clar)
-    form_lens_hints = form_to_lens_hints(form)
+    resource_spec_block = _render_resource_spec(
+        inferred_resource_type=signals.inferred_resource_type,
+        duration_minutes=form.duration_minutes,
+    )
+
     user = (
         f"Signals:\n{signals.model_dump_json(indent=2)}\n\n"
         f"Form:\n{form.model_dump_json(indent=2)}\n\n"
-        f"FormLensHints:\n{form_lens_hints or '(none)'}\n\n"
-        f"Clarifications:\n{clar_txt or '(none)'}"
+        f"Clarifications:\n{clar_txt or '(none)'}\n\n"
+        f"RESOURCE SPEC — treat structural rules as hard constraints:\n"
+        f"{resource_spec_block}"
     )
     result = await run_llm(
         trace_id=tid,

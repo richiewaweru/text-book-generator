@@ -4,6 +4,7 @@ from v3_blueprint.models import ProductionBlueprint, QuestionPlanItem
 from v3_blueprint.compiler import BlueprintCompiler
 
 from v3_execution.component_aliases import canonical_component_id
+from pipeline.contracts import _EXTERNAL_FIELDS, get_section_field_for_component
 from v3_execution.models import (
     AnswerKeyExecutorWorkOrder,
     AnswerKeyPlanSpec,
@@ -46,15 +47,25 @@ def _register_from_blueprint(blueprint: ProductionBlueprint) -> RegisterSpec:
     )
 
 
-def _manifest_for_components(component_ids: list[str], template_id: str) -> dict[str, object]:
-    from pipeline.contracts import get_component_registry_entry
+def _component_cards_for_components(component_ids: list[str]) -> dict[str, dict]:
+    """
+    Fetch Lectio component cards for the given component IDs from
+    lectio-content-contract.json. Raises ValueError for any unknown component.
+    """
+    from pipeline.contracts import get_component_card
 
-    manifest: dict[str, object] = {}
+    cards: dict[str, dict] = {}
     for cid in component_ids:
-        entry = get_component_registry_entry(cid) or {}
-        manifest[cid] = entry
-    _ = template_id
-    return manifest
+        card = get_component_card(cid)
+        if card is None:
+            raise ValueError(
+                f"Unknown Lectio component: '{cid}'. "
+                "The component is not present in lectio-content-contract.json. "
+                "Check that Lectio is at 0.4.2 and contracts are up to date: "
+                "uv run python tools/update_lectio_contracts.py"
+            )
+        cards[cid] = card
+    return cards
 
 
 def _infer_visual_dependency(
@@ -88,19 +99,23 @@ def compile_execution_bundle(
 
     section_orders: list[SectionWriterWorkOrder] = []
     for sec in blueprint.sections:
-        comps: list[WriterSectionComponent] = []
-        for position, c in enumerate(sec.components):
+        writer_comps: list[WriterSectionComponent] = []
+        for c in sec.components:
             canonical = canonical_component_id(c.component)
-            comps.append(
+            field = get_section_field_for_component(canonical)
+            if field in _EXTERNAL_FIELDS:
+                continue
+            writer_comps.append(
                 WriterSectionComponent(
                     component_id=canonical,
                     teacher_label=c.component.replace("_", " ").title(),
                     content_intent=c.content_intent,
                 )
             )
-        learning_intent = (
-            "; ".join(c.content_intent for c in sec.components) or sec.title
-        )
+        if not writer_comps:
+            learning_intent = sec.title
+        else:
+            learning_intent = "; ".join(c.content_intent for c in writer_comps) or sec.title
         wo = SectionWriterWorkOrder(
             work_order_id=f"sec-{sec.section_id}",
             section=WriterSection(
@@ -109,16 +124,15 @@ def compile_execution_bundle(
                 learning_intent=learning_intent,
                 constraints=[f"role:{sec.role}"],
                 register_notes=[],
-                components=comps,
+                components=writer_comps,
             ),
             register=register,
             learner_profile=LearnerProfileSpec(),
             support_adaptations=[e.effects[0] for e in blueprint.applied_lenses if e.effects],
             source_of_truth=truth,
             consistency_rules=consistency_rules,
-            manifest_components=_manifest_for_components(
-                [canonical_component_id(c.component) for c in sec.components],
-                template_id,
+            component_cards=_component_cards_for_components(
+                [c.component_id for c in writer_comps],
             ),
             template_id=template_id,
         )
