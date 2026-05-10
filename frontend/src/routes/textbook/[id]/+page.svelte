@@ -97,15 +97,16 @@
 	const weakSections = $derived(buildWeakSectionSummaries(legacyDocument, sectionTitleMap));
 	const canExportPdf = $derived(detail?.status === 'completed' && !!document && !isPrintMode);
 	const printReady = $derived(
-		!!document &&
-			!loading &&
-			detail?.status === 'completed' &&
-			(sectionSlots.length === 0 || sectionSlots.every((slot) => slot.status === 'ready'))
+		v3Document
+			? !!document && !loading
+			: !!document &&
+					!loading &&
+					detail?.status === 'completed' &&
+					(sectionSlots.length === 0 || sectionSlots.every((slot) => slot.status === 'ready'))
 	);
 
 	// [TEST] print-debug — remove after diagnosis
 	$effect(() => {
-		if (!isPrintMode) return;
 		console.log('%c[print-debug]', 'color: #f59e0b; font-weight: bold;', {
 			hasDocument: !!document,
 			loading,
