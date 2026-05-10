@@ -28,7 +28,9 @@ def test_explanation_block_labels_emphasis_as_required() -> None:
     output = format_component_contract_for_writer(card, "teach photosynthesis")
 
     assert "emphasis" in output
-    emphasis_line = next(l for l in output.splitlines() if "emphasis [string[]" in l)
+    emphasis_line = next(
+        line for line in output.splitlines() if "emphasis [string[]" in line
+    )
     assert "required" in emphasis_line
 
 
