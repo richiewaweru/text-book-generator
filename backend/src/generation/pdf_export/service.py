@@ -205,7 +205,7 @@ async def export_v3_studio_pdf(
     settings: Settings,
     request_id: str | None = None,
 ) -> PDFExportResult:
-    """PDF export for v3 Studio: Playwright renders `/textbook/{generation_id}` (V3-aware print path)."""
+    """PDF export for v3 Studio: Playwright renders the dedicated SSR print route at `/studio/print/{generation_id}`."""
     generation = Generation(
         id=generation_id,
         user_id=user_id,
@@ -234,7 +234,7 @@ async def export_v3_studio_pdf(
         request=request,
         settings=settings,
         request_id=request_id,
-        render_path=f"/textbook/{generation_id}",
+        render_path=f"/studio/print/{generation_id}",
     )
 
 
