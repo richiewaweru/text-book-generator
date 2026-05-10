@@ -12,13 +12,13 @@
 	import {
 		adjustBlueprint,
 		connectV3StudioGenerationStream,
-		downloadV3GenerationPdf,
 		extractSignals,
 		fetchV3Document,
 		generateBlueprint,
 		getClarifications,
 		startV3Generation
 	} from '$lib/api/v3';
+	import { downloadGenerationPdf } from '$lib/api/client';
 	import { isApiError } from '$lib/api/errors';
 	import { resetV3Studio, v3Studio } from '$lib/stores/v3-studio.svelte';
 	import {
@@ -377,10 +377,10 @@
 		pdfLoading = true;
 		pdfError = null;
 		try {
-			await downloadV3GenerationPdf(gid, {
+			await downloadGenerationPdf(gid, {
 				school_name: schoolName.trim(),
 				teacher_name: teacherName.trim(),
-				date: exportDate.trim() || null,
+				date: exportDate.trim() || undefined,
 				include_toc: false,
 				include_answers: includeAnswers
 			});

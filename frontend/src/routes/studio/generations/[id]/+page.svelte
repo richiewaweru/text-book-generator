@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 
-	import { downloadV3GenerationPdf, fetchV3Document, getV3GenerationDetail } from '$lib/api/v3';
+	import { downloadGenerationPdf } from '$lib/api/client';
+	import { fetchV3Document, getV3GenerationDetail } from '$lib/api/v3';
 	import { coerceV3DocumentToPack } from '$lib/studio/v3-document';
 	import { getBookletExportPolicy, isBookletStatus } from '$lib/studio/v3-booklet';
 	import V3BookletPackView from '$lib/components/studio/V3BookletPackView.svelte';
@@ -72,10 +73,10 @@
 		pdfLoading = true;
 		pdfError = null;
 		try {
-			await downloadV3GenerationPdf(generationId, {
+			await downloadGenerationPdf(generationId, {
 				school_name: schoolName.trim(),
 				teacher_name: teacherName.trim(),
-				date: exportDate.trim() || null,
+				date: exportDate.trim() || undefined,
 				include_toc: false,
 				include_answers: includeAnswers
 			});

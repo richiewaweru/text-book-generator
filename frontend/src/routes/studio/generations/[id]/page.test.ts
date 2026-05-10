@@ -3,14 +3,14 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { pageState, getV3GenerationDetail, fetchV3Document, downloadV3GenerationPdf } = vi.hoisted(() => ({
+const { pageState, getV3GenerationDetail, fetchV3Document, downloadGenerationPdf } = vi.hoisted(() => ({
 	pageState: {
 		params: { id: 'gen-123' },
 		url: new URL('http://localhost/studio/generations/gen-123')
 	},
 	getV3GenerationDetail: vi.fn(),
 	fetchV3Document: vi.fn(),
-	downloadV3GenerationPdf: vi.fn()
+	downloadGenerationPdf: vi.fn()
 }));
 
 vi.mock('$app/state', () => ({
@@ -19,8 +19,11 @@ vi.mock('$app/state', () => ({
 
 vi.mock('$lib/api/v3', () => ({
 	getV3GenerationDetail,
-	fetchV3Document,
-	downloadV3GenerationPdf
+	fetchV3Document
+}));
+
+vi.mock('$lib/api/client', () => ({
+	downloadGenerationPdf
 }));
 
 vi.mock('$lib/components/studio/V3BookletPackView.svelte', async () => ({
@@ -33,7 +36,7 @@ describe('completed V3 generation page', () => {
 	beforeEach(() => {
 		getV3GenerationDetail.mockReset();
 		fetchV3Document.mockReset();
-		downloadV3GenerationPdf.mockReset();
+		downloadGenerationPdf.mockReset();
 
 		getV3GenerationDetail.mockResolvedValue({
 			id: 'gen-123',
