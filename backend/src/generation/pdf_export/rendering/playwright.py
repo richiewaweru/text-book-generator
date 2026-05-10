@@ -31,7 +31,7 @@ async def render_generation_pdf(
                 page = await browser.new_page()
                 await page.goto(
                     render_url,
-                    wait_until="networkidle",
+                    wait_until="domcontentloaded",
                     timeout=config.playwright_timeout_ms,
                 )
                 await page.wait_for_selector(
