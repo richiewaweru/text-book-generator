@@ -103,6 +103,21 @@
 			(sectionSlots.length === 0 || sectionSlots.every((slot) => slot.status === 'ready'))
 	);
 
+	// [TEST] print-debug — remove after diagnosis
+	$effect(() => {
+		if (!isPrintMode) return;
+		console.log('%c[print-debug]', 'color: #f59e0b; font-weight: bold;', {
+			hasDocument: !!document,
+			loading,
+			detailStatus: detail?.status ?? 'null',
+			isV3: !!v3Document,
+			sectionSlotsLength: sectionSlots.length,
+			slotsAllReady: sectionSlots.every((slot) => slot.status === 'ready'),
+			printReady,
+			generationId,
+		});
+	});
+
 	function isV3BookletDocument(
 		value: GenerationDocumentResponse | null
 	): value is V3BookletDocumentResponse {
