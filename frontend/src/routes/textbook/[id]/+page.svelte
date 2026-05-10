@@ -95,7 +95,11 @@
 	);
 	const sectionTitleMap = $derived(buildSectionTitleMap(legacyDocument));
 	const weakSections = $derived(buildWeakSectionSummaries(legacyDocument, sectionTitleMap));
-	const canExportPdf = $derived(detail?.status === 'completed' && !!document && !isPrintMode);
+	const canExportPdf = $derived(
+		!!document &&
+			!isPrintMode &&
+			(v3Document ? true : detail?.status === 'completed')
+	);
 	const printReady = $derived(
 		v3Document
 			? !!document && !loading
@@ -104,20 +108,6 @@
 					detail?.status === 'completed' &&
 					(sectionSlots.length === 0 || sectionSlots.every((slot) => slot.status === 'ready'))
 	);
-
-	// [TEST] print-debug — remove after diagnosis
-	$effect(() => {
-		console.log('%c[print-debug]', 'color: #f59e0b; font-weight: bold;', {
-			hasDocument: !!document,
-			loading,
-			detailStatus: detail?.status ?? 'null',
-			isV3: !!v3Document,
-			sectionSlotsLength: sectionSlots.length,
-			slotsAllReady: sectionSlots.every((slot) => slot.status === 'ready'),
-			printReady,
-			generationId,
-		});
-	});
 
 	function isV3BookletDocument(
 		value: GenerationDocumentResponse | null

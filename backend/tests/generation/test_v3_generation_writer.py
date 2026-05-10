@@ -58,7 +58,8 @@ async def test_v3_generation_writer_persists_flat_document_json_and_report_snaps
         )
         model = await _load_generation(generation_id)
         assert model.status == "running"
-        assert model.mode == "v3"
+        # V3 writer does not set mode=v3; DB server_default is balanced
+        assert model.mode == "balanced"
         assert isinstance(model.document_json, dict)
         assert model.document_json["kind"] == "v3_booklet_pack"
         assert model.document_json["status"] == "draft_ready"

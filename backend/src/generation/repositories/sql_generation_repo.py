@@ -6,6 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from core.database.models import GenerationModel
 from generation.entities.generation import Generation
 from generation.ports.generation_repository import GenerationRepository
+from pipeline.types.requests import GenerationMode
+
+_ALLOWED_GENERATION_MODES = frozenset(m.value for m in GenerationMode)
 
 
 class SqlGenerationRepository(GenerationRepository):
@@ -130,12 +133,14 @@ class SqlGenerationRepository(GenerationRepository):
 
     @staticmethod
     def _to_entity(model: GenerationModel) -> Generation:
+        _raw_mode = model.mode or GenerationMode.BALANCED.value
+        _mode = _raw_mode if _raw_mode in _ALLOWED_GENERATION_MODES else GenerationMode.BALANCED.value
         return Generation(
             id=model.id,
             user_id=model.user_id,
             subject=model.subject,
             context=model.context or "",
-            mode=model.mode or "balanced",
+            mode=_mode,
             status=model.status,
             document_path=model.document_path,
             error=model.error,

@@ -94,7 +94,6 @@ class V3GenerationWriter:
                     user_id=user_id,
                     subject=subject,
                     context=context,
-                    mode="v3",
                     status="running",
                     requested_template_id=template_id,
                     resolved_template_id=template_id,
@@ -109,7 +108,6 @@ class V3GenerationWriter:
                 model.user_id = user_id
                 model.subject = subject
                 model.context = context
-                model.mode = "v3"
                 model.status = "running"
                 model.requested_template_id = template_id
                 model.resolved_template_id = template_id
