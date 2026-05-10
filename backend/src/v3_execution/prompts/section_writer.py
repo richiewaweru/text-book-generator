@@ -8,6 +8,33 @@ from v3_execution.prompts.formatting import (
 from v3_execution.models import SectionWriterWorkOrder
 
 
+def _format_schema_shape(shape: dict) -> str:
+    """Render schema shape dict from get_component_schema_shape for the writer prompt."""
+    lines: list[str] = ["SCHEMA SHAPE — fill this exactly:"]
+    for p in shape.get("properties", []):
+        name = p.get("name", "")
+        typ = p.get("type", "object")
+        req_lbl = "required" if p.get("required") else "optional"
+        line = f"  {name} [{typ}, {req_lbl}]"
+        enum = p.get("enum")
+        if enum:
+            line += " — must be one of: " + " | ".join(str(e) for e in enum)
+        lines.append(line)
+        nested = p.get("nested")
+        if nested:
+            lines.append("    each item:")
+            for n in nested:
+                nn = n.get("name", "")
+                nt = n.get("type", "object")
+                nr = "required" if n.get("required") else "optional"
+                nline = f"      {nn} [{nt}, {nr}]"
+                ne = n.get("enum")
+                if ne:
+                    nline += " — must be one of: " + " | ".join(str(x) for x in ne)
+                lines.append(nline)
+    return "\n".join(lines)
+
+
 def format_formatting_policy_legend(policy: dict) -> str:
     """
     Emit the format type vocabulary once at the top of the prompt.
@@ -25,6 +52,8 @@ def format_component_contract_for_writer(card: dict, content_intent: str) -> str
     """
     Format a single component card into a compact writer-facing contract block.
     """
+    from pipeline.contracts import get_component_schema_shape
+
     cid = card.get("component_id", "")
     field = card.get("section_field", "")
     role = card.get("role", "")
@@ -66,6 +95,10 @@ def format_component_contract_for_writer(card: dict, content_intent: str) -> str
         ex = examples[0]
         lines.append("Example output:")
         lines.append(f"  {_json.dumps(ex, ensure_ascii=False)}")
+
+    shape = get_component_schema_shape(cid)
+    if shape:
+        lines.append(_format_schema_shape(shape))
 
     return "\n".join(lines)
 

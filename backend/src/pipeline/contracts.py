@@ -163,6 +163,144 @@ def get_component_card(component_id: str) -> dict | None:
     return _load_lectio_content_contract().get("component_cards", {}).get(component_id)
 
 
+def get_component_schema_shape(component_id: str) -> dict | None:
+    """
+    Resolve the schema shape for a component from section-content-schema.json.
+
+    Returns a dict with ``definition`` (definition name) and ``properties`` (list of
+    property descriptors) for writer prompts. Does not replace runtime validation.
+
+    Returns None if the card is missing, ``schema_summary.$ref`` is absent, or
+    resolution fails. Never raises.
+    """
+    try:
+        card = get_component_card(component_id)
+        if not card:
+            return None
+        ref = card.get("schema_summary", {}).get("$ref")
+        if not isinstance(ref, str) or not ref:
+            return None
+        def_name = ref.split("/")[-1]
+        schema = get_section_content_schema()
+        defn = schema.get("definitions", {}).get(def_name)
+        if not isinstance(defn, dict):
+            return None
+        props_raw = defn.get("properties")
+        if not isinstance(props_raw, dict):
+            return None
+        required_fields = set(defn.get("required", []))
+        properties: list[dict] = []
+        for prop_name, prop_schema in props_raw.items():
+            if not isinstance(prop_schema, dict):
+                continue
+            properties.append(
+                _schema_shape_property(
+                    schema,
+                    prop_name,
+                    prop_schema,
+                    prop_name in required_fields,
+                    expand_array_items=True,
+                )
+            )
+        return {"definition": def_name, "properties": properties}
+    except Exception:
+        return None
+
+
+def _schema_shape_property(
+    schema: dict,
+    name: str,
+    prop_schema: dict,
+    required: bool,
+    *,
+    expand_array_items: bool,
+) -> dict:
+    typ, enum_vals, nested = _describe_schema_property_shape(
+        schema, prop_schema, expand_array_items=expand_array_items
+    )
+    return {
+        "name": name,
+        "type": typ,
+        "required": required,
+        "enum": enum_vals,
+        "nested": nested,
+    }
+
+
+def _describe_schema_property_shape(
+    schema: dict,
+    prop_schema: dict,
+    *,
+    expand_array_items: bool,
+) -> tuple[str, list[str] | None, list[dict] | None]:
+    """Return (display_type, enum_or_none, nested_property_dicts_or_none)."""
+    ref = prop_schema.get("$ref")
+    if isinstance(ref, str):
+        resolved = _resolve_json_pointer(schema, ref)
+        if not isinstance(resolved, dict):
+            return ("object", None, None)
+        rt = resolved.get("type")
+        if rt == "string":
+            ev = list(resolved["enum"]) if isinstance(resolved.get("enum"), list) else None
+            return ("string", ev, None)
+        if rt in ("integer", "number", "boolean"):
+            return (str(rt), None, None)
+        if rt == "array":
+            return ("array", None, None)
+        if rt == "object":
+            return ("object", None, None)
+        return (str(rt), None, None) if isinstance(rt, str) else ("object", None, None)
+
+    ptype = prop_schema.get("type")
+    if ptype == "string":
+        ev = list(prop_schema["enum"]) if isinstance(prop_schema.get("enum"), list) else None
+        return ("string", ev, None)
+    if ptype in ("number", "integer", "boolean"):
+        return (str(ptype), None, None)
+    if ptype == "array":
+        items = prop_schema.get("items")
+        if not isinstance(items, dict):
+            return ("array", None, None)
+        if items.get("type") == "string":
+            return ("string[]", None, None)
+        it = items.get("type")
+        if it in ("number", "integer", "boolean"):
+            return (f"{it}[]", None, None)
+        iref = items.get("$ref")
+        if isinstance(iref, str) and expand_array_items:
+            item_def = _resolve_json_pointer(schema, iref)
+            nested: list[dict] | None = None
+            if isinstance(item_def, dict) and item_def.get("type") == "object":
+                nested_req = set(item_def.get("required", []))
+                nested_list: list[dict] = []
+                nprops = item_def.get("properties")
+                if isinstance(nprops, dict):
+                    for n_name, n_sch in nprops.items():
+                        if not isinstance(n_sch, dict):
+                            continue
+                        nested_list.append(
+                            _schema_shape_property(
+                                schema,
+                                n_name,
+                                n_sch,
+                                n_name in nested_req,
+                                expand_array_items=False,
+                            )
+                        )
+                nested = nested_list
+            return ("array", None, nested)
+        return ("array", None, None)
+    if ptype == "object":
+        return ("object", None, None)
+
+    if "items" in prop_schema and isinstance(prop_schema.get("items"), dict):
+        merged = dict(prop_schema)
+        merged["type"] = "array"
+        return _describe_schema_property_shape(schema, merged, expand_array_items=expand_array_items)
+
+    return ("object", None, None)
+
+
 def get_planner_index() -> dict:
     """
     Return the planner_index from lectio-content-contract.json.
