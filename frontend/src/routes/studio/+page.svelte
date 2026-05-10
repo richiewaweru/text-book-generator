@@ -40,6 +40,11 @@
 	let pdfLoading = $state(false);
 	let pdfError = $state<string | null>(null);
 	let pdfConfirming = $state(false);
+	let pdfOpen = $state(false);
+	let schoolName = $state('');
+	let teacherName = $state('');
+	let exportDate = $state('');
+	let includeAnswers = $state(true);
 	const currentExportPolicy = $derived(getBookletExportPolicy(v3Studio.bookletStatus));
 
 	function friendly(err: unknown): string {
@@ -365,15 +370,21 @@
 			pdfConfirming = false;
 			if (!proceed) return;
 		}
+		if (!schoolName.trim() || !teacherName.trim()) {
+			pdfError = 'School name and teacher name are required.';
+			return;
+		}
 		pdfLoading = true;
 		pdfError = null;
 		try {
 			await downloadV3GenerationPdf(gid, {
-				school_name: '-',
-				teacher_name: '-',
+				school_name: schoolName.trim(),
+				teacher_name: teacherName.trim(),
+				date: exportDate.trim() || null,
 				include_toc: false,
-				include_answers: true
+				include_answers: includeAnswers
 			});
+			pdfOpen = false;
 		} catch (err) {
 			pdfError = friendly(err);
 		} finally {
@@ -408,19 +419,63 @@
 		<V3BlueprintPreview blueprint={v3Studio.blueprint} onApprove={handleBlueprintApproved} onAdjust={handleBlueprintAdjust} />
 	{:else if v3Studio.stage === 'generating' || v3Studio.stage === 'finalising' || v3Studio.stage === 'complete'}
 		{#if v3Studio.activePack}
-			<div class="mx-auto flex max-w-4xl justify-end gap-3 px-4 pt-4">
-				<button
-					type="button"
-					class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
-					onclick={handleDownloadPdf}
-					disabled={pdfLoading || !currentExportPolicy.enabled}
-				>
-					{pdfLoading ? 'Generating PDF...' : currentExportPolicy.label}
-				</button>
+			<div class="mx-auto max-w-4xl px-4 pt-4">
+				<div class="flex justify-end">
+					<button
+						type="button"
+						class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+						onclick={() => (pdfOpen = !pdfOpen)}
+						disabled={!currentExportPolicy.enabled}
+					>
+						{currentExportPolicy.label}
+					</button>
+				</div>
+				{#if pdfOpen}
+					<div class="mt-3 rounded-lg border border-border/60 bg-card p-4 space-y-3">
+						<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+							<label class="flex flex-col gap-1 text-sm">
+								School name
+								<input
+									bind:value={schoolName}
+									placeholder="Springfield High"
+									class="rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+								/>
+							</label>
+							<label class="flex flex-col gap-1 text-sm">
+								Teacher name
+								<input
+									bind:value={teacherName}
+									placeholder="Ms. Johnson"
+									class="rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+								/>
+							</label>
+							<label class="flex flex-col gap-1 text-sm">
+								Date (optional)
+								<input
+									bind:value={exportDate}
+									type="date"
+									class="rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+								/>
+							</label>
+						</div>
+						<label class="flex items-center gap-2 text-sm">
+							<input bind:checked={includeAnswers} type="checkbox" />
+							Include answers
+						</label>
+						{#if pdfError}
+							<p class="text-sm text-destructive" role="alert">{pdfError}</p>
+						{/if}
+						<button
+							type="button"
+							class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+							onclick={handleDownloadPdf}
+							disabled={pdfLoading || !schoolName.trim() || !teacherName.trim()}
+						>
+							{pdfLoading ? 'Generating PDF...' : 'Download PDF'}
+						</button>
+					</div>
+				{/if}
 			</div>
-		{/if}
-		{#if pdfError}
-			<p class="mx-auto max-w-3xl px-4 pt-2 text-center text-sm text-destructive" role="alert">{pdfError}</p>
 		{/if}
 		{#if v3Studio.coherenceHint && v3Studio.stage === 'finalising'}
 			<p class="mx-auto max-w-3xl px-4 pt-6 text-center text-sm text-muted-foreground">{v3Studio.coherenceHint}</p>

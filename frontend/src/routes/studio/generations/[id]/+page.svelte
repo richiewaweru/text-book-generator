@@ -16,6 +16,11 @@
 	let pack = $state<V3DraftPack | null>(null);
 	let pdfLoading = $state(false);
 	let pdfError = $state<string | null>(null);
+	let pdfOpen = $state(false);
+	let schoolName = $state('');
+	let teacherName = $state('');
+	let exportDate = $state('');
+	let includeAnswers = $state(true);
 
 	const resolvedStatus = $derived.by<BookletStatus>(() => {
 		if (pack?.status) return pack.status;
@@ -60,15 +65,21 @@
 			pdfError = 'PDF export is unavailable for this booklet status.';
 			return;
 		}
+		if (!schoolName.trim() || !teacherName.trim()) {
+			pdfError = 'School name and teacher name are required.';
+			return;
+		}
 		pdfLoading = true;
 		pdfError = null;
 		try {
 			await downloadV3GenerationPdf(generationId, {
-				school_name: '-',
-				teacher_name: '-',
+				school_name: schoolName.trim(),
+				teacher_name: teacherName.trim(),
+				date: exportDate.trim() || null,
 				include_toc: false,
-				include_answers: true
+				include_answers: includeAnswers
 			});
+			pdfOpen = false;
 		} catch (err) {
 			pdfError = err instanceof Error ? err.message : 'Failed to export PDF.';
 		} finally {
@@ -92,26 +103,70 @@
 	{:else if loadError}
 		<p class="text-sm text-destructive" role="alert">{loadError}</p>
 	{:else if pack}
-		<div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-card p-4">
-			<div>
-				<p class="text-xs uppercase tracking-wide text-muted-foreground">V3 generation</p>
-				<h1 class="text-lg font-semibold">{detail?.title ?? detail?.subject ?? generationId}</h1>
-				<p class="text-sm text-muted-foreground">
-					Status: {pack.status} - Sections: {pack.sections.length}
-				</p>
+		<div class="mb-4 rounded-lg border border-border/60 bg-card p-4">
+			<div class="flex flex-wrap items-center justify-between gap-3">
+				<div>
+					<p class="text-xs uppercase tracking-wide text-muted-foreground">V3 generation</p>
+					<h1 class="text-lg font-semibold">{detail?.title ?? detail?.subject ?? generationId}</h1>
+					<p class="text-sm text-muted-foreground">
+						Status: {pack.status} - Sections: {pack.sections.length}
+					</p>
+				</div>
+				<button
+					type="button"
+					class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+					onclick={() => (pdfOpen = !pdfOpen)}
+					disabled={!exportPolicy.enabled}
+				>
+					{exportPolicy.label}
+				</button>
 			</div>
-			<button
-				type="button"
-				class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
-				onclick={handleDownloadPdf}
-				disabled={pdfLoading || !exportPolicy.enabled}
-			>
-				{pdfLoading ? 'Generating PDF...' : exportPolicy.label}
-			</button>
+			{#if pdfOpen}
+				<div class="mt-3 rounded-lg border border-border/60 bg-background/50 p-4 space-y-3">
+					<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+						<label class="flex flex-col gap-1 text-sm">
+							School name
+							<input
+								bind:value={schoolName}
+								placeholder="Springfield High"
+								class="rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+							/>
+						</label>
+						<label class="flex flex-col gap-1 text-sm">
+							Teacher name
+							<input
+								bind:value={teacherName}
+								placeholder="Ms. Johnson"
+								class="rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+							/>
+						</label>
+						<label class="flex flex-col gap-1 text-sm">
+							Date (optional)
+							<input
+								bind:value={exportDate}
+								type="date"
+								class="rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+							/>
+						</label>
+					</div>
+					<label class="flex items-center gap-2 text-sm">
+						<input bind:checked={includeAnswers} type="checkbox" />
+						Include answers
+					</label>
+					{#if pdfError}
+						<p class="text-sm text-destructive" role="alert">{pdfError}</p>
+					{/if}
+					<button
+						type="button"
+						class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+						onclick={handleDownloadPdf}
+						disabled={pdfLoading || !schoolName.trim() || !teacherName.trim()}
+					>
+						{pdfLoading ? 'Generating PDF...' : 'Download PDF'}
+					</button>
+				</div>
+			{/if}
 		</div>
-		{#if pdfError}
-			<p class="mb-4 text-sm text-destructive" role="alert">{pdfError}</p>
-		{/if}
 		<V3BookletPackView pack={pack} status={pack.status} issues={pack.booklet_issues} />
 	{:else}
 		<p class="text-sm text-muted-foreground">No renderable V3 booklet was found.</p>
