@@ -1,39 +1,16 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { onMount } from 'svelte';
 	import { providePrintMode } from 'lectio';
 	import V3Canvas from '$lib/components/studio/V3Canvas.svelte';
-	import { apiFetch } from '$lib/api/client';
-	import { ensureOk } from '$lib/api/errors';
-	import { mapPackSectionsToCanvas } from '$lib/studio/v3-print-canvas';
-	import type { CanvasSection } from '$lib/types/v3';
+	import type { PageData } from './$types';
 
-	const generationId = $derived(page.params.id ?? '');
+	let { data }: { data: PageData } = $props();
+
 	const isPrintMode = $derived(page.url.searchParams.get('print') === 'true');
 	providePrintMode(() => isPrintMode);
-	let canvas = $state<CanvasSection[]>([]);
-let templateId = $state('guided-concept-path');
-	let complete = $state(false);
-	let loadError = $state<string | null>(null);
 
-	onMount(async () => {
-		if (!generationId) return;
-		try {
-			const res = await apiFetch(
-				`/api/v1/v3/generations/${encodeURIComponent(generationId)}/document`
-			);
-			await ensureOk(res, 'Document unavailable for print.');
-			const data = (await res.json()) as { sections?: unknown[]; template_id?: string };
-			canvas = Array.isArray(data.sections) ? mapPackSectionsToCanvas(data.sections) : [];
-			if (typeof data.template_id === 'string' && data.template_id) {
-				templateId = data.template_id;
-			}
-			complete = true;
-		} catch (e) {
-			loadError = e instanceof Error ? e.message : 'Failed to load print view.';
-			complete = true;
-		}
-	});
+	/** Ready on first paint — document was loaded in +page.server.ts (SSR / Playwright). */
+	const complete = true;
 </script>
 
 <svelte:head>
@@ -41,10 +18,10 @@ let templateId = $state('guided-concept-path');
 </svelte:head>
 
 <div data-generation-complete={complete ? 'true' : 'false'} class="print-canvas">
-	{#if loadError}
-		<p class="p-4 text-sm text-destructive">{loadError}</p>
+	{#if data.loadError}
+		<p class="p-4 text-sm text-destructive">{data.loadError}</p>
 	{:else}
-		<V3Canvas sections={canvas} stage="complete" {templateId} />
+		<V3Canvas sections={data.sections} stage="complete" templateId={data.templateId} />
 	{/if}
 </div>
 
