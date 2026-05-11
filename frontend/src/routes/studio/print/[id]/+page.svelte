@@ -1,4 +1,4 @@
-<!-- Step 3A: Fetch + V3PrintView JSON payload dump for PDF — no V3Canvas / Lectio. -->
+<!-- Step 4: Readable V3 print — field-safe extraction, no diagnostic wrapper in PDF. -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
@@ -16,6 +16,7 @@
 	let templateId = $state('none');
 	let loadError = $state<string | null>(null);
 	let sections = $state<CanvasSection[]>([]);
+	let subject = $state('');
 
 	onMount(async () => {
 		try {
@@ -44,11 +45,13 @@
 			const data = (await res.json()) as {
 				sections?: unknown[];
 				template_id?: string;
+				subject?: string;
 			};
 
 			const rawSections = Array.isArray(data.sections) ? data.sections : [];
 			sectionCount = rawSections.length;
 			templateId = typeof data.template_id === 'string' ? data.template_id : 'missing';
+			subject = typeof data.subject === 'string' ? data.subject.trim() : '';
 			sections = mapPackSectionsToCanvas(rawSections);
 		} catch (err) {
 			loadError = err instanceof Error ? err.message : 'Failed to load print view.';
@@ -59,23 +62,20 @@
 </script>
 
 <svelte:head>
-	<title>Studio print payload test</title>
+	<title>{subject ? `${subject} — print` : 'Lesson print'}</title>
 </svelte:head>
 
 <div
 	data-generation-complete={complete ? 'true' : 'false'}
-	data-print-route="studio-print-payload-test"
+	data-print-route="studio-print-readable"
 	data-fetch-status={fetchStatus}
 	data-section-count={sectionCount}
+	data-template-id={templateId}
 	data-generation-id={generationId}
 >
-	<h1>V3 Print Payload Test Wrapper</h1>
-	<p>Fetch status: {fetchStatus}</p>
-	<p>Section count: {sectionCount}</p>
-	<p>Template ID: {templateId}</p>
-	<p>Load error: {loadError ?? 'none'}</p>
-
-	{#if complete && !loadError}
-		<V3PrintView {sections} />
+	{#if complete && loadError}
+		<p class="p-4 text-sm text-destructive">{loadError}</p>
+	{:else if complete && !loadError}
+		<V3PrintView {sections} {subject} />
 	{/if}
 </div>

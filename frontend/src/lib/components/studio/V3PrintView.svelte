@@ -1,27 +1,36 @@
 <script lang="ts">
+	import { blocksForSection } from '$lib/studio/v3-print-fields';
 	import type { CanvasSection } from '$lib/types/v3';
 
-	let { sections }: { sections: CanvasSection[] } = $props();
+	let { sections, subject = '' }: { sections: CanvasSection[]; subject?: string } = $props();
 
-	function safeJson(value: unknown): string {
-		try {
-			return JSON.stringify(value, null, 2);
-		} catch {
-			return '[Unserializable section payload]';
-		}
-	}
+	const documentTitle = $derived(subject?.trim() || 'Lesson');
 </script>
 
 <div class="v3-print-document">
-	<h1>V3 Print Payload Test</h1>
+	<h1>{documentTitle}</h1>
 
 	{#each sections as section, index}
 		<section class="print-section">
 			<h2>{index + 1}. {section.title}</h2>
 
-			<p class="section-id">Section ID: {section.id}</p>
-
-			<pre>{safeJson(section.mergedFields)}</pre>
+			{#each blocksForSection(section) as block, bi (block.kind + '-' + bi + '-' + section.id)}
+				{#if block.kind === 'h3'}
+					<h3>{block.text}</h3>
+				{:else if block.kind === 'p'}
+					<p>{block.text}</p>
+				{:else if block.kind === 'ul'}
+					<ul class="print-list">
+						{#each block.items as item}
+							<li>{item}</li>
+						{/each}
+					</ul>
+				{:else if block.kind === 'img'}
+					<figure class="print-figure">
+						<img src={block.src} alt={block.alt} class="print-img" />
+					</figure>
+				{/if}
+			{/each}
 		</section>
 	{/each}
 </div>
@@ -47,24 +56,36 @@
 	}
 
 	h2 {
-		margin: 0 0 8px;
+		margin: 0 0 12px;
 		font-size: 20px;
 	}
 
-	.section-id {
-		margin: 0 0 12px;
-		font-size: 12px;
-		color: #555;
+	h3 {
+		margin: 16px 0 8px;
+		font-size: 16px;
+		font-weight: 600;
 	}
 
-	pre {
-		white-space: pre-wrap;
-		word-break: break-word;
-		font-size: 11px;
-		line-height: 1.4;
-		background: #f6f6f6;
-		border: 1px solid #ddd;
-		border-radius: 8px;
-		padding: 12px;
+	p {
+		margin: 0 0 10px;
+		line-height: 1.5;
+		font-size: 14px;
+	}
+
+	.print-list {
+		margin: 0 0 12px;
+		padding-left: 1.25rem;
+		line-height: 1.5;
+		font-size: 14px;
+	}
+
+	.print-figure {
+		margin: 12px 0;
+	}
+
+	.print-img {
+		max-width: 100%;
+		height: auto;
+		display: block;
 	}
 </style>
