@@ -127,6 +127,7 @@ async def test_v3_generation_writer_handles_resource_finalised_and_pdf_status() 
             generation_id,
             status="failed",
             error="Playwright timeout",
+            debug={"page_url": "https://example/print"},
         )
         model = await _load_generation(generation_id)
         assert model.status == "partial"
@@ -141,6 +142,7 @@ async def test_v3_generation_writer_handles_resource_finalised_and_pdf_status() 
         assert model.report_json["summary"]["delivered_questions"] == 1
         assert model.report_json["pdf"]["last_export_status"] == "failed"
         assert model.report_json["pdf"]["last_error"] == "Playwright timeout"
+        assert model.report_json["pdf"]["last_debug"] == {"page_url": "https://example/print"}
     finally:
         await _cleanup_generation(generation_id)
 

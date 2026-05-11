@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
@@ -13,6 +14,10 @@ logger = logging.getLogger(__name__)
 
 class PDFRenderError(RuntimeError):
     """Raised when the print route cannot be rendered to PDF."""
+
+    def __init__(self, message: str, *, debug: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.debug = debug or {}
 
 
 def _on_console(msg) -> None:
@@ -79,21 +84,32 @@ async def render_generation_pdf(
                     prefer_css_page_size=True,
                 )
             except PlaywrightTimeoutError as exc:
+                debug: dict[str, Any] = {
+                    "render_url": render_url,
+                    "page_url": page.url,
+                    "title": None,
+                    "html_sample": None,
+                }
                 try:
                     html = await page.content()
-                    title = await page.title()
+                    debug["title"] = await page.title()
+                    debug["html_sample"] = html[:4000]
                     logger.error(
                         "PDF print timed out (navigation or ready selector)",
                         extra={
                             "render_url": render_url,
                             "page_url": page.url,
-                            "title": title,
-                            "html_sample": html[:4000],
+                            "title": debug["title"],
+                            "html_sample": debug["html_sample"],
                         },
                     )
-                except Exception:
+                except Exception as capture_exc:
+                    debug["capture_error"] = str(capture_exc)[:500]
                     logger.exception("Could not capture failed print page HTML")
-                raise PDFRenderError(f"Timed out rendering print view at {render_url}") from exc
+                raise PDFRenderError(
+                    f"Timed out rendering print view at {render_url}",
+                    debug=debug,
+                ) from exc
         finally:
             await browser.close()
 

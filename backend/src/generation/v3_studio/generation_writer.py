@@ -272,6 +272,7 @@ class V3GenerationWriter:
         *,
         status: str,
         error: str | None,
+        debug: dict[str, Any] | None = None,
     ) -> None:
         async with self._session_factory() as session:
             model = await session.get(GenerationModel, generation_id)
@@ -283,6 +284,10 @@ class V3GenerationWriter:
                 pdf = {}
             pdf["last_export_status"] = status
             pdf["last_error"] = error
+            if status == "completed":
+                pdf.pop("last_debug", None)
+            elif debug is not None:
+                pdf["last_debug"] = debug
             report["pdf"] = pdf
             model.report_json = report
             await session.commit()

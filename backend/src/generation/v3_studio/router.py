@@ -28,6 +28,7 @@ from generation.v3_studio.agents import (
     get_clarifications,
 )
 from generation.pdf_export.cleanup import cleanup_files
+from generation.pdf_export.rendering.playwright import PDFRenderError
 from generation.pdf_export.service import PDFExportRequest, export_v3_studio_pdf
 from generation.v3_studio.dtos import (
     AdjustBlueprintRequest,
@@ -561,11 +562,16 @@ async def post_v3_export_pdf(
             request_id=getattr(request.state, "request_id", None),
         )
     except Exception as exc:  # noqa: BLE001
+        debug: dict[str, Any] = {}
+        if isinstance(exc, PDFRenderError):
+            debug = exc.debug
+        error_message = f"{type(exc).__name__}: {str(exc)[:300]}"
         try:
             await generation_writer.write_pdf_status(
                 generation_id,
                 status="failed",
-                error=f"{type(exc).__name__}: {str(exc)[:300]}",
+                error=error_message,
+                debug=debug,
             )
         except Exception:  # noqa: BLE001
             logger.exception(
@@ -575,7 +581,7 @@ async def post_v3_export_pdf(
         logger.exception("PDF export failed generation_id=%s", generation_id)
         raise HTTPException(
             status_code=500,
-            detail=f"{type(exc).__name__}: {str(exc)[:300]}",
+            detail={"message": error_message, "debug": debug},
         ) from exc
     try:
         await generation_writer.write_pdf_status(

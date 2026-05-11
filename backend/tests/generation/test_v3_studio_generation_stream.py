@@ -673,9 +673,11 @@ async def test_v3_pdf_export_surfaces_actionable_error_detail() -> None:
             )
 
     assert resp.status_code == 500
-    detail = resp.json()["detail"]
-    assert detail.startswith("RuntimeError:")
-    assert "playwright timed out" in detail
+    body = resp.json()["detail"]
+    assert isinstance(body, dict)
+    assert body["message"].startswith("RuntimeError:")
+    assert "playwright timed out" in body["message"]
+    assert body["debug"] == {}
 
 
 @pytest.mark.asyncio
