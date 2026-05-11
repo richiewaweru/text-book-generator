@@ -1,17 +1,21 @@
-<!-- Step 5: Optional V3Canvas print test via ?renderer=canvas-test; default V3PrintView for production PDF. -->
+<!-- V3 studio print: default Lectio template render; renderer=safe for flat debug; renderer=canvas-test for canvas diagnostics. -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { providePrintMode } from 'lectio';
+	import '$lib/styles/print.css';
 	import { buildApiUrl } from '$lib/api/client';
 	import V3Canvas from '$lib/components/studio/V3Canvas.svelte';
+	import V3LectioPrintDocumentView from '$lib/components/studio/V3LectioPrintDocumentView.svelte';
 	import V3PrintView from '$lib/components/studio/V3PrintView.svelte';
+	import { adaptV3PackToLectioDocument, type V3PackDocument } from '$lib/studio/v3-pack-to-lectio-document';
 	import { mapPackSectionsToCanvas } from '$lib/studio/v3-print-canvas';
+	import type { GenerationDocument } from '$lib/types';
 	import type { CanvasSection } from '$lib/types/v3';
 
 	const generationId = $derived(page.params.id);
 	const token = $derived(page.url.searchParams.get('token'));
-	const renderer = $derived(page.url.searchParams.get('renderer') ?? 'print-view');
+	const renderer = $derived(page.url.searchParams.get('renderer') ?? 'lectio');
 	const debugPrint = $derived(page.url.searchParams.get('debugPrint') === 'true');
 	const showPrintDiagnostics = $derived(debugPrint || renderer === 'canvas-test');
 
@@ -22,8 +26,15 @@
 	let sectionCount = $state(0);
 	let templateId = $state('none');
 	let loadError = $state<string | null>(null);
-	let sections = $state<CanvasSection[]>([]);
+	let rawSections = $state<unknown[]>([]);
+	let lectioDocument = $state<GenerationDocument | null>(null);
 	let subject = $state('');
+
+	const sections = $derived<CanvasSection[]>(
+		renderer === 'safe' || renderer === 'canvas-test'
+			? mapPackSectionsToCanvas(rawSections)
+			: []
+	);
 
 	const templateIdForCanvas = $derived(
 		templateId && templateId !== 'missing' && templateId !== 'none' ? templateId : 'guided-concept-path'
@@ -53,17 +64,19 @@
 				return;
 			}
 
-			const data = (await res.json()) as {
-				sections?: unknown[];
-				template_id?: string;
-				subject?: string;
-			};
+			const data = (await res.json()) as V3PackDocument;
 
-			const rawSections = Array.isArray(data.sections) ? data.sections : [];
-			sectionCount = rawSections.length;
+			const list = Array.isArray(data.sections) ? data.sections : [];
+			rawSections = list;
+			sectionCount = list.length;
 			templateId = typeof data.template_id === 'string' ? data.template_id : 'missing';
 			subject = typeof data.subject === 'string' ? data.subject.trim() : '';
-			sections = mapPackSectionsToCanvas(rawSections);
+
+			try {
+				lectioDocument = adaptV3PackToLectioDocument(data, { routeGenerationId: generationId });
+			} catch {
+				lectioDocument = null;
+			}
 		} catch (err) {
 			loadError = err instanceof Error ? err.message : 'Failed to load print view.';
 		} finally {
@@ -100,8 +113,12 @@
 
 		{#if renderer === 'canvas-test'}
 			<V3Canvas {sections} stage="complete" templateId={templateIdForCanvas} />
-		{:else}
+		{:else if renderer === 'safe'}
 			<V3PrintView {sections} {subject} />
+		{:else if lectioDocument}
+			<V3LectioPrintDocumentView document={lectioDocument} />
+		{:else}
+			<p class="print-error">Unable to adapt V3 pack for print.</p>
 		{/if}
 	{/if}
 </div>

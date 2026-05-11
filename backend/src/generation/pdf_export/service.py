@@ -4,6 +4,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +23,7 @@ from generation.pdf_export.components.cover import clean_cover_title, generate_c
 from generation.pdf_export.components.toc import generate_toc_pdf
 from generation.pdf_export.config import PDFExportConfig
 from generation.pdf_export.rendering.playwright import render_generation_pdf
+from generation.pdf_export.v3_pack_pipeline_document import build_pipeline_document_for_v3_pdf
 from pipeline.api import PipelineDocument
 
 logger = logging.getLogger(__name__)
@@ -200,6 +202,7 @@ async def export_v3_studio_pdf(
     title: str,
     subject: str,
     template_id: str,
+    document_json: dict[str, Any],
     auth_token: str,
     request: PDFExportRequest,
     settings: Settings,
@@ -216,16 +219,12 @@ async def export_v3_studio_pdf(
         requested_template_id=template_id,
         requested_preset_id="blue-classroom",
     )
-    document = PipelineDocument(
+    document = build_pipeline_document_for_v3_pdf(
         generation_id=generation_id,
-        subject=title or "Lesson",
-        context=subject or "",
-        mode=GenerationMode.BALANCED,
+        title=title or "Lesson",
+        subject=subject or "",
         template_id=template_id,
-        preset_id="blue-classroom",
-        status="completed",
-        section_manifest=[],
-        sections=[],
+        document_json=document_json,
     )
     return await export_generation_pdf(
         generation=generation,

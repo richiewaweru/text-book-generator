@@ -556,6 +556,7 @@ async def post_v3_export_pdf(
             title=model.context or model.subject or "Lesson",
             subject=model.subject or "",
             template_id=template_id,
+            document_json=document_json,
             auth_token=auth_token,
             request=pdf_request,
             settings=get_settings(),
