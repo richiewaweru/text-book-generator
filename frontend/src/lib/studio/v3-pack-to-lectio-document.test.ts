@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { adaptV3PackToLectioDocument, type V3PackDocument } from './v3-pack-to-lectio-document';
+import {
+	adaptV3PackToLectioDocument,
+	adaptV3PackToLectioDocumentWithDiagnostics,
+	type V3PackDocument
+} from './v3-pack-to-lectio-document';
 
 describe('adaptV3PackToLectioDocument', () => {
 	it('maps a minimal pack and manifest order', () => {
@@ -69,6 +73,31 @@ describe('adaptV3PackToLectioDocument', () => {
 			'completed'
 		);
 		expect(adaptV3PackToLectioDocument({ sections: [], status: 'unknown' }).status).toBe('partial');
+		expect(adaptV3PackToLectioDocument({ sections: [], status: 'streaming_preview' }).status).toBe(
+			'partial'
+		);
+	});
+
+	it('returns adapter diagnostics', () => {
+		const pack: V3PackDocument = {
+			sections: [{ hook: { x: 1 } }, { section_id: 'b', header: { title: 'T', subject: 'S', grade_band: 'primary' } }]
+		};
+		const { document, diagnostic } = adaptV3PackToLectioDocumentWithDiagnostics(pack);
+		expect(document.sections).toHaveLength(2);
+		expect(diagnostic.section_count).toBe(2);
+		expect(diagnostic.missing_section_ids).toBe(1);
+		expect(diagnostic.normalized_header_count).toBe(1);
+		expect(diagnostic.fields_by_section[0].fields).toContain('hook');
+	});
+
+	it('preserves pack-level answer_key without touching sections', () => {
+		const pack: V3PackDocument = {
+			sections: [{ section_id: 's1', definition_family: { family_title: 'F', definitions: [] } }],
+			answer_key: { entries: [{ question_id: 'q1', student_answer: 'A' }] }
+		};
+		const doc = adaptV3PackToLectioDocument(pack);
+		const s = doc.sections[0] as unknown as Record<string, unknown>;
+		expect(s.definition_family).toBeTruthy();
 	});
 
 	it('preserves extra section fields', () => {

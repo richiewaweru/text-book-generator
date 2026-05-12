@@ -202,3 +202,5 @@ export type V3Stage =
 	| 'generating'
 	| 'finalising'
 	| 'complete';
+
+export type { V3PackAdapterDiagnostic, V3PackDocument } from '$lib/studio/v3-pack-to-lectio-document';

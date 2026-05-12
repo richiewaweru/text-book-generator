@@ -14,6 +14,7 @@ from generation.entities.generation import Generation
 from pipeline.types.requests import GenerationMode
 from generation.pdf_export.cleanup import cleanup_files, ensure_temp_dir
 from generation.pdf_export.components.answers import generate_answer_key_pdf
+from generation.pdf_export.components.answers_v3 import generate_v3_answer_key_pdf
 from generation.pdf_export.components.assembly import (
     add_metadata,
     add_page_numbers,
@@ -47,6 +48,7 @@ class PDFExportResult(BaseModel):
     page_count: int
     generation_time_ms: int
     cleanup_paths: list[Path]
+    print_page_debug: dict[str, Any] | None = None
 
 
 async def export_generation_pdf(
@@ -58,6 +60,7 @@ async def export_generation_pdf(
     settings: Settings,
     request_id: str | None = None,
     render_path: str | None = None,
+    v3_answer_key: dict[str, Any] | None = None,
 ) -> PDFExportResult:
     config = PDFExportConfig(settings)
     if not config.enabled:
@@ -67,6 +70,7 @@ async def export_generation_pdf(
     temp_dir = ensure_temp_dir(config.temp_dir)
     cleanup_paths: list[Path] = []
     started = time.perf_counter()
+    print_page_debug: dict[str, Any] = {}
 
     cover_path = temp_dir / f"{generation.id}-{export_id}-cover.pdf"
     toc_path = temp_dir / f"{generation.id}-{export_id}-toc.pdf"
@@ -114,7 +118,7 @@ async def export_generation_pdf(
 
         content_started = time.perf_counter()
         _log_stage("content_rendering", "started", generation.id, request_id)
-        await render_generation_pdf(
+        _, print_page_debug = await render_generation_pdf(
             output_path=content_path,
             generation_id=generation.id,
             auth_token=auth_token,
@@ -134,10 +138,17 @@ async def export_generation_pdf(
         if request.include_answers:
             answers_started = time.perf_counter()
             _log_stage("answer_key_generation", "started", generation.id, request_id)
-            answer_pdf = generate_answer_key_pdf(
-                output_path=answers_path,
-                sections=document.sections,
-            )
+            answer_pdf = None
+            if v3_answer_key is not None:
+                answer_pdf = generate_v3_answer_key_pdf(
+                    output_path=answers_path,
+                    answer_key=v3_answer_key,
+                )
+            if answer_pdf is None:
+                answer_pdf = generate_answer_key_pdf(
+                    output_path=answers_path,
+                    sections=document.sections,
+                )
             if answer_pdf is not None:
                 cleanup_paths.append(answer_pdf)
                 source_paths.append(answer_pdf)
@@ -192,6 +203,7 @@ async def export_generation_pdf(
         page_count=page_count,
         generation_time_ms=duration_ms,
         cleanup_paths=cleanup_paths + [final_path],
+        print_page_debug=print_page_debug or None,
     )
 
 
@@ -226,6 +238,8 @@ async def export_v3_studio_pdf(
         template_id=template_id,
         document_json=document_json,
     )
+    v3_ak = document_json.get("answer_key")
+    v3_ak_dict = v3_ak if isinstance(v3_ak, dict) else None
     return await export_generation_pdf(
         generation=generation,
         document=document,
@@ -234,6 +248,7 @@ async def export_v3_studio_pdf(
         settings=settings,
         request_id=request_id,
         render_path=f"/studio/print/{generation_id}",
+        v3_answer_key=v3_ak_dict,
     )
 
 

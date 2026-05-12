@@ -36,6 +36,27 @@ def _on_request_failed(request) -> None:
     )
 
 
+_PRINT_ROOT_SNAPSHOT_JS = """
+() => {
+  const root = document.querySelector('[data-generation-complete="true"]');
+  if (!root) {
+    return { found: false };
+  }
+  return {
+    found: true,
+    renderer: root.getAttribute('data-renderer'),
+    section_count: root.getAttribute('data-section-count'),
+    template_id: root.getAttribute('data-template-id'),
+    image_count: root.getAttribute('data-image-count'),
+    images_loaded: root.getAttribute('data-images-loaded'),
+    images_failed: root.getAttribute('data-images-failed'),
+    images_timed_out: root.getAttribute('data-images-timed-out'),
+    failed_image_sources: root.getAttribute('data-failed-image-sources')
+  };
+}
+"""
+
+
 async def render_generation_pdf(
     *,
     output_path: Path,
@@ -43,10 +64,12 @@ async def render_generation_pdf(
     auth_token: str,
     config: PDFExportConfig,
     render_path: str | None = None,
-) -> Path:
+) -> tuple[Path, dict[str, Any]]:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     path_part = render_path if render_path is not None else f"/textbook/{generation_id}"
     render_url = f"{config.render_base_url}{path_part}?print=true&token={auth_token}"
+
+    print_snapshot: dict[str, Any] = {}
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=True)
@@ -77,6 +100,12 @@ async def render_generation_pdf(
                     "PDF print ready selector found",
                     extra={"render_url": render_url, "page_url": page.url},
                 )
+                try:
+                    evaluated = await page.evaluate(_PRINT_ROOT_SNAPSHOT_JS)
+                    if isinstance(evaluated, dict):
+                        print_snapshot = evaluated
+                except Exception:
+                    logger.exception("PDF print page evaluate failed")
                 await page.pdf(
                     path=str(output_path),
                     format="A4",
@@ -113,4 +142,4 @@ async def render_generation_pdf(
         finally:
             await browser.close()
 
-    return output_path
+    return output_path, print_snapshot

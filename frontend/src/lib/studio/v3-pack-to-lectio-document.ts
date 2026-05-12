@@ -41,12 +41,17 @@ function normalizeGradeBand(value: unknown): 'primary' | 'secondary' | 'advanced
 	return 'secondary';
 }
 
+/**
+ * Map V3 booklet status strings onto legacy `GenerationDocument.status`.
+ * Unknown values default to `partial` so draft/streaming packs stay printable.
+ */
 function mapPackStatus(status: string | undefined): GenerationDocument['status'] {
 	if (status === 'failed_unusable') return 'failed';
 	if (
 		status === 'draft_ready' ||
 		status === 'draft_with_warnings' ||
-		status === 'draft_needs_review'
+		status === 'draft_needs_review' ||
+		status === 'streaming_preview'
 	) {
 		return 'partial';
 	}
@@ -85,13 +90,11 @@ function normalizeSection(
 	} as SectionContent;
 }
 
-export function adaptV3PackToLectioDocument(
+function buildGenerationDocument(
 	pack: V3PackDocument,
-	options: AdaptV3PackOptions = {}
+	sections: SectionContent[],
+	options: AdaptV3PackOptions
 ): GenerationDocument {
-	const rawSections = Array.isArray(pack.sections) ? pack.sections.filter(isRecord) : [];
-	const sections = rawSections.map((section, index) => normalizeSection(section, index, pack));
-
 	const now = new Date().toISOString();
 	const subject =
 		safeText(pack.subject) || (sections[0]?.header && safeText(sections[0].header.subject)) || 'Lesson';
@@ -124,4 +127,55 @@ export function adaptV3PackToLectioDocument(
 	};
 
 	return normalizeDocument(doc);
+}
+
+export function adaptV3PackToLectioDocument(
+	pack: V3PackDocument,
+	options: AdaptV3PackOptions = {}
+): GenerationDocument {
+	const rawSections = Array.isArray(pack.sections) ? pack.sections.filter(isRecord) : [];
+	const sections = rawSections.map((section, index) => normalizeSection(section, index, pack));
+	return buildGenerationDocument(pack, sections, options);
+}
+
+export type V3PackAdapterDiagnostic = {
+	section_count: number;
+	normalized_header_count: number;
+	missing_section_ids: number;
+	fields_by_section: Array<{ section_id: string; fields: string[] }>;
+};
+
+function buildAdapterDiagnostic(
+	rawSections: Record<string, unknown>[],
+	normalizedSections: SectionContent[]
+): V3PackAdapterDiagnostic {
+	let missing_section_ids = 0;
+	let normalized_header_count = 0;
+	for (const raw of rawSections) {
+		if (!safeText(raw.section_id)) missing_section_ids += 1;
+		const rh = isRecord(raw.header) ? raw.header : {};
+		if (!safeText(rh.title)) normalized_header_count += 1;
+	}
+	const fields_by_section = rawSections.map((raw, index) => ({
+		section_id: normalizedSections[index]?.section_id ?? `section-${index + 1}`,
+		fields: Object.keys(raw)
+	}));
+	return {
+		section_count: rawSections.length,
+		normalized_header_count,
+		missing_section_ids,
+		fields_by_section
+	};
+}
+
+export function adaptV3PackToLectioDocumentWithDiagnostics(
+	pack: V3PackDocument,
+	options: AdaptV3PackOptions = {}
+): { document: GenerationDocument; diagnostic: V3PackAdapterDiagnostic } {
+	const rawSections = Array.isArray(pack.sections) ? pack.sections.filter(isRecord) : [];
+	const sections = rawSections.map((section, index) => normalizeSection(section, index, pack));
+	return {
+		document: buildGenerationDocument(pack, sections, options),
+		diagnostic: buildAdapterDiagnostic(rawSections, sections)
+	};
 }

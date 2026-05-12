@@ -1,6 +1,10 @@
-<!-- V3 studio print: default Lectio template render; renderer=safe for flat debug; renderer=canvas-test for canvas diagnostics. -->
+<!--
+	Production V3 PDF: default renderer is Lectio (omit ?renderer or use renderer=lectio).
+	Debug only: renderer=safe (flat V3PrintView), renderer=canvas-test (V3Canvas + diagnostics).
+	Diagnostics: ?debugPrint=true or renderer=canvas-test — never in normal student PDFs.
+-->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { providePrintMode } from 'lectio';
 	import '$lib/styles/print.css';
@@ -8,7 +12,13 @@
 	import V3Canvas from '$lib/components/studio/V3Canvas.svelte';
 	import V3LectioPrintDocumentView from '$lib/components/studio/V3LectioPrintDocumentView.svelte';
 	import V3PrintView from '$lib/components/studio/V3PrintView.svelte';
-	import { adaptV3PackToLectioDocument, type V3PackDocument } from '$lib/studio/v3-pack-to-lectio-document';
+	import {
+		adaptV3PackToLectioDocument,
+		adaptV3PackToLectioDocumentWithDiagnostics,
+		type V3PackAdapterDiagnostic,
+		type V3PackDocument
+	} from '$lib/studio/v3-pack-to-lectio-document';
+	import { forceEagerImages, waitForPrintImages, type PrintImageWaitResult } from '$lib/studio/print-readiness';
 	import { mapPackSectionsToCanvas } from '$lib/studio/v3-print-canvas';
 	import type { GenerationDocument } from '$lib/types';
 	import type { CanvasSection } from '$lib/types/v3';
@@ -21,14 +31,17 @@
 
 	providePrintMode(() => page.url.searchParams.get('print') === 'true');
 
-	let complete = $state(false);
+	let dataReady = $state(false);
+	let captureReady = $state(false);
 	let fetchStatus = $state('not-started');
 	let sectionCount = $state(0);
 	let templateId = $state('none');
 	let loadError = $state<string | null>(null);
 	let rawSections = $state<unknown[]>([]);
 	let lectioDocument = $state<GenerationDocument | null>(null);
+	let adapterDiagnostic = $state<V3PackAdapterDiagnostic | null>(null);
 	let subject = $state('');
+	let imageDebug = $state<PrintImageWaitResult | null>(null);
 
 	const sections = $derived<CanvasSection[]>(
 		renderer === 'safe' || renderer === 'canvas-test'
@@ -44,6 +57,8 @@
 		try {
 			if (!generationId) {
 				loadError = 'Missing generation id.';
+				dataReady = true;
+				captureReady = true;
 				return;
 			}
 
@@ -61,6 +76,8 @@
 
 			if (!res.ok) {
 				loadError = `Document unavailable for print (${res.status}).`;
+				dataReady = true;
+				captureReady = true;
 				return;
 			}
 
@@ -73,14 +90,30 @@
 			subject = typeof data.subject === 'string' ? data.subject.trim() : '';
 
 			try {
-				lectioDocument = adaptV3PackToLectioDocument(data, { routeGenerationId: generationId });
+				if (debugPrint) {
+					const r = adaptV3PackToLectioDocumentWithDiagnostics(data, {
+						routeGenerationId: generationId
+					});
+					lectioDocument = r.document;
+					adapterDiagnostic = r.diagnostic;
+				} else {
+					lectioDocument = adaptV3PackToLectioDocument(data, { routeGenerationId: generationId });
+					adapterDiagnostic = null;
+				}
 			} catch {
 				lectioDocument = null;
+				adapterDiagnostic = null;
 			}
+
+			dataReady = true;
+			await tick();
+			forceEagerImages();
+			imageDebug = await waitForPrintImages({ timeoutMs: 10_000 });
+			captureReady = true;
 		} catch (err) {
 			loadError = err instanceof Error ? err.message : 'Failed to load print view.';
-		} finally {
-			complete = true;
+			dataReady = true;
+			captureReady = true;
 		}
 	});
 </script>
@@ -90,17 +123,24 @@
 </svelte:head>
 
 <div
-	data-generation-complete={complete ? 'true' : 'false'}
+	data-generation-complete={captureReady ? 'true' : 'false'}
 	data-print-route="studio-print-readable"
 	data-renderer={renderer}
 	data-fetch-status={fetchStatus}
 	data-section-count={sectionCount}
 	data-template-id={templateId}
 	data-generation-id={generationId}
+	data-image-count={imageDebug?.image_count ?? 0}
+	data-images-loaded={imageDebug?.loaded_count ?? 0}
+	data-images-failed={imageDebug?.failed_count ?? 0}
+	data-images-timed-out={imageDebug?.timed_out ? 'true' : 'false'}
+	data-failed-image-sources={imageDebug?.failed_sources?.length
+		? JSON.stringify(imageDebug.failed_sources.slice(0, 12))
+		: ''}
 >
-	{#if complete && loadError}
+	{#if dataReady && loadError}
 		<p class="print-error">{loadError}</p>
-	{:else if complete && !loadError}
+	{:else if dataReady && !loadError}
 		{#if showPrintDiagnostics}
 			<div class="print-diagnostics">
 				<p><span class="print-diagnostics-label">Renderer:</span> {renderer}</p>
@@ -108,6 +148,29 @@
 				<p><span class="print-diagnostics-label">Section count:</span> {sectionCount}</p>
 				<p><span class="print-diagnostics-label">Template ID:</span> {templateId}</p>
 				<p><span class="print-diagnostics-label">Load error:</span> {loadError ?? 'none'}</p>
+				<p>
+					<span class="print-diagnostics-label">Images:</span>
+					{imageDebug?.loaded_count ?? 0}/{imageDebug?.image_count ?? 0} loaded; failed
+					{imageDebug?.failed_count ?? 0}; timed_out={imageDebug?.timed_out ?? false}
+				</p>
+				{#if debugPrint && adapterDiagnostic}
+					<p>
+						<span class="print-diagnostics-label">Adapter missing section_id:</span>
+						{adapterDiagnostic.missing_section_ids}
+					</p>
+					<p>
+						<span class="print-diagnostics-label">Adapter synthetic titles:</span>
+						{adapterDiagnostic.normalized_header_count}
+					</p>
+					<details class="adapter-fields">
+						<summary>Fields by section (debug)</summary>
+						<ul>
+							{#each adapterDiagnostic.fields_by_section as row}
+								<li>{row.section_id}: {row.fields.join(', ')}</li>
+							{/each}
+						</ul>
+					</details>
+				{/if}
 			</div>
 		{/if}
 
@@ -146,5 +209,15 @@
 	.print-diagnostics-label {
 		font-weight: 600;
 		margin-right: 0.35rem;
+	}
+
+	.adapter-fields {
+		margin-top: 0.35rem;
+		font-size: 0.7rem;
+	}
+
+	.adapter-fields ul {
+		margin: 0.25rem 0 0 1rem;
+		padding: 0;
 	}
 </style>

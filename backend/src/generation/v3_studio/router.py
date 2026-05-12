@@ -585,10 +585,18 @@ async def post_v3_export_pdf(
             detail={"message": error_message, "debug": debug},
         ) from exc
     try:
+        ak_block = document_json.get("answer_key")
+        ak_entries = ak_block.get("entries") if isinstance(ak_block, dict) else None
+        entry_count = len(ak_entries) if isinstance(ak_entries, list) else 0
         await generation_writer.write_pdf_status(
             generation_id,
             status="completed",
             error=None,
+            debug={
+                "print_page": result.print_page_debug or {},
+                "answer_key_present": isinstance(ak_block, dict),
+                "answer_key_entry_count": entry_count,
+            },
         )
     except Exception:  # noqa: BLE001
         logger.exception(
