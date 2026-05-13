@@ -9,7 +9,9 @@ export interface BlockGenerateContextBlock {
 }
 
 export interface BlockGenerateRequest {
+	lesson_id?: string;
 	component_id: string;
+	mode?: 'fill' | 'improve' | 'custom';
 	subject: string;
 	focus: string;
 	grade_band: GradeBand;

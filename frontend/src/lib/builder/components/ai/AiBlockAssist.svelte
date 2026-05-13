@@ -10,6 +10,7 @@
 
 	let {
 		block,
+		lessonId,
 		subject,
 		gradeBand,
 		contextBlocks,
@@ -19,6 +20,7 @@
 		onBeforeGenerate
 	}: {
 		block: BlockInstance;
+		lessonId?: string;
 		subject: string;
 		gradeBand: GradeBand;
 		contextBlocks: BlockGenerateContextBlock[];
@@ -100,7 +102,9 @@
 				subject;
 			const res = await generateBlock(
 				{
+					lesson_id: lessonId,
 					component_id: block.component_id,
+					mode,
 					subject,
 					focus: focusRaw,
 					grade_band: gradeBand,

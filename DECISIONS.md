@@ -58,3 +58,17 @@
 - **Guide says:** Replace it with a narrow dot rail with active highlight and quick navigation.
 - **Chose:** Reworked `CanvasOutline` to a 44px-style dot rail with section hover titles and active state, while retaining `dragHandleZone` reorder behavior behind the compact UI.
 - **Risk:** Compact controls reduce discoverability for section drag-reorder; may need onboarding hint copy in polish phase.
+
+## Phase 4 - Block Editing and AI Assist Hardening
+
+### Decision: Bind block generation to editable lesson ownership when lesson_id is present
+- **Context:** Block AI generation endpoint accepted authenticated calls but did not verify lesson ownership when used from the builder.
+- **Guide says:** Builder AI requests should be teacher-owned and scoped to editable lessons.
+- **Chose:** Extended `/api/v1/blocks/generate` request handling to accept `lesson_id` and verify `(lesson.id, lesson.user_id)` against the current user before generation.
+- **Risk:** Legacy callers that omit `lesson_id` still bypass this ownership check by design; follow-up tightening may require phased rollout.
+
+### Decision: Preserve hidden/internal block fields during AI apply via schema-aware merge
+- **Context:** AI responses could overwrite fields that are not intended to be teacher-editable.
+- **Guide says:** AI can only write fields exposed by `getEditSchema()`; hidden/advanced fields should not be overwritten.
+- **Chose:** Added `mergeAiContentWithEditableFields(...)` in the builder to apply generated values only for non-hidden schema fields, preserving existing hidden/internal content and ignoring unknown keys.
+- **Risk:** Enforcement currently lives in frontend apply logic; server-side parity should be added when backend has direct access to the same edit-schema surface.

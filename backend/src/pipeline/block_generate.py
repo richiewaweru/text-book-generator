@@ -36,7 +36,9 @@ class ContextBlockIn(BaseModel):
 
 
 class BlockGenerateRequest(BaseModel):
+    lesson_id: str | None = None
     component_id: str
+    mode: Literal["fill", "improve", "custom"] = "fill"
     subject: str
     focus: str
     grade_band: Literal["primary", "secondary", "advanced"]

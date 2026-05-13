@@ -157,6 +157,7 @@
 			{#if editSchema && onapplyaicontent}
 				<AiBlockAssist
 					{block}
+					lessonId={document?.id}
 					subject={document?.subject ?? ''}
 					gradeBand={aiGradeBand}
 					contextBlocks={contextBlocksForAi}

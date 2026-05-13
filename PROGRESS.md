@@ -5,40 +5,56 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 
 ## Current Phase
 
-- Phase 3 - Palette, block management, and canvas polish
+- Phase 4 - Block editing and AI assist hardening
 - Repo: `C:\Projects\Textbook agent`
 - Status: completed
 
 ## Feature Checklist
 
-### Feature: Builder Palette + Canvas Polish
+### Feature: Block Editing + AI Assist Hardening
 
 **Classification**: major
-**Subsystems**: frontend
+**Subsystems**: backend + frontend
 
 ### Progress
 - [x] Understood requirements and identified scope
 - [x] Read relevant source code and project rules
-- [x] Implemented centered overlay palette with grouped search
-- [x] Implemented dot-rail section outline replacement
-- [x] Preserved/verified block composition operations in store-driven canvas
+- [x] Implemented ownership-bound AI request contract (`lesson_id`, `mode`)
+- [x] Added backend lesson ownership guard for `/api/v1/blocks/generate`
+- [x] Preserved AI snapshot + undo flow, and constrained AI apply to editable fields only
 - [x] Wrote tests for new behavior
-- [x] Ran validation (frontend)
+- [x] Ran validation (backend + frontend)
 - [x] Self-reviewed against agents/standards/review.md
-- [ ] Wrote commit message(s) following agents/standards/communication.md
+- [x] Wrote commit message(s) following agents/standards/communication.md
 - [ ] Updated PR description with summary, validation evidence, risks
 - [x] Noted any follow-up work or open questions
 
 ### Validation Evidence
+- Backend lint: `uv run ruff check src tests/routes/test_blocks_generate.py` passed.
+- Backend tests: `uv run pytest tests/routes/test_blocks_generate.py -q` passed (`4 passed`).
 - Frontend checks: `npm run check` passed (`0` errors, `0` warnings).
 - Frontend build: `npm run build` passed.
-- Frontend targeted tests passed:
-  - `npx vitest run src/lib/builder/components/palette/palette-overlay.test.ts`
-  - `npx vitest run src/lib/builder/stores/document-store-ops.test.ts`
+- Frontend targeted tests: `npx vitest run src/lib/builder/components/ai/ai-block-utils.test.ts` passed (`2 passed`).
 
 ### Risks and Follow-up
-- Current published `lectio@0.4.5` package in this workspace does not export `PALETTE_GROUPS`, so Phase 3 palette grouping uses `getComponentsByGroup()`-based grouped metadata as a temporary compatibility path.
-- If strict intent-group (`PALETTE_GROUPS`) usage is required for final acceptance, the frontend dependency must consume a Lectio build that exports those symbols.
+- Backend output validation is currently contract-model based; frontend merge logic is the active guardrail for hidden/advanced field preservation in block content.
+- When backend adopts direct Lectio edit-schema contracts, add a server-side editable-field allowlist check to mirror frontend behavior.
+
+## Phase 4 What Was Done
+
+- Extended block generation request shape in backend + frontend to include:
+  - `lesson_id`
+  - `mode` (`fill | improve | custom`)
+- Added lesson ownership enforcement on `POST /api/v1/blocks/generate`:
+  - if `lesson_id` is provided, route verifies `(lesson.id, lesson.user_id)` against current user.
+  - unknown or unowned lesson returns `404`.
+- Wired AI assist payload to include lesson identity and mode from the editing surface.
+- Added safe AI apply merge to prevent overwriting hidden/internal fields:
+  - new utility `mergeAiContentWithEditableFields(...)` uses `getEditSchema(component_id)` and applies only non-hidden fields.
+- Updated canvas AI apply path to use merged content before store update.
+- Added/updated tests:
+  - `backend/tests/routes/test_blocks_generate.py` for owned/unowned lesson behavior and mode forwarding.
+  - `frontend/src/lib/builder/components/ai/ai-block-utils.test.ts` for editable-field-only merge and null-schema fallback.
 
 ## Phase 3 What Was Done
 
@@ -58,7 +74,7 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 
 ## Next Phase Needs
 
-- Phase 4: block editing + AI assist verification and UX behavior hardening per unified guide.
+- Phase 5: media manager upload/picker integration and lesson media ownership flows.
 
 ---
 

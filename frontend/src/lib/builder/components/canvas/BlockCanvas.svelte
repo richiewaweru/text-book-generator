@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { dragHandleZone, type DndEvent } from 'svelte-dnd-action';
 	import type { BlockInstance } from 'lectio';
+	import { mergeAiContentWithEditableFields } from '$lib/builder/components/ai/ai-block-utils';
 	import type { DocumentStore } from '$lib/builder/stores/document.svelte';
 	import AddSectionControl from './AddSectionControl.svelte';
 	import BlockCard from './BlockCard.svelte';
@@ -111,7 +112,12 @@
 						onfieldblur={() => store.notifyFieldBlur()}
 						contextBlocksForAi={store.getContextBlocksForAi(item.id)}
 						onapplyaicontent={(content) => {
-							store.updateBlockContent(item.id, content);
+							const merged = mergeAiContentWithEditableFields(
+								item.component_id,
+								item.content as Record<string, unknown>,
+								content
+							);
+							store.updateBlockContent(item.id, merged);
 							store.startEditing(item.id);
 						}}
 						onduplicate={() => {
