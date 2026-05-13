@@ -75,7 +75,7 @@
 
 <div
 	class={cn(
-		'block-card mb-6 rounded-xl border border-slate-200 bg-white shadow-sm outline-none',
+		'block-card relative mb-6 rounded-xl border border-slate-200 bg-white shadow-sm outline-none',
 		selected && 'ring-2 ring-blue-500'
 	)}
 	data-block-id={block.id}
@@ -103,20 +103,22 @@
 		}
 	}}
 >
+	{#if selected && !editing}
+		<span
+			class="drag-handle absolute -left-3 top-1/2 z-10 inline-flex -translate-y-1/2 cursor-grab touch-none rounded-full border border-slate-200 bg-white p-1.5 text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700 active:cursor-grabbing"
+			aria-label="Drag to reorder"
+			data-testid="block-drag-handle"
+			role="presentation"
+			onpointerdown={(e) => e.stopPropagation()}
+			use:dragHandle
+		>
+			<GripVertical size={14} aria-hidden="true" />
+		</span>
+	{/if}
 	<div
 		class="block-card-chrome flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2"
 	>
 		<div class="flex min-w-0 flex-1 items-center gap-2">
-			<span
-				class="drag-handle inline-flex shrink-0 cursor-grab touch-none rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing"
-				aria-label="Drag to reorder"
-				data-testid="block-drag-handle"
-				role="presentation"
-				onpointerdown={(e) => e.stopPropagation()}
-				use:dragHandle
-			>
-				<GripVertical size={16} aria-hidden="true" />
-			</span>
 			<span
 				class="block-label truncate text-xs font-semibold uppercase tracking-wide text-slate-500"
 			>
@@ -135,74 +137,75 @@
 				>
 					Close
 				</button>
-			{:else}
-				{#if selected && editSchema && onapplyaicontent}
-					<AiBlockAssist
-						{block}
-						subject={document?.subject ?? ''}
-						gradeBand={aiGradeBand}
-						contextBlocks={contextBlocksForAi}
-						token={aiToken}
-						{apiConfigured}
-						onBeforeGenerate={snapshotBeforeAi}
-						ongenerated={onapplyaicontent}
-					/>
-				{/if}
-				{#if selected && editSchema}
-					<button
-						type="button"
-						class="rounded-md p-1.5 text-slate-600 hover:bg-slate-100"
-						title="Edit"
-						aria-label="Edit"
-						onclick={(e) => {
-							e.stopPropagation();
-							onstartedit?.();
-						}}
-					>
-						<Pencil size={16} />
-					</button>
-				{/if}
-				{#if selected}
-					<button
-						type="button"
-						class="rounded-md p-1.5 text-slate-600 hover:bg-slate-100"
-						title="Duplicate"
-						aria-label="Duplicate"
-						onclick={(e) => {
-							e.stopPropagation();
-							onduplicate?.();
-						}}
-					>
-						<Copy size={16} />
-					</button>
-					<button
-						type="button"
-						class="rounded-md p-1.5 text-red-600 hover:bg-red-50"
-						title="Delete"
-						aria-label="Delete"
-						onclick={(e) => {
-							e.stopPropagation();
-							ondelete?.();
-						}}
-					>
-						<Trash2 size={16} />
-					</button>
-				{/if}
-				{#if editSchema && !selected}
-					<button
-						type="button"
-						class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-						onclick={(e) => {
-							e.stopPropagation();
-							onstartedit?.();
-						}}
-					>
-						Edit
-					</button>
-				{/if}
+			{:else if editSchema && !selected}
+				<button
+					type="button"
+					class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+					onclick={(e) => {
+						e.stopPropagation();
+						onstartedit?.();
+					}}
+				>
+					Edit
+				</button>
 			{/if}
 		</div>
 	</div>
+
+	{#if selected && !editing}
+		<div class="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-lg border border-slate-200 bg-white/95 p-1 shadow">
+			{#if editSchema && onapplyaicontent}
+				<AiBlockAssist
+					{block}
+					subject={document?.subject ?? ''}
+					gradeBand={aiGradeBand}
+					contextBlocks={contextBlocksForAi}
+					token={aiToken}
+					{apiConfigured}
+					onBeforeGenerate={snapshotBeforeAi}
+					ongenerated={onapplyaicontent}
+				/>
+			{/if}
+			{#if editSchema}
+				<button
+					type="button"
+					class="rounded-md p-1.5 text-slate-600 hover:bg-slate-100"
+					title="Edit"
+					aria-label="Edit"
+					onclick={(e) => {
+						e.stopPropagation();
+						onstartedit?.();
+					}}
+				>
+					<Pencil size={16} />
+				</button>
+			{/if}
+			<button
+				type="button"
+				class="rounded-md p-1.5 text-slate-600 hover:bg-slate-100"
+				title="Duplicate"
+				aria-label="Duplicate"
+				onclick={(e) => {
+					e.stopPropagation();
+					onduplicate?.();
+				}}
+			>
+				<Copy size={16} />
+			</button>
+			<button
+				type="button"
+				class="rounded-md p-1.5 text-red-600 hover:bg-red-50"
+				title="Delete"
+				aria-label="Delete"
+				onclick={(e) => {
+					e.stopPropagation();
+					ondelete?.();
+				}}
+			>
+				<Trash2 size={16} />
+			</button>
+		</div>
+	{/if}
 
 	{#if editing && editSchema}
 		<div class="flex flex-col gap-4 p-2 lg:grid lg:grid-cols-2 lg:gap-4 lg:p-4">

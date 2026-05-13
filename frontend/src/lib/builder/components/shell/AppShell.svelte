@@ -5,11 +5,12 @@
 	import type { LessonDocument } from 'lectio';
 	import BlockCanvas from '$lib/builder/components/canvas/BlockCanvas.svelte';
 	import CanvasOutline from '$lib/builder/components/canvas/CanvasOutline.svelte';
-	import PaletteSidebar from '$lib/builder/components/palette/PaletteSidebar.svelte';
+	import PaletteOverlay from '$lib/builder/components/palette/PaletteOverlay.svelte';
 	import DocumentToolbar from '$lib/builder/components/toolbar/DocumentToolbar.svelte';
 	import MediaManager from '$lib/builder/components/media/MediaManager.svelte';
 	import VersionPanel from '$lib/builder/components/versions/VersionPanel.svelte';
 	import OfflineSyncHooks from '$lib/builder/components/shell/OfflineSyncHooks.svelte';
+	import { Plus } from 'lucide-svelte';
 	import { saveVersionSnapshot } from '$lib/builder/persistence/idb-store';
 	import type { DocumentStore } from '$lib/builder/stores/document.svelte';
 
@@ -17,8 +18,7 @@
 
 	const preset = $derived(basePresetMap[document.preset_id] ?? null);
 
-	let paletteCollapsed = $state(false);
-	let mobilePaletteOpen = $state(false);
+	let paletteOpen = $state(false);
 	let mediaManagerOpen = $state(false);
 	let versionPanelOpen = $state(false);
 
@@ -63,38 +63,31 @@
 		onOpenMedia={() => (mediaManagerOpen = true)}
 		onOpenHistory={() => (versionPanelOpen = true)}
 	/>
-	<div
-		class="palette-toggle-bar hidden border-b border-slate-200 bg-white px-3 py-1.5 lg:flex lg:items-center lg:gap-2"
-	>
-		<button
-			type="button"
-			class="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-			onclick={() => (paletteCollapsed = !paletteCollapsed)}
-		>
-			{paletteCollapsed ? 'Show palette' : 'Hide palette'}
-		</button>
-	</div>
 	<div class="flex flex-1 overflow-hidden">
-		{#if !paletteCollapsed}
-			<div class="hidden shrink-0 lg:block">
-				<PaletteSidebar {store} />
-			</div>
-		{:else}
-			<div
-				class="palette-sidebar hidden w-9 shrink-0 border-r border-slate-200 bg-white lg:flex lg:flex-col lg:items-center lg:pt-2"
-			>
+		<main
+			class="builder-main min-w-0 flex-1 overflow-y-auto bg-gradient-to-b from-slate-100 via-slate-100 to-slate-200/70 p-4 sm:p-6"
+			data-testid="builder-main"
+		>
+			<div class="mx-auto mb-3 flex w-full max-w-4xl items-center justify-between">
+				<div>
+					<p class="text-xs font-semibold uppercase tracking-wide text-slate-600">Builder workspace</p>
+					<p class="text-xs text-slate-500">
+						{store.selectedSectionId
+							? `Section selected: ${store.orderedSections.find((s) => s.id === store.selectedSectionId)?.title ?? 'Untitled'}`
+							: 'Select a section to add blocks'}
+					</p>
+				</div>
 				<button
 					type="button"
-					class="rounded p-1 text-slate-600 hover:bg-slate-100"
-					title="Show palette"
-					aria-label="Show palette"
-					onclick={() => (paletteCollapsed = false)}
+					class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+					aria-label="Add block"
+					onclick={() => (paletteOpen = true)}
 				>
-					>
+					<Plus size={16} />
+					Add block
 				</button>
 			</div>
-		{/if}
-		<main class="builder-main min-w-0 flex-1 overflow-y-auto p-6" data-testid="builder-main">
+
 			{#if preset}
 				<LectioThemeSurface {preset}>
 					{#snippet children()}
@@ -118,44 +111,6 @@
 	<VersionPanel bind:open={versionPanelOpen} document={store.document} {store} />
 {/if}
 
-<button
-	type="button"
-	class="mobile-palette-fab fixed bottom-4 left-4 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-2xl font-light text-white shadow-lg lg:hidden"
-	aria-label="Open component palette"
-	onclick={() => (mobilePaletteOpen = true)}
->
-	+
-</button>
-
-{#if mobilePaletteOpen}
-	<div
-		class="fixed inset-0 z-50 flex flex-col justify-end bg-black/40 lg:hidden"
-		role="button"
-		tabindex="-1"
-		onclick={() => (mobilePaletteOpen = false)}
-		onkeydown={(e) => e.key === 'Escape' && (mobilePaletteOpen = false)}
-	>
-		<div
-			class="max-h-[min(70vh,32rem)] overflow-hidden rounded-t-xl bg-white shadow-xl"
-			role="dialog"
-			aria-label="Component palette"
-			tabindex="-1"
-			onclick={(e) => e.stopPropagation()}
-			onkeydown={(e) => e.stopPropagation()}
-		>
-			<div class="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-				<span class="text-sm font-semibold text-slate-800">Components</span>
-				<button
-					type="button"
-					class="rounded-md px-2 py-1 text-sm text-blue-600 hover:bg-blue-50"
-					onclick={() => (mobilePaletteOpen = false)}
-				>
-					Close
-				</button>
-			</div>
-			<div class="max-h-[min(60vh,28rem)] overflow-y-auto">
-				<PaletteSidebar {store} sheet />
-			</div>
-		</div>
-	</div>
+{#if paletteOpen}
+	<PaletteOverlay {store} onclose={() => (paletteOpen = false)} />
 {/if}

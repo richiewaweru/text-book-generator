@@ -38,3 +38,23 @@
 - **Guide says:** Keep IDB as offline cache while server remains authoritative; reconnect should sync queued work.
 - **Chose:** Implemented `server-sync.ts` to debounce server PUTs, enqueue retryable failures, and register a queue adapter flushed on reconnect/manual save.
 - **Risk:** Toolbar save status reflects immediate save attempts; background queue flush success may not instantly update status until next save cycle.
+
+## Phase 3 - Palette, Block Management, and Canvas Polish
+
+### Decision: Replace permanent sidebar palette with centered overlay workflow
+- **Context:** Existing builder UI used a permanently mounted `PaletteSidebar` and drag-in palette stubs.
+- **Guide says:** Palette should be a centered overlay opened by an "Add block" action, with grouped search and click-to-insert behavior.
+- **Chose:** Added `PaletteOverlay` and routed AppShell through a server-friendly click-to-insert flow: open overlay -> choose block -> `store.addBlock()` -> select/edit new block -> close overlay.
+- **Risk:** Dragging from palette into canvas is no longer the primary insertion path; composition is now button-driven for consistency and clarity.
+
+### Decision: Ship group-based palette mapping until exported Lectio intent groups are available in this workspace package
+- **Context:** The guide references `PALETTE_GROUPS` from Lectio Phase 0b. In this workspace, the installed `lectio@0.4.5` export surface does not currently expose `PALETTE_GROUPS`.
+- **Guide says:** Group by teaching intent using Lectio-owned grouping metadata.
+- **Chose:** Implemented grouped palette metadata via `getComponentsByGroup()` with intent-aligned labels/colors as a compatibility bridge, and documented the export mismatch as follow-up.
+- **Risk:** Strict interpretation of "must use `PALETTE_GROUPS`" remains partially blocked until the frontend consumes a Lectio build exporting those symbols.
+
+### Decision: Convert outline panel to compact dot rail while keeping section reordering support
+- **Context:** Existing outline was a full-width panel with row links and visible drag handles.
+- **Guide says:** Replace it with a narrow dot rail with active highlight and quick navigation.
+- **Chose:** Reworked `CanvasOutline` to a 44px-style dot rail with section hover titles and active state, while retaining `dragHandleZone` reorder behavior behind the compact UI.
+- **Risk:** Compact controls reduce discoverability for section drag-reorder; may need onboarding hint copy in polish phase.

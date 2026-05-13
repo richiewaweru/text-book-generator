@@ -5,40 +5,64 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 
 ## Current Phase
 
-- Phase 2 - Backend persistence
+- Phase 3 - Palette, block management, and canvas polish
 - Repo: `C:\Projects\Textbook agent`
 - Status: completed
 
 ## Feature Checklist
 
-### Feature: Builder Server Persistence
+### Feature: Builder Palette + Canvas Polish
 
 **Classification**: major
-**Subsystems**: backend + frontend
+**Subsystems**: frontend
 
 ### Progress
 - [x] Understood requirements and identified scope
 - [x] Read relevant source code and project rules
-- [x] Implemented backend persistence table + API
-- [x] Implemented frontend server-sync + IDB cache behavior
+- [x] Implemented centered overlay palette with grouped search
+- [x] Implemented dot-rail section outline replacement
+- [x] Preserved/verified block composition operations in store-driven canvas
 - [x] Wrote tests for new behavior
-- [x] Ran validation (backend + frontend)
+- [x] Ran validation (frontend)
 - [x] Self-reviewed against agents/standards/review.md
 - [ ] Wrote commit message(s) following agents/standards/communication.md
 - [ ] Updated PR description with summary, validation evidence, risks
 - [x] Noted any follow-up work or open questions
 
 ### Validation Evidence
-- Backend tests: `uv run pytest tests/routes/test_builder_lessons.py -q` passed (`4` tests).
-- Backend lint: `uv run ruff check src tests/routes/test_builder_lessons.py` passed.
 - Frontend checks: `npm run check` passed (`0` errors, `0` warnings).
 - Frontend build: `npm run build` passed.
+- Frontend targeted tests passed:
+  - `npx vitest run src/lib/builder/components/palette/palette-overlay.test.ts`
+  - `npx vitest run src/lib/builder/stores/document-store-ops.test.ts`
 
 ### Risks and Follow-up
-- Status badge currently reflects latest local save/sync attempt; reconnect-triggered queue flush can recover in the background without immediately flipping toolbar state.
-- Older Phase 1-only local IDB lessons without server records will show sync errors until recreated/migrated through server-backed flows.
+- Current published `lectio@0.4.5` package in this workspace does not export `PALETTE_GROUPS`, so Phase 3 palette grouping uses `getComponentsByGroup()`-based grouped metadata as a temporary compatibility path.
+- If strict intent-group (`PALETTE_GROUPS`) usage is required for final acceptance, the frontend dependency must consume a Lectio build that exports those symbols.
 
-## Phase 2 What Was Done
+## Phase 3 What Was Done
+
+- Replaced permanent palette sidebar with centered "Add block" overlay:
+  - Added `frontend/src/lib/builder/components/palette/PaletteOverlay.svelte`.
+  - Added grouped/searchable data adapter `frontend/src/lib/builder/components/palette/palette-overlay.ts`.
+  - Added palette filter tests in `frontend/src/lib/builder/components/palette/palette-overlay.test.ts`.
+- Replaced full right-side outline panel with minimal dot rail:
+  - Updated `frontend/src/lib/builder/components/canvas/CanvasOutline.svelte`.
+- Updated canvas composition surface and interaction polish:
+  - Updated `frontend/src/lib/builder/components/canvas/BlockCanvas.svelte` (centered page card, preserved DnD reorder, shortcut hint bar).
+  - Updated `frontend/src/lib/builder/components/canvas/BlockCard.svelte` (selected-state floating action bar and left-edge drag handle).
+  - Updated `frontend/src/lib/builder/components/shell/AppShell.svelte` to use overlay workflow.
+- Added operation regression tests for core store behaviors:
+  - `frontend/src/lib/builder/stores/document-store-ops.test.ts`
+  - Covers add, duplicate, delete + undo, and cross-section reorder.
+
+## Next Phase Needs
+
+- Phase 4: block editing + AI assist verification and UX behavior hardening per unified guide.
+
+---
+
+## Phase 2 Archive
 
 - Backend persistence:
   - Added `EditableLessonModel` in `backend/src/core/database/models.py`.

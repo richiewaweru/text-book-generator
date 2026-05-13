@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { dragHandle, dragHandleZone, type DndEvent } from 'svelte-dnd-action';
-	import { GripVertical } from 'lucide-svelte';
+	import { dragHandleZone, type DndEvent } from 'svelte-dnd-action';
 	import type { DocumentSection } from 'lectio';
 	import type { DocumentStore } from '$lib/builder/stores/document.svelte';
 
@@ -24,40 +23,35 @@
 </script>
 
 <nav
-	class="canvas-outline w-52 shrink-0 border-l border-slate-200 bg-slate-50 p-4 text-sm"
+	class="canvas-outline sticky top-0 hidden h-screen w-11 shrink-0 border-l border-slate-200 bg-white/90 py-4 md:block"
 	aria-label="Section outline"
 >
-	<p class="mb-3 font-semibold text-slate-700">Outline</p>
 	<div
 		use:dragHandleZone={{
 			items: outlineItems,
 			type: 'outline-section',
 			flipDurationMs: 200,
-			dropTargetStyle: { outline: '2px dashed #64748b' },
+			dropTargetStyle: { outline: '2px dashed #94a3b8' },
 			dropFromOthersDisabled: true
 		}}
 		onconsider={handleConsider}
 		onfinalize={handleFinalize}
+		class="flex h-full flex-col items-center gap-2"
 	>
 		{#each outlineItems as section (section.id)}
-			<div class="mb-1 flex items-center gap-1">
+			<a
+				href="#section-{section.id}"
+				data-testid="outline-section-link"
+				title={`Section ${section.position + 1}: ${section.title}`}
+				class="inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors hover:bg-slate-100"
+				onclick={() => store.selectSection(section.id)}
+			>
 				<span
-					class="drag-handle inline-flex shrink-0 cursor-grab touch-none rounded p-0.5 text-slate-400 hover:bg-slate-200"
-					aria-label="Drag to reorder sections"
-					data-testid="outline-drag-handle"
-					use:dragHandle
-				>
-					<GripVertical size={14} aria-hidden="true" />
-				</span>
-				<a
-					href="#section-{section.id}"
-					data-testid="outline-section-link"
-					class="block min-w-0 flex-1 truncate rounded px-2 py-1 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
-					onclick={() => store.selectSection(section.id)}
-				>
-					{section.title}
-				</a>
-			</div>
+					class="h-2.5 w-2.5 rounded-full {store.selectedSectionId === section.id
+						? 'bg-blue-600 ring-2 ring-blue-200'
+						: 'bg-slate-400'}"
+				></span>
+			</a>
 		{/each}
 	</div>
 </nav>
