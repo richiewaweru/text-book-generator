@@ -5,40 +5,58 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 
 ## Current Phase
 
-- Phase 5 - Shared media manager with server uploads
+- Phase 6 - Manual lesson creation and lesson listing
 - Repo: `C:\Projects\Textbook agent`
 - Status: completed
 
 ## Feature Checklist
 
-### Feature: Shared Media Manager with GCS Upload
+### Feature: Manual Lesson Creation + Builder Index
 
 **Classification**: major
-**Subsystems**: backend + frontend
+**Subsystems**: frontend
 
 ### Progress
 - [x] Understood requirements and identified scope
 - [x] Read relevant source code and project rules
-- [x] Implemented lesson-owned media upload endpoint (`POST /api/v1/builder/lessons/{id}/media/upload`)
-- [x] Enforced media upload type and size validation (PNG/JPEG/WebP/GIF, 10MB max)
-- [x] Routed image upload UI through backend API (no data-URI persistence for new uploads)
-- [x] Preserved URL-paste and existing-media selection flows in editor/media manager
+- [x] Verified `/builder/new` template + blank flows use server create + builder navigation
+- [x] Added `/builder` lesson index route with source badge and updated timestamp
+- [x] Added visible "Builder" and "New Lesson" entry points in shell/dashboard
 - [x] Wrote tests for new behavior
-- [x] Ran validation (backend + frontend)
+- [x] Ran validation (frontend)
 - [x] Self-reviewed against agents/standards/review.md
 - [x] Wrote commit message(s) following agents/standards/communication.md
 - [ ] Updated PR description with summary, validation evidence, risks
 - [x] Noted any follow-up work or open questions
 
 ### Validation Evidence
-- Backend lint: `uv run ruff check src tests/routes/test_builder_lessons.py` passed.
-- Backend tests: `uv run pytest tests/routes/test_builder_lessons.py -q` passed (`8 passed`).
 - Frontend checks: `npm run check` passed (`0` errors, `0` warnings).
-- Frontend build: `npm run build` attempted; failed due pre-existing local `lectio` install mismatch/resolution issue in this environment (`Rollup failed to resolve import "lectio"` from existing route code).
+- Frontend tests: `npm run test -- src/routes/builder/page.test.ts src/routes/dashboard/page.test.ts` passed (`4 passed`).
+- Frontend build: `npm run build` passed.
 
 ### Risks and Follow-up
-- Upload endpoint currently relies on `GCSImageStore` availability (`GCS_BUCKET_NAME` + credentials); when unavailable it returns `503`.
-- Current `lectio` package in this workspace does not expose `MediaReference.source`; frontend media entries stay schema-compatible by omitting that field.
+- `/builder` list currently relies on standard `/api/v1/builder/lessons` responses without client-side pagination; large lesson sets may later need paging/search.
+- Profileless users are still redirected by global shell auth rules; if non-profile builder access is needed later, update redirect allowlist intentionally.
+
+## Phase 6 What Was Done
+
+- Confirmed manual creation route behavior in `frontend/src/routes/builder/new/+page.svelte`:
+  - Template selection from `templateRegistry`
+  - Preset selection from `basePresets` filtered by template
+  - Template scaffold uses `always_present` blocks
+  - Blank flow uses `open-canvas`
+  - Both call `POST /api/v1/builder/lessons` and navigate to `/builder/{id}`
+- Added builder index route at `frontend/src/routes/builder/+page.svelte`:
+  - Loads editable lessons via `GET /api/v1/builder/lessons`
+  - Displays lesson title, source-type badge, and updated timestamp
+  - Each item links to `/builder/{id}`
+  - Includes empty-state CTA to `/builder/new`
+- Added entry points:
+  - Header nav links: `Builder` and `New Lesson` in `frontend/src/routes/+layout.svelte`
+  - Dashboard Lesson Builder card with links to `/builder` and `/builder/new`
+- Added route test coverage:
+  - `frontend/src/routes/builder/page.test.ts` validates list rendering and empty state CTA
+  - Existing dashboard test suite still passes after entry-point additions
 
 ## Phase 5 What Was Done
 
@@ -95,7 +113,7 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 
 ## Next Phase Needs
 
-- Phase 6: manual lesson creation UX verification and builder lesson-list entry path hardening.
+- Phase 7: version history verification plus builder print/PDF export endpoint (teacher/student audiences).
 
 ---
 

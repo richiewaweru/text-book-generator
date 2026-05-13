@@ -56,6 +56,8 @@
 					<div class="nav-links">
 						<a href="/dashboard" class="nav-link">Dashboard</a>
 						<a href="/studio" class="nav-link">Studio</a>
+						<a href="/builder" class="nav-link">Builder</a>
+						<a href="/builder/new" class="nav-link">New Lesson</a>
 					</div>
 				{/if}
 			</div>

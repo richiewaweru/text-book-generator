@@ -160,6 +160,28 @@
 			</div>
 		</section>
 
+		<section class="generate-section">
+			<h2>Lesson Builder</h2>
+			<p>
+				Open your editable lesson workspace to continue drafts, refine generated lessons, or start
+				a new lesson from template or blank canvas.
+			</p>
+			<div class="studio-entry">
+				<div class="studio-entry-copy">
+					<p class="studio-kicker">Teacher-owned editing</p>
+					<h3>Manage editable lessons</h3>
+					<p>
+						See all builder lessons, resume in-progress work, and create new lessons without
+						running generation first.
+					</p>
+				</div>
+				<div class="studio-entry-actions">
+					<a href="/builder" class="studio-link">Open Builder</a>
+					<a href="/builder/new" class="ghost-link">New Lesson</a>
+				</div>
+			</div>
+		</section>
+
 		{#if recentPacks.length > 0}
 			<section class="history-section">
 				<h2>Recent Packs</h2>

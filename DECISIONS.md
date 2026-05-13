@@ -86,3 +86,17 @@
 - **Guide says:** Media uploads should go through backend ownership checks and stored URLs.
 - **Chose:** Added `frontend/src/lib/builder/api/media-upload.ts` and updated `ImageUploader`/media field integrations to upload files first, then store returned URL references in the lesson media map.
 - **Risk:** Current `lectio` `MediaReference` type in this workspace does not include a `source` field, so source metadata could not be recorded without contract changes.
+
+## Phase 6 - Manual Lesson Creation and Listing
+
+### Decision: Keep `/builder/new` as the single creation surface and add `/builder` as the resume/listing surface
+- **Context:** Manual creation flow already existed and created server-backed lessons, but there was no dedicated builder index route to list editable lessons.
+- **Guide says:** Provide `/builder/new` for manual creation and a builder index page listing user lessons.
+- **Chose:** Kept existing `/builder/new` logic and added `frontend/src/routes/builder/+page.svelte` for listing/resume, instead of splitting creation into multiple new screens.
+- **Risk:** Listing is currently unpaginated; large lesson collections may need filtering/pagination in a later phase.
+
+### Decision: Add explicit Builder entry points in both global nav and dashboard
+- **Context:** Teachers could reach builder routes via direct URLs but lacked obvious navigation affordances.
+- **Guide says:** Include "New Lesson" entry point in nav or dashboard and expose builder list flow.
+- **Chose:** Added `Builder` and `New Lesson` links to the global authenticated nav and a dedicated Lesson Builder card in dashboard.
+- **Risk:** Additional nav items increase top-bar density on smaller screens; future mobile polish may consolidate actions.
