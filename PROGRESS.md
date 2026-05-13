@@ -5,13 +5,13 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 
 ## Current Phase
 
-- Phase 4 - Block editing and AI assist hardening
+- Phase 5 - Shared media manager with server uploads
 - Repo: `C:\Projects\Textbook agent`
 - Status: completed
 
 ## Feature Checklist
 
-### Feature: Block Editing + AI Assist Hardening
+### Feature: Shared Media Manager with GCS Upload
 
 **Classification**: major
 **Subsystems**: backend + frontend
@@ -19,9 +19,10 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 ### Progress
 - [x] Understood requirements and identified scope
 - [x] Read relevant source code and project rules
-- [x] Implemented ownership-bound AI request contract (`lesson_id`, `mode`)
-- [x] Added backend lesson ownership guard for `/api/v1/blocks/generate`
-- [x] Preserved AI snapshot + undo flow, and constrained AI apply to editable fields only
+- [x] Implemented lesson-owned media upload endpoint (`POST /api/v1/builder/lessons/{id}/media/upload`)
+- [x] Enforced media upload type and size validation (PNG/JPEG/WebP/GIF, 10MB max)
+- [x] Routed image upload UI through backend API (no data-URI persistence for new uploads)
+- [x] Preserved URL-paste and existing-media selection flows in editor/media manager
 - [x] Wrote tests for new behavior
 - [x] Ran validation (backend + frontend)
 - [x] Self-reviewed against agents/standards/review.md
@@ -30,15 +31,35 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 - [x] Noted any follow-up work or open questions
 
 ### Validation Evidence
-- Backend lint: `uv run ruff check src tests/routes/test_blocks_generate.py` passed.
-- Backend tests: `uv run pytest tests/routes/test_blocks_generate.py -q` passed (`4 passed`).
+- Backend lint: `uv run ruff check src tests/routes/test_builder_lessons.py` passed.
+- Backend tests: `uv run pytest tests/routes/test_builder_lessons.py -q` passed (`8 passed`).
 - Frontend checks: `npm run check` passed (`0` errors, `0` warnings).
-- Frontend build: `npm run build` passed.
-- Frontend targeted tests: `npx vitest run src/lib/builder/components/ai/ai-block-utils.test.ts` passed (`2 passed`).
+- Frontend build: `npm run build` attempted; failed due pre-existing local `lectio` install mismatch/resolution issue in this environment (`Rollup failed to resolve import "lectio"` from existing route code).
 
 ### Risks and Follow-up
-- Backend output validation is currently contract-model based; frontend merge logic is the active guardrail for hidden/advanced field preservation in block content.
-- When backend adopts direct Lectio edit-schema contracts, add a server-side editable-field allowlist check to mirror frontend behavior.
+- Upload endpoint currently relies on `GCSImageStore` availability (`GCS_BUCKET_NAME` + credentials); when unavailable it returns `503`.
+- Current `lectio` package in this workspace does not expose `MediaReference.source`; frontend media entries stay schema-compatible by omitting that field.
+
+## Phase 5 What Was Done
+
+- Backend:
+  - Added `POST /api/v1/builder/lessons/{lesson_id}/media/upload` with:
+    - teacher ownership checks
+    - content type allowlist validation (`image/png`, `image/jpeg`, `image/webp`, `image/gif`)
+    - max file size enforcement (10MB)
+    - GCS key path: `editable-lessons/{lesson_id}/media/{media_id}.{ext}`
+  - Extended `GCSImageStore` with `upload_with_key(...)` so builder uploads reuse existing storage infrastructure.
+- Frontend:
+  - Added `frontend/src/lib/builder/api/media-upload.ts`.
+  - Updated `ImageUploader.svelte` to upload files via backend API and emit hosted URL payloads.
+  - Updated `FieldMedia.svelte` and `MediaManager.svelte` to consume uploaded URLs while keeping video URL paste + existing-media selection flows.
+  - Updated client-side file-size messaging to 10MB.
+- Tests:
+  - Expanded `backend/tests/routes/test_builder_lessons.py` with media-upload coverage:
+    - owned lesson upload path + key assertion
+    - ownership rejection
+    - unsupported MIME rejection
+    - oversized payload rejection
 
 ## Phase 4 What Was Done
 
@@ -74,7 +95,7 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 
 ## Next Phase Needs
 
-- Phase 5: media manager upload/picker integration and lesson media ownership flows.
+- Phase 6: manual lesson creation UX verification and builder lesson-list entry path hardening.
 
 ---
 

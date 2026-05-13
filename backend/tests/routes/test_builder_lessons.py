@@ -5,6 +5,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app import app
 from core.auth.middleware import get_current_user
+from core.dependencies import get_gcs_image_store
 from core.database.models import GenerationModel, UserModel
 from core.database.session import get_async_session
 from core.entities.user import User
@@ -67,9 +68,27 @@ def _minimal_lesson(document_id: str = "client-doc-id") -> dict:
     }
 
 
+class _FakeGcsStore:
+    def __init__(self, enabled: bool = True):
+        self.enabled = enabled
+        self.calls: list[dict[str, str | int]] = []
+
+    async def upload_with_key(
+        self, *, key: str, image_bytes: bytes, content_type: str = "image/png"
+    ) -> str | None:
+        self.calls.append(
+            {
+                "key": key,
+                "content_type": content_type,
+                "size": len(image_bytes),
+            }
+        )
+        return f"https://cdn.example.test/{key}"
+
+
 @pytest.fixture(autouse=True)
 def _install_dependency_overrides(db_session_factory):
-    state = {"user": USER_A}
+    state = {"user": USER_A, "gcs_store": _FakeGcsStore()}
 
     async def override_current_user():
         return state["user"]
@@ -78,9 +97,13 @@ def _install_dependency_overrides(db_session_factory):
         async with db_session_factory() as session:
             yield session
 
+    def override_gcs_store():
+        return state["gcs_store"]
+
     app.dependency_overrides.clear()
     app.dependency_overrides[get_current_user] = override_current_user
     app.dependency_overrides[get_async_session] = override_session
+    app.dependency_overrides[get_gcs_image_store] = override_gcs_store
     yield state
     app.dependency_overrides.clear()
 
@@ -239,3 +262,77 @@ class TestBuilderLessonRoutes:
 
         assert unknown_component_response.status_code == 400
         assert missing_block_response.status_code == 422
+
+    async def test_media_upload_uses_gcs_with_lesson_owned_path(self, _install_dependency_overrides):
+        async with await _client() as client:
+            created = await client.post(
+                "/api/v1/builder/lessons",
+                json={"source_type": "manual", "document": _minimal_lesson()},
+            )
+            assert created.status_code == 201
+            lesson_id = created.json()["id"]
+
+            upload = await client.post(
+                f"/api/v1/builder/lessons/{lesson_id}/media/upload",
+                files={"file": ("diagram.png", b"\x89PNG\r\n\x1a\nfake-image", "image/png")},
+            )
+
+        assert upload.status_code == 200
+        body = upload.json()
+        assert body["type"] == "image"
+        assert body["mime_type"] == "image/png"
+        assert body["url"].startswith("https://cdn.example.test/editable-lessons/")
+        calls = _install_dependency_overrides["gcs_store"].calls
+        assert len(calls) == 1
+        assert calls[0]["key"].startswith(f"editable-lessons/{lesson_id}/media/")
+        assert calls[0]["content_type"] == "image/png"
+
+    async def test_media_upload_requires_lesson_ownership(self, _install_dependency_overrides):
+        async with await _client() as client:
+            created = await client.post(
+                "/api/v1/builder/lessons",
+                json={"source_type": "manual", "document": _minimal_lesson()},
+            )
+            assert created.status_code == 201
+            lesson_id = created.json()["id"]
+
+            _install_dependency_overrides["user"] = USER_B
+            denied = await client.post(
+                f"/api/v1/builder/lessons/{lesson_id}/media/upload",
+                files={"file": ("diagram.png", b"\x89PNG\r\n\x1a\nfake-image", "image/png")},
+            )
+
+        assert denied.status_code == 404
+
+    async def test_media_upload_rejects_unsupported_content_type(self):
+        async with await _client() as client:
+            created = await client.post(
+                "/api/v1/builder/lessons",
+                json={"source_type": "manual", "document": _minimal_lesson()},
+            )
+            assert created.status_code == 201
+            lesson_id = created.json()["id"]
+
+            upload = await client.post(
+                f"/api/v1/builder/lessons/{lesson_id}/media/upload",
+                files={"file": ("note.txt", b"not-an-image", "text/plain")},
+            )
+
+        assert upload.status_code == 415
+
+    async def test_media_upload_rejects_oversized_file(self):
+        async with await _client() as client:
+            created = await client.post(
+                "/api/v1/builder/lessons",
+                json={"source_type": "manual", "document": _minimal_lesson()},
+            )
+            assert created.status_code == 201
+            lesson_id = created.json()["id"]
+
+            oversized = b"\x89PNG\r\n\x1a\n" + b"0" * (10 * 1024 * 1024 + 1)
+            upload = await client.post(
+                f"/api/v1/builder/lessons/{lesson_id}/media/upload",
+                files={"file": ("huge.png", oversized, "image/png")},
+            )
+
+        assert upload.status_code == 413

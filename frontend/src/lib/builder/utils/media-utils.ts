@@ -1,6 +1,6 @@
 import DOMPurify from 'dompurify';
 
-export const MAX_RASTER_IMAGE_BYTES = 2 * 1024 * 1024;
+export const MAX_RASTER_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export const ALLOWED_RASTER_IMAGE_TYPES = [
 	'image/png',
@@ -68,7 +68,7 @@ export function validateRasterImageFile(
 		return { ok: false, reason: 'Use PNG, JPEG, WebP, or GIF.' };
 	}
 	if (file.size > MAX_RASTER_IMAGE_BYTES) {
-		return { ok: false, reason: 'Image must be 2 MB or smaller.' };
+		return { ok: false, reason: 'Image must be 10 MB or smaller.' };
 	}
 	return { ok: true };
 }

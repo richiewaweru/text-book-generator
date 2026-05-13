@@ -7,21 +7,30 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth.middleware import get_current_user
+from core.dependencies import get_gcs_image_store
 from core.database.models import EditableLessonModel, GenerationModel
 from core.database.session import get_async_session
 from core.entities.user import User
+from core.storage.gcs_image_store import GCSImageStore
 from pipeline.contracts import get_component_registry_entry
 
 router = APIRouter(prefix="/api/v1/builder", tags=["builder"])
 
 _VALID_SOURCES = {"manual", "v3_generation", "template"}
 _MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
+_MAX_MEDIA_UPLOAD_BYTES = 10 * 1024 * 1024
+_ALLOWED_MEDIA_UPLOAD_MIME_TYPES: dict[str, str] = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+}
 
 
 def _utc_naive_now() -> datetime:
@@ -40,7 +49,7 @@ def _validate_lesson_document_shape(document: dict[str, Any]) -> None:
     payload_bytes = len(json.dumps(payload).encode("utf-8"))
     if payload_bytes > _MAX_DOCUMENT_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"Document payload exceeds {_MAX_DOCUMENT_BYTES} bytes",
         )
 
@@ -141,6 +150,15 @@ class BuilderLessonListItem(BaseModel):
 
 class BuilderLessonDetailResponse(BuilderLessonListItem):
     document: dict[str, Any]
+
+
+class BuilderMediaUploadResponse(BaseModel):
+    id: str
+    type: Literal["image"] = "image"
+    url: str
+    mime_type: str
+    filename: str | None = None
+    source: Literal["upload"] = "upload"
 
 
 def _to_list_item(model: EditableLessonModel) -> BuilderLessonListItem:
@@ -301,3 +319,54 @@ async def delete_builder_lesson(
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+
+@router.post("/lessons/{lesson_id}/media/upload", response_model=BuilderMediaUploadResponse)
+async def upload_builder_lesson_media(
+    lesson_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
+    gcs_store: GCSImageStore = Depends(get_gcs_image_store),
+) -> BuilderMediaUploadResponse:
+    await _owned_lesson_or_404(session, lesson_id=lesson_id, user_id=current_user.id)
+
+    mime_type = (file.content_type or "").strip().lower()
+    extension = _ALLOWED_MEDIA_UPLOAD_MIME_TYPES.get(mime_type)
+    if not extension:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Unsupported media type. Use PNG, JPEG, WebP, or GIF.",
+        )
+
+    payload = await file.read()
+    if len(payload) > _MAX_MEDIA_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"File too large. Max size is {_MAX_MEDIA_UPLOAD_BYTES} bytes.",
+        )
+
+    if not gcs_store.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Media upload is unavailable.",
+        )
+
+    media_id = uuid.uuid4().hex
+    key = f"editable-lessons/{lesson_id}/media/{media_id}.{extension}"
+    uploaded_url = await gcs_store.upload_with_key(
+        key=key,
+        image_bytes=payload,
+        content_type=mime_type,
+    )
+    if not uploaded_url:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to upload media.",
+        )
+
+    return BuilderMediaUploadResponse(
+        id=media_id,
+        url=uploaded_url,
+        mime_type=mime_type,
+        filename=file.filename,
+    )

@@ -72,3 +72,17 @@
 - **Guide says:** AI can only write fields exposed by `getEditSchema()`; hidden/advanced fields should not be overwritten.
 - **Chose:** Added `mergeAiContentWithEditableFields(...)` in the builder to apply generated values only for non-hidden schema fields, preserving existing hidden/internal content and ignoring unknown keys.
 - **Risk:** Enforcement currently lives in frontend apply logic; server-side parity should be added when backend has direct access to the same edit-schema surface.
+
+## Phase 5 - Shared Media Manager and Uploads
+
+### Decision: Reuse `GCSImageStore` with explicit object keys for builder-owned media
+- **Context:** Builder needed lesson-owned media uploads with a new GCS prefix, but the existing storage service only exposed generation/section-oriented keys.
+- **Guide says:** Reuse existing GCS infrastructure and upload under `editable-lessons/{lesson_id}/media/...`.
+- **Chose:** Extended `GCSImageStore` with `upload_with_key(...)`, then used it from builder media upload route to avoid introducing parallel storage code paths.
+- **Risk:** In environments without configured GCS (`GCS_BUCKET_NAME`/credentials), uploads are unavailable and the API returns `503`.
+
+### Decision: Move image handling from data-URI persistence to server-uploaded URLs
+- **Context:** Existing builder media flows stored uploaded images as inline data URIs in lesson JSON, which does not satisfy server-owned persistence and cross-device durability expectations.
+- **Guide says:** Media uploads should go through backend ownership checks and stored URLs.
+- **Chose:** Added `frontend/src/lib/builder/api/media-upload.ts` and updated `ImageUploader`/media field integrations to upload files first, then store returned URL references in the lesson media map.
+- **Risk:** Current `lectio` `MediaReference` type in this workspace does not include a `source` field, so source metadata could not be recorded without contract changes.

@@ -61,12 +61,25 @@ class GCSImageStore:
             return None
 
         key = f"images/{generation_id}/{section_id}.png"
-        blob = self._bucket.blob(key)
-
-        # SDK is sync — run off the event loop
-        await asyncio.to_thread(
-            blob.upload_from_string, image_bytes, content_type
+        return await self.upload_with_key(
+            key=key,
+            image_bytes=image_bytes,
+            content_type=content_type,
         )
+
+    async def upload_with_key(
+        self,
+        *,
+        key: str,
+        image_bytes: bytes,
+        content_type: str = "image/png",
+    ) -> str | None:
+        """Upload bytes to a specific object key and return an accessible URL."""
+        if not self.enabled:
+            return None
+
+        blob = self._bucket.blob(key)
+        await asyncio.to_thread(blob.upload_from_string, image_bytes, content_type)
 
         if self._base_url:
             return f"{self._base_url.rstrip('/')}/{key}"

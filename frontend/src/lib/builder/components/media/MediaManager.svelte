@@ -47,9 +47,9 @@
 		}
 	}
 
-	function replaceImage(id: string, payload: { dataUri: string; filename: string; mimeType: string }): void {
+	function replaceImage(id: string, payload: { url: string; filename: string; mimeType: string }): void {
 		store.updateMedia(id, {
-			url: payload.dataUri,
+			url: payload.url,
 			filename: payload.filename,
 			mime_type: payload.mimeType,
 			type: 'image'
@@ -136,11 +136,14 @@
 									{#if m.type === 'image'}
 										<div class="w-full max-w-xs">
 											<p class="mb-1 text-xs text-slate-500">Replace image</p>
-											<ImageUploader
-												onReady={(p) => {
-													replaceImage(m.id, p);
-												}}
-											/>
+											{#if store.document}
+												<ImageUploader
+													lessonId={store.document.id}
+													onReady={(p) => {
+														replaceImage(m.id, p);
+													}}
+												/>
+											{/if}
 										</div>
 									{:else if m.type === 'video'}
 										<div class="w-full max-w-md">

@@ -44,12 +44,12 @@
 		onchange?.(media.id);
 	}
 
-	function addImageFromUpload(payload: { dataUri: string; filename: string; mimeType: string }): void {
+	function addImageFromUpload(payload: { url: string; filename: string; mimeType: string }): void {
 		if (!store) return;
 		const media: MediaReference = {
 			id: crypto.randomUUID(),
 			type: 'image',
-			url: payload.dataUri,
+			url: payload.url,
 			filename: payload.filename,
 			mime_type: payload.mimeType,
 			alt_text: '',
@@ -118,7 +118,9 @@
 				<VideoUrlInput onValidEmbed={addVideoFromEmbed} />
 			{/if}
 			{#if wantImage}
-				<ImageUploader onReady={addImageFromUpload} />
+				{#if store.document}
+					<ImageUploader lessonId={store.document.id} onReady={addImageFromUpload} />
+				{/if}
 			{/if}
 			{#if !wantVideo && !wantImage}
 				<p class="text-xs text-slate-500">Choose an image or video block to use the media picker.</p>
