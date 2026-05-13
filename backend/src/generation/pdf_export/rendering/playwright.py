@@ -97,7 +97,8 @@ async def render_generation_pdf(
 ) -> tuple[Path, dict[str, Any]]:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     path_part = render_path if render_path is not None else f"/textbook/{generation_id}"
-    render_url = f"{config.render_base_url}{path_part}?print=true&token={auth_token}"
+    separator = "&" if "?" in path_part else "?"
+    render_url = f"{config.render_base_url}{path_part}{separator}print=true&token={auth_token}"
 
     print_snapshot: dict[str, Any] = {}
 
