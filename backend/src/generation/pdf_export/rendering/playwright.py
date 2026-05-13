@@ -45,6 +45,7 @@ _PRINT_ROOT_SNAPSHOT_JS = """
   return {
     found: true,
     renderer: root.getAttribute('data-renderer'),
+    fetch_status: root.getAttribute('data-fetch-status'),
     section_count: root.getAttribute('data-section-count'),
     template_id: root.getAttribute('data-template-id'),
     image_count: root.getAttribute('data-image-count'),
@@ -55,6 +56,35 @@ _PRINT_ROOT_SNAPSHOT_JS = """
   };
 }
 """
+
+
+def _log_print_snapshot(generation_id: str, snapshot: dict[str, Any]) -> None:
+    if not snapshot.get("found"):
+        return
+
+    logger.info(
+        "PDF render diagnostics",
+        extra={
+            "generation_id": generation_id,
+            "renderer": snapshot.get("renderer"),
+            "fetch_status": snapshot.get("fetch_status"),
+            "section_count": snapshot.get("section_count"),
+            "template_id": snapshot.get("template_id"),
+            "image_count": snapshot.get("image_count"),
+            "images_loaded": snapshot.get("images_loaded"),
+            "images_failed": snapshot.get("images_failed"),
+            "images_timed_out": snapshot.get("images_timed_out"),
+        },
+    )
+
+    if str(snapshot.get("images_failed") or "0") != "0":
+        logger.warning(
+            "PDF image failures",
+            extra={
+                "generation_id": generation_id,
+                "failed_image_sources": snapshot.get("failed_image_sources"),
+            },
+        )
 
 
 async def render_generation_pdf(
@@ -104,6 +134,7 @@ async def render_generation_pdf(
                     evaluated = await page.evaluate(_PRINT_ROOT_SNAPSHOT_JS)
                     if isinstance(evaluated, dict):
                         print_snapshot = evaluated
+                        _log_print_snapshot(generation_id, print_snapshot)
                 except Exception:
                     logger.exception("PDF print page evaluate failed")
                 await page.pdf(
