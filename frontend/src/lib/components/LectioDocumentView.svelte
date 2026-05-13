@@ -7,7 +7,7 @@
 	interface Props {
 		document: GenerationDocument;
 		sectionSlots?: ViewerSectionSlot[];
-		/** When set and `document.status === 'completed'`, shows "Export for Builder" in the lesson header. */
+		/** When set and `document.status === 'completed'`, shows "Open in Builder" in the lesson header. */
 		onExportForBuilder?: () => void;
 	}
 
@@ -51,7 +51,7 @@
 									class="export-builder-btn"
 									onclick={() => onExportForBuilder?.()}
 								>
-									Export for Builder
+									Open in Builder
 								</button>
 							{/if}
 							<div class="document-meta">

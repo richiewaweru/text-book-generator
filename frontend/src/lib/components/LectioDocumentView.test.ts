@@ -190,7 +190,7 @@ describe('LectioDocumentView', () => {
 		expect(screen.queryByText(/Generating section 1/i)).toBeNull();
 	});
 
-	it('shows Export for Builder when completed and handler is provided', async () => {
+	it('shows Open in Builder when completed and handler is provided', async () => {
 		const onExportForBuilder = vi.fn();
 		render(LectioDocumentView, {
 			props: {
@@ -221,13 +221,13 @@ describe('LectioDocumentView', () => {
 			}
 		});
 
-		const btn = screen.getByRole('button', { name: /export for builder/i });
+		const btn = screen.getByRole('button', { name: /open in builder/i });
 		expect(btn).toBeTruthy();
 		await fireEvent.click(btn);
 		expect(onExportForBuilder).toHaveBeenCalledTimes(1);
 	});
 
-	it('does not show Export for Builder when generation is still running', () => {
+	it('does not show Open in Builder when generation is still running', () => {
 		render(LectioDocumentView, {
 			props: {
 				document: {
@@ -251,6 +251,6 @@ describe('LectioDocumentView', () => {
 			}
 		});
 
-		expect(screen.queryByRole('button', { name: /export for builder/i })).toBeNull();
+		expect(screen.queryByRole('button', { name: /open in builder/i })).toBeNull();
 	});
 });

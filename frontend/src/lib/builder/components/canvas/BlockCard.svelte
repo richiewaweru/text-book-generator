@@ -1,0 +1,247 @@
+<script lang="ts">
+	import { dragHandle } from 'svelte-dnd-action';
+	import { cn } from 'lectio';
+	import { getComponentById, getEditSchema } from 'lectio';
+	import type { BlockInstance, LessonDocument } from 'lectio';
+	import type { DocumentStore } from '$lib/builder/stores/document.svelte';
+	import { Copy, GripVertical, Pencil, Trash2 } from 'lucide-svelte';
+	import type { BlockGenerateContextBlock } from '$lib/builder/api/ai-client';
+	import { apiBaseUrl } from '$lib/builder/api/public-env';
+	import AiBlockAssist from '$lib/builder/components/ai/AiBlockAssist.svelte';
+	import { getToken } from '$lib/stores/auth';
+	import { saveVersionSnapshot } from '$lib/builder/persistence/idb-store';
+	import { validationWarningsForBlock } from '$lib/builder/utils/section-validation';
+	import BlockEditor from './BlockEditor.svelte';
+	import BlockPreview from './BlockPreview.svelte';
+
+	let {
+		block,
+		document,
+		store,
+		selected = false,
+		editing = false,
+		onselect,
+		onstartedit,
+		onstopedit,
+		onupdatefield,
+		onfieldblur,
+		onduplicate,
+		ondelete,
+		contextBlocksForAi = [],
+		onapplyaicontent
+	}: {
+		block: BlockInstance;
+		document: LessonDocument | null;
+		store: DocumentStore;
+		selected?: boolean;
+		editing?: boolean;
+		onselect?: () => void;
+		onstartedit?: () => void;
+		onstopedit?: () => void;
+		onupdatefield?: (field: string, value: unknown) => void;
+		onfieldblur?: () => void;
+		onduplicate?: () => void;
+		ondelete?: () => void;
+		contextBlocksForAi?: BlockGenerateContextBlock[];
+		onapplyaicontent?: (content: Record<string, unknown>) => void;
+	} = $props();
+
+	const apiConfigured = $derived(Boolean(apiBaseUrl()));
+	const aiGradeBand = $derived(document?.grade_band ?? 'secondary');
+	const aiToken = $derived(getToken());
+
+	const meta = $derived(getComponentById(block.component_id));
+	const editSchema = $derived(getEditSchema(block.component_id));
+
+	let sectionWarnings = $state<string[]>([]);
+
+	let lastEditing = false;
+	$effect(() => {
+		if (lastEditing && !editing && document) {
+			sectionWarnings = validationWarningsForBlock(document, block.id);
+		}
+		lastEditing = editing;
+	});
+
+	function handleStopEdit(): void {
+		onstopedit?.();
+	}
+
+	async function snapshotBeforeAi(): Promise<void> {
+		if (!document) return;
+		await saveVersionSnapshot(document.id, document, 'Before AI generation');
+	}
+</script>
+
+<div
+	class={cn(
+		'block-card mb-6 rounded-xl border border-slate-200 bg-white shadow-sm outline-none',
+		selected && 'ring-2 ring-blue-500'
+	)}
+	data-block-id={block.id}
+	data-component-id={block.component_id}
+	data-testid="block-card"
+	data-editing-card={editing ? block.id : undefined}
+	role="button"
+	tabindex="0"
+	onclick={(e) => {
+		const t = e.target as HTMLElement;
+		if (t.closest?.('.drag-handle') || t.closest?.('button')) return;
+		onselect?.();
+	}}
+	ondblclick={(e) => {
+		const t = e.target as HTMLElement;
+		if (t.closest?.('.drag-handle')) return;
+		onstartedit?.();
+	}}
+	onkeydown={(e) => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			const t = e.target as HTMLElement;
+			if (t.closest?.('button')) return;
+			e.preventDefault();
+			onselect?.();
+		}
+	}}
+>
+	<div
+		class="block-card-chrome flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2"
+	>
+		<div class="flex min-w-0 flex-1 items-center gap-2">
+			<span
+				class="drag-handle inline-flex shrink-0 cursor-grab touch-none rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing"
+				aria-label="Drag to reorder"
+				data-testid="block-drag-handle"
+				role="presentation"
+				onpointerdown={(e) => e.stopPropagation()}
+				use:dragHandle
+			>
+				<GripVertical size={16} aria-hidden="true" />
+			</span>
+			<span
+				class="block-label truncate text-xs font-semibold uppercase tracking-wide text-slate-500"
+			>
+				{meta?.teacherLabel ?? block.component_id}
+			</span>
+		</div>
+		<div class="flex flex-wrap items-center gap-1">
+			{#if editing}
+				<button
+					type="button"
+					class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+					onclick={(e) => {
+						e.stopPropagation();
+						handleStopEdit();
+					}}
+				>
+					Close
+				</button>
+			{:else}
+				{#if selected && editSchema && onapplyaicontent}
+					<AiBlockAssist
+						{block}
+						subject={document?.subject ?? ''}
+						gradeBand={aiGradeBand}
+						contextBlocks={contextBlocksForAi}
+						token={aiToken}
+						{apiConfigured}
+						onBeforeGenerate={snapshotBeforeAi}
+						ongenerated={onapplyaicontent}
+					/>
+				{/if}
+				{#if selected && editSchema}
+					<button
+						type="button"
+						class="rounded-md p-1.5 text-slate-600 hover:bg-slate-100"
+						title="Edit"
+						aria-label="Edit"
+						onclick={(e) => {
+							e.stopPropagation();
+							onstartedit?.();
+						}}
+					>
+						<Pencil size={16} />
+					</button>
+				{/if}
+				{#if selected}
+					<button
+						type="button"
+						class="rounded-md p-1.5 text-slate-600 hover:bg-slate-100"
+						title="Duplicate"
+						aria-label="Duplicate"
+						onclick={(e) => {
+							e.stopPropagation();
+							onduplicate?.();
+						}}
+					>
+						<Copy size={16} />
+					</button>
+					<button
+						type="button"
+						class="rounded-md p-1.5 text-red-600 hover:bg-red-50"
+						title="Delete"
+						aria-label="Delete"
+						onclick={(e) => {
+							e.stopPropagation();
+							ondelete?.();
+						}}
+					>
+						<Trash2 size={16} />
+					</button>
+				{/if}
+				{#if editSchema && !selected}
+					<button
+						type="button"
+						class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+						onclick={(e) => {
+							e.stopPropagation();
+							onstartedit?.();
+						}}
+					>
+						Edit
+					</button>
+				{/if}
+			{/if}
+		</div>
+	</div>
+
+	{#if editing && editSchema}
+		<div class="flex flex-col gap-4 p-2 lg:grid lg:grid-cols-2 lg:gap-4 lg:p-4">
+			<div class="min-w-0 border-slate-100 lg:border-r lg:pr-4">
+				<BlockEditor
+					schema={editSchema}
+					content={block.content}
+					onchange={(field, value) => onupdatefield?.(field, value)}
+					onfieldblur={onfieldblur}
+					{store}
+				/>
+			</div>
+			<div class="min-w-0 rounded-lg border border-slate-100 bg-slate-50/50 p-3">
+				<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Live preview</p>
+				<BlockPreview
+					componentId={block.component_id}
+					content={block.content}
+					media={document?.media ?? {}}
+				/>
+			</div>
+		</div>
+	{:else}
+		<div class="block-content p-4">
+			<BlockPreview
+				componentId={block.component_id}
+				content={block.content}
+				media={document?.media ?? {}}
+			/>
+		</div>
+	{/if}
+
+	{#if sectionWarnings.length > 0}
+		<details class="border-t border-amber-100 bg-amber-50/50 px-4 py-2 text-sm text-amber-900">
+			<summary class="cursor-pointer font-medium">Section validation ({sectionWarnings.length})</summary>
+			<ul class="mt-2 list-inside list-disc space-y-1 text-xs">
+				{#each sectionWarnings as w (w)}
+					<li>{w}</li>
+				{/each}
+			</ul>
+		</details>
+	{/if}
+</div>

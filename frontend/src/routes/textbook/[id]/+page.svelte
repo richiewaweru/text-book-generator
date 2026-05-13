@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { providePrintMode } from 'lectio';
 	import '$lib/styles/print.css';
@@ -21,7 +22,10 @@
 		type V3BookletDocumentResponse
 	} from '$lib/api/client';
 	import { mapPackSectionsToCanvas } from '$lib/studio/v3-print-canvas';
-	import { downloadLessonDocument, exportToLessonDocument } from '$lib/generation/export-document';
+	import { exportToLessonDocument } from '$lib/generation/export-document';
+	import { saveDocument } from '$lib/builder/persistence/idb-store';
+import { v3PackToBuilderDocument } from '$lib/builder/adapters/from-generation';
+import type { V3PackDocument } from '$lib/studio/v3-pack-to-lectio-document';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import type { PDFExportRequest } from '$lib/types';
 	import type {
@@ -199,6 +203,29 @@
 		exportPreset = preset;
 		includeToc = true;
 		includeAnswers = preset === 'teacher';
+	}
+
+	async function openInBuilder(): Promise<void> {
+		if (!generationId) return;
+
+		try {
+			if (v3Document) {
+				const lesson = v3PackToBuilderDocument(v3Document as V3PackDocument, {
+					routeGenerationId: generationId
+				});
+				await saveDocument(lesson);
+				await goto(`/builder/${lesson.id}`);
+				return;
+			}
+
+			if (legacyDocument) {
+				const lesson = exportToLessonDocument(legacyDocument);
+				await saveDocument(lesson);
+				await goto(`/builder/${lesson.id}`);
+			}
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to open lesson in builder.';
+		}
 	}
 
 	function buildSectionTitleMap(nextDocument: GenerationDocument | null): Map<string, string> {
@@ -580,12 +607,7 @@
 		<LectioDocumentView
 			document={legacyDocument}
 			sectionSlots={sectionSlots}
-			onExportForBuilder={() => {
-				const currentDocument = legacyDocument;
-				if (!currentDocument) return;
-				const lesson = exportToLessonDocument(currentDocument);
-				downloadLessonDocument(lesson);
-			}}
+			onExportForBuilder={() => void openInBuilder()}
 		/>
 	{:else}
 		<p>No document is available yet.</p>
