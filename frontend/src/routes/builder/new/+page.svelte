@@ -7,12 +7,14 @@
 		getTemplateById,
 		templateRegistry
 	} from 'lectio';
+	import { createBuilderLesson } from '$lib/builder/api/lesson-crud';
 	import { saveDocument } from '$lib/builder/persistence/idb-store';
 
 	let title = $state('');
 	let subject = $state('');
 	let templateId = $state(templateRegistry[0]?.contract.id ?? 'open-canvas');
 	let presetId = $state(basePresets[0]?.id ?? 'blue-classroom');
+	let createError = $state<string | null>(null);
 
 	const presetChoices = $derived.by(() => {
 		const def = getTemplateById(templateId);
@@ -100,15 +102,35 @@
 	}
 
 	async function onCreateFromTemplate(): Promise<void> {
+		createError = null;
 		const doc = createFromTemplate(title, subject, templateId, presetId);
-		await saveDocument(doc);
-		await goto(`/builder/${doc.id}`);
+		try {
+			const created = await createBuilderLesson({
+				source_type: 'template',
+				title: doc.title,
+				document: doc
+			});
+			await saveDocument(created.document);
+			await goto(`/builder/${created.id}`);
+		} catch (error) {
+			createError = error instanceof Error ? error.message : 'Failed to create lesson.';
+		}
 	}
 
 	async function onStartBlank(): Promise<void> {
+		createError = null;
 		const doc = createBlank(title, subject, presetId);
-		await saveDocument(doc);
-		await goto(`/builder/${doc.id}`);
+		try {
+			const created = await createBuilderLesson({
+				source_type: 'manual',
+				title: doc.title,
+				document: doc
+			});
+			await saveDocument(created.document);
+			await goto(`/builder/${created.id}`);
+		} catch (error) {
+			createError = error instanceof Error ? error.message : 'Failed to create lesson.';
+		}
 	}
 </script>
 
@@ -119,6 +141,11 @@
 	</p>
 
 	<div class="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+		{#if createError}
+			<p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+				{createError}
+			</p>
+		{/if}
 		<div>
 			<label class="mb-1 block text-sm font-medium text-slate-700" for="nl-title">Lesson title</label>
 			<input

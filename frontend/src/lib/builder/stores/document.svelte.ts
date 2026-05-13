@@ -1,10 +1,16 @@
 import type { BlockInstance, DocumentSection, LessonDocument, MediaReference } from 'lectio';
 import { getEmptyContent, getTemplateById } from 'lectio';
 import { saveDocument } from '$lib/builder/persistence/idb-store';
+import {
+	ensureBuilderSyncAdapterRegistered,
+	flushBuilderSyncQueue,
+	saveLessonToServer
+} from '$lib/builder/persistence/server-sync';
 import { createHistoryStore } from './history.svelte';
 
 const FIELD_HISTORY_IDLE_MS = 1000;
-const PERSIST_DEBOUNCE_MS = 300;
+const IDB_PERSIST_DEBOUNCE_MS = 300;
+const SERVER_PERSIST_DEBOUNCE_MS = 1200;
 
 /** Item row in a canvas DnD zone: real block or palette stub (before materialization). */
 export type DndRowItem =
@@ -104,31 +110,60 @@ export function createDocumentStore() {
 	const canRedo = $derived(history.canRedo);
 
 	let saveStatus = $state<'saved' | 'saving' | 'error'>('saved');
-	let persistTimer: ReturnType<typeof setTimeout> | null = null;
+	let idbPersistTimer: ReturnType<typeof setTimeout> | null = null;
+	let serverPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
-	function clearPersistTimer(): void {
-		if (persistTimer !== null) {
-			clearTimeout(persistTimer);
-			persistTimer = null;
+	function clearPersistTimers(): void {
+		if (idbPersistTimer !== null) {
+			clearTimeout(idbPersistTimer);
+			idbPersistTimer = null;
+		}
+		if (serverPersistTimer !== null) {
+			clearTimeout(serverPersistTimer);
+			serverPersistTimer = null;
 		}
 	}
 
-	function schedulePersist(snapshot: LessonDocument): void {
+	function scheduleIdbPersist(snapshot: LessonDocument): void {
 		if (typeof indexedDB === 'undefined') return;
-		clearPersistTimer();
-		persistTimer = setTimeout(async () => {
-			persistTimer = null;
-			const ts = snapshot.updated_at;
-			saveStatus = 'saving';
+		if (idbPersistTimer !== null) {
+			clearTimeout(idbPersistTimer);
+		}
+		idbPersistTimer = setTimeout(async () => {
+			idbPersistTimer = null;
 			try {
 				await saveDocument(snapshot);
-				if (document?.updated_at === ts) {
-					saveStatus = 'saved';
-				}
 			} catch {
 				saveStatus = 'error';
 			}
-		}, PERSIST_DEBOUNCE_MS);
+		}, IDB_PERSIST_DEBOUNCE_MS);
+	}
+
+	function scheduleServerPersist(snapshot: LessonDocument): void {
+		if (serverPersistTimer !== null) {
+			clearTimeout(serverPersistTimer);
+		}
+		serverPersistTimer = setTimeout(async () => {
+			serverPersistTimer = null;
+			const revision = snapshot.updated_at;
+			try {
+				await saveLessonToServer(snapshot);
+				await flushBuilderSyncQueue();
+				if (document?.updated_at === revision) {
+					saveStatus = 'saved';
+				}
+			} catch {
+				if (document?.updated_at === revision) {
+					saveStatus = 'error';
+				}
+			}
+		}, SERVER_PERSIST_DEBOUNCE_MS);
+	}
+
+	function schedulePersist(snapshot: LessonDocument): void {
+		saveStatus = 'saving';
+		scheduleIdbPersist(snapshot);
+		scheduleServerPersist(snapshot);
 	}
 
 	function defaultSelectedSection(): void {
@@ -537,12 +572,19 @@ export function createDocumentStore() {
 	}
 
 	async function flushSave(): Promise<void> {
-		if (!document || typeof indexedDB === 'undefined') return;
-		clearPersistTimer();
+		if (!document) return;
+		clearPersistTimers();
 		saveStatus = 'saving';
+		let idbFailed = false;
 		try {
 			await saveDocument(document);
-			saveStatus = 'saved';
+		} catch {
+			idbFailed = true;
+		}
+		try {
+			await saveLessonToServer(document);
+			await flushBuilderSyncQueue();
+			saveStatus = idbFailed ? 'error' : 'saved';
 		} catch {
 			saveStatus = 'error';
 		}
@@ -636,14 +678,16 @@ export function createDocumentStore() {
 		blocksForSection,
 		getContextBlocksForAi,
 		loadDocument(doc: LessonDocument) {
+			ensureBuilderSyncAdapterRegistered();
 			document = doc;
 			history.clear();
 			selectedBlockId = null;
 			editingBlockId = null;
 			fieldBurstOpen = false;
 			clearFieldIdleTimer();
-			clearPersistTimer();
+			clearPersistTimers();
 			saveStatus = 'saved';
+			void flushBuilderSyncQueue();
 			defaultSelectedSection();
 		},
 		clear() {
@@ -654,7 +698,7 @@ export function createDocumentStore() {
 			selectedSectionId = null;
 			fieldBurstOpen = false;
 			clearFieldIdleTimer();
-			clearPersistTimer();
+			clearPersistTimers();
 			saveStatus = 'saved';
 		},
 		updateBlockContent,

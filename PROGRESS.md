@@ -5,11 +5,75 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 
 ## Current Phase
 
-- Phase 1 - Move Builder into Textbook Agent frontend
+- Phase 2 - Backend persistence
 - Repo: `C:\Projects\Textbook agent`
-- Status: complete
+- Status: completed
 
 ## Feature Checklist
+
+### Feature: Builder Server Persistence
+
+**Classification**: major
+**Subsystems**: backend + frontend
+
+### Progress
+- [x] Understood requirements and identified scope
+- [x] Read relevant source code and project rules
+- [x] Implemented backend persistence table + API
+- [x] Implemented frontend server-sync + IDB cache behavior
+- [x] Wrote tests for new behavior
+- [x] Ran validation (backend + frontend)
+- [x] Self-reviewed against agents/standards/review.md
+- [ ] Wrote commit message(s) following agents/standards/communication.md
+- [ ] Updated PR description with summary, validation evidence, risks
+- [x] Noted any follow-up work or open questions
+
+### Validation Evidence
+- Backend tests: `uv run pytest tests/routes/test_builder_lessons.py -q` passed (`4` tests).
+- Backend lint: `uv run ruff check src tests/routes/test_builder_lessons.py` passed.
+- Frontend checks: `npm run check` passed (`0` errors, `0` warnings).
+- Frontend build: `npm run build` passed.
+
+### Risks and Follow-up
+- Status badge currently reflects latest local save/sync attempt; reconnect-triggered queue flush can recover in the background without immediately flipping toolbar state.
+- Older Phase 1-only local IDB lessons without server records will show sync errors until recreated/migrated through server-backed flows.
+
+## Phase 2 What Was Done
+
+- Backend persistence:
+  - Added `EditableLessonModel` in `backend/src/core/database/models.py`.
+  - Added migration `backend/src/core/database/migrations/versions/20260513_0013_add_editable_lessons.py`.
+  - Added builder CRUD API routes in `backend/src/builder/routes.py`:
+    - `POST /api/v1/builder/lessons`
+    - `GET /api/v1/builder/lessons`
+    - `GET /api/v1/builder/lessons/{id}`
+    - `PUT /api/v1/builder/lessons/{id}`
+    - `DELETE /api/v1/builder/lessons/{id}`
+  - Enforced ownership checks for all operations and source-generation ownership on create.
+  - Added hard LessonDocument save guards (shape, known component IDs, section/block integrity, payload size limit).
+  - Registered builder router in `backend/src/app.py`.
+  - Updated backend CORS methods to include `PUT`.
+- Frontend persistence + sync:
+  - Added CRUD client: `frontend/src/lib/builder/api/lesson-crud.ts`.
+  - Added server sync layer: `frontend/src/lib/builder/persistence/server-sync.ts`.
+  - Updated document store to:
+    - save immediately to IDB (debounced 300ms)
+    - save to server via debounced PUT (1200ms)
+    - queue retry entries on retryable failures
+    - flush queue on manual save and load
+  - Mounted reconnect sync hooks in `AppShell` via `OfflineSyncHooks`.
+  - Updated `/builder/[id]` load path to server-first with IDB fallback.
+- Flow updates:
+  - Updated `/builder/new` to create server lesson first, then cache in IDB.
+  - Updated textbook "Open in Builder" to `POST /api/v1/builder/lessons` first (server UUID), then cache + navigate.
+
+## Next Phase Needs
+
+- Phase 3: Palette, block management verification, and canvas polish per unified guide.
+
+---
+
+## Phase 1 Archive
 
 ### Feature: Embed Lesson Builder Module
 

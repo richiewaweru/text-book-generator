@@ -21,11 +21,12 @@
 		type GenerationDocumentResponse,
 		type V3BookletDocumentResponse
 	} from '$lib/api/client';
+	import { createBuilderLesson } from '$lib/builder/api/lesson-crud';
 	import { mapPackSectionsToCanvas } from '$lib/studio/v3-print-canvas';
 	import { exportToLessonDocument } from '$lib/generation/export-document';
 	import { saveDocument } from '$lib/builder/persistence/idb-store';
-import { v3PackToBuilderDocument } from '$lib/builder/adapters/from-generation';
-import type { V3PackDocument } from '$lib/studio/v3-pack-to-lectio-document';
+	import { v3PackToBuilderDocument } from '$lib/builder/adapters/from-generation';
+	import type { V3PackDocument } from '$lib/studio/v3-pack-to-lectio-document';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import type { PDFExportRequest } from '$lib/types';
 	import type {
@@ -213,15 +214,27 @@ import type { V3PackDocument } from '$lib/studio/v3-pack-to-lectio-document';
 				const lesson = v3PackToBuilderDocument(v3Document as V3PackDocument, {
 					routeGenerationId: generationId
 				});
-				await saveDocument(lesson);
-				await goto(`/builder/${lesson.id}`);
+				const created = await createBuilderLesson({
+					source_type: 'v3_generation',
+					source_generation_id: generationId,
+					title: lesson.title,
+					document: lesson
+				});
+				await saveDocument(created.document);
+				await goto(`/builder/${created.id}`);
 				return;
 			}
 
 			if (legacyDocument) {
 				const lesson = exportToLessonDocument(legacyDocument);
-				await saveDocument(lesson);
-				await goto(`/builder/${lesson.id}`);
+				const created = await createBuilderLesson({
+					source_type: 'v3_generation',
+					source_generation_id: generationId,
+					title: lesson.title,
+					document: lesson
+				});
+				await saveDocument(created.document);
+				await goto(`/builder/${created.id}`);
 			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to open lesson in builder.';

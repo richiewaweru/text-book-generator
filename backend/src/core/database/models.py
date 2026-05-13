@@ -32,6 +32,7 @@ class UserModel(Base):
     generations = relationship("GenerationModel", back_populates="user")
     packs = relationship("LearningPackModel", back_populates="user")
     llm_calls = relationship("LLMCallModel", back_populates="user")
+    editable_lessons = relationship("EditableLessonModel", back_populates="user")
 
 
 class StudentProfileModel(Base):
@@ -175,6 +176,23 @@ class LessonShareModel(Base):
     expires_at = Column(DateTime, nullable=False, index=True)
     allow_download = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
+
+
+class EditableLessonModel(Base):
+    """Teacher-owned lesson workspace persisted for the Builder."""
+
+    __tablename__ = "editable_lessons"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    source_generation_id = Column(String, nullable=True)
+    source_type = Column(String, nullable=False, default="manual", server_default="manual")
+    title = Column(String, nullable=False, default="Untitled lesson", server_default="Untitled lesson")
+    document_json = Column(JSON_DOCUMENT_TYPE, nullable=False)
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    user = relationship("UserModel", back_populates="editable_lessons")
 
 
 class V3TraceRunModel(Base):

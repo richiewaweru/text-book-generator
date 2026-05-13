@@ -28,6 +28,7 @@ from core.pdf_export_runtime import cleanup_stale_pdf_exports
 from core.routes.auth import router as auth_router
 from core.routes.profile import router as profile_router
 from core.routes.shares import router as shares_router
+from builder.routes import router as builder_router
 from generation.dependencies import get_document_repository, get_generation_repository
 from generation.image_pipeline_health import (
     check_gemini_image_provider,
@@ -242,7 +243,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
     app.add_middleware(SecurityHeadersMiddleware)
@@ -254,6 +255,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(builder_router)
     app.include_router(shares_router)
     app.include_router(profile_router)
     app.include_router(brief_router)

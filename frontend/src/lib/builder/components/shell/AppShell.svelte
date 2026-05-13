@@ -9,6 +9,7 @@
 	import DocumentToolbar from '$lib/builder/components/toolbar/DocumentToolbar.svelte';
 	import MediaManager from '$lib/builder/components/media/MediaManager.svelte';
 	import VersionPanel from '$lib/builder/components/versions/VersionPanel.svelte';
+	import OfflineSyncHooks from '$lib/builder/components/shell/OfflineSyncHooks.svelte';
 	import { saveVersionSnapshot } from '$lib/builder/persistence/idb-store';
 	import type { DocumentStore } from '$lib/builder/stores/document.svelte';
 
@@ -55,6 +56,7 @@
 </script>
 
 <div class="builder-shell flex min-h-screen flex-col bg-slate-100">
+	<OfflineSyncHooks />
 	<DocumentToolbar
 		document={store.document ?? document}
 		saveStatus={store.saveStatus}

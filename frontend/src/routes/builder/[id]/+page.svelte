@@ -5,7 +5,7 @@
 	import { onMount } from 'svelte';
 	import AppShell from '$lib/builder/components/shell/AppShell.svelte';
 	import { createDocumentStore } from '$lib/builder/stores/document.svelte';
-	import { getDocument } from '$lib/builder/persistence/idb-store';
+	import { loadBuilderLessonWithFallback } from '$lib/builder/persistence/server-sync';
 	import {
 		isDeleteOrBackspace,
 		isModifierD,
@@ -17,6 +17,7 @@
 
 	const store = createDocumentStore();
 	let ready = $state(false);
+	let loadWarning = $state<string | null>(null);
 
 	const id = $derived(page.params.id);
 
@@ -25,14 +26,22 @@
 			void goto('/');
 			return;
 		}
-		void getDocument(id).then(async (doc) => {
-			if (!doc) {
+		void loadBuilderLessonWithFallback(id)
+			.then(async ({ document: doc, source }) => {
+				if (!doc) {
+					await goto('/');
+					return;
+				}
+				store.loadDocument(doc);
+				loadWarning =
+					source === 'idb'
+						? 'Loaded local cached copy. Server sync will resume when connectivity is restored.'
+						: null;
+				ready = true;
+			})
+			.catch(async () => {
 				await goto('/');
-				return;
-			}
-			store.loadDocument(doc);
-			ready = true;
-		});
+			});
 	});
 
 	$effect(() => {
@@ -97,5 +106,10 @@
 {#if !ready || !store.document}
 	<p class="p-8 text-slate-600">Loading lesson…</p>
 {:else}
+	{#if loadWarning}
+		<p class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+			{loadWarning}
+		</p>
+	{/if}
 	<AppShell document={store.document} {store} />
 {/if}
