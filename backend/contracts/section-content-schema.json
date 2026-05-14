@@ -445,6 +445,9 @@
     "DiagramContent": {
       "type": "object",
       "properties": {
+        "media_id": {
+          "type": "string"
+        },
         "svg_content": {
           "type": "string"
         },
@@ -468,6 +471,14 @@
         },
         "figure_number": {
           "type": "number"
+        },
+        "width": {
+          "type": "string",
+          "enum": [
+            "full",
+            "half",
+            "third"
+          ]
         }
       },
       "required": [
@@ -752,7 +763,13 @@
     "DiagramCompareContent": {
       "type": "object",
       "properties": {
+        "before_media_id": {
+          "type": "string"
+        },
         "before_svg": {
+          "type": "string"
+        },
+        "after_media_id": {
           "type": "string"
         },
         "after_svg": {
@@ -823,6 +840,9 @@
           "type": "string"
         },
         "caption": {
+          "type": "string"
+        },
+        "media_id": {
           "type": "string"
         },
         "svg_content": {
@@ -973,7 +993,23 @@
         "values": {
           "type": "array",
           "items": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            ]
           }
         },
         "takeaway": {
@@ -1512,7 +1548,23 @@
         "word_bank": {
           "type": "array",
           "items": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "word": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "word"
+                ],
+                "additionalProperties": false
+              }
+            ]
           }
         }
       },

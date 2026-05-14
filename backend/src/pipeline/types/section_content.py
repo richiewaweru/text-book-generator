@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict
 
 class SectionHeaderContent(BaseModel):
@@ -75,6 +75,7 @@ class PracticeSolution(BaseModel):
     worked: Optional[str] = None
 class DiagramContent(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    media_id: Optional[str] = None
     svg_content: Optional[str] = None
     image_url: Optional[str] = None
     caption: str
@@ -82,6 +83,7 @@ class DiagramContent(BaseModel):
     alt_text: str
     callouts: Optional[list[DiagramCallout]] = None
     figure_number: Optional[float] = None
+    width: Optional[Literal["full", "half", "third"]] = None
 class DiagramCallout(BaseModel):
     model_config = ConfigDict(extra='forbid')
     id: str
@@ -152,7 +154,9 @@ class ProcessStepItem(BaseModel):
     warning: Optional[str] = None
 class DiagramCompareContent(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    before_media_id: Optional[str] = None
     before_svg: Optional[str] = None
+    after_media_id: Optional[str] = None
     after_svg: Optional[str] = None
     before_image_url: Optional[str] = None
     after_image_url: Optional[str] = None
@@ -170,6 +174,7 @@ class DiagramSeriesStep(BaseModel):
     model_config = ConfigDict(extra='forbid')
     step_label: str
     caption: str
+    media_id: Optional[str] = None
     svg_content: Optional[str] = None
     image_url: Optional[str] = None
 class VideoEmbedContent(BaseModel):
@@ -204,7 +209,7 @@ class ComparisonColumn(BaseModel):
 class ComparisonRow(BaseModel):
     model_config = ConfigDict(extra='forbid')
     criterion: str
-    values: list[str]
+    values: list[Union[str, ComparisonRowValuesItem]]
     takeaway: Optional[str] = None
 class TimelineContent(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -329,7 +334,7 @@ class FillInBlankContent(BaseModel):
     model_config = ConfigDict(extra='forbid')
     instruction: Optional[str] = None
     segments: list[FillInBlankSegment]
-    word_bank: Optional[list[str]] = None
+    word_bank: Optional[list[Union[str, FillInBlankContentWordBankItem]]] = None
 class FillInBlankSegment(BaseModel):
     model_config = ConfigDict(extra='forbid')
     text: str
@@ -348,6 +353,12 @@ class HookHeroContentDataPoint(BaseModel):
     value: str
     label: str
     source: Optional[str] = None
+class ComparisonRowValuesItem(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    text: str
+class FillInBlankContentWordBankItem(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    word: str
 class SectionContent(BaseModel):
     model_config = ConfigDict(extra='forbid')
     section_id: str
@@ -448,4 +459,6 @@ FillInBlankSegment.model_rebuild()
 SectionDividerContent.model_rebuild()
 KeyFactContent.model_rebuild()
 HookHeroContentDataPoint.model_rebuild()
+ComparisonRowValuesItem.model_rebuild()
+FillInBlankContentWordBankItem.model_rebuild()
 SectionContent.model_rebuild()
