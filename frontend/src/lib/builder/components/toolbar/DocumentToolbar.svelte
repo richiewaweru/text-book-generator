@@ -20,7 +20,8 @@
 		onSaveToDrive,
 		lessonId,
 		printPreviewActive = false,
-		onTogglePrintPreview
+		onTogglePrintPreview,
+		onRetrySave
 	}: {
 		document: LessonDocument;
 		saveStatus?: 'saved' | 'saving' | 'error';
@@ -31,6 +32,7 @@
 		lessonId?: string;
 		printPreviewActive?: boolean;
 		onTogglePrintPreview?: () => void;
+		onRetrySave?: () => void;
 	} = $props();
 
 	let storageAlmostFull = $state(false);
@@ -105,6 +107,16 @@
 				Saved
 			{/if}
 		</span>
+		{#if saveStatus === 'error' && onRetrySave}
+			<button
+				type="button"
+				class="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+				data-testid="toolbar-retry-save"
+				onclick={onRetrySave}
+			>
+				Retry save
+			</button>
+		{/if}
 		{#if onOpenHistory}
 			<button
 				type="button"

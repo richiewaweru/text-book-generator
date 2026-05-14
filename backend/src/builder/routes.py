@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -20,6 +21,7 @@ from core.dependencies import get_gcs_image_store, get_jwt_handler, get_settings
 from core.database.models import EditableLessonModel, GenerationModel
 from core.database.session import get_async_session
 from core.entities.user import User
+from core.rate_limit import limiter
 from core.storage.gcs_image_store import GCSImageStore
 from generation.entities.generation import Generation
 from generation.pdf_export.cleanup import cleanup_files
@@ -29,6 +31,7 @@ from pipeline.contracts import get_component_registry_entry
 from pipeline.types.requests import GenerationMode
 
 router = APIRouter(prefix="/api/v1/builder", tags=["builder"])
+logger = logging.getLogger(__name__)
 
 _VALID_SOURCES = {"manual", "v3_generation", "template"}
 _MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
@@ -364,9 +367,28 @@ def _builder_pdf_request_for_user(current_user: User) -> PDFExportRequest:
     )
 
 
+def _log_builder_event(
+    action: str,
+    *,
+    user_id: str,
+    lesson_id: str | None = None,
+    request: Request | None = None,
+    **details: Any,
+) -> None:
+    payload: dict[str, Any] = {
+        "action": action,
+        "user_id": user_id,
+        "lesson_id": lesson_id,
+        "request_id": getattr(getattr(request, "state", None), "request_id", None),
+    }
+    payload.update(details)
+    logger.info("builder_event", extra=payload)
+
+
 @router.post("/lessons", response_model=BuilderLessonDetailResponse, status_code=status.HTTP_201_CREATED)
 async def create_builder_lesson(
     body: BuilderLessonCreateRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> BuilderLessonDetailResponse:
@@ -410,11 +432,20 @@ async def create_builder_lesson(
     )
     session.add(model)
     await session.commit()
+    _log_builder_event(
+        "lesson_created",
+        user_id=current_user.id,
+        lesson_id=lesson_id,
+        request=request,
+        source_type=body.source_type,
+        source_generation_id=body.source_generation_id,
+    )
     return _to_detail(model)
 
 
 @router.get("/lessons", response_model=list[BuilderLessonListItem])
 async def list_builder_lessons(
+    request: Request,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> list[BuilderLessonListItem]:
@@ -423,21 +454,37 @@ async def list_builder_lessons(
         .where(EditableLessonModel.user_id == current_user.id)
         .order_by(EditableLessonModel.updated_at.desc())
     )
-    return [_to_list_item(model) for model in result.scalars().all()]
+    items = [_to_list_item(model) for model in result.scalars().all()]
+    _log_builder_event(
+        "lessons_listed",
+        user_id=current_user.id,
+        request=request,
+        lesson_count=len(items),
+    )
+    return items
 
 
 @router.get("/lessons/{lesson_id}", response_model=BuilderLessonDetailResponse)
 async def get_builder_lesson(
     lesson_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> BuilderLessonDetailResponse:
     model = await _owned_lesson_or_404(session, lesson_id=lesson_id, user_id=current_user.id)
+    _log_builder_event(
+        "lesson_loaded",
+        user_id=current_user.id,
+        lesson_id=lesson_id,
+        request=request,
+    )
     return _to_detail(model)
 
 
 @router.put("/lessons/{lesson_id}", response_model=BuilderLessonDetailResponse)
+@limiter.limit("120/minute")
 async def update_builder_lesson(
+    request: Request,
     lesson_id: str,
     body: BuilderLessonUpdateRequest,
     current_user: User = Depends(get_current_user),
@@ -462,24 +509,39 @@ async def update_builder_lesson(
     model.document_json = document_json
     model.updated_at = now
     await session.commit()
+    _log_builder_event(
+        "lesson_saved",
+        user_id=current_user.id,
+        lesson_id=lesson_id,
+        request=request,
+        payload_bytes=len(json.dumps(document_json).encode("utf-8")),
+    )
     return _to_detail(model)
 
 
 @router.delete("/lessons/{lesson_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_builder_lesson(
     lesson_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> Response:
     model = await _owned_lesson_or_404(session, lesson_id=lesson_id, user_id=current_user.id)
     await session.delete(model)
     await session.commit()
+    _log_builder_event(
+        "lesson_deleted",
+        user_id=current_user.id,
+        lesson_id=lesson_id,
+        request=request,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/lessons/{lesson_id}/media/upload", response_model=BuilderMediaUploadResponse)
 async def upload_builder_lesson_media(
     lesson_id: str,
+    request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
@@ -521,6 +583,16 @@ async def upload_builder_lesson_media(
             detail="Failed to upload media.",
         )
 
+    _log_builder_event(
+        "media_uploaded",
+        user_id=current_user.id,
+        lesson_id=lesson_id,
+        request=request,
+        media_id=media_id,
+        mime_type=mime_type,
+        byte_size=len(payload),
+    )
+
     return BuilderMediaUploadResponse(
         id=media_id,
         url=uploaded_url,
@@ -532,6 +604,7 @@ async def upload_builder_lesson_media(
 @router.get("/lessons/{lesson_id}/print-document")
 async def get_builder_lesson_print_document(
     lesson_id: str,
+    request: Request,
     audience: Literal["student", "teacher"] = "teacher",
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
@@ -541,6 +614,13 @@ async def get_builder_lesson_print_document(
         raise HTTPException(status_code=422, detail="Stored lesson document is invalid")
 
     document = _clone_json_tree(model.document_json)
+    _log_builder_event(
+        "print_document_loaded",
+        user_id=current_user.id,
+        lesson_id=lesson_id,
+        request=request,
+        audience=audience,
+    )
     if audience == "student":
         return _strip_answers_for_student_doc(document)
     return document
@@ -575,6 +655,15 @@ async def export_builder_lesson_pdf(
         settings=get_settings(),
         request_id=getattr(request.state, "request_id", None),
         render_path=f"/builder/print/{lesson_id}?audience={body.audience}",
+    )
+    _log_builder_event(
+        "pdf_exported",
+        user_id=current_user.id,
+        lesson_id=lesson_id,
+        request=request,
+        audience=body.audience,
+        page_count=result.page_count,
+        file_size_bytes=result.file_size_bytes,
     )
 
     return FileResponse(

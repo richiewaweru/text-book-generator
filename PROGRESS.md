@@ -5,13 +5,13 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 
 ## Current Phase
 
-- Phase 7 - Version history and teacher/student print + PDF export
+- Phase 8 - Polish and production hardening
 - Repo: `C:\Projects\Textbook agent`
-- Status: completed
+- Status: completed (pending PR)
 
 ## Feature Checklist
 
-### Feature: Version History + Print/Export Modes
+### Feature: Polish and Production Hardening
 
 **Classification**: major
 **Subsystems**: both
@@ -19,30 +19,71 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 ### Progress
 - [x] Understood requirements and identified scope
 - [x] Read relevant source code and project rules
-- [x] Verified existing version timeline flow remains intact (auto-version + pre-AI snapshots + restore backup)
-- [x] Added builder print document endpoint with `audience=teacher|student` ownership enforcement
-- [x] Added builder PDF export endpoint wired to existing Playwright PDF pipeline
-- [x] Added `/builder/print/[id]` print route for Playwright capture
-- [x] Added toolbar print preview toggle and teacher/student PDF export actions
-- [x] Wrote tests for new backend/frontend behavior
+- [x] Added save retry UX in toolbar (`saveStatus=error` -> retry action)
+- [x] Added loading skeleton and robust route error states for `/builder/[id]` (401 -> logout/login redirect, 404 -> local not found panel)
+- [x] Updated mobile palette behavior toward bottom-sheet presentation and expanded keyboard hint bar copy
+- [x] Added backend hardening: structured builder logs and save endpoint rate limit
+- [x] Added/updated tests for new frontend behavior
 - [x] Ran validation (backend + frontend)
 - [x] Self-reviewed against agents/standards/review.md
 - [x] Wrote commit message(s) following agents/standards/communication.md
 - [ ] Updated PR description with summary, validation evidence, risks
+- [x] Verified cross-repo success criteria checks (Lectio cleanup + single Lectio version)
 - [x] Noted any follow-up work or open questions
 
 ### Validation Evidence
 - Backend tests: `uv run pytest tests/routes/test_builder_lessons.py -q` passed (`11 passed`).
-- Backend lint: `uv run ruff check src tests/routes/test_builder_lessons.py` passed.
-- Frontend tests: `npm run test -- src/lib/builder/components/toolbar/DocumentToolbar.test.ts src/routes/builder/page.test.ts src/routes/dashboard/page.test.ts` passed (`6 passed`).
-- Frontend targeted re-check: `npm run test -- src/lib/builder/components/toolbar/DocumentToolbar.test.ts` passed (`2 passed`).
+- Backend lint: `uv tool run ruff check src tests/routes/test_builder_lessons.py` passed.
+- Frontend tests: `npm run test -- src/lib/builder/components/toolbar/DocumentToolbar.test.ts src/routes/builder/[id]/page.test.ts src/routes/builder/page.test.ts src/routes/dashboard/page.test.ts` passed (`10 passed`).
+- Frontend compatibility tests: `npm run test -- src/lib/components/LectioDocumentView.test.ts src/lib/builder/adapters/from-generation.test.ts` passed (`6 passed`).
 - Frontend checks: `npm run check` passed (`0` errors, `0` warnings).
 - Frontend build: `npm run build` passed.
+- Dependency check: `npm ls lectio` passed with a single version (`lectio@0.4.6`).
+- Lectio cleanup check (`C:\Projects\lectio`): `src/routes/builder` absent, `src/lib/builder` absent.
 
 ### Risks and Follow-up
-- Student audience stripping currently targets `quiz-check`, `short-answer`, `practice-stack`, and `fill-in-blank` answer fields; if additional answer-bearing components are introduced, this map must be extended.
-- Builder PDF export currently uses the lesson-rendered content path and disables generated answer-key appendix (`include_answers=false`) to avoid divergence between audience rendering and appendix semantics.
-- Toolbar PDF export currently uses default metadata (`school_name="Lesson Builder"`, `teacher_name=current_user.name/email`) and can be expanded in Phase 8 UX polish.
+- Frontend validation warnings listed in Phase 8 (page-length and alt-text hints) remain future follow-up; they are intentionally non-blocking in the guide.
+- Local npm installs in fresh worktrees require `lectio@0.4.6` availability; pin now matches published version.
+
+## Success Criteria Verification (1-10)
+
+- [x] 1. Teacher can open V3 lesson in builder with one click.
+  Evidence: `LectioDocumentView.test.ts` (Open in Builder CTA flow) and `from-generation.ts` adapter test pass.
+- [x] 2. Teacher can edit/reorder/add/remove blocks.
+  Evidence: `document-store-ops.test.ts` coverage plus builder UI/store integration in Phases 3-4.
+- [x] 3. AI can fill/improve/custom-generate any block.
+  Evidence: Phase 4 request-mode wiring (`fill|improve|custom`) and route ownership tests.
+- [x] 4. Edits save to server and survive reload/device changes.
+  Evidence: server-authoritative CRUD + sync queue from Phase 2; backend lesson route tests pass.
+- [x] 5. Print produces clean lesson with no builder chrome.
+  Evidence: builder print route + print CSS + successful build/test coverage from Phases 7-8.
+- [x] 6. Teacher can create a lesson from scratch without V3 generation.
+  Evidence: `/builder/new` template/blank creation flow and `/builder` listing route shipped in Phase 6.
+- [x] 7. Builder module can be deleted without breaking studio/dashboard/textbook routes.
+  Evidence: frontend build passes; dashboard and textbook-facing tests pass (`dashboard/page.test.ts`, `LectioDocumentView.test.ts`).
+- [x] 8. Exactly one Lectio version in dependency tree.
+  Evidence: `npm ls lectio` -> single `lectio@0.4.6`.
+- [x] 9. LessonDocument round-trips cleanly (adapt/edit/export/render).
+  Evidence: adapter/runtime tests pass and print/export rendering path validated in Phases 1 and 7.
+- [x] 10. No generated lesson is mutated by builder edits.
+  Evidence: copy-on-edit flow + backend print student-strip test confirms persisted lesson remains unchanged.
+
+## Phase 8 What Was Done
+
+- Backend:
+  - Added structured builder event logging for create/list/get/save/delete/upload/print/export operations.
+  - Added save endpoint rate limiting (`PUT /api/v1/builder/lessons/{lesson_id}` -> `120/minute`).
+- Frontend:
+  - Added retry control in toolbar save-error state.
+  - Added `/builder/[id]` loading skeleton and explicit 401/404/500 handling.
+  - Updated palette overlay to bottom-sheet style on mobile widths.
+  - Expanded shortcut hint copy to include undo/redo/save/duplicate/delete/escape.
+  - Wired retry save action from shell to document store flush.
+- Tests:
+  - Extended `DocumentToolbar.test.ts` for retry control behavior.
+  - Added `src/routes/builder/[id]/page.test.ts` for success, 404, and 401 route behavior.
+
+## Phase 7 Archive
 
 ## Phase 7 What Was Done
 

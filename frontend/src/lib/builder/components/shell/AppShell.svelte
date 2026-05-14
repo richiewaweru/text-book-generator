@@ -69,6 +69,7 @@
 		lessonId={store.document?.id ?? document.id}
 		printPreviewActive={printPreviewActive}
 		onTogglePrintPreview={() => (printPreviewActive = !printPreviewActive)}
+		onRetrySave={() => void store.flushSave()}
 	/>
 	<div class="flex flex-1 overflow-hidden">
 		<main

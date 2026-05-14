@@ -3,9 +3,11 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import { isApiError } from '$lib/api/errors';
 	import AppShell from '$lib/builder/components/shell/AppShell.svelte';
 	import { createDocumentStore } from '$lib/builder/stores/document.svelte';
 	import { loadBuilderLessonWithFallback } from '$lib/builder/persistence/server-sync';
+	import { logout } from '$lib/stores/auth';
 	import {
 		isDeleteOrBackspace,
 		isModifierD,
@@ -18,18 +20,27 @@
 	const store = createDocumentStore();
 	let ready = $state(false);
 	let loadWarning = $state<string | null>(null);
+	let loadError = $state<{ status: number; title: string; detail: string } | null>(null);
 
 	const id = $derived(page.params.id);
 
 	onMount(() => {
 		if (!id) {
-			void goto('/');
+			loadError = {
+				status: 404,
+				title: 'Lesson not found',
+				detail: 'This lesson id is missing or invalid.'
+			};
 			return;
 		}
 		void loadBuilderLessonWithFallback(id)
-			.then(async ({ document: doc, source }) => {
+			.then(({ document: doc, source }) => {
 				if (!doc) {
-					await goto('/');
+					loadError = {
+						status: 404,
+						title: 'Lesson not found',
+						detail: 'This lesson was not found or is no longer available.'
+					};
 					return;
 				}
 				store.loadDocument(doc);
@@ -39,8 +50,25 @@
 						: null;
 				ready = true;
 			})
-			.catch(async () => {
-				await goto('/');
+			.catch(async (error) => {
+				if (isApiError(error) && error.status === 401) {
+					logout();
+					await goto('/login', { replaceState: true });
+					return;
+				}
+				if (isApiError(error) && error.status === 404) {
+					loadError = {
+						status: 404,
+						title: 'Lesson not found',
+						detail: 'This lesson does not exist or you no longer have access to it.'
+					};
+					return;
+				}
+				loadError = {
+					status: 500,
+					title: 'Unable to load lesson',
+					detail: error instanceof Error ? error.message : 'Please retry in a moment.'
+				};
 			});
 	});
 
@@ -103,8 +131,33 @@
 	});
 </script>
 
-{#if !ready || !store.document}
-	<p class="p-8 text-slate-600">Loading lesson…</p>
+{#if loadError}
+	<section class="mx-auto max-w-3xl p-6">
+		<div class="rounded-xl border border-red-200 bg-red-50 p-5 text-red-800">
+			<p class="text-xs font-semibold uppercase tracking-wide text-red-700">{loadError.status}</p>
+			<h1 class="mt-1 text-xl font-bold">{loadError.title}</h1>
+			<p class="mt-2 text-sm">{loadError.detail}</p>
+			<div class="mt-4">
+				<a
+					href="/builder"
+					class="inline-flex rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-100/40"
+				>
+					Back to Builder lessons
+				</a>
+			</div>
+		</div>
+	</section>
+{:else if !ready || !store.document}
+	<section class="mx-auto max-w-4xl p-6" aria-busy="true" aria-live="polite">
+		<div class="mb-4 h-6 w-56 animate-pulse rounded bg-slate-200"></div>
+		<div class="space-y-3 rounded-2xl border border-slate-200 bg-white p-5">
+			<div class="h-5 w-40 animate-pulse rounded bg-slate-200"></div>
+			<div class="h-4 w-full animate-pulse rounded bg-slate-100"></div>
+			<div class="h-4 w-11/12 animate-pulse rounded bg-slate-100"></div>
+			<div class="h-4 w-9/12 animate-pulse rounded bg-slate-100"></div>
+		</div>
+		<p class="mt-4 text-sm text-slate-500">Loading lesson workspace...</p>
+	</section>
 {:else}
 	{#if loadWarning}
 		<p class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">

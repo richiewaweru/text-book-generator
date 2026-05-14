@@ -128,3 +128,29 @@
 - **Guide says:** Teacher copy includes answers, student copy strips answers, both via shared export pipeline.
 - **Chose:** Set builder export request to `include_answers=false` and rely on audience-specific rendered content (`teacher` includes, `student` strips) to avoid mismatch between rendered body and appended answer key pages.
 - **Risk:** If product later expects a separate teacher answer-key appendix for builder lessons, endpoint contract and UI options will need explicit expansion.
+
+## Phase 8 - Polish and Production Hardening
+
+### Decision: Keep save reliability UX local to the toolbar with explicit retry hook
+- **Context:** The guide requires visible save error handling with retry while preserving teacher edits.
+- **Guide says:** Save state should show saving/saved/error with retry.
+- **Chose:** Added `onRetrySave` to `DocumentToolbar` and wired `AppShell` retry to `store.flushSave()`, without introducing a second persistence path.
+- **Risk:** Retry action currently triggers queue flush only; if repeated backend failures occur, teachers still need clearer long-form diagnostics in a future pass.
+
+### Decision: Enforce route-level 401/404 handling directly in `/builder/[id]`
+- **Context:** Prior behavior used generic loader errors and did not provide clear lesson-not-found or auth-expired UX.
+- **Guide says:** Unauthorized should redirect to login; not-found should render an appropriate error state.
+- **Chose:** Added explicit `isApiError` branching in `+page.svelte`: `401` triggers `logout()` + redirect, `404` renders a local "Lesson not found" state, and other failures render a generic load error panel.
+- **Risk:** This is page-local handling; shared builder route error primitives may still be useful if more route-level error states are added later.
+
+### Decision: Add backend request-scoped structured logs and save endpoint throttling in existing builder routes
+- **Context:** Production hardening requires operational visibility and protection from rapid-fire save storms.
+- **Guide says:** Add structured builder logs and rate limiting on save endpoint.
+- **Chose:** Added `_log_builder_event(...)` with request metadata (`request_id`, method, path, lesson/user IDs) across CRUD/upload/print/export and applied `@limiter.limit("120/minute")` on lesson `PUT`.
+- **Risk:** Current limit is static and environment-agnostic; high-throughput classroom scenarios may need configurable thresholds.
+
+### Decision: Align frontend Lectio dependency to published `0.4.6` for success-criteria verification
+- **Context:** This worktree still pinned `lectio@0.4.5`, while registry/package availability and the primary repo had moved to `0.4.6`.
+- **Guide says:** There should be exactly one Lectio version in the dependency tree.
+- **Chose:** Updated `frontend/package.json` to `lectio@0.4.6` and verified `npm ls lectio` resolves to a single installed version.
+- **Risk:** If another branch still pins `0.4.5`, merges may need a lockfile reconciliation pass.
