@@ -7,18 +7,26 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
+from core.auth.jwt_handler import JWTHandler
 from core.auth.middleware import get_current_user
-from core.dependencies import get_gcs_image_store
+from core.dependencies import get_gcs_image_store, get_jwt_handler, get_settings
 from core.database.models import EditableLessonModel, GenerationModel
 from core.database.session import get_async_session
 from core.entities.user import User
 from core.storage.gcs_image_store import GCSImageStore
+from generation.entities.generation import Generation
+from generation.pdf_export.cleanup import cleanup_files
+from generation.pdf_export.service import PDFExportRequest, export_generation_pdf
+from pipeline.api import PipelineDocument, PipelineSectionManifestItem
 from pipeline.contracts import get_component_registry_entry
+from pipeline.types.requests import GenerationMode
 
 router = APIRouter(prefix="/api/v1/builder", tags=["builder"])
 
@@ -161,6 +169,10 @@ class BuilderMediaUploadResponse(BaseModel):
     source: Literal["upload"] = "upload"
 
 
+class BuilderLessonPDFExportRequest(BaseModel):
+    audience: Literal["student", "teacher"] = "teacher"
+
+
 def _to_list_item(model: EditableLessonModel) -> BuilderLessonListItem:
     return BuilderLessonListItem(
         id=model.id,
@@ -205,6 +217,151 @@ async def _owned_lesson_or_404(
     if model is None:
         raise HTTPException(status_code=404, detail="Lesson not found")
     return model
+
+
+def _first_section_template_id(document: dict[str, Any]) -> str:
+    sections = document.get("sections")
+    if isinstance(sections, list):
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            template_id = section.get("template_id")
+            if isinstance(template_id, str) and template_id.strip():
+                return template_id.strip()
+    return "open-canvas"
+
+
+def _safe_position(raw_position: Any, fallback: int) -> int:
+    if isinstance(raw_position, int):
+        return raw_position
+    return fallback
+
+
+def _section_manifest_from_document(document: dict[str, Any]) -> list[PipelineSectionManifestItem]:
+    manifest: list[PipelineSectionManifestItem] = []
+    sections = document.get("sections")
+    if not isinstance(sections, list):
+        return manifest
+
+    sortable_sections: list[tuple[int, dict[str, Any]]] = []
+    for index, section in enumerate(sections):
+        if not isinstance(section, dict):
+            continue
+        sortable_sections.append((_safe_position(section.get("position"), index), section))
+
+    sortable_sections.sort(key=lambda item: item[0])
+    for index, (_, section) in enumerate(sortable_sections, start=1):
+        section_id = section.get("id")
+        title = section.get("title")
+        position = _safe_position(section.get("position"), index)
+        manifest.append(
+            PipelineSectionManifestItem(
+                section_id=section_id if isinstance(section_id, str) and section_id else f"section-{index}",
+                title=title if isinstance(title, str) and title else f"Section {index}",
+                position=position,
+            )
+        )
+    return manifest
+
+
+def _build_builder_pipeline_document(lesson_id: str, document: dict[str, Any]) -> PipelineDocument:
+    subject = document.get("subject")
+    description = document.get("description")
+    preset_id = document.get("preset_id")
+    return PipelineDocument(
+        generation_id=lesson_id,
+        subject=subject if isinstance(subject, str) and subject.strip() else "Lesson",
+        context=description if isinstance(description, str) else "",
+        mode=GenerationMode.BALANCED,
+        template_id=_first_section_template_id(document),
+        preset_id=preset_id if isinstance(preset_id, str) and preset_id.strip() else "blue-classroom",
+        status="completed",
+        section_manifest=_section_manifest_from_document(document),
+        sections=[],
+        failed_sections=[],
+        qc_reports=[],
+        quality_passed=True,
+    )
+
+
+def _builder_generation_from_document(
+    lesson_id: str,
+    user_id: str,
+    document: dict[str, Any],
+) -> Generation:
+    subject = document.get("subject")
+    description = document.get("description")
+    template_id = _first_section_template_id(document)
+    preset_id = document.get("preset_id")
+    subject_text = subject if isinstance(subject, str) and subject.strip() else "Lesson"
+    return Generation(
+        id=lesson_id,
+        user_id=user_id,
+        subject=subject_text,
+        context=description if isinstance(description, str) else "",
+        mode=GenerationMode.BALANCED,
+        status="completed",
+        requested_template_id=template_id,
+        resolved_template_id=template_id,
+        requested_preset_id=preset_id if isinstance(preset_id, str) and preset_id.strip() else "blue-classroom",
+        resolved_preset_id=preset_id if isinstance(preset_id, str) and preset_id.strip() else "blue-classroom",
+        quality_passed=True,
+    )
+
+
+def _strip_answers_for_student_doc(document: dict[str, Any]) -> dict[str, Any]:
+    stripped = _clone_json_tree(document)
+    blocks = stripped.get("blocks")
+    if not isinstance(blocks, dict):
+        return stripped
+
+    for raw_block in blocks.values():
+        if not isinstance(raw_block, dict):
+            continue
+        component_id = raw_block.get("component_id")
+        content = raw_block.get("content")
+        if not isinstance(component_id, str) or not isinstance(content, dict):
+            continue
+
+        if component_id == "quiz-check":
+            options = content.get("options")
+            if isinstance(options, list):
+                for option in options:
+                    if not isinstance(option, dict):
+                        continue
+                    option["correct"] = False
+                    if "explanation" in option:
+                        option["explanation"] = ""
+            if "feedback_correct" in content:
+                content["feedback_correct"] = ""
+            if "feedback_incorrect" in content:
+                content["feedback_incorrect"] = ""
+        elif component_id == "short-answer":
+            content.pop("mark_scheme", None)
+        elif component_id == "practice-stack":
+            problems = content.get("problems")
+            if isinstance(problems, list):
+                for problem in problems:
+                    if isinstance(problem, dict):
+                        problem.pop("solution", None)
+        elif component_id == "fill-in-blank":
+            segments = content.get("segments")
+            if isinstance(segments, list):
+                for segment in segments:
+                    if isinstance(segment, dict):
+                        segment.pop("answer", None)
+
+    return stripped
+
+
+def _builder_pdf_request_for_user(current_user: User) -> PDFExportRequest:
+    teacher_name = (current_user.name or current_user.email or "Teacher").strip()
+    return PDFExportRequest(
+        school_name="Lesson Builder",
+        teacher_name=teacher_name or "Teacher",
+        include_toc=True,
+        include_answers=False,
+    )
 
 
 @router.post("/lessons", response_model=BuilderLessonDetailResponse, status_code=status.HTTP_201_CREATED)
@@ -369,4 +526,65 @@ async def upload_builder_lesson_media(
         url=uploaded_url,
         mime_type=mime_type,
         filename=file.filename,
+    )
+
+
+@router.get("/lessons/{lesson_id}/print-document")
+async def get_builder_lesson_print_document(
+    lesson_id: str,
+    audience: Literal["student", "teacher"] = "teacher",
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict[str, Any]:
+    model = await _owned_lesson_or_404(session, lesson_id=lesson_id, user_id=current_user.id)
+    if not isinstance(model.document_json, dict):
+        raise HTTPException(status_code=422, detail="Stored lesson document is invalid")
+
+    document = _clone_json_tree(model.document_json)
+    if audience == "student":
+        return _strip_answers_for_student_doc(document)
+    return document
+
+
+@router.post("/lessons/{lesson_id}/export/pdf")
+async def export_builder_lesson_pdf(
+    lesson_id: str,
+    body: BuilderLessonPDFExportRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
+    jwt_handler: JWTHandler = Depends(get_jwt_handler),
+) -> FileResponse:
+    model = await _owned_lesson_or_404(session, lesson_id=lesson_id, user_id=current_user.id)
+    if not isinstance(model.document_json, dict):
+        raise HTTPException(status_code=422, detail="Stored lesson document is invalid")
+
+    document = _clone_json_tree(model.document_json)
+    if body.audience == "student":
+        document = _strip_answers_for_student_doc(document)
+
+    generation = _builder_generation_from_document(lesson_id, current_user.id, document)
+    pipeline_document = _build_builder_pipeline_document(lesson_id, document)
+    auth_token = jwt_handler.create_access_token(current_user.id, current_user.email)
+    export_request = _builder_pdf_request_for_user(current_user)
+    result = await export_generation_pdf(
+        generation=generation,
+        document=pipeline_document,
+        auth_token=auth_token,
+        request=export_request,
+        settings=get_settings(),
+        request_id=getattr(request.state, "request_id", None),
+        render_path=f"/builder/print/{lesson_id}?audience={body.audience}",
+    )
+
+    return FileResponse(
+        path=result.pdf_path,
+        media_type="application/pdf",
+        filename=result.filename,
+        headers={
+            "X-Page-Count": str(result.page_count),
+            "X-File-Size": str(result.file_size_bytes),
+            "X-Generation-Time-Ms": str(result.generation_time_ms),
+        },
+        background=BackgroundTask(cleanup_files, result.cleanup_paths),
     )

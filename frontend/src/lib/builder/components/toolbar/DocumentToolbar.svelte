@@ -4,8 +4,12 @@
 	import { connectivityStore } from '$lib/builder/stores/connectivity.svelte';
 	import { getStorageEstimate } from '$lib/builder/utils/storage-estimate';
 	import { downloadLessonDocument } from '$lib/builder/utils/file-io';
-	import { printDocument } from '$lib/builder/utils/pdf-export';
-	import { CloudOff, History, Printer, Share2, UploadCloud } from 'lucide-svelte';
+	import {
+		downloadBuilderLessonPdf,
+		printDocument,
+		type BuilderPdfAudience
+	} from '$lib/builder/utils/pdf-export';
+	import { CloudOff, Eye, EyeOff, History, Printer, Share2, UploadCloud } from 'lucide-svelte';
 
 	let {
 		document,
@@ -13,7 +17,10 @@
 		onOpenMedia,
 		onOpenHistory,
 		onOpenShare,
-		onSaveToDrive
+		onSaveToDrive,
+		lessonId,
+		printPreviewActive = false,
+		onTogglePrintPreview
 	}: {
 		document: LessonDocument;
 		saveStatus?: 'saved' | 'saving' | 'error';
@@ -21,9 +28,14 @@
 		onOpenHistory?: () => void;
 		onOpenShare?: () => void;
 		onSaveToDrive?: () => void;
+		lessonId?: string;
+		printPreviewActive?: boolean;
+		onTogglePrintPreview?: () => void;
 	} = $props();
 
 	let storageAlmostFull = $state(false);
+	let exportLoadingAudience = $state<BuilderPdfAudience | null>(null);
+	let exportError = $state<string | null>(null);
 
 	async function refreshStorageHint(): Promise<void> {
 		const est = await getStorageEstimate();
@@ -32,6 +44,19 @@
 
 	function exportLesson(): void {
 		downloadLessonDocument(document);
+	}
+
+	async function exportPdf(audience: BuilderPdfAudience): Promise<void> {
+		if (!lessonId) return;
+		exportLoadingAudience = audience;
+		exportError = null;
+		try {
+			await downloadBuilderLessonPdf(lessonId, audience);
+		} catch (error) {
+			exportError = error instanceof Error ? error.message : 'Failed to export lesson PDF.';
+		} finally {
+			exportLoadingAudience = null;
+		}
 	}
 
 	onMount(() => {
@@ -57,7 +82,7 @@
 >
 	<div>
 		<h1 class="text-lg font-semibold text-slate-900">{document.title}</h1>
-		<p class="text-xs text-slate-500">{document.subject} · {document.preset_id}</p>
+		<p class="text-xs text-slate-500">{document.subject} - {document.preset_id}</p>
 	</div>
 	<div class="flex flex-wrap items-center gap-4">
 		{#if !connectivityStore.online}
@@ -122,6 +147,22 @@
 				Media
 			</button>
 		{/if}
+		{#if onTogglePrintPreview}
+			<button
+				type="button"
+				class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+				onclick={onTogglePrintPreview}
+				data-testid="toolbar-print-preview"
+			>
+				{#if printPreviewActive}
+					<EyeOff size={16} aria-hidden="true" />
+					Exit preview
+				{:else}
+					<Eye size={16} aria-hidden="true" />
+					Print preview
+				{/if}
+			</button>
+		{/if}
 		<button
 			type="button"
 			class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
@@ -133,6 +174,24 @@
 		</button>
 		<button
 			type="button"
+			class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+			onclick={() => void exportPdf('teacher')}
+			disabled={!lessonId || exportLoadingAudience !== null}
+			data-testid="toolbar-export-teacher-pdf"
+		>
+			{exportLoadingAudience === 'teacher' ? 'Exporting teacher PDF...' : 'Teacher PDF'}
+		</button>
+		<button
+			type="button"
+			class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+			onclick={() => void exportPdf('student')}
+			disabled={!lessonId || exportLoadingAudience !== null}
+			data-testid="toolbar-export-student-pdf"
+		>
+			{exportLoadingAudience === 'student' ? 'Exporting student PDF...' : 'Student PDF'}
+		</button>
+		<button
+			type="button"
 			class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
 			onclick={exportLesson}
 		>
@@ -140,4 +199,7 @@
 		</button>
 		<a href="/" class="text-sm font-medium text-blue-600 hover:text-blue-800">All documents</a>
 	</div>
+	{#if exportError}
+		<p class="w-full text-sm text-red-700" data-testid="toolbar-export-error">{exportError}</p>
+	{/if}
 </header>

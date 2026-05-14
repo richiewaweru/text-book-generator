@@ -5,38 +5,81 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 
 ## Current Phase
 
-- Phase 6 - Manual lesson creation and lesson listing
+- Phase 7 - Version history and teacher/student print + PDF export
 - Repo: `C:\Projects\Textbook agent`
 - Status: completed
 
 ## Feature Checklist
 
-### Feature: Manual Lesson Creation + Builder Index
+### Feature: Version History + Print/Export Modes
 
 **Classification**: major
-**Subsystems**: frontend
+**Subsystems**: both
 
 ### Progress
 - [x] Understood requirements and identified scope
 - [x] Read relevant source code and project rules
-- [x] Verified `/builder/new` template + blank flows use server create + builder navigation
-- [x] Added `/builder` lesson index route with source badge and updated timestamp
-- [x] Added visible "Builder" and "New Lesson" entry points in shell/dashboard
-- [x] Wrote tests for new behavior
-- [x] Ran validation (frontend)
+- [x] Verified existing version timeline flow remains intact (auto-version + pre-AI snapshots + restore backup)
+- [x] Added builder print document endpoint with `audience=teacher|student` ownership enforcement
+- [x] Added builder PDF export endpoint wired to existing Playwright PDF pipeline
+- [x] Added `/builder/print/[id]` print route for Playwright capture
+- [x] Added toolbar print preview toggle and teacher/student PDF export actions
+- [x] Wrote tests for new backend/frontend behavior
+- [x] Ran validation (backend + frontend)
 - [x] Self-reviewed against agents/standards/review.md
 - [x] Wrote commit message(s) following agents/standards/communication.md
 - [ ] Updated PR description with summary, validation evidence, risks
 - [x] Noted any follow-up work or open questions
 
 ### Validation Evidence
+- Backend tests: `uv run pytest tests/routes/test_builder_lessons.py -q` passed (`11 passed`).
+- Backend lint: `uv run ruff check src tests/routes/test_builder_lessons.py` passed.
+- Frontend tests: `npm run test -- src/lib/builder/components/toolbar/DocumentToolbar.test.ts src/routes/builder/page.test.ts src/routes/dashboard/page.test.ts` passed (`6 passed`).
+- Frontend targeted re-check: `npm run test -- src/lib/builder/components/toolbar/DocumentToolbar.test.ts` passed (`2 passed`).
 - Frontend checks: `npm run check` passed (`0` errors, `0` warnings).
-- Frontend tests: `npm run test -- src/routes/builder/page.test.ts src/routes/dashboard/page.test.ts` passed (`4 passed`).
 - Frontend build: `npm run build` passed.
 
 ### Risks and Follow-up
-- `/builder` list currently relies on standard `/api/v1/builder/lessons` responses without client-side pagination; large lesson sets may later need paging/search.
-- Profileless users are still redirected by global shell auth rules; if non-profile builder access is needed later, update redirect allowlist intentionally.
+- Student audience stripping currently targets `quiz-check`, `short-answer`, `practice-stack`, and `fill-in-blank` answer fields; if additional answer-bearing components are introduced, this map must be extended.
+- Builder PDF export currently uses the lesson-rendered content path and disables generated answer-key appendix (`include_answers=false`) to avoid divergence between audience rendering and appendix semantics.
+- Toolbar PDF export currently uses default metadata (`school_name="Lesson Builder"`, `teacher_name=current_user.name/email`) and can be expanded in Phase 8 UX polish.
+
+## Phase 7 What Was Done
+
+- Backend:
+  - Added `GET /api/v1/builder/lessons/{lesson_id}/print-document?audience=teacher|student` with:
+    - lesson ownership enforcement
+    - student mode answer stripping on copy-only payload
+  - Added `POST /api/v1/builder/lessons/{lesson_id}/export/pdf` with:
+    - lesson ownership enforcement
+    - audience-aware render path (`/builder/print/{id}?audience=...`)
+    - reuse of existing `export_generation_pdf(...)` pipeline
+    - file response headers + background cleanup handling
+  - Added helper logic for:
+    - synthetic pipeline document manifest from builder lesson sections
+    - synthetic generation metadata for cover/export metadata
+    - answer stripping for student audience (`quiz-check`, `short-answer`, `practice-stack`, `fill-in-blank`)
+- Frontend:
+  - Added builder print route:
+    - `frontend/src/routes/builder/print/[id]/+page.svelte`
+    - fetches owned print document payload with audience mode
+    - emits Playwright readiness attributes (`data-generation-complete`, image load diagnostics)
+  - Extended builder toolbar:
+    - print preview toggle (applies print CSS in-canvas without opening browser print dialog)
+    - teacher/student PDF export buttons wired to backend endpoint
+    - export loading/error state
+  - Extended builder export utility:
+    - `downloadBuilderLessonPdf(lessonId, audience)` in `frontend/src/lib/builder/utils/pdf-export.ts`
+  - Added preview-mode CSS:
+    - `frontend/src/lib/builder/styles/print.css` includes `.builder-print-preview` selectors to hide builder chrome while keeping toolbar controls visible.
+- Tests:
+  - Backend: expanded `backend/tests/routes/test_builder_lessons.py` to cover:
+    - student print-document answer stripping + non-mutation of persisted lesson
+    - ownership checks for print-document/export endpoints
+    - PDF export render-path wiring to audience route
+  - Frontend: added `frontend/src/lib/builder/components/toolbar/DocumentToolbar.test.ts` for:
+    - print preview toggle callback
+    - teacher/student PDF action wiring
 
 ## Phase 6 What Was Done
 
@@ -113,7 +156,7 @@ Source of truth: `C:\Users\richi\Downloads\lesson-builder-unified-implementation
 
 ## Next Phase Needs
 
-- Phase 7: version history verification plus builder print/PDF export endpoint (teacher/student audiences).
+- Phase 8: polish and production hardening (save retry UX, loading/error states, mobile, validation warnings, backend limits/logging, and Lectio cleanup validation).
 
 ---
 

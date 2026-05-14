@@ -21,6 +21,7 @@
 	let paletteOpen = $state(false);
 	let mediaManagerOpen = $state(false);
 	let versionPanelOpen = $state(false);
+	let printPreviewActive = $state(false);
 
 	/** Mutable refs for 30-minute auto-version (avoid stale interval closure). */
 	const va = { docId: '', lastM: 0, lastA: 0 };
@@ -55,13 +56,19 @@
 	});
 </script>
 
-<div class="builder-shell flex min-h-screen flex-col bg-slate-100">
+<div
+	class="builder-shell flex min-h-screen flex-col bg-slate-100"
+	class:builder-print-preview={printPreviewActive}
+>
 	<OfflineSyncHooks />
 	<DocumentToolbar
 		document={store.document ?? document}
 		saveStatus={store.saveStatus}
 		onOpenMedia={() => (mediaManagerOpen = true)}
 		onOpenHistory={() => (versionPanelOpen = true)}
+		lessonId={store.document?.id ?? document.id}
+		printPreviewActive={printPreviewActive}
+		onTogglePrintPreview={() => (printPreviewActive = !printPreviewActive)}
 	/>
 	<div class="flex flex-1 overflow-hidden">
 		<main

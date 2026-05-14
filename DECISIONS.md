@@ -100,3 +100,31 @@
 - **Guide says:** Include "New Lesson" entry point in nav or dashboard and expose builder list flow.
 - **Chose:** Added `Builder` and `New Lesson` links to the global authenticated nav and a dedicated Lesson Builder card in dashboard.
 - **Risk:** Additional nav items increase top-bar density on smaller screens; future mobile polish may consolidate actions.
+
+## Phase 7 - Version History and Print/Export
+
+### Decision: Reuse the existing PDF pipeline with a builder-specific print route instead of adding a new renderer
+- **Context:** Backend PDF export already uses Playwright + `export_generation_pdf(...)` with optional custom render paths, but builder lessons did not have a dedicated print endpoint/route.
+- **Guide says:** Add builder teacher/student PDF export while reusing existing PDF infrastructure.
+- **Chose:** Added:
+  - backend `GET /api/v1/builder/lessons/{id}/print-document?audience=...`
+  - frontend `/builder/print/[id]` route with print readiness attributes for Playwright
+  - backend `POST /api/v1/builder/lessons/{id}/export/pdf` that calls `export_generation_pdf(...)` using `render_path=/builder/print/{id}?audience=...`
+- **Risk:** Builder export now depends on frontend print route compatibility (`data-generation-complete` contract) just like studio export; route regressions could affect PDF capture reliability.
+
+### Decision: Enforce student-copy answer stripping in backend print payload, not in frontend
+- **Context:** Audience behavior is security/ownership-sensitive and must not rely on frontend-only logic.
+- **Guide says:** Student export strips/hides answer fields; teacher export includes answers.
+- **Chose:** Implemented backend answer stripping against a copied lesson payload for student audience on:
+  - `quiz-check` (`options[].correct`, `options[].explanation`, feedback fields)
+  - `short-answer` (`mark_scheme`)
+  - `practice-stack` (`problems[].solution`)
+  - `fill-in-blank` (`segments[].answer`)
+  while leaving persisted lesson data unchanged.
+- **Risk:** If new answer-bearing components are introduced, this stripping map must be extended to preserve student-copy expectations.
+
+### Decision: Use content-rendered audience mode and disable appended answer-key pages for builder PDF export
+- **Context:** Existing PDF pipeline can append answer-key pages from pipeline section structures, but builder export is sourced from lesson render route with audience transformations.
+- **Guide says:** Teacher copy includes answers, student copy strips answers, both via shared export pipeline.
+- **Chose:** Set builder export request to `include_answers=false` and rely on audience-specific rendered content (`teacher` includes, `student` strips) to avoid mismatch between rendered body and appended answer key pages.
+- **Risk:** If product later expects a separate teacher answer-key appendix for builder lessons, endpoint contract and UI options will need explicit expansion.

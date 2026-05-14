@@ -1,4 +1,7 @@
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -61,6 +64,81 @@ def _minimal_lesson(document_id: str = "client-doc-id") -> dict:
                 "position": 0,
                 "content": {"body": "A fraction represents part of a whole."},
             }
+        },
+        "media": {},
+        "created_at": "2026-05-13T00:00:00Z",
+        "updated_at": "2026-05-13T00:00:00Z",
+    }
+
+
+def _lesson_with_answers(document_id: str = "client-doc-id") -> dict:
+    return {
+        "version": 1,
+        "id": document_id,
+        "title": "Assessment practice",
+        "subject": "mathematics",
+        "preset_id": "blue-classroom",
+        "source": "manual",
+        "sections": [
+            {
+                "id": "section-1",
+                "template_id": "open-canvas",
+                "title": "Quiz section",
+                "position": 0,
+                "block_ids": ["quiz-1", "short-1", "practice-1", "fib-1"],
+            }
+        ],
+        "blocks": {
+            "quiz-1": {
+                "id": "quiz-1",
+                "component_id": "quiz-check",
+                "position": 0,
+                "content": {
+                    "question": "2 + 2 = ?",
+                    "options": [
+                        {"text": "3", "correct": False, "explanation": "Too small"},
+                        {"text": "4", "correct": True, "explanation": "Correct sum"},
+                    ],
+                    "feedback_correct": "Great work.",
+                    "feedback_incorrect": "Try again.",
+                },
+            },
+            "short-1": {
+                "id": "short-1",
+                "component_id": "short-answer",
+                "position": 1,
+                "content": {
+                    "question": "Explain equivalent fractions.",
+                    "marks": 2,
+                    "mark_scheme": "1 mark for definition, 1 mark for example",
+                },
+            },
+            "practice-1": {
+                "id": "practice-1",
+                "component_id": "practice-stack",
+                "position": 2,
+                "content": {
+                    "problems": [
+                        {
+                            "difficulty": "warm",
+                            "question": "Simplify 6/8",
+                            "hints": [{"level": 1, "text": "Divide numerator and denominator by 2"}],
+                            "solution": {"approach": "Divide by 2", "answer": "3/4"},
+                        }
+                    ]
+                },
+            },
+            "fib-1": {
+                "id": "fib-1",
+                "component_id": "fill-in-blank",
+                "position": 3,
+                "content": {
+                    "segments": [
+                        {"text": "The value is ", "is_blank": False},
+                        {"text": "", "is_blank": True, "answer": "4"},
+                    ]
+                },
+            },
         },
         "media": {},
         "created_at": "2026-05-13T00:00:00Z",
@@ -336,3 +414,116 @@ class TestBuilderLessonRoutes:
             )
 
         assert upload.status_code == 413
+
+    async def test_print_document_student_mode_strips_answers_without_mutating_saved_document(self):
+        async with await _client() as client:
+            created = await client.post(
+                "/api/v1/builder/lessons",
+                json={"source_type": "manual", "document": _lesson_with_answers()},
+            )
+            assert created.status_code == 201
+            lesson_id = created.json()["id"]
+
+            teacher_view = await client.get(
+                f"/api/v1/builder/lessons/{lesson_id}/print-document",
+                params={"audience": "teacher"},
+            )
+            student_view = await client.get(
+                f"/api/v1/builder/lessons/{lesson_id}/print-document",
+                params={"audience": "student"},
+            )
+            saved = await client.get(f"/api/v1/builder/lessons/{lesson_id}")
+
+        assert teacher_view.status_code == 200
+        assert student_view.status_code == 200
+        assert saved.status_code == 200
+
+        teacher_doc = teacher_view.json()
+        student_doc = student_view.json()
+        saved_doc = saved.json()["document"]
+
+        assert teacher_doc["blocks"]["quiz-1"]["content"]["options"][1]["correct"] is True
+        assert teacher_doc["blocks"]["short-1"]["content"]["mark_scheme"]
+        assert teacher_doc["blocks"]["practice-1"]["content"]["problems"][0]["solution"]["answer"] == "3/4"
+        assert teacher_doc["blocks"]["fib-1"]["content"]["segments"][1]["answer"] == "4"
+
+        student_options = student_doc["blocks"]["quiz-1"]["content"]["options"]
+        assert all(option["correct"] is False for option in student_options)
+        assert all(option["explanation"] == "" for option in student_options)
+        assert student_doc["blocks"]["quiz-1"]["content"]["feedback_correct"] == ""
+        assert student_doc["blocks"]["quiz-1"]["content"]["feedback_incorrect"] == ""
+        assert "mark_scheme" not in student_doc["blocks"]["short-1"]["content"]
+        assert "solution" not in student_doc["blocks"]["practice-1"]["content"]["problems"][0]
+        assert "answer" not in student_doc["blocks"]["fib-1"]["content"]["segments"][1]
+
+        # Export views must not mutate the persisted teacher-owned lesson.
+        assert saved_doc["blocks"]["quiz-1"]["content"]["options"][1]["correct"] is True
+        assert saved_doc["blocks"]["short-1"]["content"]["mark_scheme"]
+        assert saved_doc["blocks"]["practice-1"]["content"]["problems"][0]["solution"]["answer"] == "3/4"
+        assert saved_doc["blocks"]["fib-1"]["content"]["segments"][1]["answer"] == "4"
+
+    async def test_print_document_and_export_pdf_enforce_ownership(self, _install_dependency_overrides):
+        async with await _client() as client:
+            created = await client.post(
+                "/api/v1/builder/lessons",
+                json={"source_type": "manual", "document": _minimal_lesson()},
+            )
+            assert created.status_code == 201
+            lesson_id = created.json()["id"]
+
+            _install_dependency_overrides["user"] = USER_B
+
+            denied_print = await client.get(
+                f"/api/v1/builder/lessons/{lesson_id}/print-document",
+                params={"audience": "student"},
+            )
+
+            denied_export = await client.post(
+                f"/api/v1/builder/lessons/{lesson_id}/export/pdf",
+                json={"audience": "student"},
+            )
+
+        assert denied_print.status_code == 404
+        assert denied_export.status_code == 404
+
+    async def test_export_pdf_uses_builder_print_route_and_audience(self, tmp_path: Path):
+        async with await _client() as client:
+            created = await client.post(
+                "/api/v1/builder/lessons",
+                json={"source_type": "manual", "document": _minimal_lesson()},
+            )
+            assert created.status_code == 201
+            lesson_id = created.json()["id"]
+
+            exported_pdf = tmp_path / "builder.pdf"
+            exported_pdf.write_bytes(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF")
+
+            captured: dict[str, object] = {}
+
+            async def fake_export_generation_pdf(**kwargs):
+                captured.update(kwargs)
+                return SimpleNamespace(
+                    pdf_path=exported_pdf,
+                    filename="builder-student.pdf",
+                    file_size_bytes=exported_pdf.stat().st_size,
+                    page_count=3,
+                    generation_time_ms=420,
+                    cleanup_paths=[],
+                    print_page_debug=None,
+                )
+
+            with patch("builder.routes.export_generation_pdf", side_effect=fake_export_generation_pdf):
+                response = await client.post(
+                    f"/api/v1/builder/lessons/{lesson_id}/export/pdf",
+                    json={"audience": "student"},
+                )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert response.headers["x-page-count"] == "3"
+        assert response.headers["x-file-size"] == str(exported_pdf.stat().st_size)
+        assert response.headers["x-generation-time-ms"] == "420"
+
+        assert captured["render_path"] == f"/builder/print/{lesson_id}?audience=student"
+        request_body = captured["request"]
+        assert getattr(request_body, "include_answers", None) is False
