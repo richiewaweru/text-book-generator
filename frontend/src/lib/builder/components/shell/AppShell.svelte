@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { basePresetMap, LectioThemeSurface } from 'lectio';
 	import type { LessonDocument } from 'lectio';
 	import BlockCanvas from '$lib/builder/components/canvas/BlockCanvas.svelte';
@@ -54,6 +54,23 @@
 		}, 60_000);
 		return () => clearInterval(id);
 	});
+
+	async function handlePaletteAdd(componentId: string): Promise<void> {
+		paletteOpen = false;
+
+		await tick();
+
+		const sectionId = store.selectedSectionId ?? store.orderedSections[0]?.id;
+		if (!sectionId) return;
+
+		const newId = store.addBlock(sectionId, componentId);
+		store.selectBlock(newId);
+
+		await tick();
+
+		const el = globalThis.document.querySelector(`[data-block-id="${newId}"]`);
+		el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	}
 </script>
 
 <div
@@ -76,7 +93,7 @@
 			class="builder-main min-w-0 flex-1 overflow-y-auto bg-gradient-to-b from-slate-100 via-slate-100 to-slate-200/70 p-4 sm:p-6"
 			data-testid="builder-main"
 		>
-			<div class="mx-auto mb-3 flex w-full max-w-4xl items-center justify-between">
+			<div class="builder-print-hidden sticky top-0 z-10 mx-auto mb-3 flex w-full max-w-4xl items-center justify-between rounded-b-lg bg-slate-100/95 pb-3 pt-2 backdrop-blur-sm">
 				<div>
 					<p class="text-xs font-semibold uppercase tracking-wide text-slate-600">Builder workspace</p>
 					<p class="text-xs text-slate-500">
@@ -120,5 +137,5 @@
 {/if}
 
 {#if paletteOpen}
-	<PaletteOverlay {store} onclose={() => (paletteOpen = false)} />
+	<PaletteOverlay {store} onclose={() => (paletteOpen = false)} onadd={handlePaletteAdd} />
 {/if}

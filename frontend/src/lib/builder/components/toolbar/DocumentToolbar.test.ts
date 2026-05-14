@@ -93,4 +93,37 @@ describe('DocumentToolbar', () => {
 		await fireEvent.click(screen.getByTestId('toolbar-retry-save'));
 		expect(onRetrySave).toHaveBeenCalledTimes(1);
 	});
+
+	it('shows estimated A4 page count from document blocks', () => {
+		render(DocumentToolbar, {
+			document: {
+				...DOCUMENT,
+				blocks: {
+					'block-1': {
+						id: 'block-1',
+						component_id: 'practice-stack',
+						content: {},
+						position: 0
+					},
+					'block-2': {
+						id: 'block-2',
+						component_id: 'diagram-series',
+						content: {},
+						position: 1
+					},
+					'block-3': {
+						id: 'block-3',
+						component_id: 'comparison-grid',
+						content: {},
+						position: 2
+					}
+				}
+			},
+			lessonId: 'lesson-1'
+		});
+
+		const pageCount = screen.getByTestId('toolbar-page-count');
+		expect(pageCount.textContent?.trim()).toBe('~2 pages');
+		expect(pageCount.getAttribute('title')).toBe('~2 A4 pages');
+	});
 });

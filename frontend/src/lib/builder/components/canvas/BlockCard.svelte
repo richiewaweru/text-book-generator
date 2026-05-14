@@ -11,6 +11,7 @@
 	import { getToken } from '$lib/stores/auth';
 	import { saveVersionSnapshot } from '$lib/builder/persistence/idb-store';
 	import { validationWarningsForBlock } from '$lib/builder/utils/section-validation';
+	import { isTextEditingTarget } from '$lib/builder/utils/shortcuts';
 	import BlockEditor from './BlockEditor.svelte';
 	import BlockPreview from './BlockPreview.svelte';
 
@@ -98,6 +99,7 @@
 		if (e.key === 'Enter' || e.key === ' ') {
 			const t = e.target as HTMLElement;
 			if (t.closest?.('button')) return;
+			if (isTextEditingTarget(t)) return;
 			e.preventDefault();
 			onselect?.();
 		}
@@ -219,7 +221,7 @@
 					{store}
 				/>
 			</div>
-			<div class="min-w-0 rounded-lg border border-slate-100 bg-slate-50/50 p-3">
+			<div class="min-w-0 overflow-hidden rounded-lg border border-slate-100 bg-slate-50/50 p-3" style="overflow-wrap: break-word; word-break: break-word;">
 				<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Live preview</p>
 				<BlockPreview
 					componentId={block.component_id}
@@ -227,9 +229,9 @@
 					media={document?.media ?? {}}
 				/>
 			</div>
-		</div>
+	</div>
 	{:else}
-		<div class="block-content p-4">
+		<div class="block-content overflow-hidden p-4" style="overflow-wrap: break-word; word-break: break-word;">
 			<BlockPreview
 				componentId={block.component_id}
 				content={block.content}

@@ -16,10 +16,12 @@
 
 	let {
 		store,
-		onclose
+		onclose,
+		onadd
 	}: {
 		store: DocumentStore;
 		onclose: () => void;
+		onadd?: (componentId: string) => void | Promise<void>;
 	} = $props();
 
 	let query = $state('');
@@ -61,6 +63,10 @@
 	}
 
 	function addBlock(componentId: string): void {
+		if (onadd) {
+			void onadd(componentId);
+			return;
+		}
 		const sectionId = store.selectedSectionId ?? store.orderedSections[0]?.id;
 		if (!sectionId) return;
 		const newId = store.addBlock(sectionId, componentId);

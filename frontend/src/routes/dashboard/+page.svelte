@@ -4,14 +4,18 @@
 	import { fromStore } from 'svelte/store';
 	import { isApiError } from '$lib/api/errors';
 	import { getOnboardingRoute, resolveDashboardProfileFailure } from '$lib/auth/routing';
-	import { getV3Generations } from '$lib/api/v3';
+	import { fetchV3Document, getV3Generations } from '$lib/api/v3';
 	import { getPacks } from '$lib/api/learning-pack';
 	import { friendlyGenerationErrorMessage } from '$lib/generation/error-messages';
 	import { getProfile } from '$lib/api/profile';
+	import { v3PackToBuilderDocument } from '$lib/builder/adapters/from-generation';
+	import { createBuilderLesson } from '$lib/builder/api/lesson-crud';
+	import { saveDocument } from '$lib/builder/persistence/idb-store';
 	import { authUser, logout } from '$lib/stores/auth';
 	import type { TeacherProfile } from '$lib/types';
 	import type { V3GenerationHistoryItem } from '$lib/types/v3';
 	import type { PackStatusResponse } from '$lib/types/learning-pack';
+	import type { V3PackDocument } from '$lib/studio/v3-pack-to-lectio-document';
 
 	const user = fromStore(authUser);
 
@@ -20,6 +24,8 @@
 	let recentPacks = $state<PackStatusResponse[]>([]);
 	let loadingProfile = $state(true);
 	let profileErrorMessage = $state<string | null>(null);
+	let openingBuilderId = $state<string | null>(null);
+	let builderOpenError = $state<string | null>(null);
 
 	onMount(async () => {
 		try {
@@ -55,6 +61,29 @@
 
 	function v3OpenRoute(generationId: string): string {
 		return `/studio/generations/${generationId}`;
+	}
+
+	async function openGenerationInBuilder(generationId: string, title: string): Promise<void> {
+		openingBuilderId = generationId;
+		builderOpenError = null;
+		try {
+			const pack = (await fetchV3Document(generationId)) as V3PackDocument;
+			const lesson = v3PackToBuilderDocument(pack, {
+				routeGenerationId: generationId
+			});
+			const created = await createBuilderLesson({
+				source_type: 'v3_generation',
+				source_generation_id: generationId,
+				title: title || lesson.title,
+				document: lesson
+			});
+			await saveDocument(created.document);
+			await goto(`/builder/${created.id}`);
+		} catch (err) {
+			builderOpenError = err instanceof Error ? err.message : 'Failed to open lesson in builder.';
+		} finally {
+			openingBuilderId = null;
+		}
 	}
 </script>
 
@@ -208,6 +237,9 @@
 		{#if v3Generations.length > 0}
 			<section class="history-section">
 				<h2>Saved V3 Books</h2>
+				{#if builderOpenError}
+					<p class="failure-copy">{builderOpenError}</p>
+				{/if}
 				<ul class="history-list">
 					{#each v3Generations as gen}
 						<li class="history-item">
@@ -227,6 +259,16 @@
 							</div>
 							<div class="history-actions">
 								<a href={v3OpenRoute(gen.id)} class="view-link">Open</a>
+								{#if gen.status === 'completed'}
+									<button
+										type="button"
+										class="view-link action-link"
+										disabled={openingBuilderId === gen.id}
+										onclick={() => openGenerationInBuilder(gen.id, gen.title || gen.subject)}
+									>
+										{openingBuilderId === gen.id ? 'Opening...' : 'Edit in Builder'}
+									</button>
+								{/if}
 							</div>
 						</li>
 					{/each}
@@ -445,6 +487,20 @@
 		color: #24436a;
 		font-weight: 600;
 		text-decoration: none;
+	}
+
+	.action-link {
+		border: none;
+		background: none;
+		cursor: pointer;
+		color: #1d6a52;
+		font: inherit;
+		padding: 0;
+	}
+
+	.action-link:disabled {
+		cursor: progress;
+		opacity: 0.68;
 	}
 
 	.history-actions {

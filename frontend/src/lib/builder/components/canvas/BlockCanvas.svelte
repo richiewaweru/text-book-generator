@@ -143,6 +143,7 @@
 				{/each}
 			</div>
 		{/each}
+		<AddSectionControl {store} insertIndex={store.orderedSections.length} />
 	</div>
 	<div class="mx-auto mt-4 max-w-3xl rounded-xl border border-slate-200 bg-white/80 px-4 py-2 text-xs text-slate-600">
 		Shortcuts:

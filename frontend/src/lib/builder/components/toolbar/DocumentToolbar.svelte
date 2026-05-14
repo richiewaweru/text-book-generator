@@ -3,6 +3,11 @@
 	import type { LessonDocument } from 'lectio';
 	import { connectivityStore } from '$lib/builder/stores/connectivity.svelte';
 	import { getStorageEstimate } from '$lib/builder/utils/storage-estimate';
+	import {
+		estimatePageCount,
+		pageWarningLevel,
+		pageWarningMessage
+	} from '$lib/builder/utils/page-estimate';
 	import { downloadLessonDocument } from '$lib/builder/utils/file-io';
 	import {
 		downloadBuilderLessonPdf,
@@ -38,6 +43,10 @@
 	let storageAlmostFull = $state(false);
 	let exportLoadingAudience = $state<BuilderPdfAudience | null>(null);
 	let exportError = $state<string | null>(null);
+	const blocks = $derived(document ? Object.values(document.blocks) : []);
+	const pageCount = $derived(estimatePageCount(blocks));
+	const warningLevel = $derived(pageWarningLevel(pageCount));
+	const pageWarning = $derived(pageWarningMessage(pageCount));
 
 	async function refreshStorageHint(): Promise<void> {
 		const est = await getStorageEstimate();
@@ -117,6 +126,16 @@
 				Retry save
 			</button>
 		{/if}
+		<span
+			class="text-xs tabular-nums"
+			class:text-slate-500={warningLevel === 'none'}
+			class:text-amber-600={warningLevel === 'info'}
+			class:text-red-600={warningLevel === 'warn'}
+			title={pageWarning ?? `~${pageCount} A4 pages`}
+			data-testid="toolbar-page-count"
+		>
+			~{pageCount} {pageCount === 1 ? 'page' : 'pages'}
+		</span>
 		{#if onOpenHistory}
 			<button
 				type="button"
