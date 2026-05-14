@@ -53,6 +53,16 @@
 		templateId && templateId !== 'missing' && templateId !== 'none' ? templateId : 'guided-concept-path'
 	);
 
+	/** DOM `data-renderer` for Playwright: reflects the branch that actually rendered. */
+	const dataRenderer = $derived.by(() => {
+		if (renderer === 'canvas-test') return 'canvas-test';
+		if (renderer === 'safe') return 'safe';
+		if (!dataReady) return renderer;
+		if (loadError) return renderer;
+		if (lectioDocument) return 'lectio';
+		return 'lectio-adapter-failed';
+	});
+
 	onMount(async () => {
 		try {
 			if (!generationId) {
@@ -100,7 +110,8 @@
 					lectioDocument = adaptV3PackToLectioDocument(data, { routeGenerationId: generationId });
 					adapterDiagnostic = null;
 				}
-			} catch {
+			} catch (err) {
+				console.error('[v3-print] adaptV3PackToLectioDocument failed', err);
 				lectioDocument = null;
 				adapterDiagnostic = null;
 			}
@@ -125,7 +136,7 @@
 <div
 	data-generation-complete={captureReady ? 'true' : 'false'}
 	data-print-route="studio-print-readable"
-	data-renderer={renderer}
+	data-renderer={dataRenderer}
 	data-fetch-status={fetchStatus}
 	data-section-count={sectionCount}
 	data-template-id={templateId}
@@ -143,7 +154,14 @@
 	{:else if dataReady && !loadError}
 		{#if showPrintDiagnostics}
 			<div class="print-diagnostics">
-				<p><span class="print-diagnostics-label">Renderer:</span> {renderer}</p>
+				<p>
+					<span class="print-diagnostics-label">Renderer (query):</span>
+					{renderer}
+				</p>
+				<p>
+					<span class="print-diagnostics-label">Renderer (DOM path):</span>
+					{dataRenderer}
+				</p>
 				<p><span class="print-diagnostics-label">Fetch status:</span> {fetchStatus}</p>
 				<p><span class="print-diagnostics-label">Section count:</span> {sectionCount}</p>
 				<p><span class="print-diagnostics-label">Template ID:</span> {templateId}</p>

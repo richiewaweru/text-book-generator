@@ -156,7 +156,7 @@ def get_component_card(component_id: str) -> dict | None:
 
     A card contains: component_id, section_field, role, cognitive_job,
     capacity, capabilities, field_contracts, component_constraints, examples,
-    print_behavior.
+    print, print_behavior.
 
     Use this instead of get_component_registry_entry() in V3 code paths.
     """
@@ -348,6 +348,12 @@ def get_formatting_policy() -> dict:
     not per-component.
     """
     return _load_lectio_content_contract().get("formatting_policy", {})
+
+
+def get_lectio_print_surface() -> dict[str, Any]:
+    """Root ``print_surface`` from lectio-content-contract.json (A4 sizing, usable_height_px)."""
+    raw = _load_lectio_content_contract().get("print_surface")
+    return raw if isinstance(raw, dict) else {}
 
 
 def _required_components(contract: dict) -> list[str]:
@@ -706,4 +712,5 @@ def clear_cache() -> None:
     _load_component_registry.cache_clear()
     _load_preset_registry.cache_clear()
     _load_section_content_schema.cache_clear()
+    _load_manifest.cache_clear()
     _load_lectio_content_contract.cache_clear()

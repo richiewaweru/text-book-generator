@@ -33,8 +33,7 @@
 .builder-print-preview .block-card {
 	border: none !important;
 	box-shadow: none !important;
-	break-inside: avoid;
-	page-break-inside: avoid;
+	/* fragmentation handled by Lectio component data-print-* attributes */
 }
 
 .builder-print-preview .block-content {
@@ -77,8 +76,7 @@
 	.block-card {
 		border: none !important;
 		box-shadow: none !important;
-		break-inside: avoid;
-		page-break-inside: avoid;
+		/* fragmentation handled by Lectio component data-print-* attributes */
 	}
 
 	.block-content {

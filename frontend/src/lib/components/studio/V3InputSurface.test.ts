@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import V3InputSurface from './V3InputSurface.svelte';
@@ -18,11 +19,26 @@ describe('V3InputSurface', () => {
 		const onSubmit = vi.fn();
 		render(V3InputSurface, { props: { onSubmit } });
 
-		await fireEvent.change(screen.getByLabelText('Grade level'), { target: { value: 'Grade 7' } });
-		await fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Mathematics' } });
-		await fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'Compound area' } });
+		const gradeSelect = screen.getByLabelText('Grade level') as HTMLSelectElement;
+		gradeSelect.value = 'Grade 7';
+		await fireEvent.change(gradeSelect);
+		await tick();
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Build my lesson plan' }));
+		const subjectSelect = screen.getByLabelText('Subject') as HTMLSelectElement;
+		subjectSelect.value = 'Mathematics';
+		await fireEvent.change(subjectSelect);
+		await tick();
+
+		const topicInput = screen.getByLabelText('Topic') as HTMLInputElement;
+		topicInput.value = 'Compound area';
+		await fireEvent.input(topicInput);
+		await tick();
+
+		const submit = screen.getByRole('button', { name: 'Build my lesson plan' }) as HTMLButtonElement;
+		expect(submit.disabled).toBe(false);
+
+		await fireEvent.click(submit);
+		await tick();
 
 		expect(onSubmit).toHaveBeenCalledTimes(1);
 		const payload = onSubmit.mock.calls[0][0];

@@ -36,3 +36,8 @@ class PDFExportConfig:
     @property
     def max_page_count(self) -> int:
         return self._settings.pdf_max_page_count
+
+    @property
+    def usable_page_height_px(self) -> int:
+        """Max block height for print preflight (A4 usable column; tunable via settings)."""
+        return self._settings.pdf_usable_page_height_px

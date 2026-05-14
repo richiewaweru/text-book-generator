@@ -214,9 +214,5 @@
 		.textbook-document-shell[data-print-mode='true'] {
 			padding: 0;
 		}
-
-		.section-stack[data-print-mode='true'] {
-			gap: var(--rh-gap-component, 1rem);
-		}
 	}
 </style>

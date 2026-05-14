@@ -63,6 +63,25 @@ def test_lectio_content_contract_has_required_structure() -> None:
     template = templates["guided-concept-path"]
     assert "available_components" in template, "guided-concept-path missing available_components"
 
+    assert "print_surface" in contract, "missing print_surface"
+    ps = contract["print_surface"]
+    assert isinstance(ps, dict), "print_surface must be an object"
+    assert ps.get("usable_height_px") == 970, f"unexpected usable_height_px: {ps.get('usable_height_px')}"
+
+    ds = cards.get("diagram-series")
+    assert ds is not None, "diagram-series missing from component_cards"
+    assert ds.get("print", {}).get("breakBehavior") == "itemized", (
+        f"diagram-series print.breakBehavior wrong: {ds.get('print')}"
+    )
+
+
+def test_get_lectio_print_surface_helper() -> None:
+    from pipeline.contracts import get_lectio_print_surface
+
+    surf = get_lectio_print_surface()
+    assert isinstance(surf, dict)
+    assert surf.get("usable_height_px") == 970
+
 
 def test_sync_rejects_non_generated_adapter(tmp_path: Path) -> None:
     script_path = _repo_root() / "tools" / "update_lectio_contracts.py"

@@ -39,19 +39,4 @@
 		display: grid;
 		gap: var(--rh-gap-section, 1.25rem);
 	}
-
-	@media print {
-		.textbook-document-shell[data-print-mode='true'] {
-			padding: 0;
-		}
-
-		.section-stack[data-print-mode='true'] {
-			gap: var(--rh-gap-component, 1rem);
-		}
-
-		.section-stack[data-print-mode='true'] > article {
-			break-inside: avoid;
-			page-break-inside: avoid;
-		}
-	}
 </style>

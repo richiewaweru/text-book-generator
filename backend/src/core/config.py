@@ -231,6 +231,7 @@ class Settings(BaseSettings):
     playwright_timeout_ms: int = Field(default=45000, gt=0)
     pdf_max_file_size_mb: int = Field(default=50, gt=0)
     pdf_max_page_count: int = Field(default=200, gt=0)
+    pdf_usable_page_height_px: int = Field(default=970, gt=0)
     pdf_temp_retention_seconds: int = Field(default=3600, ge=60)
 
     @field_validator("app_env", mode="before")

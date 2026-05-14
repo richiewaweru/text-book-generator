@@ -1,6 +1,17 @@
 {
   "version": "1.0.0",
   "source": "lectio",
+  "print_surface": {
+    "assumed_page": "A4",
+    "assumed_margins_mm": {
+      "top": 16,
+      "right": 14,
+      "bottom": 18,
+      "left": 14
+    },
+    "usable_height_px": 970,
+    "usable_width_px": 680
+  },
   "default_template_id": "guided-concept-path",
   "formatting_policy": {
     "default": "plain_text unless field contract says otherwise",
@@ -280,9 +291,18 @@
           "grade_band": "secondary"
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Full static header"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Full static header"
       }
     },
@@ -374,9 +394,18 @@
           "anchor": "Need"
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "prose",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": true,
+        "fallback": "Pull quote block with left border"
+      },
+      "print_behavior": {
+        "breakBehavior": "prose",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": true,
         "fallback": "Pull quote block with left border"
       }
     },
@@ -437,9 +466,18 @@
           "emphasis": []
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "prose",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Static prose"
+      },
+      "print_behavior": {
+        "breakBehavior": "prose",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Static prose"
       }
     },
@@ -495,9 +533,18 @@
           ]
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Inline list of prerequisites"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Inline list of prerequisites"
       }
     },
@@ -558,9 +605,18 @@
           "preview": "Preview."
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "prose",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Static, amber left rule"
+      },
+      "print_behavior": {
+        "breakBehavior": "prose",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Static, amber left rule"
       }
     },
@@ -615,9 +671,18 @@
           "audience": "Friend"
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Static with write-in lines"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Static with write-in lines"
       }
     },
@@ -671,9 +736,18 @@
           "body": "Notice this."
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Bordered callout box"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Bordered callout box"
       }
     },
@@ -735,9 +809,18 @@
           ]
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "prose",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": true,
+        "fallback": "Bulleted list with border"
+      },
+      "print_behavior": {
+        "breakBehavior": "prose",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": true,
         "fallback": "Bulleted list with border"
       }
     },
@@ -779,9 +862,18 @@
           "label": "Part B"
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Horizontal rule with label"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Horizontal rule with label"
       }
     },
@@ -866,9 +958,18 @@
           "plain": "Plain def."
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Both versions shown"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Both versions shown"
       }
     },
@@ -928,9 +1029,20 @@
           ]
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".definition-family-print-item",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "All definitions expanded"
+      },
+      "print_behavior": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".definition-family-print-item",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "All definitions expanded"
       }
     },
@@ -999,9 +1111,18 @@
           ]
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "prose",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": true,
+        "fallback": "Inline vocabulary strip at section end"
+      },
+      "print_behavior": {
+        "breakBehavior": "prose",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": true,
         "fallback": "Inline vocabulary strip at section end"
       }
     },
@@ -1069,9 +1190,18 @@
           ]
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "table",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": true,
+        "fallback": "Static table"
+      },
+      "print_behavior": {
+        "breakBehavior": "table",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": true,
         "fallback": "Static table"
       }
     },
@@ -1124,9 +1254,18 @@
           "fact": "E = mc²"
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Bold bordered fact box"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Bold bordered fact box"
       }
     },
@@ -1237,9 +1376,18 @@
           ]
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "table",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Static comparison table"
+      },
+      "print_behavior": {
+        "breakBehavior": "table",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Static comparison table"
       }
     },
@@ -1336,9 +1484,20 @@
           "conclusion": "Done."
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "avoid",
+      "print": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".worked-step-print",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "All steps expanded"
+      },
+      "print_behavior": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".worked-step-print",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "All steps expanded"
       }
     },
@@ -1427,9 +1586,20 @@
           ]
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "avoid",
+      "print": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".process-print-step",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "All steps visible, checkbox squares for print"
+      },
+      "print_behavior": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".process-print-step",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "All steps visible, checkbox squares for print"
       }
     },
@@ -1534,9 +1704,20 @@
           ]
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "avoid",
+      "print": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".practice-print-problem",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "All visible, write-in lines rendered; inline answers hidden by default"
+      },
+      "print_behavior": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".practice-print-problem",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "All visible, write-in lines rendered; inline answers hidden by default"
       }
     },
@@ -1630,9 +1811,18 @@
           "feedback_incorrect": "Review."
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Question and options shown, correct answer marked"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Question and options shown, correct answer marked"
       }
     },
@@ -1705,9 +1895,18 @@
           "type": "open"
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Prompt with write-in lines"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Prompt with write-in lines"
       }
     },
@@ -1760,9 +1959,18 @@
           "prompt": "Write notes."
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Lined write-in area"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Lined write-in area"
       }
     },
@@ -1821,9 +2029,18 @@
           "question": "Explain inertia in one paragraph."
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Question with lined answer space, mark allocation shown"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Question with lined answer space, mark allocation shown"
       }
     },
@@ -1901,9 +2118,18 @@
           ]
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "allow",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Passage with underlined blanks, word bank box below"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Passage with underlined blanks, word bank box below"
       }
     },
@@ -1973,9 +2199,18 @@
           "correction": "Right idea."
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "avoid",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Full static, amber left border"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Full static, amber left border"
       }
     },
@@ -2058,10 +2293,21 @@
           "alt_text": "Diagram showing key parts referenced in the prose."
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "avoid",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
-        "fallback": "Static SVG 80% width centred"
+        "hasMedia": true,
+        "mediaConstraint": "constrain-width",
+        "requiresColorReset": false,
+        "fallback": "Static diagram centred, width constrained for print"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": true,
+        "mediaConstraint": "constrain-width",
+        "requiresColorReset": false,
+        "fallback": "Static diagram centred, width constrained for print"
       }
     },
     "diagram-compare": {
@@ -2154,9 +2400,20 @@
           "alt_text": "Side-by-side diagram comparison."
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "avoid",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
+        "hasMedia": true,
+        "mediaConstraint": "constrain-width",
+        "requiresColorReset": false,
+        "fallback": "Both diagrams shown side by side"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": true,
+        "mediaConstraint": "constrain-width",
+        "requiresColorReset": false,
         "fallback": "Both diagrams shown side by side"
       }
     },
@@ -2226,9 +2483,22 @@
           ]
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "avoid",
+      "print": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".diagram-series-print-item",
         "preferredWidth": "full",
+        "hasMedia": true,
+        "mediaConstraint": "constrain-height",
+        "requiresColorReset": false,
+        "fallback": "All diagrams in sequence with step labels"
+      },
+      "print_behavior": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".diagram-series-print-item",
+        "preferredWidth": "full",
+        "hasMedia": true,
+        "mediaConstraint": "constrain-height",
+        "requiresColorReset": false,
         "fallback": "All diagrams in sequence with step labels"
       }
     },
@@ -2329,9 +2599,20 @@
           ]
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "avoid",
+      "print": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".timeline-print-event",
         "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Vertical event list"
+      },
+      "print_behavior": {
+        "breakBehavior": "itemized",
+        "itemSelector": ".timeline-print-event",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
         "fallback": "Vertical event list"
       }
     },
@@ -2434,10 +2715,19 @@
           }
         }
       ],
-      "print_behavior": {
-        "breakBehavior": "avoid",
+      "print": {
+        "breakBehavior": "atomic",
         "preferredWidth": "full",
-        "fallback": "Static diagram at midstate"
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Static diagram at midstate or explanation text"
+      },
+      "print_behavior": {
+        "breakBehavior": "atomic",
+        "preferredWidth": "full",
+        "hasMedia": false,
+        "requiresColorReset": false,
+        "fallback": "Static diagram at midstate or explanation text"
       }
     }
   },

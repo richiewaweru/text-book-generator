@@ -19,6 +19,10 @@ def test_log_print_snapshot_emits_diagnostics_and_failures(caplog) -> None:
             "images_failed": "1",
             "images_timed_out": "false",
             "failed_image_sources": '["https://cdn.example/bad.png"]',
+            "print_contract_coverage": {"declared": 8, "total": 12},
+            "print_layout_report": {
+                "oversized_blocks": [{"type": "atomic", "block": "diagram-block", "height": 1200}],
+            },
         },
     )
 
@@ -33,6 +37,8 @@ def test_log_print_snapshot_emits_diagnostics_and_failures(caplog) -> None:
     assert diagnostic_record.images_loaded == "2"
     assert diagnostic_record.images_failed == "1"
     assert diagnostic_record.images_timed_out == "false"
+    assert diagnostic_record.print_contract_coverage == {"declared": 8, "total": 12}
+    assert diagnostic_record.oversized_block_count == 1
 
     failure_record = next(
         record for record in caplog.records if record.getMessage() == "PDF image failures"
