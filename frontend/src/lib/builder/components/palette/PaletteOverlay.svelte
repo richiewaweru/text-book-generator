@@ -71,7 +71,7 @@
 </script>
 
 <div
-	class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+	class="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
 	role="button"
 	tabindex="-1"
 	onclick={onclose}
@@ -81,7 +81,7 @@
 		role="dialog"
 		aria-label="Add block"
 		tabindex="-1"
-		class="w-[min(92vw,400px)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+		class="w-full max-w-none overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl sm:w-[min(92vw,400px)] sm:rounded-xl"
 		onclick={(e) => e.stopPropagation()}
 		onkeydown={(e) => e.stopPropagation()}
 	>
@@ -110,7 +110,7 @@
 			/>
 		</div>
 
-		<div class="max-h-[65vh] overflow-y-auto p-3">
+		<div class="max-h-[70vh] overflow-y-auto p-3 sm:max-h-[65vh]">
 			{#if filteredGroups.length === 0}
 				<p class="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
 					No components match "{query}".

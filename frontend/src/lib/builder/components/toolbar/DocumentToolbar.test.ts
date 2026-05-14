@@ -79,4 +79,18 @@ describe('DocumentToolbar', () => {
 			expect(downloadBuilderLessonPdf).toHaveBeenCalledWith('lesson-1', 'student');
 		});
 	});
+
+	it('shows retry save control when save status is error', async () => {
+		const onRetrySave = vi.fn();
+
+		render(DocumentToolbar, {
+			document: DOCUMENT,
+			lessonId: 'lesson-1',
+			saveStatus: 'error',
+			onRetrySave
+		});
+
+		await fireEvent.click(screen.getByTestId('toolbar-retry-save'));
+		expect(onRetrySave).toHaveBeenCalledTimes(1);
+	});
 });

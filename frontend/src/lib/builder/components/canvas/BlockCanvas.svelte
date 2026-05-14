@@ -145,6 +145,12 @@
 		{/each}
 	</div>
 	<div class="mx-auto mt-4 max-w-3xl rounded-xl border border-slate-200 bg-white/80 px-4 py-2 text-xs text-slate-600">
-		Shortcuts: <span class="font-medium">Cmd/Ctrl+Z</span> undo, <span class="font-medium">Cmd/Ctrl+Shift+Z</span> redo, <span class="font-medium">Enter</span> edit block, <span class="font-medium">Esc</span> close edit.
+		Shortcuts:
+		<span class="font-medium">Cmd/Ctrl+Z</span> undo,
+		<span class="font-medium">Cmd/Ctrl+Shift+Z</span> redo,
+		<span class="font-medium">Cmd/Ctrl+S</span> save,
+		<span class="font-medium">Cmd/Ctrl+D</span> duplicate,
+		<span class="font-medium">Delete</span> remove,
+		<span class="font-medium">Esc</span> close editor.
 	</div>
 </div>
