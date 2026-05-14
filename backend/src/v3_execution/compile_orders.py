@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from v3_blueprint.models import ProductionBlueprint, QuestionPlanItem
 from v3_blueprint.compiler import BlueprintCompiler
 
@@ -79,6 +81,29 @@ def _infer_visual_dependency(
         if "walkthrough" in strat or "annotate" in strat or "model" in strat:
             return "section_text"
     return "blueprint_only"
+
+
+def _extract_series_frames(
+    blueprint: ProductionBlueprint,
+    section_id: str,
+    fallback_description: str,
+) -> list[VisualFrameSpec]:
+    """Derive per-frame specs from diagram-series content intent markers."""
+    for sec in blueprint.sections:
+        if sec.section_id != section_id:
+            continue
+        for comp in sec.components:
+            if canonical_component_id(comp.component) != "diagram-series":
+                continue
+            panels = re.split(
+                r"(?:Panel|Step|Frame)\s*\d+\s*[\-:\u2014]",
+                comp.content_intent,
+                flags=re.IGNORECASE,
+            )
+            panel_descriptions = [part.strip() for part in panels[1:] if part.strip()]
+            if len(panel_descriptions) >= 2:
+                return [VisualFrameSpec(description=desc) for desc in panel_descriptions]
+    return [VisualFrameSpec(description=fallback_description)]
 
 
 def compile_execution_bundle(
@@ -177,7 +202,7 @@ def compile_execution_bundle(
             mode=mode,
             purpose=vis.strategy,
             must_show=[vis.strategy] + ([f"density:{vis.density}"] if vis.density else []),
-            frames=[VisualFrameSpec(description=vis.strategy)] if series else [],
+            frames=_extract_series_frames(blueprint, vis.section_id, vis.strategy) if series else [],
         )
         visual_orders.append(
             VisualGeneratorWorkOrder(

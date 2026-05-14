@@ -63,6 +63,9 @@ _SKIP_TEXT_KEYS = frozenset(
         "type",
     }
 )
+_VISUAL_COMPONENT_IDS = frozenset(
+    {"diagram-block", "diagram-series", "diagram-compare", "simulation-block"}
+)
 
 
 def _walk_student_strings(obj: Any, key: str | None = None) -> list[str]:
@@ -159,6 +162,9 @@ def check_planned_components_exist(
             continue
         for comp in sec_plan.components:
             cid = canonical_component_id(comp.component)
+            if cid in _VISUAL_COMPONENT_IDS:
+                # Visual components are filled by visual executor, not section writer.
+                continue
             field = get_section_field_for_component(cid)
             if field is None:
                 issues.append(

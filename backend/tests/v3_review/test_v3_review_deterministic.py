@@ -17,7 +17,9 @@ from v3_review.deterministic_checks import (
     check_expected_answers_preserved,
     check_internal_artifact_leaks,
     check_no_extra_questions,
+    check_planned_components_exist,
     check_planned_sections_exist,
+    check_planned_visuals_exist,
 )
 from v3_review.models import CoherenceReport
 from v3_review.repair_router import route_repairs
@@ -196,6 +198,26 @@ def test_coherence_report_summary_json_safe() -> None:
     summary = coherence_report_to_generation_summary(report)
     assert summary["status"] == "passed"
     assert summary["blocking_count"] == 0
+
+
+def test_planned_components_skip_diagram_series_but_visual_check_flags_missing() -> None:
+    bp = _load_example("james_mitosis_booklet.json")
+
+    sections = []
+    for sec in bp.sections:
+        sections.append(
+            {
+                "section_id": sec.section_id,
+                "template_id": "guided-concept-path",
+            }
+        )
+    dp = _minimal_draft_pack(sections=sections, answer_key=None)
+
+    component_issues = check_planned_components_exist(bp, dp)
+    visual_issues = check_planned_visuals_exist(bp, dp)
+
+    assert all("diagram-series" not in issue.message for issue in component_issues)
+    assert any(issue.repair_target_id == "visual:diagram_sequence" for issue in visual_issues)
 
 
 @pytest.mark.asyncio

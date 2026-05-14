@@ -85,7 +85,7 @@ def _parse_ids_from_issue(issue: ReviewIssue) -> tuple[str | None, str | None, s
     elif rid.startswith("visual:"):
         rest = rid.split(":", 1)[1]
         sec_id = rest
-        vid = rest
+        vid = None
     elif rid.startswith("answer_key:"):
         tail = rid.split(":", 1)[1]
         if tail != "main":
