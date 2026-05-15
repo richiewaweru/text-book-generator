@@ -18,12 +18,14 @@
 		value,
 		onchange,
 		onfieldblur,
+		onSvgChange,
 		ownerComponentId = ''
 	}: {
 		schema: FieldSchema;
 		value: unknown;
 		onchange: (value: unknown) => void;
 		onfieldblur?: () => void;
+		onSvgChange?: (svg: string) => void;
 		ownerComponentId?: string;
 	} = $props();
 
@@ -118,6 +120,11 @@
 								schema={sub}
 								value={row[sub.field]}
 								onchange={(v: unknown) => patch(i, sub.field, v)}
+								onSvgChange={(svg: string) => {
+									const svgField = sub.field === 'media_id' ? 'svg_content' : null;
+									if (svgField) patch(i, svgField, svg);
+									onSvgChange?.(svg);
+								}}
 								{onfieldblur}
 								{ownerComponentId}
 							/>
@@ -126,6 +133,7 @@
 								schema={sub}
 								value={row[sub.field]}
 								onchange={(v: unknown) => patch(i, sub.field, v)}
+								{onSvgChange}
 								{onfieldblur}
 								{ownerComponentId}
 							/>

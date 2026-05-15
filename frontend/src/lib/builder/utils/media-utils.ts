@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify';
 
 export const MAX_RASTER_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_SVG_BYTES = 2 * 1024 * 1024;
 
 export const ALLOWED_RASTER_IMAGE_TYPES = [
 	'image/png',
@@ -8,6 +9,7 @@ export const ALLOWED_RASTER_IMAGE_TYPES = [
 	'image/webp',
 	'image/gif'
 ] as const;
+export const ALLOWED_SVG_TYPES = ['image/svg+xml'] as const;
 
 export type VideoParseResult = { provider: 'youtube' | 'vimeo'; embedUrl: string };
 
@@ -71,6 +73,38 @@ export function validateRasterImageFile(
 		return { ok: false, reason: 'Image must be 10 MB or smaller.' };
 	}
 	return { ok: true };
+}
+
+export function isSvgFile(file: File): boolean {
+	return (
+		ALLOWED_SVG_TYPES.includes(file.type as (typeof ALLOWED_SVG_TYPES)[number]) ||
+		file.name.toLowerCase().endsWith('.svg')
+	);
+}
+
+export function validateSvgFile(
+	file: File
+): { ok: true } | { ok: false; reason: string } {
+	if (!isSvgFile(file)) {
+		return { ok: false, reason: 'File must be an SVG.' };
+	}
+	if (file.size > MAX_SVG_BYTES) {
+		return { ok: false, reason: 'SVG must be 2 MB or smaller.' };
+	}
+	return { ok: true };
+}
+
+export function validateDiagramFile(
+	file: File
+): { ok: true; kind: 'raster' | 'svg' } | { ok: false; reason: string } {
+	if (isSvgFile(file)) {
+		const svgResult = validateSvgFile(file);
+		if (!svgResult.ok) return svgResult;
+		return { ok: true, kind: 'svg' };
+	}
+	const rasterResult = validateRasterImageFile(file);
+	if (!rasterResult.ok) return rasterResult;
+	return { ok: true, kind: 'raster' };
 }
 
 export function fileToDataUri(file: File): Promise<string> {

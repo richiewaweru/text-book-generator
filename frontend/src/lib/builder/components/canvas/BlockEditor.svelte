@@ -13,6 +13,7 @@
 	import FieldSvg from '$lib/builder/components/editor/fields/FieldSvg.svelte';
 	import FieldText from '$lib/builder/components/editor/fields/FieldText.svelte';
 	import FieldTextarea from '$lib/builder/components/editor/fields/FieldTextarea.svelte';
+	import { isDiagramComponentId, svgFieldFor } from './diagram-media-fields';
 
 	let {
 		schema,
@@ -69,6 +70,11 @@
 				schema={fieldSchema}
 				value={content[fieldSchema.field]}
 				onchange={(v: unknown) => onchange(fieldSchema.field, v)}
+				onSvgChange={(svg: string) => {
+					if (!isDiagramComponentId(ownerId)) return;
+					const svgField = svgFieldFor(ownerId, fieldSchema.field);
+					if (svgField) onchange(svgField, svg);
+				}}
 				{onfieldblur}
 				ownerComponentId={ownerId}
 			/>

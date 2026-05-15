@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { FieldSchema, MediaReference } from 'lectio';
+	import { isDiagramComponentId } from '$lib/builder/components/canvas/diagram-media-fields';
 	import { getDocumentStoreContext } from '$lib/builder/components/editor/document-store-context';
+	import DiagramUploader from '$lib/builder/components/media/DiagramUploader.svelte';
 	import ImageUploader from '$lib/builder/components/media/ImageUploader.svelte';
 	import MediaGrid from '$lib/builder/components/media/MediaGrid.svelte';
 	import VideoUrlInput from '$lib/builder/components/media/VideoUrlInput.svelte';
@@ -9,13 +11,15 @@
 		schema,
 		value,
 		onchange,
+		onSvgChange,
 		ownerComponentId = ''
 	}: {
 		schema: FieldSchema;
 		value?: unknown;
 		onchange?: (value: unknown) => void;
+		onSvgChange?: (svg: string) => void;
 		onfieldblur?: () => void;
-		/** Parent block component id — selects video vs image behaviour for this field. */
+		/** Parent block component id - selects video vs image behaviour for this field. */
 		ownerComponentId?: string;
 	} = $props();
 
@@ -24,6 +28,7 @@
 	const mediaId = $derived(typeof value === 'string' ? value : '');
 	const wantVideo = $derived(ownerComponentId === 'video-embed');
 	const wantImage = $derived(ownerComponentId === 'image-block');
+	const wantDiagram = $derived(isDiagramComponentId(ownerComponentId));
 
 	const docMedia = $derived(store?.document?.media ?? {});
 	const current = $derived(mediaId ? docMedia[mediaId] : undefined);
@@ -122,7 +127,16 @@
 					<ImageUploader lessonId={store.document.id} onReady={addImageFromUpload} />
 				{/if}
 			{/if}
-			{#if !wantVideo && !wantImage}
+			{#if wantDiagram}
+				{#if store.document}
+					<DiagramUploader
+						lessonId={store.document.id}
+						onImageReady={addImageFromUpload}
+						onSvgReady={(svg: string) => onSvgChange?.(svg)}
+					/>
+				{/if}
+			{/if}
+			{#if !wantVideo && !wantImage && !wantDiagram}
 				<p class="text-xs text-slate-500">Choose an image or video block to use the media picker.</p>
 			{/if}
 		</div>
@@ -132,7 +146,7 @@
 			<MediaGrid
 				mediaList={Object.values(docMedia)}
 				selectedId={mediaId}
-				filterType={wantVideo ? 'video' : wantImage ? 'image' : undefined}
+				filterType={wantVideo ? 'video' : wantImage || wantDiagram ? 'image' : undefined}
 				onpick={pickMedia}
 			/>
 		</div>
