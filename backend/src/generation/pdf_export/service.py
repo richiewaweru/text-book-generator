@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import time
@@ -10,8 +10,7 @@ from pydantic import BaseModel, Field
 
 from core.config import Settings
 from core.pdf_export_runtime import pdf_export_telemetry
-from generation.entities.generation import Generation
-from pipeline.types.requests import GenerationMode
+from generation.pdf_export.context import PDFGenerationContext
 from generation.pdf_export.cleanup import cleanup_files, ensure_temp_dir
 from generation.pdf_export.components.answers import generate_answer_key_pdf
 from generation.pdf_export.components.answers_v3 import generate_v3_answer_key_pdf
@@ -25,7 +24,7 @@ from generation.pdf_export.components.toc import generate_toc_pdf
 from generation.pdf_export.config import PDFExportConfig
 from generation.pdf_export.rendering.playwright import render_generation_pdf
 from generation.pdf_export.v3_pack_pipeline_document import build_pipeline_document_for_v3_pdf
-from pipeline.api import PipelineDocument
+from contracts.document import PipelineDocument
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +52,7 @@ class PDFExportResult(BaseModel):
 
 async def export_generation_pdf(
     *,
-    generation: Generation,
+    generation: PDFGenerationContext,
     document: PipelineDocument,
     auth_token: str,
     request: PDFExportRequest,
@@ -221,12 +220,12 @@ async def export_v3_studio_pdf(
     request_id: str | None = None,
 ) -> PDFExportResult:
     """PDF export for v3 Studio: Playwright renders the dedicated SSR print route at `/studio/print/{generation_id}`."""
-    generation = Generation(
+    generation = PDFGenerationContext(
         id=generation_id,
         user_id=user_id,
         subject=title or "Lesson",
         context=subject or "",
-        mode=GenerationMode.BALANCED,
+        mode="v3",
         status="completed",
         requested_template_id=template_id,
         requested_preset_id="blue-classroom",
@@ -304,3 +303,5 @@ def _slugify(text: str) -> str:
     while "--" in value:
         value = value.replace("--", "-")
     return value or "lesson"
+
+

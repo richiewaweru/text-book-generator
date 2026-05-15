@@ -1,4 +1,4 @@
-"""Server persistence for teacher-owned Builder lessons (Phase 2)."""
+﻿"""Server persistence for teacher-owned Builder lessons (Phase 2)."""
 
 from __future__ import annotations
 
@@ -23,12 +23,11 @@ from core.database.session import get_async_session
 from core.entities.user import User
 from core.rate_limit import limiter
 from core.storage.gcs_image_store import GCSImageStore
-from generation.entities.generation import Generation
+from generation.pdf_export.context import PDFGenerationContext
 from generation.pdf_export.cleanup import cleanup_files
 from generation.pdf_export.service import PDFExportRequest, export_generation_pdf
-from pipeline.api import PipelineDocument, PipelineSectionManifestItem
-from pipeline.contracts import get_component_registry_entry
-from pipeline.types.requests import GenerationMode
+from contracts.document import PipelineDocument, PipelineSectionManifestItem
+from contracts.lectio import get_component_registry_entry
 
 router = APIRouter(prefix="/api/v1/builder", tags=["builder"])
 logger = logging.getLogger(__name__)
@@ -275,14 +274,12 @@ def _build_builder_pipeline_document(lesson_id: str, document: dict[str, Any]) -
         generation_id=lesson_id,
         subject=subject if isinstance(subject, str) and subject.strip() else "Lesson",
         context=description if isinstance(description, str) else "",
-        mode=GenerationMode.BALANCED,
+        mode="v3",
         template_id=_first_section_template_id(document),
         preset_id=preset_id if isinstance(preset_id, str) and preset_id.strip() else "blue-classroom",
         status="completed",
         section_manifest=_section_manifest_from_document(document),
         sections=[],
-        failed_sections=[],
-        qc_reports=[],
         quality_passed=True,
     )
 
@@ -291,18 +288,18 @@ def _builder_generation_from_document(
     lesson_id: str,
     user_id: str,
     document: dict[str, Any],
-) -> Generation:
+) -> PDFGenerationContext:
     subject = document.get("subject")
     description = document.get("description")
     template_id = _first_section_template_id(document)
     preset_id = document.get("preset_id")
     subject_text = subject if isinstance(subject, str) and subject.strip() else "Lesson"
-    return Generation(
+    return PDFGenerationContext(
         id=lesson_id,
         user_id=user_id,
         subject=subject_text,
         context=description if isinstance(description, str) else "",
-        mode=GenerationMode.BALANCED,
+        mode="v3",
         status="completed",
         requested_template_id=template_id,
         resolved_template_id=template_id,
@@ -677,3 +674,6 @@ async def export_builder_lesson_pdf(
         },
         background=BackgroundTask(cleanup_files, result.cleanup_paths),
     )
+
+
+

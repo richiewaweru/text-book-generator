@@ -1,10 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from pipeline.types.teacher_brief import (
+from learning.brief_types import (
     GRADE_BAND_BY_LEVEL,
     ClassProfile,
     TeacherBriefDepth,
@@ -144,3 +144,4 @@ class PackStatusResponse(BaseModel):
     resources: list[ResourceStatus] = Field(default_factory=list)
     created_at: str
     completed_at: str | None = None
+

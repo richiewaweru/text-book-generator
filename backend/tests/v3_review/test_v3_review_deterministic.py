@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.contracts import get_section_field_for_component
+from contracts.lectio import get_section_field_for_component
 
 from v3_blueprint.models import ProductionBlueprint
 from v3_execution.compile_orders import compile_execution_bundle

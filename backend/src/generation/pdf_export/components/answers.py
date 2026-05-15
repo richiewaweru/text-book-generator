@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,8 +7,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
-from pipeline.section_content_helpers import practice_problems, section_title
-from pipeline.types.section_content import SectionContent
+from contracts.section_content_helpers import practice_problems, section_title
+from contracts.section_content import SectionContent
 
 
 @dataclass(slots=True)
@@ -132,3 +132,4 @@ def _wrap_text(text: str, max_chars: int) -> list[str]:
         current = word
     lines.append(current)
     return lines
+

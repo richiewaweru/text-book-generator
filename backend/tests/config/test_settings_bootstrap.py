@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -14,9 +14,7 @@ from pydantic import ValidationError
 
 from core.config import Settings, bootstrap_environment
 from core.database.session import build_engine_kwargs
-from pipeline.storage.image_store import LocalImageStore, get_image_store
-from pipeline.runtime_policy import resolve_generation_timeout_seconds, resolve_runtime_policy_bundle
-from pipeline.types.requests import GenerationMode
+from media.storage.image_store import LocalImageStore, get_image_store
 
 
 def _snapshot_env(*names: str) -> dict[str, str | None]:
@@ -136,63 +134,6 @@ def test_bootstrap_environment_preserves_postgres_urls(
         )
     finally:
         _restore_env(snapshot)
-
-
-def test_runtime_policy_settings_defaults() -> None:
-    settings = Settings(_env_file=None)
-    bundle = resolve_runtime_policy_bundle(settings, GenerationMode.BALANCED)
-
-    assert settings.generation_max_concurrent_per_user == 2
-    assert settings.pipeline_timeout_curriculum_seconds == 90.0
-    assert settings.pipeline_timeout_diagram_node_budget_seconds == 90.0
-    assert settings.pipeline_timeout_interaction_seconds == 60.0
-    assert bundle.concurrency.max_section_concurrency == 4
-    assert bundle.concurrency.max_media_concurrency == 2
-    assert bundle.concurrency.max_diagram_concurrency == 2
-    assert bundle.concurrency.max_qc_concurrency == 4
-    assert bundle.max_section_rerenders == 2
-    assert bundle.retries.qc_agent.max_attempts == 2
-    assert resolve_generation_timeout_seconds(settings, 3) == 480.0
-    assert resolve_generation_timeout_seconds(settings, 20) == 900.0
-
-
-def test_runtime_policy_settings_read_env_overrides(monkeypatch) -> None:
-    monkeypatch.setenv("GENERATION_MAX_CONCURRENT_PER_USER", "5")
-    monkeypatch.setenv("PIPELINE_CONCURRENCY_STRICT_MEDIA_MAX", "2")
-    monkeypatch.setenv("PIPELINE_TIMEOUT_GENERATION_BASE_SECONDS", "150")
-    monkeypatch.setenv("PIPELINE_TIMEOUT_GENERATION_PER_SECTION_SECONDS", "75")
-    monkeypatch.setenv("PIPELINE_TIMEOUT_GENERATION_CAP_SECONDS", "600")
-    monkeypatch.setenv("PIPELINE_RETRY_QC_MAX_ATTEMPTS", "4")
-    monkeypatch.setenv("PIPELINE_RERENDER_STRICT_SECTION_MAX", "6")
-
-    settings = Settings(_env_file=None)
-    bundle = resolve_runtime_policy_bundle(settings, GenerationMode.STRICT)
-
-    assert settings.generation_max_concurrent_per_user == 5
-    assert bundle.concurrency.max_media_concurrency == 2
-    assert bundle.concurrency.max_diagram_concurrency == 2
-    assert bundle.max_section_rerenders == 6
-    assert bundle.retries.qc_agent.max_attempts == 4
-    assert resolve_generation_timeout_seconds(settings, 4, mode=GenerationMode.STRICT) == 450.0
-
-
-def test_runtime_policy_settings_accept_legacy_diagram_aliases(monkeypatch) -> None:
-    monkeypatch.setenv("PIPELINE_CONCURRENCY_BALANCED_DIAGRAM_MAX", "3")
-    monkeypatch.setenv("PIPELINE_RETRY_DIAGRAM_MAX_ATTEMPTS", "5")
-
-    settings = Settings(_env_file=None)
-    bundle = resolve_runtime_policy_bundle(settings, GenerationMode.BALANCED)
-
-    assert bundle.concurrency.max_media_concurrency == 3
-    assert bundle.concurrency.max_diagram_concurrency == 3
-    assert bundle.retries.diagram_generator.max_attempts == 5
-
-
-def test_runtime_policy_settings_reject_invalid_values(monkeypatch) -> None:
-    monkeypatch.setenv("PIPELINE_TIMEOUT_QC_SECONDS", "0")
-
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None)
 
 
 def test_engine_kwargs_use_db_echo_for_sqlite() -> None:
@@ -376,7 +317,7 @@ def test_image_store_uses_app_env_and_typed_settings(monkeypatch) -> None:
     monkeypatch.setenv("IMAGE_BASE_URL", "http://localhost:8000/custom-images")
 
     monkeypatch.setattr(
-        "pipeline.storage.image_store.settings",
+        "media.storage.image_store.settings",
         Settings(_env_file=None),
     )
 
@@ -401,11 +342,11 @@ def test_image_store_uses_gcs_bucket_in_production(monkeypatch) -> None:
             self.bucket_name = bucket_name
 
     monkeypatch.setattr(
-        "pipeline.storage.image_store.GCSImageStore",
+        "media.storage.image_store.GCSImageStore",
         StubGCSImageStore,
     )
     monkeypatch.setattr(
-        "pipeline.storage.image_store.settings",
+        "media.storage.image_store.settings",
         Settings(_env_file=None),
     )
 
@@ -451,7 +392,7 @@ def test_gcs_image_store_uses_service_account_json_and_base_url(monkeypatch) -> 
         ),
     )
 
-    from pipeline.storage.image_store import GCSImageStore
+    from media.storage.image_store import GCSImageStore
 
     store = GCSImageStore("prod-diagrams")
 
@@ -512,3 +453,5 @@ def test_pytest_config_deselects_postgres_by_default() -> None:
 
     assert "postgres: tests requiring a real PostgreSQL instance (deselected by default)" in pytest_options["markers"]
     assert "not postgres" in pytest_options["addopts"]
+
+

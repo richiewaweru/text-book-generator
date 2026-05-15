@@ -1,10 +1,17 @@
-import logging
+﻿import logging
 
+from generation.pdf_export.rendering import playwright as playwright_module
 from generation.pdf_export.rendering.playwright import _log_print_snapshot
 
 
-def test_log_print_snapshot_emits_diagnostics_and_failures(caplog) -> None:
+def _enable_playwright_logging(caplog) -> None:
+    playwright_module.logger.disabled = False
+    playwright_module.logger.propagate = True
     caplog.set_level(logging.INFO, logger="generation.pdf_export.rendering.playwright")
+
+
+def test_log_print_snapshot_emits_diagnostics_and_failures(caplog) -> None:
+    _enable_playwright_logging(caplog)
 
     _log_print_snapshot(
         "gen-123",
@@ -48,7 +55,7 @@ def test_log_print_snapshot_emits_diagnostics_and_failures(caplog) -> None:
 
 
 def test_log_print_snapshot_skips_missing_root(caplog) -> None:
-    caplog.set_level(logging.INFO, logger="generation.pdf_export.rendering.playwright")
+    _enable_playwright_logging(caplog)
 
     _log_print_snapshot("gen-123", {"found": False})
 

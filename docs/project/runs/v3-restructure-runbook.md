@@ -84,3 +84,21 @@ Objective: Execute `v3-overhaul-sprint-proposals.md` Sprints 1-6 only, in order,
 
 
 
+
+## Sprint 4 - Delete V2 Pipeline and Planning
+- [x] 4.1 Confirmed zero V3 imports from `pipeline.*` or `planning.*` before deletion; fixed `v3_review` deterministic-check imports to `contracts.lectio`.
+- [x] 4.2 Deleted `backend/src/pipeline/`.
+- [x] 4.3 Deleted `backend/src/planning/`.
+- [x] 4.4 Deleted V2 generation entities, repositories, ports, service, recovery, dependencies, DTOs, and engine port.
+- [x] 4.5 Deleted V2 telemetry recorder/report stack and removed report-route/repository wiring.
+- [x] 4.6 Restructured `generation/routes.py` to V3 studio plus extracted `generation/block_generate_routes.py`.
+- [x] 4.7 Restructured `app.py` to remove planning router, V2 stale-generation sweeper, V2 repository loaders, and V2 image health extensions.
+- [x] 4.8 Simplified `telemetry/service.py` to shared LLM call recording plus V3 trace registration; removed V2 report backfill/recorders.
+- [x] 4.9 Simplified `telemetry/dependencies.py` to LLM call and V3 trace repositories.
+- [x] 4.10 Deleted V2 pipeline/planning/API/report tests and updated remaining tests to neutral `contracts`, `media`, and V3 routes.
+- [x] Verification: full backend `uv run pytest` passes: 226 passed, 1 warning.
+- [x] Verification: `rg "from pipeline\." backend/src` and `rg "from planning\." backend/src` return zero hits.
+- [x] Verification: `rg "\bGenerationMode\b" backend/src` returns zero hits.
+- [x] Verification: import smoke `import app; import generation.routes; import generation.block_generate_routes; import generation.pdf_export.service; import telemetry.service; import learning.routes; import builder.routes` passes.
+- [x] Verification: block generate endpoint tests pass.
+- [x] Verification: V3 studio route/writer/stream tests pass as part of full pytest.

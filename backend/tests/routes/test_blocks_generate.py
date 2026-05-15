@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
@@ -49,7 +49,7 @@ async def test_generate_block_returns_content_mocked_llm() -> None:
     }
 
     with patch(
-        "generation.routes.run_block_generation",
+        "generation.block_generate_routes.run_block_generation",
         new=AsyncMock(return_value=fake_content),
     ):
         async with _client() as client:
@@ -122,7 +122,7 @@ async def test_generate_block_rejects_unowned_lesson(db_session_factory) -> None
         )
         await session.commit()
 
-    with patch("generation.routes.run_block_generation", new=AsyncMock(return_value={"headline": "x"})) as mocked:
+    with patch("generation.block_generate_routes.run_block_generation", new=AsyncMock(return_value={"headline": "x"})) as mocked:
         async with _client() as client:
             res = await client.post(
                 "/api/v1/blocks/generate",
@@ -171,7 +171,7 @@ async def test_generate_block_accepts_owned_lesson_and_mode(db_session_factory) 
         )
         await session.commit()
 
-    with patch("generation.routes.run_block_generation", new=AsyncMock(return_value={"headline": "ok"})) as mocked:
+    with patch("generation.block_generate_routes.run_block_generation", new=AsyncMock(return_value={"headline": "ok"})) as mocked:
         async with _client() as client:
             res = await client.post(
                 "/api/v1/blocks/generate",
@@ -192,3 +192,4 @@ async def test_generate_block_accepts_owned_lesson_and_mode(db_session_factory) 
     assert forwarded_body.lesson_id == "lesson-owned-by-user"
     assert forwarded_body.mode == "custom"
     assert mocked.await_args.kwargs["user_id"] == TEST_USER.id
+

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
-from pipeline.api import PipelineSectionManifestItem
+from contracts.document import PipelineSectionManifestItem
 
 
 def generate_toc_pdf(
@@ -35,3 +35,4 @@ def generate_toc_pdf(
     pdf.showPage()
     pdf.save()
     return output_path
+

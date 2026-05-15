@@ -1,13 +1,12 @@
-"""Build a `PipelineDocument` from a saved V3 booklet pack for PDF assembly (TOC, answer key)."""
+﻿"""Build a `PipelineDocument` from a saved V3 booklet pack for PDF assembly (TOC, answer key)."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from pipeline.api import PipelineDocument, PipelineSectionManifestItem
-from pipeline.types.requests import GenerationMode as PipelineMode
-from pipeline.types.section_content import SectionContent
+from contracts.document import PipelineDocument, PipelineSectionManifestItem
+from contracts.section_content import SectionContent
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +67,11 @@ def build_pipeline_document_for_v3_pdf(
         generation_id=generation_id,
         subject=subj,
         context=ctx,
-        mode=PipelineMode.BALANCED,
+        mode="v3",
         template_id=template_id,
         preset_id="blue-classroom",
         status="completed",
         section_manifest=manifest,
         sections=validated_sections,
     )
+

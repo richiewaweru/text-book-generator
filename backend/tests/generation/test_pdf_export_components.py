@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -15,8 +15,8 @@ from generation.pdf_export.components.cover import (
     generate_cover_pdf,
 )
 from generation.pdf_export.components.toc import generate_toc_pdf
-from pipeline.api import PipelineSectionManifestItem
-from pipeline.types.section_content import (
+from contracts.document import PipelineSectionManifestItem
+from contracts.section_content import (
     ExplanationContent,
     HookHeroContent,
     PracticeContent,
@@ -194,3 +194,4 @@ def test_cleanup_files_removes_export_artifacts(tmp_path: Path) -> None:
 
     assert not first.exists()
     assert not second.exists()
+

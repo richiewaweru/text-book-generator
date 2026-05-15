@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -9,17 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from core.auth.middleware import get_current_user
 from core.database.models import LearningPackModel
 from core.database.session import async_session_factory
-from core.dependencies import get_student_profile_repository, get_settings
+from core.dependencies import get_settings
 from core.entities.user import User
 from core.llm import build_model, run_llm
 from core.rate_limit import limiter
-from generation.dependencies import (
-    get_document_repository,
-    get_generation_engine,
-    get_generation_repository,
-    get_report_repository,
-)
-from generation.ports.generation_repository import GenerationRepository
 from learning.models import (
     LearningJob,
     LearningPackPlan,
@@ -32,9 +25,8 @@ from learning.models import (
 )
 from learning.pack_planner import generate_pack_learning_plan, plan_pack
 from learning.pack_repository import LearningPackRepository
-from learning.pack_runner import start_pack
-from planning.llm_config import PLANNING_SECTION_COMPOSER_CALLER, get_planning_slot, get_planning_spec
-from planning.routes import _load_profile
+from learning.llm_config import PLANNING_SECTION_COMPOSER_CALLER, get_planning_slot, get_planning_spec
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/packs", tags=["learning-packs"])
@@ -130,38 +122,12 @@ async def generate_learning_pack(
     request: Request,
     payload: PackGenerateRequest,
     current_user: User = Depends(get_current_user),
-    profile_repo=Depends(get_student_profile_repository),
-    engine=Depends(get_generation_engine),
-    gen_repo: GenerationRepository = Depends(get_generation_repository),
-    document_repo=Depends(get_document_repository),
-    report_repo=Depends(get_report_repository),
-    pack_repo: LearningPackRepository = Depends(get_pack_repository),
 ) -> PackGenerateResponse:
-    _ = request
-    enabled = [resource for resource in payload.pack_plan.resources if resource.enabled]
-    if not enabled:
-        raise HTTPException(status_code=422, detail="No resources enabled.")
-    if len(enabled) > get_settings().learning_pack_max_resources:
-        raise HTTPException(status_code=422, detail="Too many resources enabled.")
-
-    profile = await _load_profile(current_user, profile_repo)
-    model = build_model(get_planning_spec(PLANNING_SECTION_COMPOSER_CALLER))
-    try:
-        return await start_pack(
-            payload.pack_plan,
-            payload.learner_context,
-            current_user=current_user,
-            profile=profile,
-            engine=engine,
-            gen_repo=gen_repo,
-            document_repo=document_repo,
-            report_repo=report_repo,
-            model=model,
-            run_llm_fn=_run_llm_fn,
-            pack_repo=pack_repo,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _ = (request, payload, current_user)
+    raise HTTPException(
+        status_code=410,
+        detail="Learning pack generation used the removed V2 pipeline and is disabled until a V3-native runner is added.",
+    )
 
 
 @router.get("", response_model=list[PackStatusResponse])
@@ -247,3 +213,5 @@ def _pack_to_status(pack: LearningPackModel, generations: list) -> PackStatusRes
         created_at=pack.created_at.isoformat(),
         completed_at=pack.completed_at.isoformat() if pack.completed_at else None,
     )
+
+

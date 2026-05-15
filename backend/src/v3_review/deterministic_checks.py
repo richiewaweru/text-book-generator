@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from pipeline.contracts import (
+from contracts.lectio import (
     get_component_card,
     get_section_field_for_component,
 )

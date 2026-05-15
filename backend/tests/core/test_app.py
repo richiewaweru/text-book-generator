@@ -1,13 +1,9 @@
-from __future__ import annotations
-
-from datetime import datetime, timedelta, timezone
+﻿from __future__ import annotations
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 
 import app as app_module
-from core.database.models import Base, GenerationModel
 
 
 def test_cors_wildcard_raises_in_production() -> None:
@@ -63,62 +59,3 @@ def test_images_static_route_is_mounted() -> None:
     assert getattr(image_routes[0], "name", None) == "images"
 
 
-@pytest.mark.asyncio
-async def test_stale_generations_marked_failed_only_when_older_than_threshold(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "stale-cutoff.db"
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    monkeypatch.setattr(app_module, "async_session_factory", session_factory)
-
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    stale_cutoff = now - timedelta(
-        seconds=app_module.settings.pipeline_timeout_generation_cap_seconds
-        + app_module._STALE_GENERATION_GRACE_SECONDS
-    )
-
-    async with session_factory() as session:
-        session.add_all(
-            [
-                GenerationModel(
-                    id="stale-old",
-                    user_id="user-1",
-                    subject="Algebra",
-                    status="running",
-                    created_at=stale_cutoff - timedelta(seconds=1),
-                    requested_template_id="guided-concept-path",
-                    requested_preset_id="blue-classroom",
-                ),
-                GenerationModel(
-                    id="fresh-new",
-                    user_id="user-1",
-                    subject="Geometry",
-                    status="running",
-                    created_at=stale_cutoff + timedelta(seconds=1),
-                    requested_template_id="guided-concept-path",
-                    requested_preset_id="blue-classroom",
-                ),
-            ]
-        )
-        await session.commit()
-
-    try:
-        count = await app_module._mark_stale_generations_failed()
-
-        assert count == 1
-
-        async with session_factory() as session:
-            result = await session.execute(
-                select(GenerationModel).order_by(GenerationModel.id)
-            )
-            models = {model.id: model for model in result.scalars().all()}
-
-        assert models["stale-old"].status == "failed"
-        assert models["stale-old"].error_code == "worker_restart"
-        assert models["fresh-new"].status == "running"
-        assert models["fresh-new"].error is None
-    finally:
-        await engine.dispose()
