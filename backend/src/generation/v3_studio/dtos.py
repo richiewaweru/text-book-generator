@@ -238,6 +238,8 @@ class V3GenerationDetailDTO(BaseModel):
     section_count: int
     document_section_count: int
     report_json: dict[str, Any]
+    blueprint_id: str | None = None
+    planning_artifact: dict[str, Any] | None = None
     created_at: str | None = None
     completed_at: str | None = None
 

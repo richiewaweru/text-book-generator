@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
@@ -8,6 +9,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.database.models import GenerationModel
+from generation.v3_studio.planning_artifact import (
+    parse_planning_artifact,
+    planning_summary_from_artifact,
+)
 
 
 def _utc_now_naive() -> datetime:
@@ -351,6 +356,42 @@ class V3GenerationWriter:
             if model.mode != "v3" and model.requested_preset_id != "v3-studio":
                 return None
             return model
+
+    async def write_planning_artifact(
+        self,
+        *,
+        generation_id: str,
+        user_id: str,
+        artifact: dict[str, Any],
+    ) -> None:
+        async with self._session_factory() as session:
+            model = await session.get(GenerationModel, generation_id)
+            if model is None or model.user_id != user_id:
+                raise ValueError(
+                    f"Generation {generation_id} not found for user {user_id}"
+                )
+
+            model.planning_spec_json = json.dumps(artifact)
+
+            report = self._coerce_report(
+                model.report_json,
+                section_count=model.section_count or 0,
+            )
+            report["planning"] = planning_summary_from_artifact(artifact)
+            model.report_json = report
+
+            await session.commit()
+
+    async def read_planning_artifact(
+        self,
+        generation_id: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        async with self._session_factory() as session:
+            model = await session.get(GenerationModel, generation_id)
+            if model is None or model.user_id != user_id:
+                return None
+            return parse_planning_artifact(model.planning_spec_json)
 
     async def _write_pack_event(
         self,

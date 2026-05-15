@@ -8,12 +8,19 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app import app
 from core.auth.middleware import get_current_user
 from core.database.models import GenerationModel, UserModel
 from core.database.session import async_session_factory
 from core.entities.user import User
+from generation.v3_studio.dtos import V3InputForm
+from generation.v3_studio.planning_artifact import (
+    SCHEMA_VERSION,
+    build_planning_artifact,
+    parse_planning_artifact,
+)
 from generation.v3_studio.session_store import v3_studio_store
 from generation.v3_studio.router import _pump_sse_to_queue
 from telemetry.v3_trace import event_types as trace_events
@@ -399,7 +406,7 @@ async def test_v3_generate_start_fails_when_trace_initialization_fails() -> None
                 },
             )
             assert post.status_code == 500
-            assert "telemetry could not be initialized" in post.json()["detail"].lower()
+            assert "could not start generation" in post.json()["detail"].lower()
 
     assert await v3_studio_store.get_queue(generation_id) is None
 
@@ -728,3 +735,207 @@ async def test_pump_sse_parses_events_and_dispatches_generation_writer() -> None
         streamed.append(queue.get_nowait())
     assert any(isinstance(item, str) and "draft_pack_ready" in item for item in streamed)
     assert streamed[-1] is None
+
+
+@pytest.mark.asyncio
+async def test_v3_generate_start_persists_planning_artifact_before_stream() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    blueprint_id = str(uuid.uuid4())
+    generation_id = str(uuid.uuid4())
+    bp = _example_bp("amara_compound_area.json")
+    form = V3InputForm(
+        grade_level="Grade 8",
+        subject="Mathematics",
+        duration_minutes=50,
+        topic="Compound area",
+        support_needs=["visuals"],
+    )
+    await v3_studio_store.put_blueprint(
+        TEST_USER_A.id,
+        blueprint_id,
+        bp,
+        "guided-concept-path",
+        form=form,
+    )
+
+    async def fake_pump(queue, **_kwargs):
+        await queue.put(None)
+
+    with patch("generation.v3_studio.router._pump_sse_to_queue", new=fake_pump):
+        async with _client() as client:
+            post = await client.post(
+                "/api/v1/v3/generate/start",
+                json={
+                    "generation_id": generation_id,
+                    "blueprint_id": blueprint_id,
+                    "template_id": "guided-concept-path",
+                },
+            )
+            assert post.status_code == 200
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(GenerationModel).where(GenerationModel.id == generation_id)
+        )
+        model = result.scalar_one_or_none()
+        assert model is not None
+        artifact = parse_planning_artifact(model.planning_spec_json)
+        assert artifact is not None
+        assert artifact["schema_version"] == SCHEMA_VERSION
+        assert artifact["blueprint_id"] == blueprint_id
+        assert artifact["form"]["topic"] == "Compound area"
+        planning = model.report_json.get("planning") if isinstance(model.report_json, dict) else None
+        assert isinstance(planning, dict)
+        assert planning["has_full_planning_artifact"] is True
+        assert planning["blueprint_id"] == blueprint_id
+
+
+@pytest.mark.asyncio
+async def test_v3_generation_detail_exposes_planning_artifact() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    generation_id = str(uuid.uuid4())
+    blueprint_id = str(uuid.uuid4())
+    bp = _example_bp("amara_compound_area.json")
+    artifact = build_planning_artifact(
+        generation_id=generation_id,
+        blueprint_id=blueprint_id,
+        template_id="guided-concept-path",
+        blueprint=bp,
+        form=None,
+    )
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json=None,
+        report_json={"booklet_status": "final_ready", "planning": {"blueprint_id": blueprint_id}},
+        mode="v3",
+        status="completed",
+        subject=bp.metadata.subject,
+        context=bp.metadata.title,
+        section_count=len(bp.sections),
+    )
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        assert model is not None
+        model.planning_spec_json = json.dumps(artifact)
+        await session.commit()
+
+    async with _client() as client:
+        resp = await client.get(f"/api/v1/v3/generations/{generation_id}")
+    assert resp.status_code == 200
+    detail = resp.json()
+    assert detail["blueprint_id"] == blueprint_id
+    assert detail["planning_artifact"]["blueprint_id"] == blueprint_id
+    assert isinstance(detail["planning_artifact"]["blueprint"], dict)
+    assert detail["report_json"]["planning"]["blueprint_id"] == blueprint_id
+
+
+@pytest.mark.asyncio
+async def test_v3_generation_detail_without_planning_artifact_is_compatible() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    generation_id = str(uuid.uuid4())
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json=None,
+        report_json={"booklet_status": "streaming_preview"},
+        mode="v3",
+        status="running",
+    )
+
+    async with _client() as client:
+        resp = await client.get(f"/api/v1/v3/generations/{generation_id}")
+    assert resp.status_code == 200
+    detail = resp.json()
+    assert detail["planning_artifact"] is None
+    assert detail["blueprint_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_v3_generation_blueprint_endpoint_uses_db_after_session_store_missing() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    generation_id = str(uuid.uuid4())
+    blueprint_id = str(uuid.uuid4())
+    bp = _example_bp("amara_compound_area.json")
+    form = V3InputForm(
+        grade_level="Grade 8",
+        subject="Mathematics",
+        duration_minutes=50,
+        topic="Compound area",
+    )
+    artifact = build_planning_artifact(
+        generation_id=generation_id,
+        blueprint_id=blueprint_id,
+        template_id="guided-concept-path",
+        blueprint=bp,
+        form=form,
+    )
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json=None,
+        report_json={},
+        mode="v3",
+        status="completed",
+        subject=bp.metadata.subject,
+        context=bp.metadata.title,
+        section_count=len(bp.sections),
+    )
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        assert model is not None
+        model.planning_spec_json = json.dumps(artifact)
+        await session.commit()
+
+    async with _client() as client:
+        resp = await client.get(f"/api/v1/v3/generations/{generation_id}/blueprint")
+    assert resp.status_code == 200
+    preview = resp.json()
+    assert preview["blueprint_id"] == blueprint_id
+    assert preview["title"] == bp.metadata.title
+    assert preview["learner_context"]["grade_level"] == "Grade 8"
+    assert len(preview["section_plan"]) == len(bp.sections)
+
+
+@pytest.mark.asyncio
+async def test_v3_generation_blueprint_endpoint_forbidden_for_other_user() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+    await _ensure_user(TEST_USER_B)
+
+    generation_id = str(uuid.uuid4())
+    blueprint_id = str(uuid.uuid4())
+    bp = _example_bp("amara_compound_area.json")
+    artifact = build_planning_artifact(
+        generation_id=generation_id,
+        blueprint_id=blueprint_id,
+        template_id="guided-concept-path",
+        blueprint=bp,
+        form=None,
+    )
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json=None,
+        report_json={},
+        mode="v3",
+        status="completed",
+    )
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        assert model is not None
+        model.planning_spec_json = json.dumps(artifact)
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = _override_user_b
+    async with _client() as client:
+        resp = await client.get(f"/api/v1/v3/generations/{generation_id}/blueprint")
+    assert resp.status_code == 404

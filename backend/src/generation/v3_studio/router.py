@@ -46,6 +46,7 @@ from generation.v3_studio.dtos import (
 )
 from generation.v3_studio.preview_mapper import blueprint_to_preview_dto
 from generation.v3_studio.generation_writer import V3GenerationWriter
+from generation.v3_studio.planning_artifact import build_planning_artifact
 from generation.v3_studio.session_store import v3_studio_store
 from telemetry.dependencies import get_v3_trace_repository
 from telemetry.service import telemetry_monitor
@@ -334,16 +335,28 @@ async def post_v3_generate_start(
             planned_questions=len(blueprint.question_plan),
             component_count=component_count,
         )
+        artifact = build_planning_artifact(
+            generation_id=body.generation_id,
+            blueprint_id=body.blueprint_id,
+            template_id=template_id,
+            blueprint=blueprint,
+            form=stored.form if stored is not None else None,
+        )
+        await generation_writer.write_planning_artifact(
+            generation_id=body.generation_id,
+            user_id=current_user.id,
+            artifact=artifact,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
-            "v3 trace init failed generation_id=%s trace_id=%s error=%s",
+            "v3 generation start failed generation_id=%s trace_id=%s error=%s",
             body.generation_id,
             trace_id,
             str(exc)[:400],
         )
         raise HTTPException(
             status_code=500,
-            detail="Could not start generation because telemetry could not be initialized.",
+            detail="Could not start generation.",
         ) from exc
 
     queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -407,6 +420,10 @@ async def get_v3_generation_detail(
     model = await generation_writer.get_generation_model(generation_id, current_user.id)
     if model is None:
         raise HTTPException(status_code=404, detail="Generation not found")
+    artifact = await generation_writer.read_planning_artifact(
+        generation_id,
+        current_user.id,
+    )
     return V3GenerationDetailDTO(
         id=model.id,
         subject=model.subject,
@@ -417,6 +434,8 @@ async def get_v3_generation_detail(
         section_count=int(model.section_count or 0),
         document_section_count=_document_section_count(model.document_json),
         report_json=model.report_json if isinstance(model.report_json, dict) else {},
+        blueprint_id=artifact.get("blueprint_id") if artifact else None,
+        planning_artifact=artifact,
         created_at=_iso(model.created_at),
         completed_at=_iso(model.completed_at),
     )
@@ -470,6 +489,23 @@ async def get_v3_generation_blueprint(
     generation_id: str,
     current_user: User = Depends(get_current_user),
 ) -> BlueprintPreviewDTO:
+    generation_writer = V3GenerationWriter(async_session_factory)
+
+    artifact = await generation_writer.read_planning_artifact(
+        generation_id,
+        current_user.id,
+    )
+    if artifact is not None:
+        blueprint = ProductionBlueprint.model_validate(artifact["blueprint"])
+        form_raw = artifact.get("form")
+        form = V3InputForm.model_validate(form_raw) if isinstance(form_raw, dict) else None
+        return blueprint_to_preview_dto(
+            blueprint_id=str(artifact["blueprint_id"]),
+            blueprint=blueprint,
+            template_id=str(artifact.get("template_id") or "guided-concept-path"),
+            form=form,
+        )
+
     owner = await v3_studio_store.get_generation_owner(generation_id)
     if owner != current_user.id:
         raise HTTPException(status_code=404, detail="Generation not found")
