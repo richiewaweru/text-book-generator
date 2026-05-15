@@ -5,9 +5,23 @@
 		blueprint: BlueprintPreviewDTO;
 		onApprove: () => void;
 		onAdjust: (instruction: string) => void;
+		onCancel?: () => void;
+		contextLabel?: string;
+		approveLabel?: string;
+		cancelLabel?: string;
+		parentTitle?: string | null;
 	}
 
-	let { blueprint, onApprove, onAdjust }: Props = $props();
+	let {
+		blueprint,
+		onApprove,
+		onAdjust,
+		onCancel,
+		contextLabel = 'Lesson plan',
+		approveLabel = 'Approve and generate',
+		cancelLabel = 'Back',
+		parentTitle = null
+	}: Props = $props();
 
 	let adjustText = $state('');
 	let showAdjust = $state(false);
@@ -23,8 +37,11 @@
 <div class="mx-auto max-w-3xl space-y-8 px-4 py-10">
 	<header class="flex flex-wrap items-start justify-between gap-4 border-b border-border/60 pb-6">
 		<div>
-			<p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Lesson plan</p>
+			<p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{contextLabel}</p>
 			<h2 class="mt-1 text-3xl font-semibold">{blueprint.title}</h2>
+			{#if parentTitle}
+				<p class="mt-1 text-xs text-muted-foreground">Based on: {parentTitle}</p>
+			{/if}
 			<p class="mt-2 text-sm text-muted-foreground">{blueprint.register_summary}</p>
 		</div>
 		<span class="rounded-full bg-muted px-3 py-1 text-xs font-medium capitalize">
@@ -135,14 +152,23 @@
 		</section>
 	{/if}
 
-	<div class="flex flex-col gap-3 sm:flex-row">
+	<div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
 		<button
 			type="button"
 			class="flex-1 rounded-md bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground"
 			onclick={onApprove}
 		>
-			Approve and generate
+			{approveLabel}
 		</button>
+		{#if onCancel}
+			<button
+				type="button"
+				class="flex-1 rounded-md border border-input px-4 py-3 text-sm font-semibold"
+				onclick={onCancel}
+			>
+				{cancelLabel}
+			</button>
+		{/if}
 		<button
 			type="button"
 			class="flex-1 rounded-md border border-input px-4 py-3 text-sm font-semibold"

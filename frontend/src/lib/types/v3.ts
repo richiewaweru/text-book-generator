@@ -113,6 +113,25 @@ export interface V3GenerationHistoryItem {
 	completed_at: string | null;
 }
 
+export interface V3PlanningArtifactSource {
+	kind: string;
+	parent_generation_id: string | null;
+	parent_blueprint_id: string | null;
+	target_resource_type: string | null;
+}
+
+export interface V3PlanningArtifact {
+	schema_version?: string;
+	generation_id?: string;
+	blueprint_id?: string;
+	template_id?: string;
+	source?: V3PlanningArtifactSource;
+	derived?: {
+		title?: string;
+		resource_type?: string;
+	};
+}
+
 export interface V3GenerationDetail {
 	id: string;
 	subject: string;
@@ -123,8 +142,51 @@ export interface V3GenerationDetail {
 	section_count: number;
 	document_section_count: number;
 	report_json: Record<string, unknown>;
+	blueprint_id?: string | null;
+	planning_artifact?: V3PlanningArtifact | null;
 	created_at: string | null;
 	completed_at: string | null;
+}
+
+export type V3SupplementResourceType = 'exit_ticket' | 'quiz' | 'worksheet';
+
+export interface V3SupplementOption {
+	resource_type: V3SupplementResourceType;
+	label: string;
+	description: string;
+	best_for?: string | null;
+	estimated_length?: string | null;
+	cta: string;
+}
+
+export interface V3SupplementOptionsResponse {
+	parent_generation_id: string;
+	parent_title: string | null;
+	parent_resource_type: string | null;
+	available: boolean;
+	unavailable_reason: string | null;
+	options: V3SupplementOption[];
+}
+
+export interface V3CreateSupplementBlueprintResponse {
+	generation_id: string;
+	blueprint_id: string;
+	template_id: string;
+	resource_type: V3SupplementResourceType;
+	parent_generation_id: string;
+	parent_title: string | null;
+	label: string;
+	preview: BlueprintPreviewDTO;
+}
+
+export interface V3SupplementContext {
+	mode: 'supplement_review' | 'supplement_generation';
+	parentGenerationId: string;
+	parentTitle: string | null;
+	resourceType: V3SupplementResourceType;
+	label: string;
+	childGenerationId: string;
+	childBlueprintId: string;
 }
 
 export type ComponentStatus = 'pending' | 'generating' | 'ready' | 'patched' | 'failed';
@@ -191,6 +253,17 @@ export interface V3DraftPack {
 	warnings: string[];
 	section_diagnostics: SectionAssemblyDiagnostic[];
 	booklet_issues: Array<Record<string, unknown>>;
+}
+
+export interface V3ParentSnapshot {
+	generationId: string | null;
+	blueprint: BlueprintPreviewDTO | null;
+	canvas: CanvasSection[];
+	draftPack: V3DraftPack | null;
+	finalPack: V3DraftPack | null;
+	activePack: V3DraftPack | null;
+	bookletStatus: BookletStatus;
+	bookletIssues: Array<Record<string, unknown>>;
 }
 
 export type V3Stage =

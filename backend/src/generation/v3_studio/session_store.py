@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from typing import Any
 
 from generation.v3_studio.dtos import V3InputForm
 from v3_blueprint.models import ProductionBlueprint
@@ -12,6 +13,7 @@ class StoredBlueprint:
     blueprint: ProductionBlueprint
     template_id: str
     form: V3InputForm | None = None
+    planning_source: dict[str, Any] | None = None
 
 
 class V3StudioSessionStore:
@@ -32,12 +34,14 @@ class V3StudioSessionStore:
         blueprint: ProductionBlueprint,
         template_id: str,
         form: V3InputForm | None = None,
+        planning_source: dict[str, Any] | None = None,
     ) -> None:
         async with self._lock:
             self._blueprints[(user_id, blueprint_id)] = StoredBlueprint(
                 blueprint=blueprint,
                 template_id=template_id,
                 form=form,
+                planning_source=planning_source,
             )
 
     async def get_blueprint(self, user_id: str, blueprint_id: str) -> StoredBlueprint | None:

@@ -939,3 +939,240 @@ async def test_v3_generation_blueprint_endpoint_forbidden_for_other_user() -> No
     async with _client() as client:
         resp = await client.get(f"/api/v1/v3/generations/{generation_id}/blueprint")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_blueprint_adjust_preserves_planning_source() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    blueprint_id = str(uuid.uuid4())
+    parent_generation_id = str(uuid.uuid4())
+    bp = _example_bp("amara_compound_area.json")
+
+    planning_source = {
+        "kind": "supplement",
+        "parent_generation_id": parent_generation_id,
+        "parent_blueprint_id": "bp-parent-123",
+        "target_resource_type": "exit_ticket",
+    }
+
+    await v3_studio_store.put_blueprint(
+        TEST_USER_A.id,
+        blueprint_id,
+        bp,
+        "guided-concept-path",
+        form=None,
+        planning_source=planning_source,
+    )
+
+    with patch(
+        "generation.v3_studio.router.adjust_production_blueprint",
+        new=AsyncMock(return_value=bp),
+    ):
+        async with _client() as client:
+            resp = await client.post(
+                "/api/v1/v3/blueprint/adjust",
+                json={
+                    "blueprint_id": blueprint_id,
+                    "adjustment": "Make it shorter.",
+                },
+            )
+            assert resp.status_code == 200
+
+    stored = await v3_studio_store.get_blueprint(TEST_USER_A.id, blueprint_id)
+    assert stored is not None
+    assert stored.planning_source is not None
+    assert stored.planning_source["kind"] == "supplement"
+    assert stored.planning_source["parent_generation_id"] == parent_generation_id
+    assert stored.planning_source["target_resource_type"] == "exit_ticket"
+
+
+@pytest.mark.asyncio
+async def test_v3_generate_start_persists_supplement_planning_source() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    blueprint_id = str(uuid.uuid4())
+    generation_id = str(uuid.uuid4())
+    parent_generation_id = str(uuid.uuid4())
+    bp = _example_bp("amara_compound_area.json")
+    planning_source = {
+        "kind": "supplement",
+        "parent_generation_id": parent_generation_id,
+        "parent_blueprint_id": "bp-parent-123",
+        "target_resource_type": "exit_ticket",
+    }
+    await v3_studio_store.put_blueprint(
+        TEST_USER_A.id,
+        blueprint_id,
+        bp,
+        "guided-concept-path",
+        form=None,
+        planning_source=planning_source,
+    )
+
+    async def fake_pump(queue, **_kwargs):
+        await queue.put(None)
+
+    with patch("generation.v3_studio.router._pump_sse_to_queue", new=fake_pump):
+        async with _client() as client:
+            post = await client.post(
+                "/api/v1/v3/generate/start",
+                json={
+                    "generation_id": generation_id,
+                    "blueprint_id": blueprint_id,
+                    "template_id": "guided-concept-path",
+                },
+            )
+            assert post.status_code == 200
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(GenerationModel).where(GenerationModel.id == generation_id)
+        )
+        model = result.scalar_one_or_none()
+        assert model is not None
+        artifact = parse_planning_artifact(model.planning_spec_json)
+        assert artifact is not None
+        assert artifact["source"]["kind"] == "supplement"
+        assert artifact["source"]["parent_generation_id"] == parent_generation_id
+        assert artifact["source"]["target_resource_type"] == "exit_ticket"
+
+
+async def _seed_parent_generation_with_artifact(
+    *,
+    generation_id: str,
+    resource_type: str = "lesson",
+) -> tuple[str, object]:
+    blueprint_id = str(uuid.uuid4())
+    bp = _example_bp("amara_compound_area.json")
+    bp.lesson.resource_type = resource_type
+    artifact = build_planning_artifact(
+        generation_id=generation_id,
+        blueprint_id=blueprint_id,
+        template_id="guided-concept-path",
+        blueprint=bp,
+        form=None,
+    )
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json={"sections": [{"id": "s1"}]},
+        report_json={"booklet_status": "final_ready"},
+        mode="v3",
+        status="completed",
+        subject=bp.metadata.subject,
+        context=bp.metadata.title,
+        section_count=len(bp.sections),
+    )
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        assert model is not None
+        model.planning_spec_json = json.dumps(artifact)
+        await session.commit()
+    return blueprint_id, bp
+
+
+@pytest.mark.asyncio
+async def test_supplement_options_returns_cards_for_parent_with_artifact() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    generation_id = str(uuid.uuid4())
+    await _seed_parent_generation_with_artifact(generation_id=generation_id)
+
+    async with _client() as client:
+        resp = await client.get(f"/api/v1/v3/generations/{generation_id}/supplements/options")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["available"] is True
+    assert body["parent_resource_type"] == "lesson"
+    types = {opt["resource_type"] for opt in body["options"]}
+    assert types == {"exit_ticket", "quiz", "worksheet"}
+
+
+@pytest.mark.asyncio
+async def test_supplement_options_unavailable_without_artifact() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    generation_id = str(uuid.uuid4())
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json=None,
+        report_json={},
+        mode="v3",
+        status="completed",
+    )
+
+    async with _client() as client:
+        resp = await client.get(f"/api/v1/v3/generations/{generation_id}/supplements/options")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["available"] is False
+    assert body["options"] == []
+    assert body["unavailable_reason"]
+
+
+@pytest.mark.asyncio
+async def test_create_supplement_blueprint_stores_planning_source() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    generation_id = str(uuid.uuid4())
+    parent_blueprint_id, parent_bp = await _seed_parent_generation_with_artifact(
+        generation_id=generation_id
+    )
+
+    child_bp = _example_bp("amara_compound_area.json")
+    child_bp.lesson.resource_type = "exit_ticket"
+    for index, section in enumerate(child_bp.sections):
+        section.section_id = f"supplement_{index}_{section.section_id}"
+
+    with patch(
+        "generation.v3_studio.router.generate_supplement_blueprint",
+        new=AsyncMock(return_value=child_bp),
+    ):
+        async with _client() as client:
+            resp = await client.post(
+                f"/api/v1/v3/generations/{generation_id}/supplements/blueprint",
+                json={"resource_type": "exit_ticket"},
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+
+    assert body["resource_type"] == "exit_ticket"
+    assert body["parent_generation_id"] == generation_id
+    child_blueprint_id = body["blueprint_id"]
+    stored = await v3_studio_store.get_blueprint(TEST_USER_A.id, child_blueprint_id)
+    assert stored is not None
+    assert stored.planning_source is not None
+    assert stored.planning_source["kind"] == "supplement"
+    assert stored.planning_source["parent_generation_id"] == generation_id
+    assert stored.planning_source["parent_blueprint_id"] == parent_blueprint_id
+    assert stored.planning_source["target_resource_type"] == "exit_ticket"
+
+
+@pytest.mark.asyncio
+async def test_create_supplement_blueprint_rejects_without_artifact() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    generation_id = str(uuid.uuid4())
+    await _upsert_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        document_json=None,
+        report_json={},
+        mode="v3",
+        status="completed",
+    )
+
+    async with _client() as client:
+        resp = await client.post(
+            f"/api/v1/v3/generations/{generation_id}/supplements/blueprint",
+            json={"resource_type": "exit_ticket"},
+        )
+    assert resp.status_code == 409

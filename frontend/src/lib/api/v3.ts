@@ -6,12 +6,15 @@ import { apiFetch, buildApiUrl } from '$lib/api/client';
 import { authToken } from '$lib/stores/auth';
 import type {
 	BlueprintPreviewDTO,
+	V3CreateSupplementBlueprintResponse,
 	V3GenerationDetail,
 	V3GenerationHistoryItem,
 	V3ClarificationAnswer,
 	V3ClarificationQuestion,
 	V3InputForm,
-	V3SignalSummary
+	V3SignalSummary,
+	V3SupplementOptionsResponse,
+	V3SupplementResourceType
 } from '$lib/types/v3';
 
 function bearerHeaders(): Record<string, string> {
@@ -130,6 +133,36 @@ export async function getV3GenerationDetail(generationId: string): Promise<V3Gen
 	});
 	await ensureOk(res, 'Could not load V3 generation detail.');
 	return res.json() as Promise<V3GenerationDetail>;
+}
+
+export async function getV3SupplementOptions(
+	generationId: string
+): Promise<V3SupplementOptionsResponse> {
+	const res = await apiFetch(
+		`/api/v1/v3/generations/${encodeURIComponent(generationId)}/supplements/options`,
+		{
+			method: 'GET',
+			headers: bearerHeaders()
+		}
+	);
+	await ensureOk(res, 'Could not load companion resource options.');
+	return res.json() as Promise<V3SupplementOptionsResponse>;
+}
+
+export async function createV3SupplementBlueprint(payload: {
+	parent_generation_id: string;
+	resource_type: V3SupplementResourceType;
+}): Promise<V3CreateSupplementBlueprintResponse> {
+	const res = await apiFetch(
+		`/api/v1/v3/generations/${encodeURIComponent(payload.parent_generation_id)}/supplements/blueprint`,
+		{
+			method: 'POST',
+			headers: bearerHeaders(),
+			body: JSON.stringify({ resource_type: payload.resource_type })
+		}
+	);
+	await ensureOk(res, 'Could not create companion resource plan.');
+	return res.json() as Promise<V3CreateSupplementBlueprintResponse>;
 }
 
 export function connectV3StudioGenerationStream(
