@@ -58,8 +58,7 @@ async def test_v3_generation_writer_persists_flat_document_json_and_report_snaps
         )
         model = await _load_generation(generation_id)
         assert model.status == "running"
-        # V3 writer does not set mode=v3; DB server_default is balanced
-        assert model.mode == "balanced"
+        assert model.mode == "v3"
         assert isinstance(model.document_json, dict)
         assert model.document_json["kind"] == "v3_booklet_pack"
         assert model.document_json["status"] == "draft_ready"
@@ -173,6 +172,7 @@ async def test_v3_generation_writer_persists_full_coherence_report() -> None:
         await writer.write_generation_complete(
             generation_id,
             {
+                "booklet_status": "final_ready",
                 "coherence_review": {
                     "status": "repair_required",
                     "blocking_count": 3,
@@ -183,6 +183,7 @@ async def test_v3_generation_writer_persists_full_coherence_report() -> None:
         )
         model = await _load_generation(generation_id)
         assert isinstance(model.report_json, dict)
+        assert model.quality_passed is True
         assert model.report_json["coherence"]["issues"][0]["issue_id"] == "i-1"
         assert model.report_json["summary"]["blocking_issues"] == 3
         assert model.report_json["summary"]["major_issues"] == 1

@@ -24,6 +24,13 @@ def _is_export_allowed(booklet_status: str) -> bool:
     }
 
 
+_QUALITY_MAP = {
+    "final_ready": True,
+    "final_with_warnings": True,
+    "failed_unusable": False,
+}
+
+
 def _sections_from_document(document_json: Any) -> list[dict[str, Any]]:
     if not isinstance(document_json, dict):
         return []
@@ -94,6 +101,7 @@ class V3GenerationWriter:
                     user_id=user_id,
                     subject=subject,
                     context=context,
+                    mode="v3",
                     status="running",
                     requested_template_id=template_id,
                     resolved_template_id=template_id,
@@ -108,6 +116,7 @@ class V3GenerationWriter:
                 model.user_id = user_id
                 model.subject = subject
                 model.context = context
+                model.mode = "v3"
                 model.status = "running"
                 model.requested_template_id = template_id
                 model.resolved_template_id = template_id
@@ -142,6 +151,9 @@ class V3GenerationWriter:
             if model is None:
                 return
             report = self._coerce_report(model.report_json, section_count=model.section_count or 0)
+            booklet_status = str(payload.get("booklet_status") or report.get("booklet_status") or "")
+            if booklet_status:
+                report["booklet_status"] = booklet_status
             coherence = payload.get("coherence_review")
             if isinstance(coherence, dict):
                 existing_coherence = report.get("coherence")
@@ -159,6 +171,7 @@ class V3GenerationWriter:
                     summary["minor_issues"] = int(coherence.get("minor_count") or 0)
                     report["summary"] = summary
             model.report_json = report
+            model.quality_passed = _QUALITY_MAP.get(booklet_status)
             await session.commit()
 
     async def write_coherence_result(
