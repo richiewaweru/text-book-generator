@@ -25,7 +25,25 @@ Objective: Execute `v3-overhaul-sprint-proposals.md` Sprints 1-6 only, in order,
 - [x] Verification: migration backfills existing V3 rows: temp SQLite check changed legacy v3-studio row from balanced to v3 and left V2 row balanced.
 
 ## Sprint 2 - Extract Shared Media
-- [ ] Not started.
+- [x] 2.1 Create `backend/src/media/` with `__init__.py`.
+- [x] 2.2 Create `backend/src/media/providers/` and copy provider files. Also copied `image_client.py` because copied providers import it directly.
+- [x] 2.3 Create `backend/src/media/providers/registry.py` with `IMAGE_*` primary env vars and `PIPELINE_IMAGE_*` fallback.
+- [x] 2.4 Create `backend/src/media/storage/` and copy `image_store.py` plus `__init__.py`.
+- [x] 2.5 Update `v3_execution/executors/visual_executor.py` imports to `media.*`.
+- [x] 2.6 Reviewed `generation/image_pipeline_health.py`; it does not import `pipeline.media`, only V2 `pipeline.providers`/`pipeline.storage`, so it is marked for Sprint 4 deletion/restructure.
+- [x] 2.7 Add new `IMAGE_*` vars to `backend/.env.example` alongside existing `PIPELINE_IMAGE_*` vars.
+- [x] 2.8 Add `backend/tests/media/test_providers_registry.py` with `media.providers.registry` imports and primary/fallback env coverage.
+- [x] Verification: `pytest tests/media/test_providers_registry.py` passes: 10 passed.
+- [x] Verification: fake V3 visual execution emitted `visual_generation_started` then `visual_ready` with an image URL.
+- [x] Verification: `from media.providers.registry import get_image_client` works.
+- [x] Verification: no remaining `from pipeline.media` in `backend/src/v3_execution/`.
+
+## Sprint 2 Validation Evidence
+- Media registry tests: `uv run pytest tests/media/test_providers_registry.py` -> 10 passed.
+- V3 execution tests: `uv run pytest tests/v3_execution` -> 37 passed, 1 warning.
+- Import check: `uv run python -c "from media.providers.registry import get_image_client, load_image_provider_spec; import media.storage.image_store; import v3_execution.executors.visual_executor"` -> passed.
+- V3 visual path check: fake provider/store execution emitted `visual_generation_started` and `visual_ready` and returned `https://cdn.example/gen-visual-check/section-1/visual-1.png`.
+- Full backend pytest: `uv run pytest` -> 576 passed, 37 failed, 1 warning. Failures match existing V2/pipeline/PDF areas outside Sprint 2 touched files and are noted as unrelated for this sprint.
 
 ## Sprint 1 Validation Evidence
 - Targeted writer tests: `uv run pytest tests/generation/test_v3_generation_writer.py` -> 3 passed, 1 warning.
@@ -45,4 +63,5 @@ Objective: Execute `v3-overhaul-sprint-proposals.md` Sprints 1-6 only, in order,
 
 ## Sprint 6 - Clean Frontend V2 Modules
 - [ ] Not started.
+
 

@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from pipeline.media.providers.registry import get_image_client, load_image_provider_spec
+from media.providers.registry import get_image_client, load_image_provider_spec
 
 from v3_execution.models import ExecutorOutcome, GeneratedVisualBlock, VisualGeneratorWorkOrder
 from v3_execution.prompts.visual_executor import build_visual_prompt
@@ -24,7 +24,7 @@ async def _render_frame(
     frame_suffix: str,
     frame_index: int | None,
 ) -> GeneratedVisualBlock:
-    from pipeline.media.storage.image_store import get_image_store
+    from media.storage.image_store import get_image_store
 
     client = get_image_client()
     store = get_image_store()
