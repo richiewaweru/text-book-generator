@@ -78,6 +78,14 @@
 				{onfieldblur}
 				ownerComponentId={ownerId}
 			/>
+		{:else if fieldSchema.input === 'object-list'}
+			<FieldObjectList
+				schema={fieldSchema}
+				value={content[fieldSchema.field]}
+				onchange={(v: unknown) => onchange(fieldSchema.field, v)}
+				{onfieldblur}
+				ownerComponentId={ownerId}
+			/>
 		{:else if FieldComponent}
 			<FieldComponent
 				schema={fieldSchema}

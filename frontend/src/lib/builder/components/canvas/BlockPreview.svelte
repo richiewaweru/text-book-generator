@@ -106,6 +106,12 @@
 	{/if}
 {:else if componentId === 'image-block'}
 	<ImageBlock content={content as never} {media} />
+{:else if componentId === 'diagram-block'}
+	<DiagramBlock content={content as never} {media} />
+{:else if componentId === 'diagram-compare'}
+	<DiagramCompare content={content as never} {media} />
+{:else if componentId === 'diagram-series'}
+	<DiagramSeries content={content as never} {media} />
 {:else if Component}
 	<Component content={content as never} />
 {:else}
