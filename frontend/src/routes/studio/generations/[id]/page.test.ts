@@ -75,6 +75,48 @@ describe('completed V3 generation page', () => {
 		expect(screen.queryByText(/loading v3 generation/i)).toBeNull();
 	});
 
+	it('shows parent lesson link for supplement generations', async () => {
+		getV3GenerationDetail.mockResolvedValueOnce({
+			id: 'gen-123',
+			subject: 'Mathematics',
+			title: 'Exit ticket',
+			status: 'completed',
+			booklet_status: 'final_ready',
+			template_id: 'guided-concept-path',
+			section_count: 1,
+			document_section_count: 1,
+			report_json: {},
+			blueprint_id: 'bp-child',
+			planning_artifact: {
+				source: {
+					kind: 'supplement',
+					parent_generation_id: 'gen-parent',
+					parent_blueprint_id: 'bp-parent',
+					target_resource_type: 'exit_ticket'
+				}
+			},
+			created_at: '2026-05-01T00:00:00Z',
+			completed_at: '2026-05-01T00:05:00Z'
+		});
+		fetchV3Document.mockResolvedValueOnce({
+			kind: 'v3_booklet_pack',
+			generation_id: 'gen-123',
+			template_id: 'guided-concept-path',
+			status: 'final_ready',
+			subject: 'Mathematics',
+			sections: [{ section_id: 's-1', header: { title: 'Intro' } }],
+			warnings: [],
+			section_diagnostics: [],
+			booklet_issues: []
+		});
+
+		render(CompletedV3GenerationPage);
+
+		const parentLink = await screen.findByRole('link', { name: /parent lesson/i });
+		expect(parentLink.getAttribute('href')).toBe('/studio/generations/gen-parent');
+		expect(await screen.findByText(/Companion resource based on/i)).toBeTruthy();
+	});
+
 	it('shows an error when the V3 document cannot be coerced to a renderable pack', async () => {
 		fetchV3Document.mockResolvedValueOnce({
 			kind: 'v3_booklet_pack',

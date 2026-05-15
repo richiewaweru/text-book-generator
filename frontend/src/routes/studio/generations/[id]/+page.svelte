@@ -31,7 +31,7 @@
 	});
 	const exportPolicy = $derived(getBookletExportPolicy(resolvedStatus));
 
-	const supplementLineage = $derived(() => {
+	const supplementLineage = $derived.by(() => {
 		const source = detail?.planning_artifact?.source;
 		if (source?.kind === 'supplement' && source.parent_generation_id) {
 			return source;
