@@ -102,3 +102,16 @@ Objective: Execute `v3-overhaul-sprint-proposals.md` Sprints 1-6 only, in order,
 - [x] Verification: import smoke `import app; import generation.routes; import generation.block_generate_routes; import generation.pdf_export.service; import telemetry.service; import learning.routes; import builder.routes` passes.
 - [x] Verification: block generate endpoint tests pass.
 - [x] Verification: V3 studio route/writer/stream tests pass as part of full pytest.
+
+## Sprint 5 - Clean Dependencies and Env Vars
+- [x] 5.1 Removed `langgraph` from `backend/pyproject.toml`; `langchain-core`, `langgraph-checkpoint`, `langgraph-prebuilt`, and `langgraph-sdk` were transitive and removed by lock regeneration.
+- [x] 5.2 Ran `uv lock`; LangGraph/LangChain packages were removed from `uv.lock`.
+- [x] 5.3 Removed all `PIPELINE_*`, `LLM_MAX_TOKENS`, and legacy V2 pipeline env blocks from `backend/.env.example`.
+- [x] 5.4 Kept `PIPELINE_IMAGE_*` fallback in `media.providers.registry` because the proposal says to remove it only after confirming Railway uses new `IMAGE_*` vars; no Railway confirmation is available in-repo.
+- [x] 5.5 Removed V2 `pipeline_*` settings fields from `core/config.py`.
+- [x] 5.6 Confirmed `backend/src/pipeline/llm_runner.py` was already removed by Sprint 4.
+- [x] Verification: `uv lock` succeeds.
+- [x] Verification: `uv pip install -e .` succeeds.
+- [x] Verification: `uv run pytest` passes: 226 passed, 1 warning.
+- [x] Verification: no `langchain` or `langgraph` in `uv.lock` or `pyproject.toml`.
+- [x] Verification: `.env.example` has zero `PIPELINE_*` lines.
