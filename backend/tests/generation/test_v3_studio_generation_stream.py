@@ -1040,6 +1040,72 @@ async def test_v3_generate_start_persists_supplement_planning_source() -> None:
         assert artifact["source"]["target_resource_type"] == "exit_ticket"
 
 
+@pytest.mark.asyncio
+async def test_supplement_adjust_then_start_persists_lineage_in_db() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+
+    blueprint_id = str(uuid.uuid4())
+    generation_id = str(uuid.uuid4())
+    parent_generation_id = str(uuid.uuid4())
+    bp = _example_bp("amara_compound_area.json")
+    planning_source = {
+        "kind": "supplement",
+        "parent_generation_id": parent_generation_id,
+        "parent_blueprint_id": "bp-parent-123",
+        "target_resource_type": "exit_ticket",
+    }
+    await v3_studio_store.put_blueprint(
+        TEST_USER_A.id,
+        blueprint_id,
+        bp,
+        "guided-concept-path",
+        form=None,
+        planning_source=planning_source,
+    )
+
+    with patch(
+        "generation.v3_studio.router.adjust_production_blueprint",
+        new=AsyncMock(return_value=bp),
+    ):
+        async with _client() as client:
+            adjust_resp = await client.post(
+                "/api/v1/v3/blueprint/adjust",
+                json={
+                    "blueprint_id": blueprint_id,
+                    "adjustment": "Shorten the exit ticket.",
+                },
+            )
+            assert adjust_resp.status_code == 200
+
+    async def fake_pump(queue, **_kwargs):
+        await queue.put(None)
+
+    with patch("generation.v3_studio.router._pump_sse_to_queue", new=fake_pump):
+        async with _client() as client:
+            post = await client.post(
+                "/api/v1/v3/generate/start",
+                json={
+                    "generation_id": generation_id,
+                    "blueprint_id": blueprint_id,
+                    "template_id": "guided-concept-path",
+                },
+            )
+            assert post.status_code == 200
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(GenerationModel).where(GenerationModel.id == generation_id)
+        )
+        model = result.scalar_one_or_none()
+        assert model is not None
+        artifact = parse_planning_artifact(model.planning_spec_json)
+        assert artifact is not None
+        assert artifact["source"]["kind"] == "supplement"
+        assert artifact["source"]["parent_generation_id"] == parent_generation_id
+        assert artifact["source"]["target_resource_type"] == "exit_ticket"
+
+
 async def _seed_parent_generation_with_artifact(
     *,
     generation_id: str,
