@@ -1,4 +1,4 @@
-"""
+﻿"""
 Single-block LLM generation for the Lesson Builder (POST /api/v1/blocks/generate).
 """
 
@@ -17,13 +17,18 @@ import core.events as core_events
 from core.events import TraceClosedEvent, TraceRegisteredEvent
 from core.llm.runner import run_llm
 from core.llm.types import ModelSlot
-from pipeline.contracts import get_component_registry_entry
-from pipeline.prompts.block_gen import (
+from contracts.lectio import get_component_registry_entry
+from generation.block_generate_prompts import (
     build_block_system_prompt,
     build_block_user_prompt,
     output_model_for_component,
 )
-from pipeline.providers.registry import load_profiles, resolve_text_model
+from v3_execution.config.models import (
+    V3_ANSWER_KEY_GENERATOR,
+    V3_SECTION_WRITER,
+    get_v3_model,
+    get_v3_spec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +75,9 @@ async def run_block_generation(
         )
 
     slot = _slot_for_tier(body.model_tier)
-    profiles = load_profiles()
-    spec = profiles[slot]
-    model = resolve_text_model(slot=slot, spec=spec)
+    node = V3_SECTION_WRITER if slot == ModelSlot.STANDARD else V3_ANSWER_KEY_GENERATOR
+    spec = get_v3_spec(node)
+    model = get_v3_model(node)
 
     trace_id = uuid.uuid4().hex
     core_events.event_bus.publish(
@@ -142,3 +147,4 @@ async def run_block_generation(
             trace_id,
             TraceClosedEvent(trace_id=trace_id, source="block_generate"),
         )
+

@@ -6,7 +6,7 @@ from v3_blueprint.models import ProductionBlueprint, QuestionPlanItem
 from v3_blueprint.compiler import BlueprintCompiler
 
 from v3_execution.component_aliases import canonical_component_id
-from pipeline.contracts import _EXTERNAL_FIELDS, get_section_field_for_component
+from contracts.lectio import _EXTERNAL_FIELDS, get_section_field_for_component
 from v3_execution.models import (
     AnswerKeyExecutorWorkOrder,
     AnswerKeyPlanSpec,
@@ -54,7 +54,7 @@ def _component_cards_for_components(component_ids: list[str]) -> dict[str, dict]
     Fetch Lectio component cards for the given component IDs from
     lectio-content-contract.json. Raises ValueError for any unknown component.
     """
-    from pipeline.contracts import get_component_card
+    from contracts.lectio import get_component_card
 
     cards: dict[str, dict] = {}
     for cid in component_ids:

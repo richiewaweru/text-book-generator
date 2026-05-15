@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from pipeline.contracts import get_section_field_for_component
+from contracts.lectio import get_section_field_for_component
 
 from v3_execution.llm_helpers import run_json_agent
 from v3_execution.models import ExecutorOutcome, GeneratedComponentBlock

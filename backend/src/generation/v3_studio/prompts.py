@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pipeline.contracts import get_component_card, get_planner_index, get_template_contract
+from contracts.lectio import get_component_card, get_planner_index, get_template_contract
 
 SIGNAL_SYSTEM = """You extract structured teaching signals from a structured teacher form.
 

@@ -53,7 +53,25 @@ Objective: Execute `v3-overhaul-sprint-proposals.md` Sprints 1-6 only, in order,
 
 
 ## Sprint 3 - Extract Shared Contracts
-- [ ] Not started.
+- [x] 3.1 Create `backend/src/contracts/` with `__init__.py`.
+- [x] 3.2 Copy `pipeline/contracts.py` to `contracts/lectio.py` and update internal imports.
+- [x] 3.3 Copy `pipeline/types/generation_manifest.py` to `contracts/generation_manifest.py`.
+- [x] 3.4 Copy `pipeline/types/template_contract.py` to `contracts/template_contract.py`.
+- [x] 3.5 Copy `pipeline/types/section_content.py` to `contracts/section_content.py` for V3 validation imports.
+- [x] 3.6 Update V3 imports from `pipeline.contracts` and `pipeline.types` to `contracts.*`.
+- [x] 3.7 Move `pipeline/block_generate.py` to `generation/block_generate.py`; copied direct prompt dependency to `generation/block_generate_prompts.py` and rewired to `contracts.*` plus V3 model slots so Sprint 4 pipeline deletion will not break block generation.
+- [x] 3.8 Update `generation/routes.py` block-generate import to `generation.block_generate`.
+- [x] 3.9 Replace `pipeline/contracts.py` with a re-export shim to `contracts.lectio`.
+- [x] Verification: `pytest tests/v3_execution tests/v3_blueprint tests/routes/test_blocks_generate.py` passes: 47 passed.
+- [x] Verification: block-generate endpoint tests pass.
+- [x] Verification: no `from pipeline.contracts import` remains in V3 scoped source/tests.
+- [x] Verification: `from contracts.lectio import get_contract` works.
+
+## Sprint 3 Validation Evidence
+- Targeted tests: `uv run pytest tests/v3_execution tests/v3_blueprint tests/routes/test_blocks_generate.py` -> 47 passed, 2 warnings.
+- Import check: `uv run python -c "import generation.block_generate; import generation.block_generate_prompts; import generation.routes; from contracts.lectio import get_contract; import pipeline.contracts; import v3_execution.runtime.lectio_validation"` -> passed.
+- V3 scoped grep: no `from pipeline.contracts import`, `pipeline.types`, or `from pipeline.types` hits in `backend/src/v3_execution`, `backend/src/v3_blueprint`, `backend/src/generation/v3_studio`, `backend/tests/v3_execution`, or `backend/tests/v3_blueprint`.
+- Full backend pytest: `uv run pytest` -> 575 passed, 38 failed, 2 warnings. The additional V3 ordering failure passed in isolation and appears to be full-suite shared DB/order pollution; the rest are existing V2/pipeline/PDF failures.
 
 ## Sprint 4 - Delete V2 Pipeline and Planning
 - [ ] Not started.
@@ -63,5 +81,6 @@ Objective: Execute `v3-overhaul-sprint-proposals.md` Sprints 1-6 only, in order,
 
 ## Sprint 6 - Clean Frontend V2 Modules
 - [ ] Not started.
+
 
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
-from pipeline.types.section_content import SectionContent
+from contracts.section_content import SectionContent
 
 _FIELD_MODELS: dict[str, type] = {}
 
@@ -17,7 +17,7 @@ def _try_import_field_models() -> None:
     """
     Populate _FIELD_MODELS from the generated section_content module.
     """
-    from pipeline.types import section_content as sc
+    from contracts import section_content as sc
 
     field_model_candidates = {
         "header": "SectionHeaderContent",

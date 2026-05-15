@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pipeline.contracts import get_section_field_for_component
+from contracts.lectio import get_section_field_for_component
 
 _FALLBACK_ALIAS_MAP: dict[str, str] = {
     # Amara blueprint

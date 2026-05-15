@@ -52,7 +52,7 @@ def format_component_contract_for_writer(card: dict, content_intent: str) -> str
     """
     Format a single component card into a compact writer-facing contract block.
     """
-    from pipeline.contracts import get_component_schema_shape
+    from contracts.lectio import get_component_schema_shape
 
     cid = card.get("component_id", "")
     field = card.get("section_field", "")
@@ -104,7 +104,7 @@ def format_component_contract_for_writer(card: dict, content_intent: str) -> str
 
 
 def build_section_writer_prompt(order: SectionWriterWorkOrder) -> str:
-    from pipeline.contracts import get_formatting_policy
+    from contracts.lectio import get_formatting_policy
 
     components_list = "\n".join(
         f"- {c.teacher_label or c.component_id} ({c.component_id}): {c.content_intent}"

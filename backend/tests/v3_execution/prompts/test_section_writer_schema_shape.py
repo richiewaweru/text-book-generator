@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.contracts import clear_cache, get_component_card, get_component_schema_shape
+from contracts.lectio import clear_cache, get_component_card, get_component_schema_shape
 from v3_execution.prompts.section_writer import format_component_contract_for_writer
 
 

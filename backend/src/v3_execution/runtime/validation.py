@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from pipeline.contracts import get_section_field_for_component
+from contracts.lectio import get_section_field_for_component
 
 from v3_execution.models import (
     GeneratedComponentBlock,

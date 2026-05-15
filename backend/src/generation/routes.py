@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 
@@ -34,7 +34,7 @@ from generation.ports.document_repository import DocumentRepository
 from generation.ports.generation_repository import GenerationRepository
 from pipeline.adapter import run_pipeline_streaming
 from pipeline.api import PipelineCommand as _PipelineCommand
-from pipeline.block_generate import (
+from generation.block_generate import (
     BlockGenerateRequest,
     BlockGenerateResponse,
     run_block_generation,
@@ -278,3 +278,4 @@ async def trigger_v3_generation(
             "X-Accel-Buffering": "no",
         },
     )
+
