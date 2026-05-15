@@ -7,6 +7,149 @@
 
 	let { onSubmit }: Props = $props();
 
+	const EXAMPLES: Array<{
+		label: string;
+		form: Partial<V3InputForm>;
+		subtopic_candidates: Array<{ id: string; title: string; description: string }>;
+		subtopics_selected: string[];
+	}> = [
+		{
+			label: 'Compound area · Year 9',
+			form: {
+				grade_level: 'Grade 9',
+				subject: 'Mathematics',
+				duration_minutes: 50,
+				topic: 'Compound area (L-shapes)',
+				prior_knowledge: 'Students know how to find the area of rectangles',
+				lesson_mode: 'first_exposure',
+				lesson_mode_other: '',
+				intended_outcome: 'understand',
+				intended_outcome_other: '',
+				learner_level: 'mixed',
+				reading_level: 'on_grade',
+				language_support: 'some_ell',
+				prior_knowledge_level: 'some_background',
+				support_needs: ['visuals', 'worked_examples'],
+				learning_preferences: ['visual'],
+				free_text: ''
+			},
+			subtopic_candidates: [
+				{
+					id: 'split',
+					title: 'Splitting compound shapes',
+					description: 'Decompose into rectangles'
+				},
+				{
+					id: 'subtract',
+					title: 'Subtraction method',
+					description: 'Start with the whole, subtract missing part'
+				},
+				{
+					id: 'apply',
+					title: 'Real-world application',
+					description: 'Floor plans and garden layouts'
+				}
+			],
+			subtopics_selected: ['Splitting compound shapes', 'Subtraction method']
+		},
+		{
+			label: 'Cell division · Year 7',
+			form: {
+				grade_level: 'Grade 7',
+				subject: 'Science',
+				duration_minutes: 45,
+				topic: 'Mitosis and cell division',
+				prior_knowledge: 'Students know what cells are and their basic functions',
+				lesson_mode: 'first_exposure',
+				lesson_mode_other: '',
+				intended_outcome: 'understand',
+				intended_outcome_other: '',
+				learner_level: 'on_grade',
+				reading_level: 'mixed',
+				language_support: 'none',
+				prior_knowledge_level: 'some_background',
+				support_needs: ['visuals', 'step_by_step'],
+				learning_preferences: ['visual'],
+				free_text: ''
+			},
+			subtopic_candidates: [
+				{ id: 'why', title: 'Why cells divide', description: 'Growth and repair' },
+				{
+					id: 'stages',
+					title: 'Stages of mitosis',
+					description: 'PMAT: prophase, metaphase, anaphase, telophase'
+				},
+				{
+					id: 'result',
+					title: 'The result of mitosis',
+					description: 'Two identical daughter cells'
+				}
+			],
+			subtopics_selected: ['Why cells divide', 'Stages of mitosis']
+		},
+		{
+			label: 'Persuasive writing · Year 8',
+			form: {
+				grade_level: 'Grade 8',
+				subject: 'English Language Arts',
+				duration_minutes: 60,
+				topic: 'Persuasive writing techniques',
+				prior_knowledge: 'Students can write basic paragraphs with a topic sentence',
+				lesson_mode: 'first_exposure',
+				lesson_mode_other: '',
+				intended_outcome: 'practise',
+				intended_outcome_other: '',
+				learner_level: 'mixed',
+				reading_level: 'mixed',
+				language_support: 'none',
+				prior_knowledge_level: 'some_background',
+				support_needs: ['worked_examples', 'vocabulary_support'],
+				learning_preferences: [],
+				free_text: ''
+			},
+			subtopic_candidates: [
+				{
+					id: 'ethos',
+					title: 'Ethos, pathos, logos',
+					description: 'The three pillars of persuasion'
+				},
+				{
+					id: 'structure',
+					title: 'Argument structure',
+					description: 'Claim, evidence, reasoning'
+				},
+				{
+					id: 'counter',
+					title: 'Addressing counterarguments',
+					description: 'Anticipate and refute'
+				}
+			],
+			subtopics_selected: ['Ethos, pathos, logos', 'Argument structure']
+		}
+	];
+
+	function applyExample(example: (typeof EXAMPLES)[number]) {
+		const f = example.form;
+		grade_level = f.grade_level ?? '';
+		subject = f.subject ?? '';
+		duration_minutes = f.duration_minutes ?? 50;
+		topic = f.topic ?? '';
+		prior_knowledge = f.prior_knowledge ?? '';
+		lesson_mode = f.lesson_mode ?? 'first_exposure';
+		lesson_mode_other = f.lesson_mode_other ?? '';
+		intended_outcome = f.intended_outcome ?? 'understand';
+		intended_outcome_other = f.intended_outcome_other ?? '';
+		learner_level = f.learner_level ?? 'on_grade';
+		reading_level = f.reading_level ?? 'on_grade';
+		language_support = f.language_support ?? 'none';
+		prior_knowledge_level = f.prior_knowledge_level ?? 'new_topic';
+		support_needs = [...(f.support_needs ?? [])];
+		learning_preferences = [...(f.learning_preferences ?? [])];
+		free_text = f.free_text ?? '';
+		subtopic_candidates = example.subtopic_candidates;
+		subtopics = example.subtopics_selected;
+	}
+
 	// --- Step 1 state ---
 	let grade_level = $state('');
 	let subject = $state('');
@@ -213,9 +356,23 @@
 </script>
 
 <div class="mx-auto max-w-xl space-y-6 px-4 py-10">
-	<header class="space-y-2 text-center">
+	<header class="space-y-2 text-center px-4 pt-10 pb-6">
 		<h1 class="text-3xl font-semibold tracking-tight">What do you want to teach?</h1>
-		<p class="text-muted-foreground">Answer a few quick questions — we’ll build the lesson plan.</p>
+		<p class="text-muted-foreground text-sm">
+			Answer a few quick questions — we'll build the lesson plan.
+		</p>
+		<div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 pt-2">
+			<span class="text-xs text-muted-foreground">Try an example:</span>
+			{#each EXAMPLES as ex}
+				<button
+					type="button"
+					class="text-xs underline underline-offset-2 text-muted-foreground hover:text-foreground"
+					onclick={() => applyExample(ex)}
+				>
+					{ex.label}
+				</button>
+			{/each}
+		</div>
 	</header>
 
 	<form class="space-y-10" onsubmit={handleSubmit}>

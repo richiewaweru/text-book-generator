@@ -152,9 +152,6 @@ async def get_clarifications(
     *,
     trace_id: str | None = None,
 ) -> list[V3ClarificationQuestion]:
-    if has_required_structured_fields(form) and not signals.missing_signals:
-        return []
-
     node = "v3_clarify"
     tid = trace_id or str(uuid.uuid4())
     model = get_v3_model(node)

@@ -50,7 +50,8 @@ const blueprintFixture = (): BlueprintPreviewDTO => ({
 		}
 	],
 	register_summary: '',
-	support_summary: []
+	support_summary: [],
+	learner_context: null
 });
 
 describe('buildCanvasSkeleton', () => {

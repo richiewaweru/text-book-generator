@@ -31,6 +31,10 @@ from v3_execution.models import (
 )
 
 from v3_execution.runtime import events
+from v3_execution.runtime.progress import (
+    emit_progress,
+    section_titles_from_blueprint,
+)
 from v3_review import coherence_report_to_generation_summary, route_repairs, run_coherence_review
 
 
@@ -128,6 +132,7 @@ async def run_generation(
             blueprint_id=blueprint_id,
         )
         sem = make_semaphores()
+        section_titles = section_titles_from_blueprint(blueprint)
 
         async def _guard(label: str, coro: Awaitable[list[Any]]) -> list[Any]:
             try:
@@ -254,6 +259,12 @@ async def run_generation(
                 warnings=list(result.warnings),
             )
 
+        await emit_progress(
+            emit_event,
+            generation_id=generation_id,
+            stage="finalising",
+            label="Preparing printable booklet",
+        )
         await emit_event(events.ASSEMBLY_STARTED, {"generation_id": generation_id})
         assembler = V3SectionBuilder()
 
@@ -347,6 +358,12 @@ async def run_generation(
         resource_final_status = "failed"
         artifact_status: BookletStatus = draft_pack.status
         try:
+            await emit_progress(
+                emit_event,
+                generation_id=generation_id,
+                stage="reviewing",
+                label="Reviewing for consistency",
+            )
             async with sem["llm_coherence_reviewer"]:
 
                 async def _coherence():
@@ -368,6 +385,7 @@ async def run_generation(
                         trace_id=trace_id or generation_id,
                         generation_id=generation_id,
                         model_overrides=model_overrides,
+                        section_titles=section_titles,
                     )
 
                 draft_pack, coherence_report = await asyncio.wait_for(

@@ -14,6 +14,7 @@ from v3_execution.prompts.section_writer import (
 )
 from v3_execution.config.retries import V3_MAX_RETRIES
 from v3_execution.runtime import events
+from v3_execution.runtime.progress import emit_progress, titled_label
 from v3_execution.runtime.lectio_validation import validate_lectio_field_payload
 from v3_execution.runtime.retry_runner import run_with_retries
 from v3_execution.runtime.validation import validate_component_batch
@@ -37,8 +38,21 @@ async def execute_section(
     generation_id: str | None,
     model_overrides: dict | None = None,
 ) -> list[GeneratedComponentBlock]:
+    gid = generation_id or ""
+    if gid:
+        await emit_progress(
+            emit_event,
+            generation_id=gid,
+            stage="generating_section",
+            label=titled_label(
+                "Writing",
+                order.section.title,
+                fallback="Generating section",
+            ),
+            section_id=order.section.id,
+        )
     await emit_event(
-        "section_writing_started",
+        events.SECTION_WRITING_STARTED,
         {"section_id": order.section.id, "generation_id": generation_id},
     )
     _prior_errors: list[str] = []

@@ -102,6 +102,7 @@ export type V3StudioStreamHandlers = {
 	onComponentPatched?: (data: Record<string, unknown>) => void;
 	onGenerationComplete?: (data: Record<string, unknown>) => void;
 	onGenerationWarning?: (data: Record<string, unknown>) => void;
+	onProgressUpdate?: (data: Record<string, unknown>) => void;
 	onOpen?: () => void;
 	onError?: (err: unknown) => void;
 };
@@ -231,6 +232,9 @@ export function connectV3StudioGenerationStream(
 					break;
 				case 'generation_warning':
 					handlers.onGenerationWarning?.(payload);
+					break;
+				case 'progress_update':
+					handlers.onProgressUpdate?.(payload);
 					break;
 				default:
 					break;

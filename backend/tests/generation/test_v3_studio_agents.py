@@ -129,7 +129,7 @@ def test_form_to_lens_hints_contains_key_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_clarifications_skips_llm_when_form_is_complete(
+async def test_get_clarifications_calls_llm_when_form_is_complete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     called = {"run_llm": False}
@@ -154,7 +154,7 @@ async def test_get_clarifications_skips_llm_when_form_is_complete(
 
     qs = await get_clarifications(signals, form, trace_id="tid-test")
     assert qs == []
-    assert called["run_llm"] is False
+    assert called["run_llm"] is True
 
 
 @pytest.mark.asyncio

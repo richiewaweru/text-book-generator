@@ -12,6 +12,7 @@ from v3_execution.executors.section_writer import execute_section
 from v3_execution.executors.visual_executor import execute_visual
 from v3_execution.models import CompiledWorkOrders, DraftPack, ExecutionResult
 from v3_execution.runtime import events as v3_events
+from v3_execution.runtime.progress import emit_progress, titled_label
 
 from v3_review.deterministic_checks import (
     check_expected_answers_preserved,
@@ -271,14 +272,30 @@ async def route_repairs(
     trace_id: str | None = None,
     generation_id: str | None = None,
     model_overrides: dict | None = None,
+    section_titles: dict[str, str] | None = None,
 ) -> tuple[DraftPack, CoherenceReport]:
     gid = generation_id or draft_pack.generation_id
+    titles = section_titles or {}
 
     targets_to_repair = [t for t in report.repair_targets if t.severity in ("blocking", "major")]
 
     current_pack = draft_pack
 
     for target in targets_to_repair:
+        repair_section_id = target.section_id
+        repair_title = titles.get(repair_section_id or "", None) if repair_section_id else None
+        if gid:
+            await emit_progress(
+                emit_event,
+                generation_id=gid,
+                stage="repairing_section",
+                label=titled_label(
+                    "Repairing",
+                    repair_title,
+                    fallback="Repairing section",
+                ),
+                section_id=repair_section_id,
+            )
         await emit_event(
             v3_events.REPAIR_STARTED,
             {

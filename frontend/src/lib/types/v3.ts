@@ -42,11 +42,26 @@ export interface V3ClarificationQuestion {
 	question: string;
 	reason: string;
 	optional: boolean;
+	answer_type: 'options' | 'free_text';
+	options: string[];
 }
 
 export interface V3ClarificationAnswer {
 	question: string;
 	answer: string;
+}
+
+export interface V3LearnerContextDTO {
+	grade_level: string;
+	subject: string;
+	duration_minutes: number;
+	lesson_mode: string;
+	learner_level: string;
+	reading_level: string;
+	language_support: string;
+	prior_knowledge_level: string;
+	support_needs: string[];
+	prior_knowledge: string;
 }
 
 export interface V3AppliedLens {
@@ -98,6 +113,7 @@ export interface BlueprintPreviewDTO {
 	question_plan: V3QuestionPlan[];
 	register_summary: string;
 	support_summary: string[];
+	learner_context: V3LearnerContextDTO | null;
 }
 
 export interface V3GenerationHistoryItem {

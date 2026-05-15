@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 GENERATION_STARTED = "generation_started"
+PROGRESS_UPDATE = "progress_update"
 WORK_ORDERS_COMPILED = "work_orders_compiled"
 SECTION_WRITING_STARTED = "section_writing_started"
 SECTION_WRITER_FAILED = "section_writer_failed"
@@ -57,6 +58,7 @@ __all__ = [
     "FINAL_PACK_READY",
     "GENERATION_COMPLETE",
     "GENERATION_STARTED",
+    "PROGRESS_UPDATE",
     "GENERATION_WARNING",
     "LLM_REVIEW_COMPLETE",
     "LLM_REVIEW_SKIPPED",

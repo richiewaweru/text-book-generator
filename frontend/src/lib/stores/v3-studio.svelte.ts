@@ -35,6 +35,7 @@ export type V3StudioStore = {
 	parentSnapshot: V3ParentSnapshot | null;
 	error: string | null;
 	coherenceHint: string | null;
+	progressLabel: string | null;
 	streamCancel: (() => void) | null;
 };
 
@@ -59,6 +60,7 @@ export const v3Studio = $state<V3StudioStore>({
 	parentSnapshot: null,
 	error: null,
 	coherenceHint: null,
+	progressLabel: null,
 	streamCancel: null
 });
 
@@ -115,5 +117,6 @@ export function resetV3Studio(): void {
 	v3Studio.parentSnapshot = null;
 	v3Studio.error = null;
 	v3Studio.coherenceHint = null;
+	v3Studio.progressLabel = null;
 	v3Studio.streamCancel = null;
 }

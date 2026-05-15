@@ -42,7 +42,6 @@
 	import { mapPackSectionsToCanvas } from '$lib/studio/v3-print-canvas';
 	import { getBookletExportPolicy, isBookletStatus } from '$lib/studio/v3-booklet';
 	import { coerceV3DocumentToPack } from '$lib/studio/v3-document';
-	import { hasRequiredStructuredFields } from '$lib/studio/v3-clarify';
 	import type {
 		BookletStatus,
 		V3ClarificationAnswer,
@@ -126,25 +125,16 @@
 		const form = v3Studio.form;
 		if (!signals || !form) return;
 
-		if (hasRequiredStructuredFields(form)) {
-			await runLessonArchitect();
-			return;
-		}
-
-		if (signals.missing_signals.length > 0) {
-			v3Studio.stage = 'planning';
-			try {
-				v3Studio.clarifications = await getClarifications(signals, form);
-				if (v3Studio.clarifications.length === 0) {
-					await runLessonArchitect();
-				} else {
-					v3Studio.stage = 'clarifying';
-				}
-			} catch (err) {
-				v3Studio.stage = 'confirming';
-				v3Studio.error = friendly(err);
+		v3Studio.stage = 'planning';
+		try {
+			v3Studio.clarifications = await getClarifications(signals, form);
+			if (v3Studio.clarifications.length === 0) {
+				await runLessonArchitect();
+			} else {
+				v3Studio.stage = 'clarifying';
 			}
-		} else {
+		} catch (err) {
+			console.warn('Clarify failed, proceeding to blueprint:', err);
 			await runLessonArchitect();
 		}
 	}
@@ -245,6 +235,7 @@
 		v3Studio.bookletStatus = 'streaming_preview';
 		v3Studio.bookletIssues = [];
 		v3Studio.stage = 'generating';
+		v3Studio.progressLabel = null;
 
 		try {
 			await startV3Generation({
@@ -270,6 +261,12 @@
 
 		v3Studio.streamCancel?.();
 		v3Studio.streamCancel = connectV3StudioGenerationStream(generationId, {
+			onProgressUpdate: (data) => {
+				const label = typeof data.label === 'string' ? data.label.trim() : '';
+				if (label) {
+					v3Studio.progressLabel = label;
+				}
+			},
 			onCoherenceReviewStarted: () => {
 				v3Studio.stage = 'finalising';
 			},
@@ -527,6 +524,23 @@
 			onAdjust={handleBlueprintAdjust}
 		/>
 	{:else if v3Studio.stage === 'generating' || v3Studio.stage === 'finalising' || v3Studio.stage === 'complete'}
+		{#if v3Studio.stage === 'complete'}
+			<div class="mx-auto max-w-4xl px-4 pt-6 pb-2">
+				<div
+					class="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-card p-4 shadow-sm"
+				>
+					<div>
+						<p class="text-sm font-semibold">Your booklet is ready</p>
+						<p class="mt-0.5 text-xs text-muted-foreground">
+							Review it below or download a printable PDF.
+						</p>
+					</div>
+					<span class="rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
+						Ready ✓
+					</span>
+				</div>
+			</div>
+		{/if}
 		{#if v3Studio.activePack}
 			<div class="mx-auto max-w-4xl px-4 pt-4">
 				<div class="flex justify-end">
@@ -608,11 +622,21 @@
 			<details class="mx-auto max-w-4xl px-4 pb-6">
 				<summary class="cursor-pointer text-sm font-medium text-muted-foreground">Show generation progress</summary>
 				<div class="pt-4">
-					<V3Canvas sections={v3Studio.canvas} stage={v3Studio.stage} templateId={v3Studio.blueprint?.template_id ?? 'guided-concept-path'} />
+					<V3Canvas
+						sections={v3Studio.canvas}
+						stage={v3Studio.stage}
+						templateId={v3Studio.blueprint?.template_id ?? 'guided-concept-path'}
+						statusLabel={v3Studio.progressLabel}
+					/>
 				</div>
 			</details>
 		{:else}
-			<V3Canvas sections={v3Studio.canvas} stage={v3Studio.stage} templateId={v3Studio.blueprint?.template_id ?? 'guided-concept-path'} />
+			<V3Canvas
+				sections={v3Studio.canvas}
+				stage={v3Studio.stage}
+				templateId={v3Studio.blueprint?.template_id ?? 'guided-concept-path'}
+				statusLabel={v3Studio.progressLabel}
+			/>
 		{/if}
 	{/if}
 

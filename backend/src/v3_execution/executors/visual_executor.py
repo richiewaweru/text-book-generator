@@ -9,6 +9,7 @@ from media.providers.registry import get_image_client, load_image_provider_spec
 from v3_execution.models import ExecutorOutcome, GeneratedVisualBlock, VisualGeneratorWorkOrder
 from v3_execution.prompts.visual_executor import build_visual_prompt
 from v3_execution.config.retries import V3_MAX_RETRIES
+from v3_execution.runtime.progress import emit_progress, titled_label
 from v3_execution.runtime.retry_runner import run_with_retries
 from v3_execution.runtime.validation import validate_visual_block
 
@@ -61,12 +62,30 @@ async def execute_visual(
     *,
     trace_id: str | None,
     generation_id: str | None,
+    section_titles: dict[str, str] | None = None,
 ) -> list[GeneratedVisualBlock]:
     _ = trace_id
     gid = generation_id or str(uuid.uuid4())
     spec = load_image_provider_spec()
 
+    section_id = order.visual.attaches_to or None
+    section_title = (
+        (section_titles or {}).get(section_id or "", None) if section_id else None
+    )
+
     async def _attempt(_: bool) -> ExecutorOutcome:
+        if gid:
+            await emit_progress(
+                emit_event,
+                generation_id=gid,
+                stage="generating_visual",
+                label=titled_label(
+                    "Creating diagram for",
+                    section_title,
+                    fallback="Creating diagram",
+                ),
+                section_id=section_id,
+            )
         await emit_event(
             "visual_generation_started",
             {

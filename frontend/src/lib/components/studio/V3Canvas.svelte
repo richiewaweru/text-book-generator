@@ -7,20 +7,25 @@
 		sections: CanvasSection[];
 		stage: V3Stage | 'complete';
 		templateId: string;
+		statusLabel?: string | null;
 	}
 
-	let { sections, stage, templateId }: Props = $props();
+	let { sections, stage, templateId, statusLabel = null }: Props = $props();
 
-	const progressLabel: Record<string, string> = {
+	const defaultProgressLabel: Record<string, string> = {
 		generating: 'Writing your lesson…',
 		finalising: 'Checking consistency…',
 		complete: 'Resource ready'
 	};
+
+	const displayLabel = $derived(
+		statusLabel?.trim() || defaultProgressLabel[stage] || ''
+	);
 </script>
 
 <div class="v3-canvas mx-auto max-w-3xl space-y-6 px-4 py-6">
 	<div class="text-center text-sm text-muted-foreground" role="status" aria-live="polite">
-		{progressLabel[stage] ?? ''}
+		{displayLabel}
 	</div>
 
 	<div class="space-y-8">

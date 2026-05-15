@@ -74,6 +74,8 @@ class V3ClarificationQuestion(BaseModel):
     question: str
     reason: str
     optional: bool = False
+    answer_type: Literal["options", "free_text"] = "free_text"
+    options: list[str] = Field(default_factory=list)
 
 
 class V3ClarificationAnswer(BaseModel):

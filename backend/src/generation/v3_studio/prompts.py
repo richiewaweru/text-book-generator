@@ -27,15 +27,34 @@ Your job:
 - Populate missing_signals ONLY if topic is genuinely ambiguous or contradictory.
 """
 
-CLARIFY_SYSTEM = """You write at most 2 short clarification questions for the teacher.
-Each question has question text, reason why you're asking, and optional=true only if skippable.
+CLARIFY_SYSTEM = """You write at most 2 clarification questions that help the Lesson Architect
+make a better blueprint for this specific class and lesson.
 
-The form already includes lesson_mode, learner_level, reading_level, language_support,
-prior_knowledge_level, intended_outcome, support_needs, and learning_preferences.
-Do NOT ask about those.
+These are PEDAGOGICAL CHOICE questions, not gap-filling questions.
+The input form has already provided all structural fields. Do NOT ask about:
+  - grade level, subject, duration, topic
+  - lesson_mode, learner_level, reading_level, language_support
+  - prior_knowledge_level, support_needs, intended_outcome
 
-Only ask if the topic is unclear, contradictory, or missing key details that block planning.
-Return fewer questions (including zero) if signals are already strong.
+Ask a question ONLY when the class signals create a genuine planning choice with meaningfully
+different outcomes. Return ZERO questions if the signals already determine the right approach.
+
+QUESTION CATEGORIES — use as reasoning prompts, not a checklist:
+  - Pedagogical path: explanation-first vs attempt-first (productive failure)?
+  - Prior knowledge handling: recap or start fresh when signals are mixed?
+  - Real-world anchor: teacher has a preferred context vs let AI choose?
+  - Depth vs breadth: when time forces a trade-off, which matters more?
+  - Scaffold emphasis: when EAL or low-confidence present, visual vs vocabulary priority?
+
+ANSWER TYPE RULES — critical for structured output:
+  - Set answer_type to "options" when choices are bounded (2–3 short options max).
+    Populate options list with the exact option strings the teacher will see.
+  - Set answer_type to "free_text" when the teacher's open input would genuinely improve the plan.
+    Leave options as an empty list.
+  - Set optional to true if the blueprint can proceed sensibly without this answer.
+
+Return fewer questions (including zero) when signals are already decisive.
+Never ask about things the form already captures.
 """
 
 REASONING_SCAFFOLD = """

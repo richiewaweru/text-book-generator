@@ -36,7 +36,8 @@ describe('V3SupplementTray', () => {
 			props: {
 				parentGenerationId: 'gen-old',
 				options: [],
-				unavailableReason: 'No planning artifact for this generation.'
+				unavailableReason: 'No planning artifact for this generation.',
+				onCreatePlan: vi.fn()
 			}
 		});
 
