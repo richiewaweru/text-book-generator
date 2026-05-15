@@ -132,6 +132,128 @@ Do not include the reasoning steps in the JSON output.
 ADJUST_SYSTEM = """You revise the given ProductionBlueprint JSON according to the teacher's plain-language instruction.
 Preserve IDs where possible; keep schema valid. Output the full revised blueprint."""
 
+SUPPLEMENT_SYSTEM_ADDENDUM = """
+This run produces a POST-LESSON companion resource, not a new full lesson.
+
+Students have already received the parent resource.
+
+Use the parent blueprint to understand:
+- what was taught
+- what supports were used
+- what students should now be able to do
+- what question targets already exist
+
+Do not reteach the whole parent resource.
+Do not copy the parent section structure.
+Do not reuse parent section IDs.
+Do not add instruction, explanation-blocks, hooks, summaries, or worked examples unless the target resource spec explicitly allows them.
+
+The target RESOURCE SPEC is the authority on:
+- section count
+- allowed components
+- forbidden components
+- visual policy
+- question count
+- assessment constraints
+
+If the base architect prompt conflicts with the target resource spec, follow the target resource spec.
+"""
+
+SUPPLEMENT_USER_PROMPT_TEMPLATE = """TASK:
+Create a NEW {target_resource_type} blueprint as a supplement to the parent resource.
+
+TARGET RESOURCE SPEC — hard constraints:
+{resource_spec_block}
+
+PARENT BLUEPRINT FIELD GUIDE:
+metadata.title:
+  Parent concept/resource title.
+
+metadata.subject:
+  Subject area.
+
+lesson.resource_type:
+  What the parent resource was. This tells you what students already received.
+
+lesson.lesson_mode:
+  The instructional purpose of the parent resource.
+
+applied_lenses:
+  Learner adaptations and supports to preserve where appropriate.
+
+voice:
+  Register, tone, and language style to keep consistent.
+
+prior_knowledge:
+  Anchors students have already seen or should already know.
+
+anchor:
+  Reusable example context if appropriate.
+
+sections:
+  What the parent resource taught or practiced.
+
+sections[].components[].content_intent:
+  The intended teaching job of each component.
+
+question_plan:
+  Knowledge and skill targets students should now be able to answer.
+
+question_plan[].temperature:
+  Difficulty level: warm, medium, cold, transfer.
+
+question_plan[].expected_answer:
+  Target answer or understanding.
+
+RULES:
+- The parent resource has already been taught.
+- Do not reteach the full lesson.
+- Do not copy parent section_ids.
+- Do not copy parent section structure.
+- Preserve relevant learner adaptations.
+- Build a fresh blueprint obeying the target resource spec.
+- Use the same ProductionBlueprint schema.
+
+PARENT CONTEXT:
+{parent_context_json}
+"""
+
+
+def build_parent_context_for_supplement(parent_artifact: dict) -> dict:
+    derived = parent_artifact.get("derived") if isinstance(parent_artifact.get("derived"), dict) else {}
+    return {
+        "form": parent_artifact.get("form"),
+        "blueprint": parent_artifact.get("blueprint"),
+        "derived": {
+            "title": derived.get("title"),
+            "subject": derived.get("subject"),
+            "resource_type": derived.get("resource_type"),
+            "lesson_mode": derived.get("lesson_mode"),
+            "section_count": derived.get("section_count"),
+            "component_count": derived.get("component_count"),
+            "question_count": derived.get("question_count"),
+            "visual_required_count": derived.get("visual_required_count"),
+            "lenses": derived.get("lenses", []),
+        },
+    }
+
+
+def build_supplement_architect_system_prompt() -> str:
+    return build_architect_system_prompt() + "\n\n" + SUPPLEMENT_SYSTEM_ADDENDUM
+
+
+def build_supplement_user_prompt(
+    *,
+    target_resource_type: str,
+    resource_spec_block: str,
+    parent_context_json: str,
+) -> str:
+    return SUPPLEMENT_USER_PROMPT_TEMPLATE.format(
+        target_resource_type=target_resource_type,
+        resource_spec_block=resource_spec_block,
+        parent_context_json=parent_context_json,
+    )
+
 
 @lru_cache(maxsize=1)
 def _planner_index_block() -> str:

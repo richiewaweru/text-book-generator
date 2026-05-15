@@ -3,9 +3,21 @@
 
 	interface Props {
 		form: V3InputForm | null;
+		planningLabel?: string;
+		messages?: string[];
 	}
 
-	let { form }: Props = $props();
+	let {
+		form,
+		planningLabel = 'Building your lesson plan',
+		messages = [
+			'Thinking about your class…',
+			'Planning the teaching sequence…',
+			'Selecting the right components…',
+			'Designing your practice questions…',
+			'Almost there…'
+		]
+	}: Props = $props();
 
 	const LESSON_MODE_LABELS: Record<string, string> = {
 		first_exposure: 'First exposure',
@@ -32,14 +44,6 @@
 		challenge: 'Challenge questions'
 	};
 
-	const messages = [
-		'Thinking about your class…',
-		'Planning the teaching sequence…',
-		'Selecting the right components…',
-		'Designing your practice questions…',
-		'Almost there…'
-	];
-
 	let messageIndex = $state(0);
 
 	$effect(() => {
@@ -61,7 +65,7 @@
 
 	<div class="space-y-1">
 		<p class="text-lg font-medium transition-all duration-500">{messages[messageIndex]}</p>
-		<p class="text-sm text-muted-foreground">Building your lesson plan</p>
+		<p class="text-sm text-muted-foreground">{planningLabel}</p>
 	</div>
 
 	{#if form}

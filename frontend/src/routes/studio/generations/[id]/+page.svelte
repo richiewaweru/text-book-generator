@@ -31,6 +31,14 @@
 	});
 	const exportPolicy = $derived(getBookletExportPolicy(resolvedStatus));
 
+	const supplementLineage = $derived(() => {
+		const source = detail?.planning_artifact?.source;
+		if (source?.kind === 'supplement' && source.parent_generation_id) {
+			return source;
+		}
+		return null;
+	});
+
 	async function loadGeneration(id: string): Promise<void> {
 		loading = true;
 		loadError = null;
@@ -111,6 +119,20 @@
 					<p class="text-sm text-muted-foreground">
 						Status: {pack.status} - Sections: {pack.sections.length}
 					</p>
+					{#if supplementLineage}
+						<p class="mt-2 text-sm text-muted-foreground">
+							Companion resource based on
+							<a
+								class="font-medium text-primary underline-offset-4 hover:underline"
+								href={`/studio/generations/${supplementLineage.parent_generation_id}`}
+							>
+								parent lesson
+							</a>
+							{#if supplementLineage.target_resource_type}
+								({supplementLineage.target_resource_type.replace(/_/g, ' ')})
+							{/if}
+						</p>
+					{/if}
 				</div>
 				<button
 					type="button"

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import uuid
+from typing import Any
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
@@ -24,9 +26,23 @@ from generation.v3_studio.dtos import (
     V3InputForm,
     V3SignalSummary,
 )
-from generation.v3_studio.prompts import ADJUST_SYSTEM, CLARIFY_SYSTEM, SIGNAL_SYSTEM, build_architect_system_prompt
+from generation.v3_studio.prompts import (
+    ADJUST_SYSTEM,
+    CLARIFY_SYSTEM,
+    SIGNAL_SYSTEM,
+    build_architect_system_prompt,
+    build_parent_context_for_supplement,
+    build_supplement_architect_system_prompt,
+    build_supplement_user_prompt,
+)
 
 _CALLER = "v3_studio"
+
+SUPPLEMENT_DEFAULT_DEPTH = {
+    "exit_ticket": "quick",
+    "quiz": "standard",
+    "worksheet": "standard",
+}
 
 
 class ClarifyEnvelope(BaseModel):
@@ -335,9 +351,113 @@ async def adjust_production_blueprint(
     return bp
 
 
+def _render_target_resource_spec(target_resource_type: str) -> str:
+    from resource_specs.loader import get_spec, list_spec_ids
+    from resource_specs.renderer import render_spec_for_prompt
+
+    resource_type = target_resource_type.lower().strip().replace(" ", "_")
+    available = list_spec_ids()
+    if resource_type not in available:
+        raise ValueError(f"No resource spec for type: {resource_type}")
+
+    depth = SUPPLEMENT_DEFAULT_DEPTH.get(resource_type, "standard")
+    spec = get_spec(resource_type)
+    return render_spec_for_prompt(
+        spec,
+        depth=depth,
+        active_roles=[],
+        active_supports=[],
+    )
+
+
+def _parent_section_ids(parent_artifact: dict[str, Any]) -> set[str]:
+    blueprint = parent_artifact.get("blueprint")
+    if not isinstance(blueprint, dict):
+        return set()
+    sections = blueprint.get("sections")
+    if not isinstance(sections, list):
+        return set()
+    ids: set[str] = set()
+    for section in sections:
+        if isinstance(section, dict):
+            sid = section.get("section_id")
+            if isinstance(sid, str) and sid:
+                ids.add(sid)
+    return ids
+
+
+def _assert_child_section_ids_distinct(
+    parent_artifact: dict[str, Any],
+    child_bp: ProductionBlueprint,
+) -> None:
+    parent_ids = _parent_section_ids(parent_artifact)
+    child_ids = {section.section_id for section in child_bp.sections}
+    overlap = parent_ids & child_ids
+    if overlap:
+        raise RuntimeError(
+            f"Supplement blueprint reused parent section IDs: {', '.join(sorted(overlap))}"
+        )
+
+
+async def generate_supplement_blueprint(
+    *,
+    parent_artifact: dict[str, Any],
+    target_resource_type: str,
+    trace_id: str | None = None,
+) -> ProductionBlueprint:
+    node = "v3_lesson_architect"
+    tid = trace_id or str(uuid.uuid4())
+    model = get_v3_model(node)
+    spec = get_v3_spec(node)
+    slot = get_v3_slot(node)
+    agent = Agent(
+        model=model,
+        output_type=ProductionBlueprintEnvelope,
+        system_prompt=build_supplement_architect_system_prompt(),
+    )
+    resource_spec_block = _render_target_resource_spec(target_resource_type)
+    parent_context = build_parent_context_for_supplement(parent_artifact)
+    user = build_supplement_user_prompt(
+        target_resource_type=target_resource_type,
+        resource_spec_block=resource_spec_block,
+        parent_context_json=json.dumps(parent_context, indent=2),
+    )
+    result = await run_llm(
+        trace_id=tid,
+        caller=_CALLER,
+        generation_id=None,
+        agent=agent,
+        user_prompt=user,
+        model=model,
+        slot=slot,
+        spec=spec,
+        section_id=None,
+        node=node,
+        model_settings=lesson_architect_model_settings(),
+        retry_policy=RetryPolicy(call_timeout_seconds=float(V3_TIMEOUTS["lesson_architect"])),
+    )
+    raw = result.output
+    envelope = raw if isinstance(raw, ProductionBlueprintEnvelope) else None
+    if envelope is None and hasattr(raw, "blueprint"):
+        envelope = ProductionBlueprintEnvelope(blueprint=raw.blueprint)  # type: ignore[arg-type]
+    if envelope is None:
+        raise RuntimeError("supplement architect returned unexpected output")
+    bp = envelope.blueprint
+    derived = parent_artifact.get("derived")
+    if isinstance(derived, dict):
+        subject = derived.get("subject")
+        if isinstance(subject, str) and subject.strip():
+            bp.metadata.subject = subject.strip()
+    _validate_blueprint(bp)
+    _assert_child_section_ids_distinct(parent_artifact, bp)
+    return bp
+
+
 __all__ = [
+    "SUPPLEMENT_DEFAULT_DEPTH",
     "adjust_production_blueprint",
     "extract_signals",
     "generate_production_blueprint",
+    "generate_supplement_blueprint",
     "get_clarifications",
 ]

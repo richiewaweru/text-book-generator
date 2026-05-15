@@ -8,19 +8,27 @@
 	import V3BlueprintPreview from '$lib/components/studio/V3BlueprintPreview.svelte';
 	import V3Canvas from '$lib/components/studio/V3Canvas.svelte';
 	import V3BookletPackView from '$lib/components/studio/V3BookletPackView.svelte';
+	import V3SupplementTray from '$lib/components/studio/V3SupplementTray.svelte';
 
 	import {
 		adjustBlueprint,
 		connectV3StudioGenerationStream,
+		createV3SupplementBlueprint,
 		downloadV3GenerationPdf,
 		extractSignals,
 		fetchV3Document,
 		generateBlueprint,
 		getClarifications,
+		getV3SupplementOptions,
 		startV3Generation
 	} from '$lib/api/v3';
 	import { isApiError } from '$lib/api/errors';
-	import { resetV3Studio, v3Studio } from '$lib/stores/v3-studio.svelte';
+	import {
+		captureParentSnapshot,
+		resetV3Studio,
+		restoreParentFromSupplementReview,
+		v3Studio
+	} from '$lib/stores/v3-studio.svelte';
 	import {
 		applyComponentPatchedToCanvas,
 		applyComponentReadyToCanvas,
@@ -35,12 +43,19 @@
 	import { getBookletExportPolicy, isBookletStatus } from '$lib/studio/v3-booklet';
 	import { coerceV3DocumentToPack } from '$lib/studio/v3-document';
 	import { hasRequiredStructuredFields } from '$lib/studio/v3-clarify';
-	import type { BookletStatus, V3ClarificationAnswer, V3DraftPack, V3InputForm } from '$lib/types/v3';
+	import type {
+		BookletStatus,
+		V3ClarificationAnswer,
+		V3DraftPack,
+		V3InputForm,
+		V3SupplementResourceType
+	} from '$lib/types/v3';
 
 	let pdfLoading = $state(false);
 	let pdfError = $state<string | null>(null);
 	let pdfConfirming = $state(false);
 	let pdfOpen = $state(false);
+	let pendingSupplementLabel = $state<string | null>(null);
 	let schoolName = $state('');
 	let teacherName = $state('');
 	let exportDate = $state('');
@@ -82,6 +97,9 @@
 			if (pack.status !== 'streaming_preview') {
 				v3Studio.coherenceHint = null;
 				v3Studio.stage = 'complete';
+				if (!v3Studio.supplementContext) {
+					void loadSupplementOptions(generationId);
+				}
 			}
 			return true;
 		} catch {
@@ -161,12 +179,64 @@
 		}
 	}
 
+	async function loadSupplementOptions(generationId: string | null): Promise<void> {
+		if (!generationId) return;
+		v3Studio.supplementOptionsLoading = true;
+		v3Studio.supplementOptionsError = null;
+		try {
+			const res = await getV3SupplementOptions(generationId);
+			v3Studio.supplementOptions = res.available ? res.options : [];
+			v3Studio.supplementOptionsError = res.unavailable_reason;
+		} catch (err) {
+			v3Studio.supplementOptions = [];
+			v3Studio.supplementOptionsError = friendly(err);
+		} finally {
+			v3Studio.supplementOptionsLoading = false;
+		}
+	}
+
+	async function handleCreateSupplementPlan(resourceType: V3SupplementResourceType) {
+		const parentGenerationId = v3Studio.generationId;
+		if (!parentGenerationId) return;
+
+		v3Studio.error = null;
+		v3Studio.parentSnapshot = captureParentSnapshot();
+		pendingSupplementLabel =
+			v3Studio.supplementOptions.find((option) => option.resource_type === resourceType)?.label ??
+			'companion resource';
+		v3Studio.stage = 'planning';
+
+		try {
+			const result = await createV3SupplementBlueprint({
+				parent_generation_id: parentGenerationId,
+				resource_type: resourceType
+			});
+
+			v3Studio.blueprint = result.preview;
+			v3Studio.supplementContext = {
+				mode: 'supplement_review',
+				parentGenerationId: result.parent_generation_id,
+				parentTitle: result.parent_title,
+				resourceType: result.resource_type,
+				label: result.label,
+				childGenerationId: result.generation_id,
+				childBlueprintId: result.blueprint_id
+			};
+			v3Studio.stage = 'reviewing';
+			pendingSupplementLabel = null;
+		} catch (err) {
+			restoreParentFromSupplementReview();
+			pendingSupplementLabel = null;
+			v3Studio.error = friendly(err);
+		}
+	}
+
 	async function handleBlueprintApproved() {
 		v3Studio.error = null;
 		const blueprint = v3Studio.blueprint;
 		if (!blueprint) return;
 
-		const generationId = crypto.randomUUID();
+		const generationId = v3Studio.supplementContext?.childGenerationId ?? crypto.randomUUID();
 		v3Studio.generationId = generationId;
 		v3Studio.canvas = buildCanvasSkeleton(blueprint);
 		v3Studio.draftPack = null;
@@ -186,6 +256,16 @@
 			v3Studio.stage = 'reviewing';
 			v3Studio.error = friendly(err);
 			return;
+		}
+
+		if (v3Studio.supplementContext) {
+			v3Studio.supplementContext = {
+				...v3Studio.supplementContext,
+				mode: 'supplement_generation'
+			};
+			v3Studio.parentSnapshot = null;
+			v3Studio.supplementOptions = [];
+			v3Studio.supplementOptionsError = null;
 		}
 
 		v3Studio.streamCancel?.();
@@ -238,6 +318,9 @@
 				v3Studio.streamCancel?.();
 				v3Studio.streamCancel = null;
 				v3Studio.stage = 'complete';
+				if (v3Studio.supplementContext?.mode === 'supplement_generation') {
+					v3Studio.supplementContext = null;
+				}
 			},
 			onComponentReady: (data) => {
 				const next = applyComponentReadyToCanvas(v3Studio.canvas, data);
@@ -414,9 +497,35 @@
 	{:else if v3Studio.stage === 'clarifying' && v3Studio.clarifications.length}
 		<V3Clarification questions={v3Studio.clarifications} onAnswered={handleClarificationAnswered} />
 	{:else if v3Studio.stage === 'planning'}
-		<V3PlanningState form={v3Studio.form} />
+		<V3PlanningState
+			form={v3Studio.form}
+			planningLabel={pendingSupplementLabel
+				? `Creating your ${pendingSupplementLabel} plan`
+				: undefined}
+			messages={pendingSupplementLabel
+				? [
+						'Reading the parent lesson blueprint…',
+						'Loading the resource rules…',
+						'Creating a focused companion plan…',
+						'Checking the plan against the resource spec…'
+					]
+				: undefined}
+		/>
 	{:else if v3Studio.stage === 'reviewing' && v3Studio.blueprint}
-		<V3BlueprintPreview blueprint={v3Studio.blueprint} onApprove={handleBlueprintApproved} onAdjust={handleBlueprintAdjust} />
+		<V3BlueprintPreview
+			blueprint={v3Studio.blueprint}
+			contextLabel={v3Studio.supplementContext
+				? `${v3Studio.supplementContext.label} plan`
+				: 'Lesson plan'}
+			approveLabel={v3Studio.supplementContext
+				? `Approve and generate ${v3Studio.supplementContext.label}`
+				: 'Approve and generate'}
+			cancelLabel="Back to lesson"
+			parentTitle={v3Studio.supplementContext?.parentTitle ?? null}
+			onCancel={v3Studio.supplementContext ? restoreParentFromSupplementReview : undefined}
+			onApprove={handleBlueprintApproved}
+			onAdjust={handleBlueprintAdjust}
+		/>
 	{:else if v3Studio.stage === 'generating' || v3Studio.stage === 'finalising' || v3Studio.stage === 'complete'}
 		{#if v3Studio.activePack}
 			<div class="mx-auto max-w-4xl px-4 pt-4">
@@ -479,6 +588,16 @@
 		{/if}
 		{#if v3Studio.coherenceHint && v3Studio.stage === 'finalising'}
 			<p class="mx-auto max-w-3xl px-4 pt-6 text-center text-sm text-muted-foreground">{v3Studio.coherenceHint}</p>
+		{/if}
+		{#if v3Studio.stage === 'complete' && v3Studio.generationId}
+			<V3SupplementTray
+				parentGenerationId={v3Studio.generationId}
+				options={v3Studio.supplementOptions}
+				loading={v3Studio.supplementOptionsLoading}
+				error={v3Studio.supplementOptionsError}
+				unavailableReason={v3Studio.supplementOptionsError}
+				onCreatePlan={handleCreateSupplementPlan}
+			/>
 		{/if}
 		{#if v3Studio.activePack}
 			<V3BookletPackView
