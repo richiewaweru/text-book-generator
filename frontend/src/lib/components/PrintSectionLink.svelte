@@ -10,12 +10,12 @@
 	let { generationId, section }: Props = $props();
 
 	const isInteractive = $derived(!!section.simulation);
-const sectionTitle = $derived(section.header?.title ?? 'Interactive section');
+	const sectionTitle = $derived(section.header?.title ?? 'Interactive section');
 	const sectionUrl = $derived.by(() => {
 		if (typeof window === 'undefined') {
 			return '';
 		}
-		return `${window.location.origin}/textbook/${generationId}#section-${section.section_id}`;
+		return `${window.location.origin}/studio/generations/${generationId}#section-${section.section_id}`;
 	});
 	const qrSvg = $derived.by(() => {
 		if (!isInteractive || !sectionUrl) {

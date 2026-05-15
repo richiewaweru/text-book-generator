@@ -1,46 +1,49 @@
 import type { SectionContent } from 'lectio';
-import type {
-	Brevity,
-	ExplanationStyle,
-	ExampleStyle,
-	GenerationMode,
-	PlanningGenerationSpec,
-	ReadingLevel,
-	Tone
-} from './studio';
-import type {
-	BuildMode,
-	BriefBuilderStep,
-	ClassConfidence,
-	ClassLanguageSupport,
-	ClassLearningPreference,
-	ClassPacing,
-	ClassPriorKnowledge,
-	ClassProfile,
-	ClassReadingLevel,
-	BriefReviewRequest,
-	BriefReviewResult,
-	BriefFeasibility,
-	BriefReviewWarning,
-	BriefValidationMessage,
-	BriefValidationRequest,
-	BriefValidationResult,
-	BriefValidationSuggestion,
-	BuilderWarning,
-	TeacherBrief,
-	TeacherBriefDepth,
-	TeacherGradeBand,
-	TeacherGradeLevel,
-	TeacherBriefOutcome,
-	TeacherBriefResourceType,
-	TeacherBriefSupport,
-	TopicResolutionRequest,
-	TopicResolutionResult,
-	TopicResolutionSubtopic
-} from './brief';
 
 export type TeacherRole = 'teacher' | 'tutor' | 'homeschool' | 'instructor';
 export type GradeBand = 'primary' | 'middle' | 'high_school' | 'undergraduate' | 'adult';
+export type GenerationMode = 'draft' | 'balanced' | 'strict' | 'v3';
+export type Tone = 'supportive' | 'neutral' | 'rigorous';
+export type ReadingLevel = 'simple' | 'standard' | 'advanced';
+export type ExplanationStyle = 'concrete-first' | 'concept-first' | 'balanced';
+export type ExampleStyle = 'everyday' | 'academic' | 'exam';
+export type Brevity = 'tight' | 'balanced' | 'expanded';
+export type SectionRole =
+	| 'intro'
+	| 'explain'
+	| 'practice'
+	| 'summary'
+	| 'process'
+	| 'compare'
+	| 'timeline'
+	| 'visual'
+	| 'discover';
+
+export interface VisualPolicy {
+	required: boolean;
+	mode: 'svg' | 'image' | 'none';
+	intent?: string | null;
+	goal?: string | null;
+}
+
+export interface PlanningSectionPlan {
+	section_id: string;
+	title: string;
+	position: number;
+	role: SectionRole;
+	focus: string;
+	components: string[];
+	visual_policy: VisualPolicy | null;
+}
+
+export interface PlanningGenerationSpec {
+	subject: string;
+	context: string;
+	mode: GenerationMode;
+	template_id: string;
+	preset_id: string;
+	sections: PlanningSectionPlan[];
+}
 
 export interface User {
 	id: string;
@@ -566,53 +569,3 @@ export type GenerationStreamEvent =
 	| GenerationFailedEvent
 	| ErrorEvent;
 
-export type {
-	BuildMode,
-	BriefBuilderStep,
-	ClassConfidence,
-	ClassLanguageSupport,
-	ClassLearningPreference,
-	ClassPacing,
-	ClassPriorKnowledge,
-	ClassProfile,
-	ClassReadingLevel,
-	BriefReviewRequest,
-	BriefReviewResult,
-	BriefFeasibility,
-	BriefReviewWarning,
-	BriefValidationMessage,
-	BriefValidationRequest,
-	BriefValidationResult,
-	BriefValidationSuggestion,
-	BuilderWarning,
-	TeacherBrief,
-	TeacherBriefDepth,
-	TeacherGradeBand,
-	TeacherGradeLevel,
-	TeacherBriefOutcome,
-	TeacherBriefResourceType,
-	TeacherBriefSupport,
-	TopicResolutionRequest,
-	TopicResolutionResult,
-	TopicResolutionSubtopic
-} from './brief';
-
-export type {
-	Brevity,
-	ExampleStyle,
-	ExplanationStyle,
-	GenerationMode,
-	GenerationDirectives,
-	PlanningGenerationSpec,
-	PlanningSectionPlan,
-	PlanningStatus,
-	ReadingLevel,
-	ScaffoldLevel,
-	SectionGenerationNotes,
-	SectionRole,
-	StudioState,
-	TemplateAlternative,
-	TemplateDecision,
-	Tone,
-	VisualPolicy
-} from './studio';

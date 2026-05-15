@@ -1,8 +1,5 @@
 <script lang="ts">
 	import type { V3InputForm } from '$lib/types/v3';
-	import { GRADE_BAND_BY_LEVEL } from '$lib/brief/config';
-	import { resolveTopic as resolveBriefTopic } from '$lib/api/teacher-brief';
-	import type { TeacherGradeBand, TeacherGradeLevel } from '$lib/types';
 
 	interface Props {
 		onSubmit: (form: V3InputForm) => void;
@@ -168,45 +165,24 @@
 	}
 
 	async function resolveTopic() {
-		if (!topic.trim() || !grade_level) return;
+		const cleaned = topic.trim();
+		if (!cleaned) return;
 		resolving_topic = true;
 		try {
-			const gradeLevelEnum = toTeacherGradeLevel(grade_level);
-			const gradeBand = GRADE_BAND_BY_LEVEL[gradeLevelEnum];
-			const data = await resolveBriefTopic({
-				raw_topic: topic.trim(),
-				grade_level: gradeLevelEnum,
-				grade_band: gradeBand
-			});
-			subtopic_candidates =
-				(data.candidate_subtopics ?? []).map((c) => ({
-					id: c.id,
-					title: c.title,
-					description: c.description
-				})) ?? [];
+			const parts = cleaned
+				.split(/[,;:()/-]+/)
+				.map((part) => part.trim())
+				.filter((part) => part.length > 2)
+				.slice(0, 3);
+			subtopic_candidates = (parts.length > 0 ? parts : [cleaned]).map((title, index) => ({
+				id: 'local-' + String(index + 1),
+				title,
+				description: 'Use this focus for the generated lesson.'
+			}));
 			subtopics = [];
 		} finally {
 			resolving_topic = false;
 		}
-	}
-
-	function toTeacherGradeLevel(label: string): TeacherGradeLevel {
-		const map: Record<string, TeacherGradeLevel> = {
-			Kindergarten: 'kindergarten',
-			'Grade 1': 'grade_1',
-			'Grade 2': 'grade_2',
-			'Grade 3': 'grade_3',
-			'Grade 4': 'grade_4',
-			'Grade 5': 'grade_5',
-			'Grade 6': 'grade_6',
-			'Grade 7': 'grade_7',
-			'Grade 8': 'grade_8',
-			'Grade 9': 'grade_9',
-			'Grade 10': 'grade_10',
-			'Grade 11': 'grade_11',
-			'Grade 12': 'grade_12'
-		};
-		return map[label] ?? 'mixed';
 	}
 
 	const canSubmit = $derived(grade_level !== '' && subject !== '' && topic.trim().length > 2);

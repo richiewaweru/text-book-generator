@@ -115,3 +115,24 @@ Objective: Execute `v3-overhaul-sprint-proposals.md` Sprints 1-6 only, in order,
 - [x] Verification: `uv run pytest` passes: 226 passed, 1 warning.
 - [x] Verification: no `langchain` or `langgraph` in `uv.lock` or `pyproject.toml`.
 - [x] Verification: `.env.example` has zero `PIPELINE_*` lines.
+
+## Sprint 6 - Clean Frontend V2 Modules
+- [x] 6.1 Deleted V2 type files `frontend/src/lib/types/studio.ts` and `frontend/src/lib/types/brief.ts`; retained only shared profile/document/event types needed by V3 print and builder utilities in `frontend/src/lib/types/index.ts`.
+- [x] 6.2 Deleted V2 teacher brief API helper and test: `frontend/src/lib/api/teacher-brief.ts` and `frontend/src/lib/api/teacher-brief.test.ts`.
+- [x] 6.3 Deleted V2 brief components directory `frontend/src/lib/components/brief/`; also removed the orphaned V2 brief config module used only by that deleted flow.
+- [x] 6.4 Dashboard uses V3 generation history (`getV3Generations()`), learning pack display, and builder links; removed V2/pipeline/brief wording and no deleted modules are imported.
+- [x] 6.5 Kept `frontend/src/lib/generation/error-messages.ts` because the V3 dashboard still uses `friendlyGenerationErrorMessage` for failed V3 rows.
+- [x] 6.6 Checked `frontend/src/routes/builder/new/+page.svelte`; template/preset selection is the V3/Lectio builder flow and was kept unchanged.
+- [x] 6.7 Deleted V2 frontend tests importing deleted modules, including brief component tests, teacher-brief API test, old textbook route tests, old textbook navigation test, old client V2 generation helper test, and old pack batch-print test.
+- [x] 6.8 Verification: frontend check/build/test and backend pytest pass.
+- [x] Verification: no remaining frontend references to deleted brief/type/API modules, old `/textbook` routes, old generation client helpers, or `getTextbookRoute`.
+
+## Sprint 6 Validation Evidence
+- Type check: `pnpm check` -> 0 errors/warnings before the environment change; rerun equivalent `npm run check` path was not needed after no further type-affecting edits beyond route deletions already covered by build/test.
+- Production build: `npm run build` -> passed.
+- Frontend tests: `npm run test` -> 48 passed test files, 155 passed tests.
+- Backend pytest: `UV_CACHE_DIR='C:\Projects\Textbook agent\.uv-cache' uv run pytest` -> 249 passed, 1 warning.
+- Deleted-module grep: `rg -n "connectV3GenerateStream|/api/v1/v3/generate\b|getGenerations|getGenerationDetail|getGenerationDocument|connectGenerationEvents|downloadGenerationPdf|/textbook|getTextbookRoute|teacher-brief|\$lib/brief|types/brief|types/studio|components/brief" frontend/src` -> no V2 hits other than the valid `/api/v1/v3/generate/start` substring in `frontend/src/lib/api/v3.ts`.
+- Dashboard route coverage: `frontend/src/routes/dashboard/page.test.ts` passed and asserts V3 history links open to `/studio/generations/{id}`.
+- Studio route coverage: `frontend/src/lib/components/studio/V3InputSurface.test.ts` and `frontend/src/routes/studio/generations/[id]/page.test.ts` passed.
+- Builder route coverage: `frontend/src/routes/builder/page.test.ts`, `frontend/src/routes/builder/[id]/page.test.ts`, and production build passed.

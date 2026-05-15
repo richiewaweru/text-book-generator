@@ -12,13 +12,10 @@
 	const user = fromStore(authUser);
 	const authed = fromStore(authIsAuthenticated);
 	
-	const isPrintTextbookRoute = $derived(
-		page.url.pathname.startsWith('/textbook/') && page.url.searchParams.get('print') === 'true'
-	);
 	const isPrintStudioRoute = $derived(
 		page.url.pathname.startsWith('/studio/print/') && page.url.searchParams.get('print') === 'true'
 	);
-	const isPrintShellRoute = $derived(isPrintTextbookRoute || isPrintStudioRoute);
+	const isPrintShellRoute = $derived(isPrintStudioRoute);
 
 	onMount(() => {
 		void bootstrapAuth(fetchCurrentUser);

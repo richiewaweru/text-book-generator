@@ -2,7 +2,6 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { getPackStatus } from '$lib/api/learning-pack';
 	import type { PackStatusResponse } from '$lib/types/learning-pack';
-	import { getTextbookRoute } from '$lib/navigation/textbook';
 
 	let {
 		packId,
@@ -55,7 +54,7 @@
 					<p>{resource.phase}</p>
 				</div>
 				{#if resource.generation_id && resource.phase === 'done'}
-					<a href={getTextbookRoute(resource.generation_id)}>Open</a>
+					<a href={`/studio/generations/${resource.generation_id}`}>Open</a>
 				{/if}
 			</div>
 		{/each}

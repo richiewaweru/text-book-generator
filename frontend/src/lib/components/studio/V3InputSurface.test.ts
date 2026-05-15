@@ -4,15 +4,6 @@ import { describe, expect, it, vi } from 'vitest';
 
 import V3InputSurface from './V3InputSurface.svelte';
 
-vi.mock('$lib/api/teacher-brief', () => ({
-	resolveTopic: vi.fn().mockResolvedValue({
-		subject: 'Mathematics',
-		topic: 'Compound area',
-		candidate_subtopics: [{ id: 'a', title: 'L-shapes', description: 'Decompose into rectangles' }],
-		needs_clarification: false,
-		clarification_message: null
-	})
-}));
 
 describe('V3InputSurface', () => {
 	it('submits a comprehensive V3InputForm payload', async () => {
