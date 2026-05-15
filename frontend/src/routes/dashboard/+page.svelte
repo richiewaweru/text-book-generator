@@ -97,7 +97,7 @@
 	{:else if profile}
 		<section class="welcome-section">
 			<div>
-				<p class="eyebrow">Shell + Pipeline</p>
+				<p class="eyebrow">V3 Studio</p>
 				<h1>Welcome back{user.current?.name ? `, ${user.current.name}` : ''}</h1>
 				<p class="subtitle">
 					Your saved teacher profile powers workspace defaults, while Studio remains the place where each lesson gets planned and generated.
@@ -164,27 +164,25 @@
 			<h2>Teacher Studio</h2>
 			<p>
 				The canonical lesson-creation flow now lives in the dedicated studio route. Open it to
-				capture intent, narrow the topic, choose the resource shape, and validate the brief before
-				generation.
+				capture intent, narrow the topic, choose the resource shape, and generate the lesson.
 			</p>
 			<div class="studio-entry studio-entry-prominent">
 				<div class="studio-entry-copy">
 					<p class="studio-kicker">Canonical flow</p>
 					<h3>Create a lesson in Studio</h3>
 					<p>
-						Teachers now build a structured brief first, confirm the scope, and hand a cleaner
+						Teachers now build a structured V3 plan, confirm the scope, and hand a cleaner
 						starting point into the generation system.
 					</p>
 					<div class="studio-features">
 						<span>Topic narrowing</span>
 						<span>Learner context</span>
 						<span>Support selection</span>
-						<span>Brief validation</span>
 					</div>
 				</div>
 				<div class="studio-entry-actions">
 					<a href="/studio" class="studio-link">Open Studio</a>
-					<button class="ghost-link" onclick={() => goto('/studio')}>Resume brief</button>
+					<button class="ghost-link" onclick={() => goto('/studio')}>Resume Studio</button>
 				</div>
 			</div>
 		</section>

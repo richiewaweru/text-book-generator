@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { PackStatusResponse } from '$lib/types/learning-pack';
-	import { getTextbookRoute } from '$lib/navigation/textbook';
 
 	let {
 		packStatus,
@@ -21,7 +20,7 @@
 				<strong>{resource.label}</strong>
 				<p>{resource.resource_type.replaceAll('_', ' ')} · {resource.status}</p>
 				{#if resource.generation_id}
-					<a href={getTextbookRoute(resource.generation_id)}>Open</a>
+					<a href={`/studio/generations/${resource.generation_id}`}>Open</a>
 				{/if}
 			</article>
 		{/each}
