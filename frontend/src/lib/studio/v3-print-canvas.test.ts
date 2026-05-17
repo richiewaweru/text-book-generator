@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { blocksForSection } from './v3-print-fields';
 import { mapPackSectionsToCanvas } from './v3-print-canvas';
 
 describe('mapPackSectionsToCanvas', () => {
@@ -24,5 +25,29 @@ describe('mapPackSectionsToCanvas', () => {
 		const source = [{ section_id: 'practice-1', title: 'Legacy Title' }];
 		const canvas = mapPackSectionsToCanvas(source);
 		expect(canvas[0]?.title).toBe('practice-1');
+	});
+
+	it('preserves ordering metadata and yields ordered print blocks', () => {
+		const source = [
+			{
+				section_id: 'ordered',
+				header: { title: 'Ordered Section' },
+				_component_order: ['diagram', 'explanation'],
+				_component_positions: { diagram: 0, explanation: 1 },
+				explanation: { body: 'Second block' },
+				diagram: { image_url: 'https://cdn.example/first.png', caption: 'First block' }
+			}
+		];
+
+		const canvas = mapPackSectionsToCanvas(source);
+		expect(canvas[0]?.mergedFields._component_order).toEqual(['diagram', 'explanation']);
+		expect(canvas[0]?.mergedFields._component_positions).toEqual({
+			diagram: 0,
+			explanation: 1
+		});
+
+		const blocks = blocksForSection(canvas[0]!);
+		expect(blocks[0]).toEqual({ kind: 'img', src: 'https://cdn.example/first.png', alt: 'First block' });
+		expect(blocks[1]).toEqual({ kind: 'p', text: 'Second block' });
 	});
 });

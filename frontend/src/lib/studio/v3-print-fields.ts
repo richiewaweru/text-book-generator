@@ -146,16 +146,72 @@ const ORDERED_KEYS = [
 	'quiz'
 ] as const;
 
-const SKIP_KEYS = new Set(['section_id', 'header']);
+const SKIP_KEYS = new Set([
+	'section_id',
+	'header',
+	'template_id',
+	'_component_order',
+	'_component_positions'
+]);
+
+function orderedKeysFromMetadata(fields: Record<string, unknown>): string[] {
+	const raw = fields._component_order;
+	if (!Array.isArray(raw)) return [];
+	return raw.filter((key): key is string => typeof key === 'string' && key.trim().length > 0);
+}
 
 export function mergedFieldsToBlocks(
 	fields: Record<string, unknown>,
 	sectionTitleAlt = ''
 ): PrintBlock[] {
 	const blocks: PrintBlock[] = [];
+	const rendered = new Set<string>();
+	const metadataOrder = orderedKeysFromMetadata(fields);
+	const primaryOrder = metadataOrder.length > 0 ? metadataOrder : [...ORDERED_KEYS];
+
+	for (const key of primaryOrder) {
+		if (!Object.prototype.hasOwnProperty.call(fields, key)) continue;
+		rendered.add(key);
+		const val = fields[key];
+		switch (key) {
+			case 'hook':
+				blocks.push(...blocksFromHook(val));
+				break;
+			case 'reading':
+				blocks.push(...blocksFromReading(val));
+				break;
+			case 'explanation':
+				blocks.push(...blocksFromExplanation(val));
+				break;
+			case 'practice':
+				blocks.push(...blocksFromPractice(val));
+				break;
+			case 'diagram':
+				blocks.push(...blocksFromDiagram(val, sectionTitleAlt));
+				break;
+			case 'diagram_series':
+				blocks.push(...blocksFromDiagramSeries(val, sectionTitleAlt));
+				break;
+			default:
+				if (typeof val === 'string') {
+					pushParagraph(blocks, val);
+				} else if (
+					Array.isArray(val) &&
+					val.length > 0 &&
+					val.every((x) => typeof x === 'string')
+				) {
+					const items = (val as string[]).map((s) => s.trim()).filter(Boolean);
+					if (items.length) blocks.push({ kind: 'ul', items });
+				} else {
+					blocks.push(...blocksFromNamedBlock(val));
+				}
+		}
+	}
 
 	for (const key of ORDERED_KEYS) {
+		if (rendered.has(key)) continue;
 		if (!Object.prototype.hasOwnProperty.call(fields, key)) continue;
+		rendered.add(key);
 		const val = fields[key];
 		switch (key) {
 			case 'hook':
@@ -194,7 +250,7 @@ export function mergedFieldsToBlocks(
 
 	const ordered = new Set<string>(ORDERED_KEYS);
 	for (const key of Object.keys(fields).sort()) {
-		if (SKIP_KEYS.has(key) || ordered.has(key)) continue;
+		if (SKIP_KEYS.has(key) || ordered.has(key) || rendered.has(key)) continue;
 		const val = fields[key];
 		if (typeof val === 'string' && val.trim()) {
 			pushParagraph(blocks, val);

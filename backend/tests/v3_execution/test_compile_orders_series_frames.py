@@ -52,6 +52,5 @@ def test_compile_orders_series_falls_back_without_markers() -> None:
     )
     order = next(o for o in bundle.visual_orders if o.visual.attaches_to == "diagram_sequence")
 
-    assert order.visual.mode == "diagram_series"
-    assert len(order.visual.frames) == 1
-    assert order.visual.frames[0].description == "mitosis diagram series"
+    assert order.visual.mode == "diagram"
+    assert order.visual.frames == []

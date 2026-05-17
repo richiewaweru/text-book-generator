@@ -10,6 +10,19 @@
 	}
 
 	let { section, templateId }: Props = $props();
+
+	const orderedFields = $derived.by(() => {
+		const raw = section.mergedFields?._component_order;
+		if (Array.isArray(raw)) {
+			return raw.filter(
+				(field): field is string =>
+					typeof field === 'string' &&
+					field in section.mergedFields &&
+					!field.startsWith('_')
+			);
+		}
+		return section.components.map((component) => component.id);
+	});
 </script>
 
 <div class="v3-canvas-section space-y-4 rounded-xl border border-border/60 bg-muted/20 p-4" id="section-{section.id}">
@@ -27,6 +40,19 @@
 			<V3CanvasComponent {component} />
 		{/each}
 	</div>
+
+	{#if Array.isArray(section.mergedFields?._component_order) && orderedFields.length}
+		<div class="space-y-2 rounded-md border border-border/40 bg-background/60 p-3">
+			<h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Blueprint Order</h4>
+			{#each orderedFields as fieldKey (fieldKey)}
+				{#if section.mergedFields[fieldKey]}
+					<div class="rounded border border-border/30 px-2 py-1 text-xs">
+						<span class="font-medium">{fieldKey}</span>
+					</div>
+				{/if}
+			{/each}
+		</div>
+	{/if}
 
 	{#if section.questions.length}
 		<div class="space-y-2">

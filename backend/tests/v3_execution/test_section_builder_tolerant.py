@@ -185,3 +185,99 @@ def test_no_sections_assemble_when_no_component_outputs_exist() -> None:
     assert sections == []
     assert warnings
     assert all(not d.renderable for d in diagnostics)
+
+
+def test_series_visual_takes_precedence_over_singleton_diagram() -> None:
+    bp = _load_example("james_mitosis_booklet.json")
+    section_id = "diagram_sequence"
+    builder = V3SectionBuilder()
+    section = next(s for s in bp.sections if s.section_id == section_id)
+
+    sections, _warnings, _diagnostics = builder.build_sections(
+        bp,
+        [],
+        [],
+        [
+            GeneratedVisualBlock(
+                visual_id="vs-0",
+                attaches_to=section_id,
+                mode="diagram_series",
+                image_url="https://cdn.example/frame-1.png",
+                frame_index=0,
+                caption="Frame 1",
+                source_work_order_id="wo-series",
+            ),
+            GeneratedVisualBlock(
+                visual_id="vs-1",
+                attaches_to=section_id,
+                mode="diagram_series",
+                image_url="https://cdn.example/frame-2.png",
+                frame_index=1,
+                caption="Frame 2",
+                source_work_order_id="wo-series",
+            ),
+            GeneratedVisualBlock(
+                visual_id="vd-0",
+                attaches_to=section_id,
+                mode="diagram",
+                image_url="https://cdn.example/singleton.png",
+                caption="Singleton",
+                source_work_order_id="wo-singleton",
+            ),
+        ],
+        template_id="guided-concept-path",
+        answer_key=None,
+    )
+
+    bucket = next(s for s in sections if s["section_id"] == section_id)
+    assert "diagram_series" in bucket
+    assert "diagram" not in bucket
+    assert len(bucket["diagram_series"]["diagrams"]) == 2
+
+
+def test_component_order_metadata_matches_emitted_component_sequence() -> None:
+    bp = _load_example("amara_compound_area.json")
+    builder = V3SectionBuilder()
+    sections, _warnings, _diagnostics = builder.build_sections(
+        bp,
+        _build_component_blocks(bp),
+        _build_question_blocks(bp),
+        _build_visual_blocks(bp),
+        template_id="guided-concept-path",
+        answer_key=None,
+    )
+    first = sections[0]
+    expected_fields: list[str] = []
+    expected_positions: dict[str, int] = {}
+    for component in bp.sections[0].components:
+        field = get_section_field_for_component(canonical_component_id(component.component)) or "explanation"
+        if field in first and field not in expected_positions:
+            expected_positions[field] = len(expected_fields)
+            expected_fields.append(field)
+
+    assert first["_component_order"] == expected_fields
+    assert first["_component_positions"] == expected_positions
+
+
+def test_component_order_metadata_excludes_missing_component_fields() -> None:
+    bp = _load_example("amara_compound_area.json")
+    builder = V3SectionBuilder()
+    all_components = _build_component_blocks(bp)
+    removed = all_components[0]
+    components = all_components[1:]
+
+    sections, _warnings, _diagnostics = builder.build_sections(
+        bp,
+        components,
+        _build_question_blocks(bp),
+        _build_visual_blocks(bp),
+        template_id="guided-concept-path",
+        answer_key=None,
+    )
+    section = next(s for s in sections if s["section_id"] == removed.section_id)
+    order = section["_component_order"]
+    positions = section["_component_positions"]
+
+    assert removed.section_field not in order
+    assert removed.section_field not in positions
+    assert positions == {field: idx for idx, field in enumerate(order)}

@@ -65,6 +65,7 @@ class V3SectionBuilder:
                 section_warnings.append(f"Section {section_id} has no planned components.")
 
             emitted_fields: set[str] = set()
+            emitted_order: list[str] = []
 
             for comp in planned_components:
                 planned_id = canonical_component_id(comp.component)
@@ -90,6 +91,7 @@ class V3SectionBuilder:
                     continue
                 emitted_fields.add(field)
                 bucket[field] = block.data
+                emitted_order.append(field)
 
             questions = sorted(
                 questions_by_section.get(section_id, []),
@@ -151,7 +153,7 @@ class V3SectionBuilder:
                     "title": section_plan.title,
                     "diagrams": steps,
                 }
-            if singletons:
+            elif singletons:
                 vis_block = singletons[0]
                 bucket["diagram"] = {
                     "image_url": vis_block.image_url,
@@ -159,12 +161,20 @@ class V3SectionBuilder:
                     "alt_text": vis_block.alt_text or section_plan.title,
                 }
 
+            bucket["_component_order"] = emitted_order
+            bucket["_component_positions"] = {
+                field: idx for idx, field in enumerate(emitted_order)
+            }
+
             simulations = [v for v in visuals_for_section if v.mode == "simulation"]
             if simulations:
                 sim = simulations[0]
                 bucket["simulation"] = {"html_fragment": sim.html_content or "", "caption": sim.caption or ""}
 
-            renderable = any(key not in {"section_id", "template_id"} for key in bucket)
+            renderable = any(
+                key not in {"section_id", "template_id"} and not key.startswith("_")
+                for key in bucket
+            )
             if not renderable:
                 section_warnings.append(
                     f"Section {section_id} has no renderable content after assembly."

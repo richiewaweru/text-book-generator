@@ -196,13 +196,17 @@ def compile_execution_bundle(
         series = "series" in vis.strategy.lower()
         mode = "diagram_series" if series else "diagram"
         dependency = _infer_visual_dependency(vis.section_id, vis.strategy)
+        frames = _extract_series_frames(blueprint, vis.section_id, vis.strategy) if series else []
+        if series and len(frames) < 2:
+            mode = "diagram"
+            frames = []
         plan = VisualPlanItem(
             id=f"vis-{vis.section_id}-{idx}",
             attaches_to=vis.section_id,
             mode=mode,
             purpose=vis.strategy,
             must_show=[vis.strategy] + ([f"density:{vis.density}"] if vis.density else []),
-            frames=_extract_series_frames(blueprint, vis.section_id, vis.strategy) if series else [],
+            frames=frames,
         )
         visual_orders.append(
             VisualGeneratorWorkOrder(

@@ -64,6 +64,39 @@ describe('mergedFieldsToBlocks', () => {
 		const blocks = mergedFieldsToBlocks({ footnote: 'See also page 2.' });
 		expect(blocks).toContainEqual({ kind: 'p', text: 'See also page 2.' });
 	});
+
+	it('uses _component_order when present', () => {
+		const blocks = mergedFieldsToBlocks({
+			_component_order: ['diagram', 'explanation'],
+			explanation: { body: 'Explain second' },
+			diagram: { image_url: 'https://cdn.example/first.png', caption: 'Figure first' }
+		});
+		expect(blocks[0]).toEqual({ kind: 'img', src: 'https://cdn.example/first.png', alt: 'Figure first' });
+		expect(blocks[1]).toEqual({ kind: 'p', text: 'Explain second' });
+	});
+
+	it('falls back to legacy order when _component_order is absent', () => {
+		const blocks = mergedFieldsToBlocks({
+			explanation: { body: 'Explain first' },
+			diagram: { image_url: 'https://cdn.example/second.png', caption: 'Figure second' }
+		});
+		expect(blocks[0]).toEqual({ kind: 'p', text: 'Explain first' });
+		expect(blocks[1]).toEqual({ kind: 'img', src: 'https://cdn.example/second.png', alt: 'Figure second' });
+	});
+
+	it('preserves mixed-content block order from _component_order', () => {
+		const blocks = mergedFieldsToBlocks({
+			_component_order: ['practice', 'diagram', 'explanation'],
+			explanation: { body: 'Explain last' },
+			diagram: { image_url: 'https://cdn.example/mid.png', caption: 'Middle figure' },
+			practice: {
+				problems: [{ question: 'Solve 1' }, { question: 'Solve 2' }]
+			}
+		});
+		expect(blocks[0]).toEqual({ kind: 'ul', items: ['Solve 1', 'Solve 2'] });
+		expect(blocks[1]).toEqual({ kind: 'img', src: 'https://cdn.example/mid.png', alt: 'Middle figure' });
+		expect(blocks[2]).toEqual({ kind: 'p', text: 'Explain last' });
+	});
 });
 
 describe('blocksForSection', () => {
