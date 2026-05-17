@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
+from typing import Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
@@ -37,6 +39,7 @@ from generation.v3_studio.prompts import (
 )
 
 _CALLER = "v3_studio"
+EmitFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 SUPPLEMENT_DEFAULT_DEPTH = {
     "exit_ticket": "quick",
@@ -250,13 +253,90 @@ def _render_resource_spec(
         )
 
 
+def _build_chunked_resource_spec(
+    inferred_resource_type: str | None,
+    duration_minutes: int,
+) -> dict[str, Any]:
+    from resource_specs.loader import get_spec, list_spec_ids
+    from resource_specs.renderer import render_spec_for_prompt
+
+    resource_type = (inferred_resource_type or "lesson").lower().strip().replace(" ", "_")
+    if resource_type not in list_spec_ids():
+        resource_type = "lesson"
+    depth = "quick" if duration_minutes < 20 else "deep" if duration_minutes > 45 else "standard"
+
+    try:
+        spec = get_spec(resource_type)
+        rendered = render_spec_for_prompt(
+            spec,
+            depth=depth,
+            active_roles=[],
+            active_supports=[],
+        )
+        return {
+            "resource_type": resource_type,
+            "depth": depth,
+            "spec": spec.model_dump(mode="json"),
+            "rendered": rendered,
+        }
+    except Exception:
+        return {
+            "resource_type": resource_type,
+            "depth": depth,
+            "spec": {},
+            "rendered": (
+                f"Resource type: {resource_type}\n"
+                "(No detailed spec available for this type — use judgment based on resource intent.)"
+            ),
+        }
+
+
 async def generate_production_blueprint(
     *,
     signals: V3SignalSummary,
     form: V3InputForm,
     clarification_answers: list[V3ClarificationAnswer] | None,
+    architect_mode: Literal["standard", "chunked"] = "standard",
+    generation_id: str | None = None,
+    emit_event: EmitFn | None = None,
     trace_id: str | None = None,
 ) -> ProductionBlueprint:
+    if architect_mode == "chunked":
+        from v3_blueprint.planning.assembler import assemble_blueprint
+        from v3_blueprint.planning.retry import run_stage1_with_retry, run_stage2
+
+        chunked_resource_spec = _build_chunked_resource_spec(
+            inferred_resource_type=signals.inferred_resource_type,
+            duration_minutes=form.duration_minutes,
+        )
+        plan = await run_stage1_with_retry(
+            signals=signals,
+            form=form,
+            resource_spec=chunked_resource_spec,
+            emit_event=emit_event,
+            generation_id=generation_id,
+            trace_id=trace_id,
+        )
+        briefs = await run_stage2(
+            plan=plan,
+            signals=signals,
+            form=form,
+            resource_spec=chunked_resource_spec,
+            emit_event=emit_event,
+            generation_id=generation_id,
+            trace_id=trace_id,
+        )
+        bp = assemble_blueprint(
+            plan,
+            briefs,
+            subject=form.subject.strip() or "General",
+            title=form.topic.strip() or "Generated Lesson",
+            resource_type=(signals.inferred_resource_type or "lesson").strip().lower(),
+        )
+        _validate_blueprint(bp)
+        return bp
+
+    # ── STANDARD PATH — untouched below this line ─────────────────────────
     node = "v3_lesson_architect"
     tid = trace_id or str(uuid.uuid4())
     model = get_v3_model(node)

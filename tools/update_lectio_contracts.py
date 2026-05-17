@@ -178,9 +178,9 @@ def main() -> int:
     _validate_generated_header(adapter_source)
 
     contracts_target = repo_root / "backend" / "contracts"
-    adapter_target = (
-        repo_root / "backend" / "src" / "pipeline" / "types" / "section_content.py"
-    )
+    # Backend consumes the Lectio-generated SectionContent types via `contracts.section_content`.
+    # Keep this file in sync with the installed `lectio` npm package.
+    adapter_target = repo_root / "backend" / "src" / "contracts" / "section_content.py"
 
     copied_contracts = _sync_contracts(contracts_source, contracts_target)
     compat_contracts = _write_legacy_compat_contracts(contracts_target)

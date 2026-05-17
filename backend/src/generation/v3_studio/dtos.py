@@ -175,6 +175,40 @@ class GenerateBlueprintRequest(BaseModel):
     signals: V3SignalSummary
     form: V3InputForm
     clarification_answers: list[V3ClarificationAnswer] = Field(default_factory=list)
+    architect_mode: Literal["standard", "chunked"] = "standard"
+
+
+class V3ChunkedPlanStartRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    signals: V3SignalSummary
+    form: V3InputForm
+    clarification_answers: list[V3ClarificationAnswer] = Field(default_factory=list)
+
+
+class V3ChunkedRegenerateRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    note: str = ""
+
+
+class V3ChunkedRetrySectionRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    section_id: str
+
+
+class V3ChunkedPlanStateDTO(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    generation_id: str
+    stage: str
+    structural_plan: dict[str, Any] | None = None
+    section_briefs: dict[str, Any] = Field(default_factory=dict)
+    failed_sections: list[str] = Field(default_factory=list)
+    blueprint_id: str | None = None
+    execution_started: bool = False
+    next_action: str | None = None
 
 
 class AdjustBlueprintRequest(BaseModel):
@@ -298,6 +332,10 @@ __all__ = [
     "BlueprintPreviewDTO",
     "ClarifyRequest",
     "GenerateBlueprintRequest",
+    "V3ChunkedPlanStartRequest",
+    "V3ChunkedPlanStateDTO",
+    "V3ChunkedRegenerateRequest",
+    "V3ChunkedRetrySectionRequest",
     "ProductionBlueprintEnvelope",
     "V3AppliedLensDTO",
     "V3ClarificationAnswer",

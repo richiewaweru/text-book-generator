@@ -67,7 +67,9 @@ def extract_imports(
     package_root: Path,
     module_prefix: str,
 ) -> list[tuple[int, str]]:
-    tree = ast.parse(file_path.read_text(encoding='utf-8'), filename=str(file_path))
+    # Some Windows editors may write UTF-8 with BOM. `utf-8-sig` strips the BOM
+    # so `ast.parse` doesn't choke on a leading U+FEFF.
+    tree = ast.parse(file_path.read_text(encoding='utf-8-sig'), filename=str(file_path))
     current_module = module_name_for_file(file_path, package_root, module_prefix)
     imports: list[tuple[int, str]] = []
 

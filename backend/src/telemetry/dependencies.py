@@ -1,4 +1,4 @@
-﻿from functools import lru_cache
+from functools import lru_cache
 
 from core.database.session import async_session_factory
 from telemetry.repositories.sql_llm_call_repo import SqlLLMCallRepository

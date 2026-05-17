@@ -17,7 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from core.config import settings
 from core.rate_limit import limiter
 from core.database.migrations import upgrade_database
-from core.database.session import async_session_factory, engine
+from core.database.session import engine
 from core.errors import register_error_handlers
 from core.health.routes import configure_health_extensions, router as health_router
 from core.logging import configure_logging

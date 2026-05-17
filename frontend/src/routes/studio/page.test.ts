@@ -1,0 +1,259 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+	approveChunkedPlan: vi.fn(),
+	adjustBlueprint: vi.fn(),
+	connectV3StudioGenerationStream: vi.fn(() => vi.fn()),
+	getChunkedPlanStatus: vi.fn(),
+	createV3SupplementBlueprint: vi.fn(),
+	downloadV3GenerationPdf: vi.fn(),
+	extractSignals: vi.fn(),
+	fetchV3Document: vi.fn(),
+	getV3GenerationBlueprint: vi.fn(),
+	generateBlueprint: vi.fn(),
+	getClarifications: vi.fn(),
+	getV3SupplementOptions: vi.fn(),
+	regenerateChunkedPlan: vi.fn(),
+	retryChunkedSection: vi.fn(),
+	startChunkedPlan: vi.fn(),
+	startV3Generation: vi.fn()
+}));
+
+vi.mock('$lib/api/v3', () => ({
+	approveChunkedPlan: mocks.approveChunkedPlan,
+	adjustBlueprint: mocks.adjustBlueprint,
+	connectV3StudioGenerationStream: mocks.connectV3StudioGenerationStream,
+	getChunkedPlanStatus: mocks.getChunkedPlanStatus,
+	createV3SupplementBlueprint: mocks.createV3SupplementBlueprint,
+	downloadV3GenerationPdf: mocks.downloadV3GenerationPdf,
+	extractSignals: mocks.extractSignals,
+	fetchV3Document: mocks.fetchV3Document,
+	getV3GenerationBlueprint: mocks.getV3GenerationBlueprint,
+	generateBlueprint: mocks.generateBlueprint,
+	getClarifications: mocks.getClarifications,
+	getV3SupplementOptions: mocks.getV3SupplementOptions,
+	regenerateChunkedPlan: mocks.regenerateChunkedPlan,
+	retryChunkedSection: mocks.retryChunkedSection,
+	startChunkedPlan: mocks.startChunkedPlan,
+	startV3Generation: mocks.startV3Generation
+}));
+
+vi.mock('$lib/components/studio/V3InputSurface.svelte', async () => ({
+	default: (await import('./__fixtures__/MockGeneric.svelte')).default
+}));
+vi.mock('$lib/components/studio/V3PlanningState.svelte', async () => ({
+	default: (await import('./__fixtures__/MockGeneric.svelte')).default
+}));
+vi.mock('$lib/components/studio/V3SignalConfirmation.svelte', async () => ({
+	default: (await import('./__fixtures__/MockGeneric.svelte')).default
+}));
+vi.mock('$lib/components/studio/V3Clarification.svelte', async () => ({
+	default: (await import('./__fixtures__/MockGeneric.svelte')).default
+}));
+vi.mock('$lib/components/studio/V3ArchitectModeToggle.svelte', async () => ({
+	default: (await import('./__fixtures__/MockGeneric.svelte')).default
+}));
+vi.mock('$lib/components/studio/V3BlueprintPreview.svelte', async () => ({
+	default: (await import('./__fixtures__/MockGeneric.svelte')).default
+}));
+vi.mock('$lib/components/studio/V3Canvas.svelte', async () => ({
+	default: (await import('./__fixtures__/MockGeneric.svelte')).default
+}));
+vi.mock('$lib/components/studio/V3BookletPackView.svelte', async () => ({
+	default: (await import('./__fixtures__/MockGeneric.svelte')).default
+}));
+vi.mock('$lib/components/studio/V3SupplementTray.svelte', async () => ({
+	default: (await import('./__fixtures__/MockGeneric.svelte')).default
+}));
+
+import StudioPage from './+page.svelte';
+import { resetV3Studio, v3Studio } from '$lib/stores/v3-studio.svelte';
+
+describe('studio chunked URL resume', () => {
+	beforeEach(() => {
+		resetV3Studio();
+		mocks.approveChunkedPlan.mockReset();
+		mocks.connectV3StudioGenerationStream.mockReset();
+		mocks.connectV3StudioGenerationStream.mockImplementation(() => vi.fn());
+		mocks.getChunkedPlanStatus.mockReset();
+		mocks.fetchV3Document.mockReset();
+		mocks.getV3GenerationBlueprint.mockReset();
+		window.history.replaceState({}, '', '/studio');
+	});
+
+	afterEach(() => {
+		cleanup();
+	});
+
+	it('hydrates plan review from generation_id query when plan is ready', async () => {
+		window.history.replaceState({}, '', '/studio?generation_id=gen-plan');
+		mocks.getChunkedPlanStatus.mockResolvedValue({
+			generation_id: 'gen-plan',
+			stage: 'plan_ready',
+			structural_plan: {
+				lesson_mode: 'first_exposure',
+				lesson_intent: { goal: 'Goal', structure_rationale: 'Why' },
+				anchor: { example: 'Anchor', reuse_scope: 'Reuse' },
+				sections: [],
+				question_plan: []
+			},
+			section_briefs: {},
+			failed_sections: [],
+			blueprint_id: null,
+			execution_started: false,
+			next_action: 'approve_or_regenerate'
+		});
+
+		render(StudioPage);
+
+		await waitFor(() => expect(mocks.getChunkedPlanStatus).toHaveBeenCalledWith('gen-plan'));
+		expect(await screen.findByText('Structural plan')).toBeTruthy();
+		expect(await screen.findByRole('button', { name: /adjust \(regenerate with note\)/i })).toBeTruthy();
+		expect(v3Studio.stage).toBe('chunked_review');
+		expect(mocks.connectV3StudioGenerationStream).not.toHaveBeenCalled();
+	});
+
+	it('reconnects stream for in-flight stage2 on URL resume', async () => {
+		window.history.replaceState({}, '', '/studio?generation_id=gen-live');
+		mocks.getChunkedPlanStatus.mockResolvedValue({
+			generation_id: 'gen-live',
+			stage: 'stage2_running',
+			structural_plan: {
+				lesson_mode: 'first_exposure',
+				lesson_intent: { goal: 'Goal', structure_rationale: 'Why' },
+				anchor: { example: 'Anchor', reuse_scope: 'Reuse' },
+				sections: [
+					{
+						id: 'orient',
+						title: 'Orient',
+						role: 'orient',
+						visual_required: false,
+						transition_note: null,
+						components: []
+					}
+				],
+				question_plan: []
+			},
+			section_briefs: {},
+			failed_sections: [],
+			blueprint_id: null,
+			execution_started: false,
+			next_action: 'wait_for_stage2'
+		});
+		mocks.approveChunkedPlan.mockResolvedValue({
+			generation_id: 'gen-live',
+			stage: 'stage2_running',
+			structural_plan: {
+				lesson_mode: 'first_exposure',
+				lesson_intent: { goal: 'Goal', structure_rationale: 'Why' },
+				anchor: { example: 'Anchor', reuse_scope: 'Reuse' },
+				sections: [
+					{
+						id: 'orient',
+						title: 'Orient',
+						role: 'orient',
+						visual_required: false,
+						transition_note: null,
+						components: []
+					}
+				],
+				question_plan: []
+			},
+			section_briefs: {},
+			failed_sections: [],
+			blueprint_id: null,
+			execution_started: false,
+			next_action: 'wait_for_stage2'
+		});
+
+		render(StudioPage);
+
+		await waitFor(() => expect(mocks.getChunkedPlanStatus).toHaveBeenCalledWith('gen-live'));
+		await waitFor(() => expect(mocks.approveChunkedPlan).toHaveBeenCalledWith('gen-live'));
+		await waitFor(() => expect(mocks.connectV3StudioGenerationStream).toHaveBeenCalledWith('gen-live', expect.any(Object)));
+		expect(v3Studio.stage).toBe('planning');
+	});
+
+	it('fails soft when generation_id cannot be resumed', async () => {
+		window.history.replaceState({}, '', '/studio?generation_id=gen-missing');
+		mocks.getChunkedPlanStatus.mockRejectedValue(new Error('404'));
+
+		render(StudioPage);
+
+		await waitFor(() => expect(mocks.getChunkedPlanStatus).toHaveBeenCalledWith('gen-missing'));
+		await waitFor(() => expect(v3Studio.stage).toBe('input'));
+		expect(await screen.findByRole('alert')).toBeTruthy();
+		expect(screen.getByRole('alert').textContent).toMatch(/could not resume/i);
+	});
+
+	it('transitions blocked -> retry -> generating', async () => {
+		window.history.replaceState({}, '', '/studio?generation_id=gen-blocked');
+		mocks.getChunkedPlanStatus.mockResolvedValue({
+			generation_id: 'gen-blocked',
+			stage: 'assembly_blocked',
+			structural_plan: {
+				lesson_mode: 'first_exposure',
+				lesson_intent: { goal: 'Goal', structure_rationale: 'Why' },
+				anchor: { example: 'Anchor', reuse_scope: 'Reuse' },
+				sections: [
+					{
+						id: 'orient',
+						title: 'Orient',
+						role: 'orient',
+						visual_required: false,
+						transition_note: null,
+						components: []
+					}
+				],
+				question_plan: []
+			},
+			section_briefs: { orient: null },
+			failed_sections: ['orient'],
+			blueprint_id: null,
+			execution_started: false,
+			next_action: 'retry_failed_sections'
+		});
+		mocks.retryChunkedSection.mockResolvedValue({
+			generation_id: 'gen-blocked',
+			stage: 'blueprint_ready',
+			structural_plan: {
+				lesson_mode: 'first_exposure',
+				lesson_intent: { goal: 'Goal', structure_rationale: 'Why' },
+				anchor: { example: 'Anchor', reuse_scope: 'Reuse' },
+				sections: [
+					{
+						id: 'orient',
+						title: 'Orient',
+						role: 'orient',
+						visual_required: false,
+						transition_note: null,
+						components: []
+					}
+				],
+				question_plan: []
+			},
+			section_briefs: {},
+			failed_sections: [],
+			blueprint_id: 'bp-1',
+			execution_started: true,
+			next_action: 'generation_running'
+		});
+
+		render(StudioPage);
+		await waitFor(() => expect(mocks.getChunkedPlanStatus).toHaveBeenCalledWith('gen-blocked'));
+		expect(v3Studio.stage).toBe('chunked_blocked');
+
+		await fireEvent.click(await screen.findByRole('button', { name: /retry orient/i }));
+		await waitFor(() =>
+			expect(mocks.retryChunkedSection).toHaveBeenCalledWith({
+				generation_id: 'gen-blocked',
+				section_id: 'orient'
+			})
+		);
+		await waitFor(() => expect(v3Studio.stage).toBe('generating'));
+		await waitFor(() => expect(mocks.connectV3StudioGenerationStream).toHaveBeenCalledWith('gen-blocked', expect.any(Object)));
+	});
+});

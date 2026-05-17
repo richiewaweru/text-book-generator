@@ -8,6 +8,8 @@ from core.llm import ModelFamily, ModelSlot, ModelSpec, build_model
 V3_SIGNAL_EXTRACTOR = "v3_signal_extractor"
 V3_CLARIFY = "v3_clarify"
 V3_LESSON_ARCHITECT = "v3_lesson_architect"
+V3_STAGE1_PLANNER = "v3_stage1_planner"
+V3_STAGE2_EXPANDER = "v3_stage2_expander"
 V3_BLUEPRINT_ADJUST = "v3_blueprint_adjust"
 V3_SECTION_WRITER = "v3_section_writer"
 V3_QUESTION_WRITER = "v3_question_writer"
@@ -20,6 +22,8 @@ V3_NODE_SLOTS: dict[str, ModelSlot] = {
     V3_SIGNAL_EXTRACTOR: ModelSlot.FAST,
     V3_CLARIFY: ModelSlot.FAST,
     V3_LESSON_ARCHITECT: ModelSlot.PREMIUM,
+    V3_STAGE1_PLANNER: ModelSlot.PREMIUM,
+    V3_STAGE2_EXPANDER: ModelSlot.STANDARD,
     V3_BLUEPRINT_ADJUST: ModelSlot.STANDARD,
     V3_SECTION_WRITER: ModelSlot.STANDARD,
     V3_QUESTION_WRITER: ModelSlot.STANDARD,
@@ -156,6 +160,8 @@ __all__ = [
     "V3_QUESTION_WRITER",
     "V3_SECTION_WRITER",
     "V3_SIGNAL_EXTRACTOR",
+    "V3_STAGE1_PLANNER",
+    "V3_STAGE2_EXPANDER",
     "get_v3_model",
     "get_v3_slot",
     "get_v3_spec",

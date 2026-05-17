@@ -5,7 +5,9 @@ import { ensureOk } from '$lib/api/errors';
 import { apiFetch, buildApiUrl } from '$lib/api/client';
 import { authToken } from '$lib/stores/auth';
 import type {
+	ArchitectMode,
 	BlueprintPreviewDTO,
+	V3ChunkedPlanState,
 	V3CreateSupplementBlueprintResponse,
 	V3GenerationDetail,
 	V3GenerationHistoryItem,
@@ -51,6 +53,7 @@ export async function generateBlueprint(payload: {
 	signals: V3SignalSummary;
 	form: V3InputForm;
 	clarification_answers: V3ClarificationAnswer[];
+	architect_mode: ArchitectMode;
 }): Promise<BlueprintPreviewDTO> {
 	const res = await apiFetch('/api/v1/v3/blueprint', {
 		method: 'POST',
@@ -59,6 +62,70 @@ export async function generateBlueprint(payload: {
 	});
 	await ensureOk(res, 'Could not build the lesson plan.');
 	return res.json() as Promise<BlueprintPreviewDTO>;
+}
+
+export async function startChunkedPlan(payload: {
+	signals: V3SignalSummary;
+	form: V3InputForm;
+	clarification_answers: V3ClarificationAnswer[];
+}): Promise<V3ChunkedPlanState> {
+	const res = await apiFetch('/api/v1/v3/chunked/plan/start', {
+		method: 'POST',
+		headers: bearerHeaders(),
+		body: JSON.stringify(payload)
+	});
+	await ensureOk(res, 'Could not build the structural lesson plan.');
+	return res.json() as Promise<V3ChunkedPlanState>;
+}
+
+export async function approveChunkedPlan(generationId: string): Promise<V3ChunkedPlanState> {
+	const res = await apiFetch(`/api/v1/v3/chunked/${encodeURIComponent(generationId)}/approve`, {
+		method: 'POST',
+		headers: bearerHeaders()
+	});
+	await ensureOk(res, 'Could not start section expansion.');
+	return res.json() as Promise<V3ChunkedPlanState>;
+}
+
+export async function regenerateChunkedPlan(payload: {
+	generation_id: string;
+	note?: string;
+}): Promise<V3ChunkedPlanState> {
+	const res = await apiFetch(
+		`/api/v1/v3/chunked/${encodeURIComponent(payload.generation_id)}/regenerate`,
+		{
+			method: 'POST',
+			headers: bearerHeaders(),
+			body: JSON.stringify({ note: payload.note ?? '' })
+		}
+	);
+	await ensureOk(res, 'Could not regenerate the structural plan.');
+	return res.json() as Promise<V3ChunkedPlanState>;
+}
+
+export async function retryChunkedSection(payload: {
+	generation_id: string;
+	section_id: string;
+}): Promise<V3ChunkedPlanState> {
+	const res = await apiFetch(
+		`/api/v1/v3/chunked/${encodeURIComponent(payload.generation_id)}/retry-section`,
+		{
+			method: 'POST',
+			headers: bearerHeaders(),
+			body: JSON.stringify({ section_id: payload.section_id })
+		}
+	);
+	await ensureOk(res, 'Could not retry this section.');
+	return res.json() as Promise<V3ChunkedPlanState>;
+}
+
+export async function getChunkedPlanStatus(generationId: string): Promise<V3ChunkedPlanState> {
+	const res = await apiFetch(`/api/v1/v3/chunked/${encodeURIComponent(generationId)}/status`, {
+		method: 'GET',
+		headers: bearerHeaders()
+	});
+	await ensureOk(res, 'Could not load chunked planning status.');
+	return res.json() as Promise<V3ChunkedPlanState>;
 }
 
 export async function adjustBlueprint(payload: {
@@ -102,6 +169,13 @@ export type V3StudioStreamHandlers = {
 	onComponentPatched?: (data: Record<string, unknown>) => void;
 	onGenerationComplete?: (data: Record<string, unknown>) => void;
 	onGenerationWarning?: (data: Record<string, unknown>) => void;
+	onGenerationStarting?: (data: Record<string, unknown>) => void;
+	onPlanReady?: (data: Record<string, unknown>) => void;
+	onStage2SectionStart?: (data: Record<string, unknown>) => void;
+	onStage2SectionRetry?: (data: Record<string, unknown>) => void;
+	onStage2SectionDone?: (data: Record<string, unknown>) => void;
+	onStage2SectionFailed?: (data: Record<string, unknown>) => void;
+	onStage2Complete?: (data: Record<string, unknown>) => void;
 	onOpen?: () => void;
 	onError?: (err: unknown) => void;
 };
@@ -133,6 +207,15 @@ export async function getV3GenerationDetail(generationId: string): Promise<V3Gen
 	});
 	await ensureOk(res, 'Could not load V3 generation detail.');
 	return res.json() as Promise<V3GenerationDetail>;
+}
+
+export async function getV3GenerationBlueprint(generationId: string): Promise<BlueprintPreviewDTO> {
+	const res = await apiFetch(`/api/v1/v3/generations/${encodeURIComponent(generationId)}/blueprint`, {
+		method: 'GET',
+		headers: bearerHeaders()
+	});
+	await ensureOk(res, 'Could not load generation blueprint.');
+	return res.json() as Promise<BlueprintPreviewDTO>;
 }
 
 export async function getV3SupplementOptions(
@@ -231,6 +314,27 @@ export function connectV3StudioGenerationStream(
 					break;
 				case 'generation_warning':
 					handlers.onGenerationWarning?.(payload);
+					break;
+				case 'generation_starting':
+					handlers.onGenerationStarting?.(payload);
+					break;
+				case 'plan_ready':
+					handlers.onPlanReady?.(payload);
+					break;
+				case 'stage2_section_start':
+					handlers.onStage2SectionStart?.(payload);
+					break;
+				case 'stage2_section_retry':
+					handlers.onStage2SectionRetry?.(payload);
+					break;
+				case 'stage2_section_done':
+					handlers.onStage2SectionDone?.(payload);
+					break;
+				case 'stage2_section_failed':
+					handlers.onStage2SectionFailed?.(payload);
+					break;
+				case 'stage2_complete':
+					handlers.onStage2Complete?.(payload);
 					break;
 				default:
 					break;

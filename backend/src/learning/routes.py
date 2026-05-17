@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from core.auth.middleware import get_current_user
 from core.database.models import LearningPackModel
 from core.database.session import async_session_factory
-from core.dependencies import get_settings
 from core.entities.user import User
 from core.llm import build_model, run_llm
 from core.rate_limit import limiter

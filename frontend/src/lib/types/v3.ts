@@ -49,6 +49,54 @@ export interface V3ClarificationAnswer {
 	answer: string;
 }
 
+export type ArchitectMode = 'standard' | 'chunked';
+
+export interface V3StructuralPlanComponent {
+	slug: string;
+	purpose: string;
+}
+
+export interface V3StructuralPlanSection {
+	id: string;
+	title: string;
+	role: string;
+	visual_required: boolean;
+	transition_note: string | null;
+	components: V3StructuralPlanComponent[];
+}
+
+export interface V3StructuralPlanQuestion {
+	question_id: string;
+	section_id: string;
+	temperature: 'warm' | 'medium' | 'cold' | 'transfer';
+	diagram_required: boolean;
+}
+
+export interface V3StructuralPlan {
+	lesson_mode: string;
+	lesson_intent: {
+		goal: string;
+		structure_rationale: string;
+	};
+	anchor: {
+		example: string;
+		reuse_scope: string;
+	};
+	sections: V3StructuralPlanSection[];
+	question_plan: V3StructuralPlanQuestion[];
+}
+
+export interface V3ChunkedPlanState {
+	generation_id: string;
+	stage: string;
+	structural_plan: V3StructuralPlan | null;
+	section_briefs: Record<string, unknown>;
+	failed_sections: string[];
+	blueprint_id: string | null;
+	execution_started: boolean;
+	next_action: string | null;
+}
+
 export interface V3AppliedLens {
 	id: string;
 	label: string;
@@ -271,6 +319,8 @@ export type V3Stage =
 	| 'confirming'
 	| 'clarifying'
 	| 'planning'
+	| 'chunked_review'
+	| 'chunked_blocked'
 	| 'reviewing'
 	| 'generating'
 	| 'finalising'

@@ -19,9 +19,26 @@ from core.database.session import async_session_factory
 from core.dependencies import get_jwt_handler, get_settings
 from core.entities.user import User
 from v3_blueprint.models import ProductionBlueprint
+from v3_blueprint.planning.assembler import assemble_blueprint
+from v3_blueprint.planning.models import (
+    BlueprintAssemblyBlocked,
+    SectionBrief,
+    Stage1PlanFailure,
+    StructuralPlan,
+)
+from v3_blueprint.planning.persistence import (
+    load_chunked_state,
+    persist_chunked_state,
+    resume_stage2,
+)
+from v3_blueprint.planning.retry import (
+    retry_failed_section,
+    run_stage1_with_retry,
+)
 from v3_execution.runtime.runner import sse_event_stream
 
 from generation.v3_studio.agents import (
+    _validate_blueprint,
     adjust_production_blueprint,
     extract_signals,
     generate_production_blueprint,
@@ -36,6 +53,10 @@ from generation.v3_studio.dtos import (
     BlueprintPreviewDTO,
     ClarifyRequest,
     GenerateBlueprintRequest,
+    V3ChunkedPlanStartRequest,
+    V3ChunkedPlanStateDTO,
+    V3ChunkedRegenerateRequest,
+    V3ChunkedRetrySectionRequest,
     V3CreateSupplementBlueprintRequest,
     V3CreateSupplementBlueprintResponse,
     V3GenerationDetailDTO,
@@ -55,7 +76,8 @@ from generation.v3_studio.supplement_rules import (
     assert_supplement_allowed,
     parent_resource_type_from_artifact,
 )
-from resource_specs.loader import list_spec_ids
+from resource_specs.loader import get_spec, list_spec_ids
+from resource_specs.renderer import render_spec_for_prompt
 from generation.v3_studio.preview_mapper import blueprint_to_preview_dto
 from generation.v3_studio.generation_writer import V3GenerationWriter
 from generation.v3_studio.planning_artifact import build_planning_artifact
@@ -68,6 +90,7 @@ from telemetry.v3_trace.writer import V3TraceWriter
 logger = logging.getLogger(__name__)
 
 v3_studio_router = APIRouter(prefix="/v3", tags=["v3-studio"])
+_chunked_stage2_tasks: dict[str, asyncio.Task[None]] = {}
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -113,6 +136,101 @@ def _template_id(model: GenerationModel) -> str:
     )
 
 
+def _render_chunked_sse(event: str, payload: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+
+def _normalize_chunked_state(generation_id: str, state: dict[str, Any]) -> V3ChunkedPlanStateDTO:
+    next_action: str | None = None
+    stage = str(state.get("stage") or "unknown")
+    if stage == "plan_ready":
+        next_action = "approve_or_regenerate"
+    elif stage == "stage2_running":
+        next_action = "wait_for_stage2"
+    elif stage == "assembly_blocked":
+        next_action = "retry_failed_sections"
+    elif stage == "blueprint_ready":
+        next_action = "generation_running"
+    elif stage == "complete":
+        next_action = "done"
+
+    return V3ChunkedPlanStateDTO(
+        generation_id=generation_id,
+        stage=stage,
+        structural_plan=state.get("structural_plan")
+        if isinstance(state.get("structural_plan"), dict)
+        else None,
+        section_briefs=state.get("section_briefs")
+        if isinstance(state.get("section_briefs"), dict)
+        else {},
+        failed_sections=[
+            str(section)
+            for section in state.get("failed_sections", [])
+            if isinstance(section, str)
+        ]
+        if isinstance(state.get("failed_sections"), list)
+        else [],
+        blueprint_id=state.get("blueprint_id")
+        if isinstance(state.get("blueprint_id"), str)
+        else None,
+        execution_started=bool(state.get("execution_started") is True),
+        next_action=next_action,
+    )
+
+
+def _build_chunked_resource_spec(
+    *,
+    inferred_resource_type: str | None,
+    duration_minutes: int,
+) -> dict[str, Any]:
+    resource_type = (inferred_resource_type or "lesson").lower().strip().replace(" ", "_")
+    if resource_type not in list_spec_ids():
+        resource_type = "lesson"
+    depth = "quick" if duration_minutes < 20 else "deep" if duration_minutes > 45 else "standard"
+
+    try:
+        spec = get_spec(resource_type)
+        rendered = render_spec_for_prompt(
+            spec,
+            depth=depth,
+            active_roles=[],
+            active_supports=[],
+        )
+        return {
+            "resource_type": resource_type,
+            "depth": depth,
+            "spec": spec.model_dump(mode="json"),
+            "rendered": rendered,
+        }
+    except Exception:
+        return {
+            "resource_type": resource_type,
+            "depth": depth,
+            "spec": {},
+            "rendered": (
+                f"Resource type: {resource_type}\n"
+                "(No detailed spec available for this type — use judgment based on resource intent.)"
+            ),
+        }
+
+
+def _apply_clarifications_to_form(form: V3InputForm, clarification_answers: list[Any]) -> V3InputForm:
+    if not clarification_answers:
+        return form
+    clar_lines: list[str] = []
+    for item in clarification_answers:
+        question = getattr(item, "question", None)
+        answer = getattr(item, "answer", None)
+        if isinstance(question, str) and isinstance(answer, str):
+            clar_lines.append(f"Q: {question}\nA: {answer}")
+    if not clar_lines:
+        return form
+    clar_text = "Clarifications:\n" + "\n".join(clar_lines)
+    existing = form.free_text.strip()
+    merged_free_text = f"{existing}\n\n{clar_text}" if existing else clar_text
+    return form.model_copy(update={"free_text": merged_free_text})
+
+
 @v3_studio_router.post("/signals", response_model=V3SignalSummary)
 async def post_signals(
     body: V3InputForm,
@@ -141,6 +259,7 @@ async def post_blueprint(
             signals=body.signals,
             form=body.form,
             clarification_answers=body.clarification_answers,
+            architect_mode=body.architect_mode,
             trace_id=str(uuid.uuid4()),
         )
         blueprint_id = str(uuid.uuid4())
@@ -168,6 +287,695 @@ async def post_blueprint(
             status_code=500,
             detail=f"{type(exc).__name__}: {str(exc)[:400]}",
         ) from exc
+
+
+async def _ensure_chunked_generation_row(
+    *,
+    generation_id: str,
+    user_id: str,
+    subject: str,
+    context: str,
+    section_count: int | None = None,
+) -> None:
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        if model is None:
+            session.add(
+                GenerationModel(
+                    id=generation_id,
+                    user_id=user_id,
+                    subject=subject or "General",
+                    context=context or "Chunked plan",
+                    mode="v3",
+                    status="pending",
+                    requested_template_id="guided-concept-path",
+                    resolved_template_id="guided-concept-path",
+                    requested_preset_id="v3-studio",
+                    resolved_preset_id="v3-studio",
+                    section_count=section_count,
+                )
+            )
+        else:
+            model.user_id = user_id
+            model.subject = subject or model.subject
+            model.context = context or model.context
+            model.mode = "v3"
+            model.status = "pending"
+            model.requested_template_id = "guided-concept-path"
+            model.resolved_template_id = "guided-concept-path"
+            model.requested_preset_id = "v3-studio"
+            model.resolved_preset_id = "v3-studio"
+            if section_count is not None:
+                model.section_count = section_count
+        await session.commit()
+
+
+async def _chunked_emit_event(generation_id: str, event: str, payload: dict[str, Any]) -> None:
+    queue = await v3_studio_store.get_queue(generation_id)
+    if queue is None:
+        return
+    await queue.put(_render_chunked_sse(event, payload))
+
+
+async def _load_owned_generation(
+    generation_id: str,
+    user_id: str,
+) -> GenerationModel:
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        if model is None or model.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Generation not found")
+        return model
+
+
+def _section_briefs_from_state(plan: StructuralPlan, state: dict[str, Any]) -> list[SectionBrief]:
+    section_briefs_raw = state.get("section_briefs")
+    section_briefs_map = section_briefs_raw if isinstance(section_briefs_raw, dict) else {}
+    failed_sections = {
+        item for item in state.get("failed_sections", [])
+        if isinstance(item, str)
+    }
+
+    briefs: list[SectionBrief] = []
+    for section in plan.sections:
+        persisted = section_briefs_map.get(section.id)
+        if isinstance(persisted, dict):
+            briefs.append(SectionBrief.model_validate(persisted))
+            continue
+
+        placeholder = SectionBrief(
+            section_id=section.id,
+            components=[],
+            question_briefs=[],
+            visual_strategy=None,
+        )
+        if section.id in failed_sections:
+            placeholder._failed = True
+            placeholder._errors = ["Section failed in prior attempt."]
+        briefs.append(placeholder)
+    return briefs
+
+
+async def _maybe_mark_chunked_complete(
+    generation_id: str,
+    *,
+    event_type: str,
+) -> None:
+    if event_type != "resource_finalised":
+        return
+    try:
+        state = await load_chunked_state(generation_id)
+    except Exception:  # noqa: BLE001
+        return
+    if not isinstance(state, dict) or not state:
+        return
+    await persist_chunked_state(
+        generation_id,
+        {
+            "stage": "complete",
+        },
+    )
+
+
+async def _start_generation_from_chunked_blueprint(
+    *,
+    generation_id: str,
+    blueprint_id: str,
+    blueprint: ProductionBlueprint,
+    form: V3InputForm | None,
+    user_id: str,
+    queue: asyncio.Queue[str | None],
+) -> None:
+    trace_repo = get_v3_trace_repository()
+    trace_id = str(uuid.uuid4())
+    trace_writer = V3TraceWriter(
+        repository=trace_repo,
+        trace_id=trace_id,
+        generation_id=generation_id,
+    )
+    generation_writer = V3GenerationWriter(async_session_factory)
+    template_id = "guided-concept-path"
+    try:
+        await trace_writer.start_run(
+            user_id=user_id,
+            blueprint_id=blueprint_id,
+            template_id=template_id,
+            title=blueprint.metadata.title,
+            subject=blueprint.metadata.subject,
+        )
+        component_count = sum(len(section.components) for section in blueprint.sections)
+        visual_required_count = sum(1 for section in blueprint.sections if section.visual_required)
+        lenses = [lens.lens_id for lens in blueprint.applied_lenses]
+        await trace_writer.record_blueprint_snapshot(
+            blueprint_id=blueprint_id,
+            template_id=template_id,
+            section_count=len(blueprint.sections),
+            section_ids=[section.section_id for section in blueprint.sections],
+            component_count=component_count,
+            visual_required_count=visual_required_count,
+            question_count=len(blueprint.question_plan),
+            lenses=lenses,
+        )
+        await telemetry_monitor.initialise_v3_recorder(
+            generation_id=generation_id,
+            user_id=str(user_id),
+            blueprint_title=blueprint.metadata.title,
+            subject=blueprint.metadata.subject,
+            template_id=template_id,
+        )
+        await generation_writer.upsert_started(
+            generation_id=generation_id,
+            user_id=user_id,
+            subject=blueprint.metadata.subject,
+            context=blueprint.metadata.title,
+            template_id=template_id,
+            section_count=len(blueprint.sections),
+            planned_visuals=visual_required_count,
+            planned_questions=len(blueprint.question_plan),
+            component_count=component_count,
+        )
+        artifact = build_planning_artifact(
+            generation_id=generation_id,
+            blueprint_id=blueprint_id,
+            template_id=template_id,
+            blueprint=blueprint,
+            form=form,
+            source={"kind": "teacher_approved_blueprint"},
+        )
+        await generation_writer.write_planning_artifact(
+            generation_id=generation_id,
+            user_id=user_id,
+            artifact=artifact,
+        )
+        await _chunked_emit_event(
+            generation_id,
+            "generation_starting",
+            {"generation_id": generation_id, "blueprint_id": blueprint_id},
+        )
+        asyncio.create_task(
+            _pump_sse_to_queue(
+                queue,
+                blueprint=blueprint,
+                generation_id=generation_id,
+                blueprint_id=blueprint_id,
+                template_id=template_id,
+                trace_writer=trace_writer,
+                generation_writer=generation_writer,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "chunked generation start failed generation_id=%s error=%s",
+            generation_id,
+            str(exc)[:400],
+        )
+        await _chunked_emit_event(
+            generation_id,
+            "generation_warning",
+            {"generation_id": generation_id, "message": "Could not start generation."},
+        )
+
+
+async def _ensure_chunked_stream(
+    *,
+    generation_id: str,
+    user_id: str,
+    blueprint_id: str,
+) -> asyncio.Queue[str | None]:
+    existing_owner = await v3_studio_store.get_generation_owner(generation_id)
+    if existing_owner is not None and existing_owner != user_id:
+        raise HTTPException(status_code=404, detail="Generation not found")
+    queue = await v3_studio_store.get_queue(generation_id)
+    if queue is None:
+        queue = asyncio.Queue()
+    await v3_studio_store.register_generation_stream(
+        user_id=user_id,
+        generation_id=generation_id,
+        blueprint_id=blueprint_id,
+        queue=queue,
+    )
+    return queue
+
+
+def _decode_chunked_context(
+    state: dict[str, Any],
+) -> tuple[V3SignalSummary, V3InputForm, dict[str, Any]]:
+    context = state.get("context")
+    if not isinstance(context, dict):
+        raise ValueError("Chunked context is missing.")
+    signals_raw = context.get("signals")
+    form_raw = context.get("form")
+    resource_spec = context.get("resource_spec")
+    if not isinstance(signals_raw, dict) or not isinstance(form_raw, dict):
+        raise ValueError("Chunked context is incomplete.")
+    if not isinstance(resource_spec, dict):
+        raise ValueError("Chunked resource_spec is missing.")
+    return (
+        V3SignalSummary.model_validate(signals_raw),
+        V3InputForm.model_validate(form_raw),
+        resource_spec,
+    )
+
+
+async def _attempt_chunked_assembly(
+    *,
+    generation_id: str,
+    user_id: str,
+    plan: StructuralPlan,
+    briefs: list[SectionBrief],
+    form: V3InputForm,
+    resource_spec: dict[str, Any],
+) -> None:
+    try:
+        blueprint = assemble_blueprint(
+            plan,
+            briefs,
+            subject=form.subject.strip() or "General",
+            title=form.topic.strip() or "Generated Lesson",
+            resource_type=str(resource_spec.get("resource_type") or "lesson"),
+        )
+    except BlueprintAssemblyBlocked as exc:
+        await persist_chunked_state(
+            generation_id,
+            {
+                "stage": "assembly_blocked",
+                "failed_sections": list(exc.failed_sections),
+                "execution_started": False,
+            },
+        )
+        return
+
+    _validate_blueprint(blueprint)
+    blueprint_id = str(uuid.uuid4())
+    await v3_studio_store.put_blueprint(
+        user_id,
+        blueprint_id,
+        blueprint,
+        "guided-concept-path",
+        form=form,
+        planning_source={"kind": "teacher_approved_blueprint"},
+    )
+    queue = await _ensure_chunked_stream(
+        generation_id=generation_id,
+        user_id=user_id,
+        blueprint_id=blueprint_id,
+    )
+    await persist_chunked_state(
+        generation_id,
+        {
+            "stage": "blueprint_ready",
+            "blueprint_id": blueprint_id,
+            "failed_sections": [],
+            "execution_started": True,
+        },
+    )
+    await _start_generation_from_chunked_blueprint(
+        generation_id=generation_id,
+        blueprint_id=blueprint_id,
+        blueprint=blueprint,
+        form=form,
+        user_id=user_id,
+        queue=queue,
+    )
+
+
+async def _run_chunked_stage2_pipeline(
+    *,
+    generation_id: str,
+    user_id: str,
+) -> None:
+    async def emit_event(event: str, payload: dict[str, Any]) -> None:
+        await _chunked_emit_event(generation_id, event, payload)
+
+    try:
+        state = await load_chunked_state(generation_id)
+        plan_raw = state.get("structural_plan")
+        if not isinstance(plan_raw, dict):
+            await persist_chunked_state(
+                generation_id,
+                {"stage": "assembly_blocked", "failed_sections": []},
+            )
+            await emit_event(
+                "generation_warning",
+                {
+                    "generation_id": generation_id,
+                    "message": "No structural plan found for this chunked generation.",
+                },
+            )
+            return
+
+        plan = StructuralPlan.model_validate(plan_raw)
+        signals, form, resource_spec = _decode_chunked_context(state)
+
+        briefs = await resume_stage2(
+            generation_id,
+            emit_event=emit_event,
+        )
+        await _attempt_chunked_assembly(
+            generation_id=generation_id,
+            user_id=user_id,
+            plan=plan,
+            briefs=briefs,
+            form=form,
+            resource_spec=resource_spec,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "chunked stage2 pipeline failed generation_id=%s error=%s",
+            generation_id,
+            str(exc)[:400],
+        )
+        await persist_chunked_state(
+            generation_id,
+            {
+                "stage": "assembly_blocked",
+                "execution_started": False,
+            },
+        )
+        await _chunked_emit_event(
+            generation_id,
+            "generation_warning",
+            {
+                "generation_id": generation_id,
+                "message": "Chunked expansion failed. Retry a failed section or regenerate the plan.",
+            },
+        )
+    finally:
+        _chunked_stage2_tasks.pop(generation_id, None)
+
+
+@v3_studio_router.post("/chunked/plan/start", response_model=V3ChunkedPlanStateDTO)
+async def post_chunked_plan_start(
+    body: V3ChunkedPlanStartRequest,
+    current_user: User = Depends(get_current_user),
+) -> V3ChunkedPlanStateDTO:
+    generation_id = str(uuid.uuid4())
+    form = _apply_clarifications_to_form(body.form, body.clarification_answers)
+    resource_spec = _build_chunked_resource_spec(
+        inferred_resource_type=body.signals.inferred_resource_type,
+        duration_minutes=form.duration_minutes,
+    )
+
+    await _ensure_chunked_generation_row(
+        generation_id=generation_id,
+        user_id=current_user.id,
+        subject=form.subject.strip() or "General",
+        context=form.topic.strip() or "Chunked plan",
+    )
+    await _ensure_chunked_stream(
+        generation_id=generation_id,
+        user_id=current_user.id,
+        blueprint_id=f"chunked-plan-{generation_id}",
+    )
+    await persist_chunked_state(
+        generation_id,
+        {
+            "stage": "stage1_running",
+            "execution_started": False,
+            "failed_sections": [],
+        },
+    )
+
+    async def emit_event(event: str, payload: dict[str, Any]) -> None:
+        await _chunked_emit_event(generation_id, event, payload)
+
+    try:
+        await run_stage1_with_retry(
+            signals=body.signals,
+            form=form,
+            resource_spec=resource_spec,
+            emit_event=emit_event,
+            generation_id=generation_id,
+            trace_id=str(uuid.uuid4()),
+        )
+    except Stage1PlanFailure as exc:
+        await persist_chunked_state(
+            generation_id,
+            {
+                "stage": "stage1_failed",
+                "errors": list(exc.errors),
+                "execution_started": False,
+            },
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Could not generate a valid lesson plan.",
+                "errors": exc.errors,
+            },
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "chunked stage1 failed generation_id=%s error=%s",
+            generation_id,
+            str(exc)[:400],
+        )
+        await persist_chunked_state(
+            generation_id,
+            {
+                "stage": "stage1_failed",
+                "errors": [str(exc)[:400]],
+                "execution_started": False,
+            },
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Could not generate a structural lesson plan.",
+        ) from exc
+
+    state = await load_chunked_state(generation_id)
+    return _normalize_chunked_state(generation_id, state)
+
+
+@v3_studio_router.get("/chunked/{generation_id}/status", response_model=V3ChunkedPlanStateDTO)
+async def get_chunked_plan_status(
+    generation_id: str,
+    current_user: User = Depends(get_current_user),
+) -> V3ChunkedPlanStateDTO:
+    await _load_owned_generation(generation_id, current_user.id)
+    try:
+        state = await load_chunked_state(generation_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=404, detail="Chunked state not found") from exc
+    return _normalize_chunked_state(generation_id, state)
+
+
+@v3_studio_router.post("/chunked/{generation_id}/approve", response_model=V3ChunkedPlanStateDTO)
+async def post_chunked_plan_approve(
+    generation_id: str,
+    current_user: User = Depends(get_current_user),
+) -> V3ChunkedPlanStateDTO:
+    await _load_owned_generation(generation_id, current_user.id)
+    state = await load_chunked_state(generation_id)
+    if not isinstance(state.get("structural_plan"), dict):
+        raise HTTPException(status_code=409, detail="Structural plan is not ready yet")
+
+    await _ensure_chunked_stream(
+        generation_id=generation_id,
+        user_id=current_user.id,
+        blueprint_id=str(state.get("blueprint_id") or f"chunked-plan-{generation_id}"),
+    )
+
+    running_task = _chunked_stage2_tasks.get(generation_id)
+    if running_task is not None and not running_task.done():
+        latest = await load_chunked_state(generation_id)
+        return _normalize_chunked_state(generation_id, latest)
+
+    await persist_chunked_state(
+        generation_id,
+        {
+            "stage": "stage2_running",
+            "execution_started": False,
+        },
+    )
+    task = asyncio.create_task(
+        _run_chunked_stage2_pipeline(
+            generation_id=generation_id,
+            user_id=current_user.id,
+        )
+    )
+    _chunked_stage2_tasks[generation_id] = task
+    latest = await load_chunked_state(generation_id)
+    return _normalize_chunked_state(generation_id, latest)
+
+
+@v3_studio_router.post("/chunked/{generation_id}/regenerate", response_model=V3ChunkedPlanStateDTO)
+async def post_chunked_plan_regenerate(
+    generation_id: str,
+    body: V3ChunkedRegenerateRequest,
+    current_user: User = Depends(get_current_user),
+) -> V3ChunkedPlanStateDTO:
+    await _load_owned_generation(generation_id, current_user.id)
+    state = await load_chunked_state(generation_id)
+
+    signals, form, resource_spec = _decode_chunked_context(state)
+    if body.note.strip():
+        note_prefix = "Teacher adjustment note:"
+        existing = form.free_text.strip()
+        note = f"{note_prefix} {body.note.strip()}"
+        merged = f"{existing}\n\n{note}" if existing else note
+        form = form.model_copy(update={"free_text": merged})
+
+    running_task = _chunked_stage2_tasks.pop(generation_id, None)
+    if running_task is not None and not running_task.done():
+        running_task.cancel()
+
+    await _ensure_chunked_stream(
+        generation_id=generation_id,
+        user_id=current_user.id,
+        blueprint_id=f"chunked-plan-{generation_id}",
+    )
+    await persist_chunked_state(
+        generation_id,
+        {
+            "stage": "stage1_running",
+            "section_briefs": {},
+            "failed_sections": [],
+            "blueprint_id": None,
+            "execution_started": False,
+            "errors": [],
+        },
+    )
+
+    async def emit_event(event: str, payload: dict[str, Any]) -> None:
+        await _chunked_emit_event(generation_id, event, payload)
+
+    try:
+        await run_stage1_with_retry(
+            signals=signals,
+            form=form,
+            resource_spec=resource_spec,
+            emit_event=emit_event,
+            generation_id=generation_id,
+            trace_id=str(uuid.uuid4()),
+        )
+    except Stage1PlanFailure as exc:
+        await persist_chunked_state(
+            generation_id,
+            {
+                "stage": "stage1_failed",
+                "errors": list(exc.errors),
+                "execution_started": False,
+            },
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Could not regenerate a valid lesson plan.",
+                "errors": exc.errors,
+            },
+        ) from exc
+
+    latest = await load_chunked_state(generation_id)
+    return _normalize_chunked_state(generation_id, latest)
+
+
+@v3_studio_router.post("/chunked/{generation_id}/retry-section", response_model=V3ChunkedPlanStateDTO)
+async def post_chunked_retry_section(
+    generation_id: str,
+    body: V3ChunkedRetrySectionRequest,
+    current_user: User = Depends(get_current_user),
+) -> V3ChunkedPlanStateDTO:
+    await _load_owned_generation(generation_id, current_user.id)
+    state = await load_chunked_state(generation_id)
+    plan_raw = state.get("structural_plan")
+    if not isinstance(plan_raw, dict):
+        raise HTTPException(status_code=409, detail="No structural plan available.")
+    failed_sections = [
+        section for section in state.get("failed_sections", [])
+        if isinstance(section, str)
+    ]
+    if body.section_id not in failed_sections:
+        raise HTTPException(status_code=409, detail="Section is not marked as failed.")
+
+    running_task = _chunked_stage2_tasks.get(generation_id)
+    if running_task is not None and not running_task.done():
+        raise HTTPException(status_code=409, detail="Stage 2 is already running for this generation.")
+
+    plan = StructuralPlan.model_validate(plan_raw)
+    signals, form, resource_spec = _decode_chunked_context(state)
+    stored_briefs = _section_briefs_from_state(plan, state)
+
+    await _ensure_chunked_stream(
+        generation_id=generation_id,
+        user_id=current_user.id,
+        blueprint_id=str(state.get("blueprint_id") or f"chunked-plan-{generation_id}"),
+    )
+    await persist_chunked_state(
+        generation_id,
+        {
+            "stage": "stage2_running",
+            "execution_started": False,
+        },
+    )
+    await _chunked_emit_event(
+        generation_id,
+        "stage2_section_start",
+        {
+            "generation_id": generation_id,
+            "section_id": body.section_id,
+        },
+    )
+
+    async def emit_event(event: str, payload: dict[str, Any]) -> None:
+        await _chunked_emit_event(generation_id, event, payload)
+
+    updated_briefs = await retry_failed_section(
+        section_id=body.section_id,
+        plan=plan,
+        stored_briefs=stored_briefs,
+        signals=signals,
+        form=form,
+        resource_spec=resource_spec,
+        emit_event=emit_event,
+        generation_id=generation_id,
+        trace_id=str(uuid.uuid4()),
+    )
+    retried = next((brief for brief in updated_briefs if brief.section_id == body.section_id), None)
+    if retried is not None and getattr(retried, "_failed", False):
+        await _chunked_emit_event(
+            generation_id,
+            "stage2_section_failed",
+            {
+                "generation_id": generation_id,
+                "section_id": body.section_id,
+                "errors": getattr(retried, "_errors", []),
+            },
+        )
+    else:
+        await _chunked_emit_event(
+            generation_id,
+            "stage2_section_done",
+            {
+                "generation_id": generation_id,
+                "section_id": body.section_id,
+            },
+        )
+
+    failed_after_retry = [
+        brief.section_id
+        for brief in updated_briefs
+        if getattr(brief, "_failed", False)
+    ]
+    await _chunked_emit_event(
+        generation_id,
+        "stage2_complete",
+        {
+            "generation_id": generation_id,
+            "failed_sections": failed_after_retry,
+        },
+    )
+
+    await _attempt_chunked_assembly(
+        generation_id=generation_id,
+        user_id=current_user.id,
+        plan=plan,
+        briefs=updated_briefs,
+        form=form,
+        resource_spec=resource_spec,
+    )
+    latest = await load_chunked_state(generation_id)
+    return _normalize_chunked_state(generation_id, latest)
 
 
 @v3_studio_router.post("/blueprint/adjust", response_model=BlueprintPreviewDTO)
@@ -266,6 +1074,10 @@ async def _pump_sse_to_queue(
             if event_type and payload is not None:
                 try:
                     await _write_generation_snapshot(event_type, payload)
+                    await _maybe_mark_chunked_complete(
+                        generation_id,
+                        event_type=event_type,
+                    )
                 except Exception:  # noqa: BLE001
                     logger.exception(
                         "v3 generation writer failed generation_id=%s event_type=%s",
@@ -605,32 +1417,37 @@ async def get_v3_generation_events(
     generation_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    if not await v3_studio_store.owns_generation(current_user.id, generation_id):
-        raise HTTPException(status_code=404, detail="Generation stream not found")
-
+    owns_stream = await v3_studio_store.owns_generation(current_user.id, generation_id)
+    if not owns_stream:
+        generation_writer = V3GenerationWriter(async_session_factory)
+        model = await generation_writer.get_generation_model(generation_id, current_user.id)
+        if model is None:
+            raise HTTPException(status_code=404, detail="Generation stream not found")
     queue = await v3_studio_store.get_queue(generation_id)
     if queue is None:
         raise HTTPException(status_code=404, detail="Generation stream not found")
     stored = await v3_studio_store.get_blueprint_for_generation(generation_id)
-    if stored is None:
-        raise HTTPException(status_code=404, detail="Blueprint not found")
-    await telemetry_monitor.initialise_v3_recorder(
-        generation_id=generation_id,
-        user_id=str(current_user.id),
-        blueprint_title=stored.blueprint.metadata.title,
-        subject=stored.blueprint.metadata.subject,
-        template_id=stored.template_id,
-    )
+    if stored is not None:
+        await telemetry_monitor.initialise_v3_recorder(
+            generation_id=generation_id,
+            user_id=str(current_user.id),
+            blueprint_title=stored.blueprint.metadata.title,
+            subject=stored.blueprint.metadata.subject,
+            template_id=stored.template_id,
+        )
 
     async def event_generator():
+        finished = False
         try:
             while True:
                 chunk = await queue.get()
                 if chunk is None:
+                    finished = True
                     break
                 yield chunk
         finally:
-            await v3_studio_store.cleanup_generation(generation_id)
+            if finished:
+                await v3_studio_store.cleanup_generation(generation_id)
 
     return StreamingResponse(
         event_generator(),

@@ -123,6 +123,7 @@ class GenerationModel(Base):
     quality_passed = Column(Boolean, nullable=True)
     generation_time_seconds = Column(Float, nullable=True)
     planning_spec_json = Column(Text, nullable=True)
+    chunked_state_json = Column(JSON_DOCUMENT_TYPE, nullable=True)
     report_json = Column(JSON_DOCUMENT_TYPE, nullable=True)
     pack_id = Column(String, ForeignKey("learning_packs.id"), nullable=True, index=True)
     pack_resource_id = Column(String, nullable=True, index=True)

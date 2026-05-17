@@ -54,6 +54,44 @@ def _example_bp(name: str):
     return ProductionBlueprint.model_validate(json.loads(raw.read_text(encoding="utf-8")))
 
 
+def _blueprint_payload(*, architect_mode: str | None = None) -> dict:
+    payload: dict = {
+        "signals": {
+            "topic": "Area",
+            "subtopic": "Compound area",
+            "prior_knowledge": ["rectangle area"],
+            "learner_needs": [],
+            "teacher_goal": "Build confidence",
+            "inferred_resource_type": "worksheet",
+            "confidence": "medium",
+            "missing_signals": [],
+        },
+        "form": {
+            "grade_level": "Grade 8",
+            "subject": "Mathematics",
+            "duration_minutes": 50,
+            "topic": "Compound area (L-shapes)",
+            "subtopics": ["L-shapes"],
+            "prior_knowledge": "Rectangle area",
+            "lesson_mode": "first_exposure",
+            "lesson_mode_other": "",
+            "intended_outcome": "understand",
+            "intended_outcome_other": "",
+            "learner_level": "on_grade",
+            "reading_level": "on_grade",
+            "language_support": "none",
+            "prior_knowledge_level": "some_background",
+            "support_needs": [],
+            "learning_preferences": [],
+            "free_text": "Teach compound area with scaffolded examples.",
+        },
+        "clarification_answers": [],
+    }
+    if architect_mode is not None:
+        payload["architect_mode"] = architect_mode
+    return payload
+
+
 async def _override_user_a() -> User:
     return TEST_USER_A
 
@@ -241,38 +279,7 @@ async def test_v3_generation_events_forbidden_for_other_user() -> None:
 async def test_v3_blueprint_surfaces_exception_details_and_logs() -> None:
     app.dependency_overrides[get_current_user] = _override_user_a
     await _ensure_user(TEST_USER_A)
-    payload = {
-        "signals": {
-            "topic": "Area",
-            "subtopic": "Compound area",
-            "prior_knowledge": ["rectangle area"],
-            "learner_needs": [],
-            "teacher_goal": "Build confidence",
-            "inferred_resource_type": "worksheet",
-            "confidence": "medium",
-            "missing_signals": [],
-        },
-        "form": {
-            "grade_level": "Grade 8",
-            "subject": "Mathematics",
-            "duration_minutes": 50,
-            "topic": "Compound area (L-shapes)",
-            "subtopics": ["L-shapes"],
-            "prior_knowledge": "Rectangle area",
-            "lesson_mode": "first_exposure",
-            "lesson_mode_other": "",
-            "intended_outcome": "understand",
-            "intended_outcome_other": "",
-            "learner_level": "on_grade",
-            "reading_level": "on_grade",
-            "language_support": "none",
-            "prior_knowledge_level": "some_background",
-            "support_needs": [],
-            "learning_preferences": [],
-            "free_text": "Teach compound area with scaffolded examples.",
-        },
-        "clarification_answers": [],
-    }
+    payload = _blueprint_payload()
     with (
         patch(
             "generation.v3_studio.router.generate_production_blueprint",
@@ -292,38 +299,8 @@ async def test_v3_blueprint_adjust_preserves_learner_context() -> None:
     app.dependency_overrides[get_current_user] = _override_user_a
     await _ensure_user(TEST_USER_A)
     bp = _example_bp("amara_compound_area.json")
-    payload = {
-        "signals": {
-            "topic": "Area",
-            "subtopic": "Compound area",
-            "prior_knowledge": ["rectangle area"],
-            "learner_needs": [],
-            "teacher_goal": "Build confidence",
-            "inferred_resource_type": "worksheet",
-            "confidence": "medium",
-            "missing_signals": [],
-        },
-        "form": {
-            "grade_level": "Grade 8",
-            "subject": "Mathematics",
-            "duration_minutes": 50,
-            "topic": "Compound area (L-shapes)",
-            "subtopics": ["L-shapes"],
-            "prior_knowledge": "Rectangle area",
-            "lesson_mode": "first_exposure",
-            "lesson_mode_other": "",
-            "intended_outcome": "understand",
-            "intended_outcome_other": "",
-            "learner_level": "on_grade",
-            "reading_level": "on_grade",
-            "language_support": "none",
-            "prior_knowledge_level": "some_background",
-            "support_needs": ["visuals"],
-            "learning_preferences": [],
-            "free_text": "Teach compound area with scaffolded examples.",
-        },
-        "clarification_answers": [],
-    }
+    payload = _blueprint_payload()
+    payload["form"]["support_needs"] = ["visuals"]
     with (
         patch("generation.v3_studio.router.generate_production_blueprint", return_value=bp),
         patch("generation.v3_studio.router.adjust_production_blueprint", return_value=bp),
@@ -346,6 +323,50 @@ async def test_v3_blueprint_adjust_preserves_learner_context() -> None:
             adjusted = adjust_resp.json()
             assert adjusted["learner_context"]["grade_level"] == "Grade 8"
             assert adjusted["learner_context"]["support_needs"] == ["visuals"]
+
+
+@pytest.mark.asyncio
+async def test_v3_blueprint_passes_architect_mode_chunked_to_generator() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+    bp = _example_bp("amara_compound_area.json")
+
+    with patch("generation.v3_studio.router.generate_production_blueprint", return_value=bp) as mocked:
+        async with _client() as client:
+            resp = await client.post(
+                "/api/v1/v3/blueprint",
+                json=_blueprint_payload(architect_mode="chunked"),
+            )
+    assert resp.status_code == 200
+    assert mocked.await_args.kwargs["architect_mode"] == "chunked"
+
+
+@pytest.mark.asyncio
+async def test_v3_blueprint_defaults_architect_mode_to_standard_when_omitted() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+    bp = _example_bp("amara_compound_area.json")
+
+    with patch("generation.v3_studio.router.generate_production_blueprint", return_value=bp) as mocked:
+        async with _client() as client:
+            resp = await client.post(
+                "/api/v1/v3/blueprint",
+                json=_blueprint_payload(),
+            )
+    assert resp.status_code == 200
+    assert mocked.await_args.kwargs["architect_mode"] == "standard"
+
+
+@pytest.mark.asyncio
+async def test_v3_blueprint_rejects_invalid_architect_mode() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    await _ensure_user(TEST_USER_A)
+    async with _client() as client:
+        resp = await client.post(
+            "/api/v1/v3/blueprint",
+            json=_blueprint_payload(architect_mode="invalid-mode"),
+        )
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
