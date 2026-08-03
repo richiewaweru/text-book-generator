@@ -1,4 +1,4 @@
-"""Apply SupportModification dict shapes from resources/specs/*.yaml."""
+"""Apply SupportModification dict shapes from shipped resource spec YAML."""
 
 from __future__ import annotations
 
