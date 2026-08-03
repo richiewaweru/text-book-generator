@@ -243,7 +243,7 @@ async def test_chunked_plan_start_returns_plan_ready_state() -> None:
             )
         return sample_plan
 
-    with patch("generation.v3_studio.router.run_stage1_with_retry", new=AsyncMock(side_effect=fake_stage1)):
+    with patch("generation.v3_studio.router.run_planning_with_retry", new=AsyncMock(side_effect=fake_stage1)):
         async with _client() as client:
             resp = await client.post("/api/v1/v3/chunked/plan/start", json=_chunked_start_payload())
 
@@ -330,7 +330,7 @@ async def test_chunked_plan_start_surfaces_stage1_failure() -> None:
     await _ensure_user(TEST_USER_A)
 
     with patch(
-        "generation.v3_studio.router.run_stage1_with_retry",
+        "generation.v3_studio.router.run_planning_with_retry",
         new=AsyncMock(side_effect=Stage1PlanFailure(errors=["unknown slug"])),
     ):
         async with _client() as client:
@@ -353,7 +353,7 @@ async def test_chunked_plan_start_surfaces_unexpected_stage1_exception_detail() 
         raise RuntimeError("stage1 exploded for diagnostics")
 
     with patch(
-        "generation.v3_studio.router.run_stage1_with_retry",
+        "generation.v3_studio.router.run_planning_with_retry",
         new=AsyncMock(side_effect=fake_stage1),
     ):
         async with _client() as client:
@@ -519,7 +519,7 @@ async def test_chunked_regenerate_appends_note_to_persisted_context() -> None:
         )
         return sample_plan
 
-    with patch("generation.v3_studio.router.run_stage1_with_retry", new=AsyncMock(side_effect=fake_stage1)):
+    with patch("generation.v3_studio.router.run_planning_with_retry", new=AsyncMock(side_effect=fake_stage1)):
         async with _client() as client:
             resp = await client.post(
                 f"/api/v1/v3/chunked/{generation_id}/regenerate",

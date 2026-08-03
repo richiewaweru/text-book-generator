@@ -12,6 +12,7 @@ from core.llm.runner import TruncatedCompletionError
 from v3_blueprint.planning.models import (
     SectionBrief,
     SectionPlan,
+    Stage0SkeletonFailure,
     Stage1PlanFailure,
     StructuralPlan,
     stage2_brief_preview_payload,
@@ -21,7 +22,8 @@ from v3_blueprint.planning.section_expander import (
     _call_stage2_section,
     _load_component_cards_for_section,
 )
-from v3_blueprint.planning.structural_planner import _call_stage1
+from v3_blueprint.planning.skeleton_planner import _call_stage0
+from v3_blueprint.planning.structural_planner import _call_stage1, _call_stage1b
 from v3_blueprint.planning.validators import validate_section_brief, validate_structural_plan
 
 EmitFn = Callable[[str, dict], Awaitable[None]]
@@ -50,6 +52,309 @@ def _is_structured_output_validation_failure(exc: UnexpectedModelBehavior) -> bo
     return "maximum retries" in message and (
         "result validation" in message or "output validation" in message
     )
+
+
+def _planner_mode() -> str:
+    mode = os.getenv("V3_PLANNER_MODE", "monolith").strip().lower()
+    return mode if mode in {"monolith", "split", "spec_driven"} else "monolith"
+
+
+def _active_supports_from_form(form: V3InputForm) -> list[str]:
+    supports: list[str] = []
+    if form.language_support != "none":
+        supports.append("vocabulary_support")
+        supports.append("simpler_reading")
+    if form.reading_level == "below_grade" and "simpler_reading" not in supports:
+        supports.append("simpler_reading")
+    if form.learner_level == "above_grade":
+        supports.append("challenge_questions")
+    return supports
+
+
+async def run_planning_with_retry(
+    signals: V3SignalSummary,
+    form: V3InputForm,
+    resource_spec: dict,
+    *,
+    emit_event: EmitFn | None = None,
+    generation_id: str | None = None,
+    trace_id: str | None = None,
+) -> StructuralPlan:
+    mode = _planner_mode()
+    if mode == "monolith":
+        return await run_stage1_with_retry(
+            signals,
+            form,
+            resource_spec,
+            emit_event=emit_event,
+            generation_id=generation_id,
+            trace_id=trace_id,
+        )
+    if mode == "spec_driven":
+        return await _run_spec_driven_planning(
+            signals,
+            form,
+            resource_spec,
+            emit_event=emit_event,
+            generation_id=generation_id,
+            trace_id=trace_id,
+        )
+    return await _run_split_planning(
+        signals,
+        form,
+        resource_spec,
+        emit_event=emit_event,
+        generation_id=generation_id,
+        trace_id=trace_id,
+    )
+
+
+async def _run_split_planning(
+    signals: V3SignalSummary,
+    form: V3InputForm,
+    resource_spec: dict,
+    *,
+    emit_event: EmitFn | None = None,
+    generation_id: str | None = None,
+    trace_id: str | None = None,
+) -> StructuralPlan:
+    skeleton_errors: list[str] = []
+    skeleton = None
+    for attempt in range(1, 3):
+        try:
+            skeleton = await _call_stage0(
+                signals,
+                form,
+                resource_spec,
+                generation_id=generation_id,
+                trace_id=trace_id,
+                previous_errors=skeleton_errors if attempt == 2 else None,
+            )
+            break
+        except Stage0SkeletonFailure as exc:
+            skeleton_errors = list(exc.errors)
+            if attempt == 1:
+                log.warning("Stage 0 attempt 1 failed: %s", skeleton_errors)
+                continue
+            raise Stage1PlanFailure(
+                errors=[f"stage0: {error}" for error in exc.errors]
+            ) from exc
+        except Exception as exc:
+            if attempt == 1:
+                log.warning("Stage 0 attempt 1 exception: %s", exc)
+                skeleton_errors = [str(exc)]
+                continue
+            raise Stage1PlanFailure(errors=[f"stage0: {exc}"]) from exc
+
+    if skeleton is None:
+        raise Stage1PlanFailure(errors=["stage0: no skeleton produced"])
+
+    errors: list[str] = []
+    for attempt in range(1, 3):
+        try:
+            plan = await _call_stage1b(
+                signals,
+                form,
+                resource_spec,
+                skeleton,
+                generation_id=generation_id,
+                trace_id=trace_id,
+                previous_errors=errors if attempt == 2 else None,
+            )
+        except TruncatedCompletionError as exc:
+            if attempt == 1:
+                log.warning("Stage 1b attempt 1 truncated: %s", exc)
+                continue
+            raise Stage1PlanFailure(errors=[str(exc)]) from exc
+        except UnexpectedModelBehavior as exc:
+            if not _is_structured_output_validation_failure(exc):
+                raise
+            errors = [f"Stage 1b structured output could not be validated: {exc}"]
+            if attempt == 1:
+                log.warning("Stage 1b attempt 1 output validation failed: %s", exc)
+                continue
+            raise Stage1PlanFailure(errors=errors) from exc
+        except ValueError as exc:
+            errors = [str(exc)]
+            if attempt == 1:
+                log.warning("Stage 1b attempt 1 conformance/validation failed: %s", exc)
+                continue
+            raise Stage1PlanFailure(errors=errors) from exc
+        except Exception:
+            raise
+
+        errors = validate_structural_plan(plan, resource_spec)
+        if not errors:
+            if generation_id:
+                await persist_structural_plan(
+                    generation_id,
+                    plan,
+                    signals=signals,
+                    form=form,
+                    resource_spec=resource_spec,
+                )
+            if emit_event:
+                await emit_event("plan_ready", {
+                    "generation_id": generation_id,
+                    "plan": plan.model_dump(),
+                })
+            return plan
+        if attempt == 1:
+            log.warning("Stage 1b attempt 1 failed: %s", errors)
+            continue
+
+    raise Stage1PlanFailure(errors=errors)
+
+
+async def _run_spec_driven_planning(
+    signals: V3SignalSummary,
+    form: V3InputForm,
+    resource_spec: dict,
+    *,
+    emit_event: EmitFn | None = None,
+    generation_id: str | None = None,
+    trace_id: str | None = None,
+) -> StructuralPlan:
+    try:
+        from resource_specs.loader import get_spec
+        from resource_specs.schema import ResourceSpec
+        from v3_blueprint.skeleton.apply import apply_edits
+        from v3_blueprint.skeleton.baseline import build_baseline_skeleton
+        from v3_blueprint.skeleton.edit_planner import run_skeleton_edit_planner
+    except ImportError:
+        print(
+            "[PLANNER MODE] spec_driven falling back to split "
+            f"generation_id={generation_id}",
+            flush=True,
+        )
+        return await _run_split_planning(
+            signals,
+            form,
+            resource_spec,
+            emit_event=emit_event,
+            generation_id=generation_id,
+            trace_id=trace_id,
+        )
+
+    depth = resource_spec.get("depth") if isinstance(resource_spec, dict) else None
+    if not isinstance(depth, str) or not depth:
+        depth = "standard"
+    typed_spec: ResourceSpec | None = None
+    raw_spec = resource_spec.get("spec") if isinstance(resource_spec, dict) else None
+    resource_type = resource_spec.get("resource_type") if isinstance(resource_spec, dict) else None
+    try:
+        if isinstance(resource_type, str) and resource_type:
+            typed_spec = get_spec(resource_type)
+        elif isinstance(raw_spec, dict) and raw_spec:
+            typed_spec = ResourceSpec.model_validate(raw_spec)
+    except Exception as exc:
+        print(
+            f"[PLANNER MODE] spec_driven could not load ResourceSpec ({exc}); "
+            f"falling back to split generation_id={generation_id}",
+            flush=True,
+        )
+        return await _run_split_planning(
+            signals,
+            form,
+            resource_spec,
+            emit_event=emit_event,
+            generation_id=generation_id,
+            trace_id=trace_id,
+        )
+
+    if typed_spec is None:
+        print(
+            "[PLANNER MODE] spec_driven missing typed spec; falling back to split "
+            f"generation_id={generation_id}",
+            flush=True,
+        )
+        return await _run_split_planning(
+            signals,
+            form,
+            resource_spec,
+            emit_event=emit_event,
+            generation_id=generation_id,
+            trace_id=trace_id,
+        )
+
+    active_supports = _active_supports_from_form(form)
+    baseline = build_baseline_skeleton(
+        typed_spec,
+        depth,
+        active_supports,
+        lesson_mode=signals.inferred_lesson_mode,
+        generation_id=generation_id,
+    )
+    edit_plan = await run_skeleton_edit_planner(
+        signals=signals,
+        form=form,
+        resource_spec=resource_spec,
+        baseline=baseline,
+        generation_id=generation_id,
+        trace_id=trace_id,
+    )
+    for note in edit_plan.unexpressible:
+        print(
+            f"[SKELETON UNEXPRESSIBLE] generation_id={generation_id} note={note}",
+            flush=True,
+        )
+    skeleton, _rejected = apply_edits(
+        baseline,
+        list(edit_plan.edits),
+        typed_spec,
+        generation_id=generation_id,
+        depth=depth,
+    )
+
+    errors: list[str] = []
+    for attempt in range(1, 3):
+        try:
+            plan = await _call_stage1b(
+                signals,
+                form,
+                resource_spec,
+                skeleton,
+                generation_id=generation_id,
+                trace_id=trace_id,
+                previous_errors=errors if attempt == 2 else None,
+            )
+        except TruncatedCompletionError as exc:
+            if attempt == 1:
+                continue
+            raise Stage1PlanFailure(errors=[str(exc)]) from exc
+        except UnexpectedModelBehavior as exc:
+            if not _is_structured_output_validation_failure(exc):
+                raise
+            errors = [f"Stage 1b structured output could not be validated: {exc}"]
+            if attempt == 1:
+                continue
+            raise Stage1PlanFailure(errors=errors) from exc
+        except ValueError as exc:
+            errors = [str(exc)]
+            if attempt == 1:
+                continue
+            raise Stage1PlanFailure(errors=errors) from exc
+
+        errors = validate_structural_plan(plan, resource_spec)
+        if not errors:
+            if generation_id:
+                await persist_structural_plan(
+                    generation_id,
+                    plan,
+                    signals=signals,
+                    form=form,
+                    resource_spec=resource_spec,
+                )
+            if emit_event:
+                await emit_event("plan_ready", {
+                    "generation_id": generation_id,
+                    "plan": plan.model_dump(),
+                })
+            return plan
+        if attempt == 1:
+            continue
+
+    raise Stage1PlanFailure(errors=errors)
 
 
 async def run_stage1_with_retry(
@@ -536,6 +841,7 @@ __all__ = [
     "_failed_placeholder",
     "_run_section_with_retry",
     "retry_failed_section",
+    "run_planning_with_retry",
     "run_stage1_with_retry",
     "run_stage2",
 ]

@@ -39,7 +39,7 @@ from v3_blueprint.planning.persistence import (
 )
 from v3_blueprint.planning.retry import (
     retry_failed_section,
-    run_stage1_with_retry,
+    run_planning_with_retry,
 )
 from v3_execution.config import get_v3_model, get_v3_model_settings, get_v3_slot, get_v3_spec
 from v3_execution.config.timeouts import V3_TIMEOUTS
@@ -1037,7 +1037,7 @@ async def post_chunked_plan_start(
         await _chunked_emit_event(generation_id, event, payload)
 
     try:
-        await run_stage1_with_retry(
+        await run_planning_with_retry(
             signals=body.signals,
             form=form,
             resource_spec=resource_spec,
@@ -1259,7 +1259,7 @@ async def post_chunked_plan_regenerate(
         await _chunked_emit_event(generation_id, event, payload)
 
     try:
-        await run_stage1_with_retry(
+        await run_planning_with_retry(
             signals=signals,
             form=form,
             resource_spec=resource_spec,
