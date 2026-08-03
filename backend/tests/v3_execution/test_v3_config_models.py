@@ -20,6 +20,9 @@ from v3_execution.models import AnswerKeyExecutorWorkOrder, AnswerKeyPlanSpec, W
 def test_v3_slot_mapping() -> None:
     assert get_v3_slot("v3_signal_extractor") == ModelSlot.FAST
     assert get_v3_slot("v3_stage1_planner") == ModelSlot.STANDARD
+    assert get_v3_slot("v3_stage0_skeleton") == ModelSlot.FAST
+    assert get_v3_slot("v3_stage1b_commitments") == ModelSlot.FAST
+    assert get_v3_slot("v3_skeleton_editor") == ModelSlot.FAST
     assert get_v3_slot("v3_section_writer") == ModelSlot.STANDARD
     assert get_v3_slot("v3_answer_key_generator") == ModelSlot.FAST
     assert get_v3_slot("v3_answer_key_generator_heavy") == ModelSlot.STANDARD

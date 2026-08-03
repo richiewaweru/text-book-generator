@@ -168,6 +168,59 @@ class Stage1PlanFailure(Exception):
         super().__init__(f"Stage 1 failed after 2 attempts: {errors}")
 
 
+# ── Stage 0 skeleton models (planner experiment arms) ─────────────────────
+
+
+class SkeletonComponent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slug: str = Field(description="Component slug from registry. Must exist.")
+
+
+class SkeletonSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Unique section identifier slug e.g. 'orient', 'model'")
+    title: str = Field(description="Section title. Max 80 chars.", max_length=80)
+    role: str = Field(description="Spec-vocabulary role string for this section.")
+    visual_required: bool
+    components: list[SkeletonComponent] = Field(
+        description="Ordered component slugs. Max 4 per section.",
+        max_length=4,
+    )
+
+    @field_validator("components")
+    @classmethod
+    def max_four_components(cls, v: list[SkeletonComponent]) -> list[SkeletonComponent]:
+        if len(v) > 4:
+            raise ValueError("Max 4 components per section")
+        return v
+
+
+class LessonSkeleton(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lesson_mode: Literal[
+        "first_exposure", "consolidation", "repair", "retrieval", "transfer"
+    ]
+    sections: list[SkeletonSection] = Field(
+        description="Ordered skeleton sections. Max 6.",
+    )
+
+    @field_validator("sections")
+    @classmethod
+    def max_six_sections(cls, v: list[SkeletonSection]) -> list[SkeletonSection]:
+        if len(v) > 6:
+            raise ValueError("Max 6 sections")
+        return v
+
+
+class Stage0SkeletonFailure(Exception):
+    def __init__(self, errors: list[str]):
+        self.errors = errors
+        super().__init__(f"Stage 0 skeleton failed: {errors}")
+
+
 # ── Stage 2 output models ─────────────────────────────────────────────────
 
 

@@ -4,6 +4,7 @@ import logging
 
 from contracts.lectio import get_component_card
 from v3_blueprint.planning.models import QPlanItem, SectionBrief, SectionPlan, StructuralPlan
+from v3_blueprint.planning.models import LessonSkeleton
 
 log = logging.getLogger(__name__)
 
@@ -220,5 +221,121 @@ def validate_section_brief(
             f"Returned section_id '{brief.section_id}' does not match "
             f"assigned section '{section_plan.id}'."
         )
+
+    return errors
+
+
+def validate_lesson_skeleton(
+    skeleton: LessonSkeleton,
+    resource_spec: dict | None = None,
+) -> list[str]:
+    """Validate a Stage 0 LessonSkeleton. Parallel to validate_structural_plan."""
+    errors: list[str] = []
+    all_slugs = {
+        component.slug
+        for section in skeleton.sections
+        for component in section.components
+    }
+    registry = _get_component_registry(all_slugs)
+
+    for section in skeleton.sections:
+        for comp in section.components:
+            if comp.slug not in registry:
+                errors.append(
+                    f"Section '{section.id}': unknown slug '{comp.slug}'. "
+                    f"Must be from AVAILABLE COMPONENTS."
+                )
+
+    for section in skeleton.sections:
+        seen_fields: dict[str, str] = {}
+        for comp in section.components:
+            if comp.slug not in registry:
+                continue
+            card = registry[comp.slug]
+            field = card.get("sectionField") or card.get("section_field")
+            if not isinstance(field, str):
+                errors.append(
+                    f"Section '{section.id}': component '{comp.slug}' is missing section_field metadata."
+                )
+                continue
+            if field in seen_fields:
+                errors.append(
+                    f"Section '{section.id}': components '{comp.slug}' and "
+                    f"'{seen_fields[field]}' share section_field '{field}'. "
+                    f"Only one component per section_field is allowed."
+                )
+            else:
+                seen_fields[field] = comp.slug
+
+    visual_capable = {
+        "diagram-block",
+        "diagram-series",
+        "diagram-compare",
+        "worked-example-card",
+        "timeline-block",
+    }
+    for section in skeleton.sections:
+        if section.visual_required:
+            slugs = {c.slug for c in section.components}
+            if not slugs.intersection(visual_capable):
+                errors.append(
+                    f"Section '{section.id}' has visual_required=true but "
+                    f"no visual-capable component. Add one of: "
+                    f"{sorted(visual_capable)}"
+                )
+
+    allowed_roles = _allowed_roles_from_resource_spec(resource_spec)
+    if allowed_roles:
+        for section in skeleton.sections:
+            if section.role not in allowed_roles:
+                errors.append(
+                    f"Section '{section.id}' emitted role '{section.role}' "
+                    f"which is not in the active resource spec roles: {sorted(allowed_roles)}."
+                )
+
+    return errors
+
+
+def validate_skeleton_conformance(
+    skeleton: LessonSkeleton,
+    plan: StructuralPlan,
+) -> list[str]:
+    """Positional structure lock: Stage 1b must not change the frozen skeleton."""
+    errors: list[str] = []
+    if plan.lesson_mode != skeleton.lesson_mode:
+        errors.append(
+            f"lesson_mode mismatch: skeleton={skeleton.lesson_mode!r} plan={plan.lesson_mode!r}"
+        )
+    if len(plan.sections) != len(skeleton.sections):
+        errors.append(
+            f"section count mismatch: skeleton={len(skeleton.sections)} plan={len(plan.sections)}"
+        )
+        return errors
+
+    for index, (skel_sec, plan_sec) in enumerate(
+        zip(skeleton.sections, plan.sections, strict=True)
+    ):
+        prefix = f"sections[{index}]"
+        if plan_sec.id != skel_sec.id:
+            errors.append(f"{prefix}.id mismatch: skeleton={skel_sec.id!r} plan={plan_sec.id!r}")
+        if plan_sec.title != skel_sec.title:
+            errors.append(
+                f"{prefix}.title mismatch: skeleton={skel_sec.title!r} plan={plan_sec.title!r}"
+            )
+        if plan_sec.role != skel_sec.role:
+            errors.append(
+                f"{prefix}.role mismatch: skeleton={skel_sec.role!r} plan={plan_sec.role!r}"
+            )
+        if plan_sec.visual_required != skel_sec.visual_required:
+            errors.append(
+                f"{prefix}.visual_required mismatch: "
+                f"skeleton={skel_sec.visual_required!r} plan={plan_sec.visual_required!r}"
+            )
+        skel_slugs = [c.slug for c in skel_sec.components]
+        plan_slugs = [c.slug for c in plan_sec.components]
+        if plan_slugs != skel_slugs:
+            errors.append(
+                f"{prefix}.components mismatch: skeleton={skel_slugs!r} plan={plan_slugs!r}"
+            )
 
     return errors

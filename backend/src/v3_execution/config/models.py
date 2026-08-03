@@ -12,6 +12,9 @@ V3_SIGNAL_EXTRACTOR = "v3_signal_extractor"
 V3_NARROW = "v3_narrow"
 V3_PROPOSE_INTENT = "v3_propose_intent"
 V3_STAGE1_PLANNER = "v3_stage1_planner"
+V3_STAGE0_SKELETON = "v3_stage0_skeleton"
+V3_STAGE1B_COMMITMENTS = "v3_stage1b_commitments"
+V3_SKELETON_EDITOR = "v3_skeleton_editor"
 V3_STAGE2_EXPANDER = "v3_stage2_expander"
 V3_BLUEPRINT_ADJUST = "v3_blueprint_adjust"
 V3_SECTION_WRITER = "v3_section_writer"
@@ -28,6 +31,9 @@ V3_NODE_SLOTS: dict[str, ModelSlot] = {
     V3_NARROW: ModelSlot.FAST,
     V3_PROPOSE_INTENT: ModelSlot.STANDARD,
     V3_STAGE1_PLANNER: ModelSlot.STANDARD,
+    V3_STAGE0_SKELETON: ModelSlot.FAST,
+    V3_STAGE1B_COMMITMENTS: ModelSlot.FAST,
+    V3_SKELETON_EDITOR: ModelSlot.FAST,
     V3_STAGE2_EXPANDER: ModelSlot.STANDARD,
     V3_BLUEPRINT_ADJUST: ModelSlot.STANDARD,
     V3_SECTION_WRITER: ModelSlot.STANDARD,
@@ -47,6 +53,9 @@ V3_NODE_REASONING: dict[str, V3NodeReasoningPolicy] = {
     V3_NARROW: "medium",
     V3_PROPOSE_INTENT: "medium",
     V3_STAGE1_PLANNER: "high",
+    V3_STAGE0_SKELETON: False,
+    V3_STAGE1B_COMMITMENTS: False,
+    V3_SKELETON_EDITOR: False,
     V3_STAGE2_EXPANDER: "medium",
     V3_BLUEPRINT_ADJUST: "medium",
     V3_SECTION_WRITER: "low",
@@ -243,7 +252,10 @@ __all__ = [
     "V3_QUESTION_WRITER",
     "V3_SECTION_WRITER",
     "V3_SIGNAL_EXTRACTOR",
+    "V3_STAGE0_SKELETON",
     "V3_STAGE1_PLANNER",
+    "V3_STAGE1B_COMMITMENTS",
+    "V3_SKELETON_EDITOR",
     "V3_STAGE2_EXPANDER",
     "V3_VISUAL_QC",
     "get_v3_model",
