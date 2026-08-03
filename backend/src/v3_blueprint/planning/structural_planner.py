@@ -253,9 +253,255 @@ async def _call_stage1(
         raise
 
 
+STAGE1B_NODE = "v3_stage1b_commitments"
+
+
+def build_stage1b_system_prompt() -> str:
+    shared_prefix = build_v3_shared_prefix()
+    planner_block = _planner_index_block()
+
+    return f"""{shared_prefix}
+You are a lesson architect attaching pedagogical commitments to a FROZEN skeleton.
+Produce only valid StructuralPlan JSON.
+
+You do NOT write lesson prose, question text, or finished component content.
+Your job is to decide commitments: goal, anchor, voice, slot purposes,
+transition notes, pitfalls, and question placement — WITHOUT changing structure.
+
+{planner_block}
+
+CONSTRAINT: Each section_field (shown in brackets) may appear at most once per section.
+Never plan two components with the same section_field in the same section.
+
+FIXED SKELETON CONSTRAINT — NON-NEGOTIABLE
+The LessonSkeleton in your user message is frozen.
+You MUST copy exactly, with no reordering, renaming, or substitution:
+  - lesson_mode
+  - section count and order
+  - each section id, title, role, visual_required
+  - each section's component slug list including order
+You may ONLY fill: lesson_intent, anchor, voice, prior_knowledge, repair_focus,
+known_pitfalls, transition_note text, each component purpose, question_plan,
+answer_key_style.
+If a commitment seems to need a different structure, keep the skeleton and
+express the tension in structure_rationale — do not alter the skeleton.
+
+REASONING STEPS — work through these in order before producing JSON
+
+STEP 2 — GOAL
+  Write one testable goal:
+  "By the end the student can ___."
+
+STEP 4 — ANCHOR
+  Choose one concrete anchor example for the whole lesson.
+  Name it exactly and explain how it recurs across sections.
+  Never substitute or generalise it later.
+
+STEP 6 — SLOT MAPPING
+  For each section, keep the frozen component slug list exactly.
+  Write a purpose for each slotted component.
+  Each purpose must tell the writer exactly what the component must do now.
+  For each section after the first, write one transition_note stating what the
+  prior section established and what this section now does with it.
+
+STEP 7 — MISCONCEPTIONS
+  Only if a pitfall-alert component is slotted:
+  name the specific misconception and the component_id it feeds.
+  Otherwise return an empty list.
+
+STEP 8 — VISUALS & QUESTIONS
+  Visuals: keep visual_required exactly as in the frozen skeleton.
+  Questions: follow this lesson_mode arc:
+    first_exposure → warm and medium only
+    consolidation  → medium to cold; at least one transfer
+    repair         → warm only until the fault line is resolved
+    retrieval      → cold and transfer; no warm
+    transfer       → transfer; cold acceptable; no warm or medium
+  Keep question counts within the resource spec depth limits.
+
+STEP 9 — SELF CHECK
+  Verify:
+  - structure matches the frozen skeleton byte-for-byte on ids/titles/roles/
+    visual_required/component slug order and lesson_mode
+  - every section has purposes for its frozen components
+  - the anchor appears by exact name where the concept is taught
+  - question temperatures match lesson_mode
+  - transition_notes are specific, first section only has null
+  - repair_focus is present if lesson_mode=repair
+
+Output ONLY valid JSON matching this schema exactly:
+{{
+  "lesson_mode": "first_exposure",
+  "lesson_intent": {{
+    "goal": "By the end of this lesson the student can...",
+    "structure_rationale": "Why this structure fits this class and concept."
+  }},
+  "anchor": {{
+    "example": "splitting a pizza into 8 equal slices",
+    "reuse_scope": "introduced in intro; reused in explain; varied in practice; returned in summary"
+  }},
+  "voice": {{
+    "register_name": "simple",
+    "tone": "encouraging"
+  }},
+  "prior_knowledge": ["equal sharing", "basic division"],
+  "repair_focus": null,
+  "known_pitfalls": [
+    {{
+      "misconception": "students believe a larger denominator means a larger fraction",
+      "component_id": "pitfall-alert"
+    }}
+  ],
+  "sections": [
+    {{
+      "id": "intro",
+      "title": "What do you already know about sharing equally?",
+      "role": "intro",
+      "visual_required": false,
+      "transition_note": null,
+      "components": [
+        {{
+          "slug": "hook-hero",
+          "purpose": "surface the anchor problem before any instruction"
+        }}
+      ]
+    }}
+  ],
+  "question_plan": [
+    {{
+      "question_id": "q1",
+      "section_id": "practice",
+      "temperature": "warm",
+      "diagram_required": false
+    }}
+  ],
+  "answer_key_style": "brief_explanations"
+}}
+
+HARD RULES:
+- Only use slugs from the frozen skeleton. Never invent or swap slugs.
+- Max 6 sections.
+- Max 4 component slugs per section.
+- transition_note is null for the first section only.
+- Every emitted role must match the frozen skeleton.
+- known_pitfalls is [] if no pitfall-alert was planned.
+- repair_focus is null unless lesson_mode is repair.
+- Do not include content_intent, question prompt text, or visual subject descriptions.
+- Do not add any JSON keys not shown in the schema above.
+"""
+
+
+def build_stage1b_user_message(
+    *,
+    signals: V3SignalSummary,
+    form: V3InputForm,
+    resource_spec: dict,
+    skeleton: "LessonSkeleton",
+    previous_errors: list[str] | None = None,
+) -> str:
+    payload = (
+        f"Signals JSON:\n{signals.model_dump_json(indent=2)}\n\n"
+        f"Form JSON:\n{form.model_dump_json(indent=2)}\n\n"
+        f"FROZEN LESSON SKELETON JSON:\n{skeleton.model_dump_json(indent=2)}\n\n"
+        f"RESOURCE SPEC JSON:\n{json.dumps(resource_spec, indent=2, sort_keys=True)}"
+    )
+    if previous_errors:
+        payload += (
+            "\n\nVALIDATION ERRORS FROM PREVIOUS ATTEMPT "
+            "(fix all of these):\n"
+            + "\n".join(f"- {error}" for error in previous_errors)
+        )
+    return payload
+
+
+async def _call_stage1b(
+    signals: V3SignalSummary,
+    form: V3InputForm,
+    resource_spec: dict,
+    skeleton: "LessonSkeleton",
+    *,
+    trace_id: str | None = None,
+    generation_id: str | None = None,
+    previous_errors: list[str] | None = None,
+) -> StructuralPlan:
+    from v3_blueprint.planning.models import LessonSkeleton
+    from v3_blueprint.planning.validators import validate_skeleton_conformance
+
+    import traceback
+
+    try:
+        node = STAGE1B_NODE
+        tid = trace_id or generation_id or str(uuid.uuid4())
+        model = get_v3_model(node)
+        spec = get_v3_spec(node)
+        slot = get_v3_slot(node)
+        agent = Agent(
+            model=model,
+            output_type=structured_output_type_for_model(StructuralPlan, spec=spec),
+            system_prompt=build_stage1b_system_prompt(),
+        )
+        result = await run_llm(
+            trace_id=tid,
+            caller=_CALLER,
+            generation_id=generation_id,
+            agent=agent,
+            user_prompt=build_stage1b_user_message(
+                signals=signals,
+                form=form,
+                resource_spec=resource_spec,
+                skeleton=skeleton,
+                previous_errors=previous_errors,
+            ),
+            model=model,
+            slot=slot,
+            spec=spec,
+            section_id=None,
+            node=node,
+            model_settings=get_v3_model_settings(node),
+            retry_policy=RetryPolicy(
+                max_attempts=1,
+                call_timeout_seconds=float(settings.v3_timeout_stage1_seconds),
+            ),
+        )
+        raw = result.output
+        if isinstance(raw, StructuralPlan):
+            plan = raw
+        elif hasattr(raw, "model_dump"):
+            plan = StructuralPlan.model_validate(raw.model_dump())
+        else:
+            plan = StructuralPlan.model_validate(raw)
+        _validate_stage1_roles(plan, resource_spec)
+        conformance_errors = validate_skeleton_conformance(skeleton, plan)
+        if conformance_errors:
+            print(
+                f"[STAGE1B CONFORMANCE VIOLATION] generation_id={generation_id}"
+                f" errors={conformance_errors}",
+                flush=True,
+            )
+            raise ValueError(
+                "Stage 1b broke frozen skeleton: " + "; ".join(conformance_errors)
+            )
+        return plan
+    except Exception as exc:
+        tb = traceback.format_exc()
+        print(
+            f"\n[_CALL_STAGE1B ERROR]"
+            f" generation_id={generation_id}"
+            f" type={type(exc).__name__}"
+            f"\nmessage={str(exc)}"
+            f"\ntraceback:\n{tb}",
+            flush=True,
+        )
+        raise
+
+
 __all__ = [
     "STAGE1_NODE",
+    "STAGE1B_NODE",
     "_call_stage1",
+    "_call_stage1b",
     "build_stage1_system_prompt",
     "build_stage1_user_message",
+    "build_stage1b_system_prompt",
+    "build_stage1b_user_message",
 ]
