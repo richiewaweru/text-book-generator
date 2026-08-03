@@ -36,9 +36,9 @@ allowed_outcomes: [teach_new_concept, develop_understanding, first_exposure_to_p
 
 depth:
   quick:
-    sections: "4"
-    min_sections: 4
-    max_sections: 4
+    sections: "5"
+    min_sections: 5
+    max_sections: 5
     time_minutes: "15-20"
     questions: "3-4"
     note: >

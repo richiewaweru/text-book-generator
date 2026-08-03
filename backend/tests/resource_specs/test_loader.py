@@ -33,6 +33,18 @@ def test_specs_have_required_sections_and_depths() -> None:
             assert depth_variant.min_sections <= depth_variant.max_sections
 
 
+def test_required_sections_fit_within_max_sections_at_every_depth() -> None:
+    """Permanent guard: required sections must never exceed depth max_sections."""
+    specs = load_all_specs(SPECS_DIR)
+    for spec_id, spec in specs.items():
+        required_count = len(spec.sections.required)
+        for depth_key, depth_variant in spec.depth.items():
+            assert required_count <= depth_variant.max_sections, (
+                f"{spec_id}/{depth_key}: {required_count} required sections "
+                f"exceed max_sections={depth_variant.max_sections}"
+            )
+
+
 def test_resource_type_enum_matches_available_specs() -> None:
     """
     ResourceType enum in v3_blueprint/models.py must contain exactly the spec IDs

@@ -43,9 +43,9 @@ allowed_outcomes: [understand, review, vocabulary, compare]
 
 depth:
   quick:
-    sections: "2-3"
+    sections: "3-4"
     min_sections: 2
-    max_sections: 3
+    max_sections: 4
     time_minutes: "10-15"
     questions: "2-4"
     note: >
