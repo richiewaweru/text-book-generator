@@ -18,8 +18,10 @@ from planning.models import (
     ConceptCandidate,
     LessonPart,
     MergePathLessonsRequest,
+    PathCompleteness,
     PathLessonPatch,
     PathPlan,
+    PrerequisiteRisk,
     ReorderPathLessonsRequest,
     SplitPathLessonRequest,
     UnitCreate,
@@ -38,7 +40,7 @@ from planning.service import (
     skip_lesson,
     split_lesson,
 )
-from planning.validation import PathApprovalBlocked
+from planning.validation import PathApprovalBlocked, PathValidationError, assert_approvable, validate_path_plan
 
 
 FIXTURES = Path(__file__).resolve().parents[3] / "handoff" / "fixtures"
@@ -46,6 +48,16 @@ FIXTURES = Path(__file__).resolve().parents[3] / "handoff" / "fixtures"
 
 def _plan(name: str) -> PathPlan:
     return PathPlan.model_validate_json((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def assert_risks_imply_unreachable(version: PathVersionModel) -> None:
+    """D1: non-empty prerequisite_risks always implies unreachable (columns + plan)."""
+    risks = version.prerequisite_risks or []
+    if risks:
+        assert version.reaches_destination is False
+        plan = version.source_plan_json or {}
+        assert (plan.get("completeness") or {}).get("reaches_destination") is False
+        assert plan.get("prerequisite_risks")
 
 
 async def _unit(db_session, *, owner_id: str, fixture_name: str):
@@ -352,6 +364,7 @@ async def test_resolve_assumption_teach_records_risk_and_blocks_approve(db_sessi
     ]
     assert version.source_plan_json["prerequisite_risks"] == version.prerequisite_risks
     assert version.source_plan_json["completeness"]["reaches_destination"] is False
+    assert_risks_imply_unreachable(version)
     assert claimed not in (unit.starting_knowledge or [])
     # Declination leaves the declaration unconfirmed; panel still names it.
     assert await list_open_assumptions(db_session, unit_id=unit.id, lessons=lessons) == [
@@ -359,6 +372,92 @@ async def test_resolve_assumption_teach_records_risk_and_blocks_approve(db_sessi
     ]
     with pytest.raises(PathApprovalBlocked):
         await approve_path(db_session, version)
+
+
+async def test_resolve_assumption_teach_twice_same_label_one_risk(db_session, owner) -> None:
+    plan = _plan("grade4-photosynthesis-path.json")
+    unit = await _unit(
+        db_session,
+        owner_id=owner.id,
+        fixture_name="grade4-photosynthesis-path.json",
+    )
+    claimed = "multiply any two fractions"
+    plan.lessons[0].external_prerequisites = [claimed]
+    version = await persist_path_plan(db_session, unit=unit, plan=plan)
+
+    await resolve_path_assumption(
+        db_session, unit=unit, version=version, claimed=claimed, decision="teach"
+    )
+    revision_after_first = version.revision
+
+    await resolve_path_assumption(
+        db_session, unit=unit, version=version, claimed=claimed, decision="teach"
+    )
+    assert version.revision == revision_after_first
+    assert len(version.prerequisite_risks or []) == 1
+    assert_risks_imply_unreachable(version)
+
+
+async def test_persist_path_with_risks_satisfies_risk_invariant(db_session, owner) -> None:
+    plan = _plan("grade8-unreachable-destination-path.json")
+    unit = await _unit(
+        db_session,
+        owner_id=owner.id,
+        fixture_name="grade8-unreachable-destination-path.json",
+    )
+    version = await persist_path_plan(db_session, unit=unit, plan=plan)
+    assert version.prerequisite_risks
+    assert_risks_imply_unreachable(version)
+
+
+async def test_risks_with_reaches_destination_true_rejected(db_session, owner) -> None:
+    """D3: live failure shape — risks present while plan still claims reachable."""
+    plan = _plan("grade4-photosynthesis-path.json")
+    plan.prerequisite_risks = [
+        PrerequisiteRisk(
+            missing="gap skill",
+            needed_by=plan.lessons[0].concept_candidate.slug,
+            note="teacher declined",
+        )
+    ]
+    plan.completeness = PathCompleteness(
+        forward_verified=True,
+        reaches_destination=True,
+        note=None,
+    )
+
+    with pytest.raises(PathValidationError) as exc_info:
+        validate_path_plan(plan)
+    assert exc_info.value.code == "risks_require_unreachable"
+
+    with pytest.raises(PathValidationError) as exc_info:
+        assert_approvable(plan)
+    assert exc_info.value.code == "risks_require_unreachable"
+
+
+async def test_resolve_teach_risk_survives_commit_and_refetch(db_session, owner) -> None:
+    plan = _plan("grade4-photosynthesis-path.json")
+    unit = await _unit(
+        db_session,
+        owner_id=owner.id,
+        fixture_name="grade4-photosynthesis-path.json",
+    )
+    claimed = "multiply any two fractions"
+    plan.lessons[0].external_prerequisites = [claimed]
+    version = await persist_path_plan(db_session, unit=unit, plan=plan)
+    version_id = version.id
+
+    await resolve_path_assumption(
+        db_session, unit=unit, version=version, claimed=claimed, decision="teach"
+    )
+    await db_session.commit()
+
+    refetched = await db_session.get(PathVersionModel, version_id)
+    assert refetched is not None
+    assert refetched.reaches_destination is False
+    assert len(refetched.prerequisite_risks or []) == 1
+    assert_risks_imply_unreachable(refetched)
+    validate_path_plan(PathPlan.model_validate(refetched.source_plan_json))
 
 
 async def test_resolve_assumption_idempotent_when_already_settled(db_session, owner) -> None:
@@ -488,6 +587,7 @@ async def test_planner_reword_surfaces_unconfirmed_declaration(db_session, owner
 
 
 async def test_approve_open_assumptions_inverse_invariant(db_session, owner) -> None:
+    """D2 (declaration era): approve block labels == open_assumptions claimed labels."""
     plan = _plan("grade4-photosynthesis-path.json")
     unit = await _unit(
         db_session,

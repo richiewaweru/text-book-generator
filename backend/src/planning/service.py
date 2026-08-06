@@ -50,6 +50,33 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def record_prerequisite_risk(
+    version: PathVersionModel,
+    *,
+    missing: str,
+    needed_by: str,
+    note: str,
+) -> None:
+    """Record a prerequisite gap. Always clears reaches_destination.
+
+    Updates denormalized columns and source_plan_json together — approve_path
+    validates the embedded plan via assert_approvable before column gates.
+    """
+    risk = {"missing": missing, "needed_by": needed_by, "note": note}
+    version.prerequisite_risks = [*(version.prerequisite_risks or []), risk]
+    version.reaches_destination = False
+
+    plan_json = dict(version.source_plan_json or {})
+    plan_json["prerequisite_risks"] = [
+        *(plan_json.get("prerequisite_risks") or []),
+        risk,
+    ]
+    completeness = dict(plan_json.get("completeness") or {})
+    completeness["reaches_destination"] = False
+    plan_json["completeness"] = completeness
+    version.source_plan_json = plan_json
+
+
 async def _declarations(
     session: AsyncSession,
     unit_id: str,
@@ -226,6 +253,8 @@ async def persist_path_plan(
         prior_version.status = "superseded"
         prior_version.revision += 1
 
+    # prerequisite_risks and reaches_destination must stay consistent — validate_path_plan
+    # enforces risks_require_unreachable on the plan before this constructor runs.
     version = PathVersionModel(
         unit_id=unit.id,
         version=await _next_version(session, unit.id),
@@ -338,6 +367,7 @@ async def clone_path_version(
             .order_by(PathLessonModel.position)
         )
     )
+    # Copy prerequisite_risks and reaches_destination together from source.
     clone = PathVersionModel(
         unit_id=unit.id,
         version=await _next_version(session, unit.id),
@@ -497,33 +527,21 @@ async def resolve_path_assumption(
             knowledge.append(declaration.label)
             unit.starting_knowledge = knowledge
     elif decision == "teach":
-        risks = list(version.prerequisite_risks or [])
         already = any(
             isinstance(risk, dict)
             and isinstance(risk.get("missing"), str)
             and risk["missing"].casefold() == declaration.label.casefold()
-            for risk in risks
+            for risk in (version.prerequisite_risks or [])
         )
         if declaration.confirmed or already:
             await session.flush()
             return version
-        risk = {
-            "missing": declaration.label,
-            "needed_by": needed_by,
-            "note": "teacher declined",
-        }
-        risks.append(risk)
-        version.prerequisite_risks = risks
-        version.reaches_destination = False
-
-        plan_json = dict(version.source_plan_json or {})
-        plan_risks = list(plan_json.get("prerequisite_risks") or [])
-        plan_risks.append(risk)
-        plan_json["prerequisite_risks"] = plan_risks
-        completeness = dict(plan_json.get("completeness") or {})
-        completeness["reaches_destination"] = False
-        plan_json["completeness"] = completeness
-        version.source_plan_json = plan_json
+        record_prerequisite_risk(
+            version,
+            missing=declaration.label,
+            needed_by=needed_by,
+            note="teacher declined",
+        )
     else:
         raise PathValidationError(
             "invalid_assumption_decision",
