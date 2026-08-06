@@ -117,12 +117,10 @@ def test_undeclared_external_prerequisite_is_open_assumption_not_halt() -> None:
 
     validate_path_plan(plan)
 
-    assumptions = open_assumptions(
-        starting_knowledge=plan.starting_knowledge,
-        assumed_prerequisites=plan.scope_contract.assumed_prerequisites,
-        lessons=plan.lessons,
-        prerequisite_risks=plan.prerequisite_risks,
-    )
+    class _Decl:
+        label = "undeclared capability"
+
+    assumptions = open_assumptions(unconfirmed=[_Decl()], lessons=plan.lessons)
     assert assumptions == [
         {
             "claimed": "undeclared capability",
@@ -131,93 +129,56 @@ def test_undeclared_external_prerequisite_is_open_assumption_not_halt() -> None:
     ]
 
 
-def test_open_assumptions_ignore_exact_and_casefold_matches() -> None:
-    payload = copy.deepcopy(_fixture("grade4-photosynthesis-path.json"))
-    declared = payload["starting_knowledge"][0]
-    payload["modules"][0]["lessons"][0]["external_prerequisites"] = [
-        declared,
-        declared.upper(),
-    ]
-    plan = PathPlan.model_validate(payload)
-
-    assert (
-        open_assumptions(
-            starting_knowledge=plan.starting_knowledge,
-            assumed_prerequisites=plan.scope_contract.assumed_prerequisites,
-            lessons=plan.lessons,
-            prerequisite_risks=[],
-        )
-        == []
-    )
-
-
-def test_open_assumptions_exclude_claims_already_recorded_as_risks() -> None:
-    payload = copy.deepcopy(_fixture("grade4-photosynthesis-path.json"))
-    payload["modules"][0]["lessons"][0]["external_prerequisites"] = ["multiply any two fractions"]
-    plan = PathPlan.model_validate(payload)
-
-    assumptions = open_assumptions(
-        starting_knowledge=plan.starting_knowledge,
-        assumed_prerequisites=plan.scope_contract.assumed_prerequisites,
-        lessons=plan.lessons,
-        prerequisite_risks=[
-            {
-                "missing": "Multiply Any Two Fractions",
-                "needed_by": plan.lessons[0].concept_candidate.slug,
-                "note": "teacher declined",
-            }
-        ],
-    )
-    assert assumptions == []
-
-
-def test_open_assumptions_dedupe_same_claim_across_lessons() -> None:
+def test_open_assumptions_reads_unconfirmed_rows_not_string_lists() -> None:
     payload = copy.deepcopy(_fixture("grade4-photosynthesis-path.json"))
     claimed = "multiply any two fractions"
     payload["modules"][0]["lessons"][0]["external_prerequisites"] = [claimed]
-    payload["modules"][0]["lessons"][1]["external_prerequisites"] = [claimed.upper()]
     plan = PathPlan.model_validate(payload)
 
-    assumptions = open_assumptions(
-        starting_knowledge=plan.starting_knowledge,
-        assumed_prerequisites=plan.scope_contract.assumed_prerequisites,
-        lessons=plan.lessons,
-        prerequisite_risks=[],
-    )
-    assert assumptions == [
-        {
-            "claimed": claimed,
-            "needed_by": plan.lessons[0].concept_candidate.slug,
-        }
+    class _Confirmed:
+        label = claimed
+
+    # Confirmed rows are not passed in; panel is empty even if lessons still list the label.
+    assert open_assumptions(unconfirmed=[], lessons=plan.lessons) == []
+
+    class _Unconfirmed:
+        label = claimed
+
+    assert open_assumptions(unconfirmed=[_Unconfirmed()], lessons=plan.lessons) == [
+        {"claimed": claimed, "needed_by": plan.lessons[0].concept_candidate.slug}
     ]
 
 
-def test_open_assumptions_ignore_skipped_lessons() -> None:
+def test_open_assumptions_stale_row_still_surfaces() -> None:
+    class _Decl:
+        label = "stale capability"
+
     class _Lesson:
-        def __init__(self, *, slug: str, title: str, skipped: bool, external: list[str]) -> None:
+        concept_slug = "active-lesson"
+        skipped = False
+        external_prerequisites: list[str] = []
+
+    assert open_assumptions(unconfirmed=[_Decl()], lessons=[_Lesson()]) == [
+        {"claimed": "stale capability", "needed_by": ""}
+    ]
+
+
+def test_open_assumptions_needed_by_skips_skipped_lessons() -> None:
+    class _Decl:
+        label = "read a clock face"
+
+    class _Lesson:
+        def __init__(self, *, slug: str, skipped: bool, external: list[str]) -> None:
             self.concept_slug = slug
-            self.title = title
             self.skipped = skipped
             self.external_prerequisites = external
 
     assumptions = open_assumptions(
-        starting_knowledge=[],
-        assumed_prerequisites=[],
+        unconfirmed=[_Decl()],
         lessons=[
-            _Lesson(
-                slug="skipped-lesson",
-                title="Skipped",
-                skipped=True,
-                external=["multiply any two fractions"],
-            ),
-            _Lesson(
-                slug="active-lesson",
-                title="Active",
-                skipped=False,
-                external=["read a clock face"],
-            ),
+            _Lesson(slug="skipped-lesson", skipped=True, external=["read a clock face"]),
+            _Lesson(slug="active-lesson", skipped=False, external=["read a clock face"]),
         ],
-        prerequisite_risks=[],
     )
     assert assumptions == [
         {"claimed": "read a clock face", "needed_by": "active-lesson"},

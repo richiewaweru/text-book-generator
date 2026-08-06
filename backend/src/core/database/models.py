@@ -333,6 +333,37 @@ class UnitModel(Base):
         cascade="all, delete-orphan",
         order_by="ResourceCompositionModel.created_at",
     )
+    capability_declarations = relationship(
+        "UnitCapabilityDeclarationModel",
+        back_populates="unit",
+        cascade="all, delete-orphan",
+        order_by="UnitCapabilityDeclarationModel.created_at",
+    )
+
+
+class UnitCapabilityDeclarationModel(Base):
+    """Teacher- or planner-declared prior-knowledge capability for a unit.
+
+    Approval is gated on unconfirmed rows, not string equality between intake
+    and planner wording.
+    """
+
+    __tablename__ = "unit_capability_declarations"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    unit_id = Column(
+        String,
+        ForeignKey("units.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    label = Column(Text, nullable=False)
+    source = Column(String, nullable=False)
+    confirmed = Column(Boolean, nullable=False, default=False, server_default="false")
+    confirmed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+
+    unit = relationship("UnitModel", back_populates="capability_declarations")
 
 
 class UnitScopeContractModel(Base):

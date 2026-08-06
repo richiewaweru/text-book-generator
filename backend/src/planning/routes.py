@@ -16,7 +16,6 @@ from core.database.models import (
     ResourceCompositionModel,
     UnitGroupModel,
     UnitModel,
-    UnitScopeContractModel,
 )
 from core.dependencies import get_async_session
 from core.entities.user import User
@@ -97,6 +96,7 @@ from planning.service import (
     get_path_lesson,
     get_path_version,
     invalidate_path_approval,
+    list_open_assumptions,
     list_path_versions,
     merge_lessons,
     patch_lesson,
@@ -110,7 +110,6 @@ from planning.service import (
 from planning.validation import (
     PathApprovalBlocked,
     PathValidationError,
-    open_assumptions,
     plain_validation_message,
     validate_path_plan,
 )
@@ -170,14 +169,8 @@ async def _path_payload(session: AsyncSession, version) -> dict[str, object]:
     prerequisites: dict[str, list[str]] = {lesson.id: [] for lesson in lessons}
     for link in links:
         prerequisites[link.path_lesson_id].append(link.prerequisite_lesson_id)
-    scope = await session.get(UnitScopeContractModel, version.unit_id) if unit is not None else None
     assumptions = (
-        open_assumptions(
-            starting_knowledge=unit.starting_knowledge if unit is not None else [],
-            assumed_prerequisites=scope.assumed_prerequisites if scope is not None else [],
-            lessons=lessons,
-            prerequisite_risks=version.prerequisite_risks,
-        )
+        await list_open_assumptions(session, unit_id=unit.id, lessons=lessons)
         if unit is not None
         else []
     )

@@ -11,7 +11,7 @@ from core.database.models import (
     PathLessonModel,
     PathLessonPrerequisiteModel,
     PathVersionModel,
-    UnitScopeContractModel,
+    UnitCapabilityDeclarationModel,
     UserModel,
 )
 from planning.models import (
@@ -28,15 +28,17 @@ from planning.service import (
     approve_path,
     clone_path_version,
     create_unit,
+    list_open_assumptions,
     merge_lessons,
     patch_lesson,
     persist_path_plan,
+    record_teacher_intake_declarations,
     reorder_lessons,
     resolve_path_assumption,
     skip_lesson,
     split_lesson,
 )
-from planning.validation import PathApprovalBlocked, open_assumptions
+from planning.validation import PathApprovalBlocked
 
 
 FIXTURES = Path(__file__).resolve().parents[3] / "handoff" / "fixtures"
@@ -292,15 +294,8 @@ async def test_paraphrased_external_prerequisite_blocks_approve_until_known(db_s
             .order_by(PathLessonModel.position)
         )
     )
-    scope = await db_session.get(UnitScopeContractModel, unit.id)
-    assert scope is not None
 
-    assumptions = open_assumptions(
-        starting_knowledge=unit.starting_knowledge,
-        assumed_prerequisites=scope.assumed_prerequisites,
-        lessons=lessons,
-        prerequisite_risks=version.prerequisite_risks,
-    )
+    assumptions = await list_open_assumptions(db_session, unit_id=unit.id, lessons=lessons)
     assert assumptions == [{"claimed": claimed, "needed_by": lessons[0].concept_slug}]
 
     with pytest.raises(PathApprovalBlocked, match=re.escape(repr(claimed))):
@@ -316,15 +311,7 @@ async def test_paraphrased_external_prerequisite_blocks_approve_until_known(db_s
     )
     assert claimed in (unit.starting_knowledge or [])
     assert version.revision == revision_before + 1
-    assert (
-        open_assumptions(
-            starting_knowledge=unit.starting_knowledge,
-            assumed_prerequisites=scope.assumed_prerequisites,
-            lessons=lessons,
-            prerequisite_risks=version.prerequisite_risks,
-        )
-        == []
-    )
+    assert await list_open_assumptions(db_session, unit_id=unit.id, lessons=lessons) == []
     await approve_path(db_session, version)
     assert version.status == "approved"
 
@@ -366,19 +353,11 @@ async def test_resolve_assumption_teach_records_risk_and_blocks_approve(db_sessi
     assert version.source_plan_json["prerequisite_risks"] == version.prerequisite_risks
     assert version.source_plan_json["completeness"]["reaches_destination"] is False
     assert claimed not in (unit.starting_knowledge or [])
-
-    scope = await db_session.get(UnitScopeContractModel, unit.id)
-    assert scope is not None
-    assert (
-        open_assumptions(
-            starting_knowledge=unit.starting_knowledge,
-            assumed_prerequisites=scope.assumed_prerequisites,
-            lessons=lessons,
-            prerequisite_risks=version.prerequisite_risks,
-        )
-        == []
-    )
-    with pytest.raises(PathApprovalBlocked, match="prerequisite"):
+    # Declination leaves the declaration unconfirmed; panel still names it.
+    assert await list_open_assumptions(db_session, unit_id=unit.id, lessons=lessons) == [
+        {"claimed": claimed, "needed_by": lessons[0].concept_slug}
+    ]
+    with pytest.raises(PathApprovalBlocked):
         await approve_path(db_session, version)
 
 
@@ -430,3 +409,234 @@ async def test_resolve_assumption_rejects_bogus_claim(db_session, owner) -> None
             claimed="never claimed by any lesson",
             decision="known",
         )
+
+
+async def test_planner_reword_surfaces_unconfirmed_declaration(db_session, owner) -> None:
+    """Live-failure regression: teacher intake vs planner wording for two of three."""
+    intake = [
+        "multiply fractions (I'm assuming this is already covered)",
+        "understand what a fraction represents",
+        "divide whole numbers",
+    ]
+    plan = _plan("grade4-photosynthesis-path.json")
+    unit = await create_unit(
+        db_session,
+        owner_id=owner.id,
+        request=UnitCreate(
+            title="Fractions",
+            topic="Fractions",
+            subject="Math",
+            grade_level="Grade 5",
+            destination_objective=plan.destination_objective or "Destination",
+            starting_knowledge=intake,
+        ),
+    )
+    plan.starting_knowledge = list(intake)
+    plan.lessons[0].external_prerequisites = [
+        "multiply fractions",
+        "understand fraction concept",
+        "divide whole numbers",
+    ]
+    for lesson in plan.lessons[1:]:
+        lesson.external_prerequisites = []
+    version = await persist_path_plan(db_session, unit=unit, plan=plan)
+    lessons = list(
+        await db_session.scalars(
+            select(PathLessonModel)
+            .where(PathLessonModel.path_version_id == version.id)
+            .order_by(PathLessonModel.position)
+        )
+    )
+
+    rows = list(
+        await db_session.scalars(
+            select(UnitCapabilityDeclarationModel).where(
+                UnitCapabilityDeclarationModel.unit_id == unit.id
+            )
+        )
+    )
+    by_label = {row.label: row for row in rows}
+    assert by_label["divide whole numbers"].confirmed is True
+    assert by_label["multiply fractions"].confirmed is False
+    assert by_label["understand fraction concept"].confirmed is False
+
+    assumptions = await list_open_assumptions(db_session, unit_id=unit.id, lessons=lessons)
+    claimed = {row["claimed"] for row in assumptions}
+    assert claimed == {"multiply fractions", "understand fraction concept"}
+
+    blocked_labels: set[str] | None = None
+    try:
+        await approve_path(db_session, version)
+    except PathApprovalBlocked as exc:
+        blocked_labels = {
+            label.strip("'\"")
+            for label in re.findall(r"'[^']+'|\"[^\"]+\"", str(exc))
+        }
+    assert blocked_labels == claimed
+
+    for label in sorted(claimed):
+        await resolve_path_assumption(
+            db_session,
+            unit=unit,
+            version=version,
+            claimed=label,
+            decision="known",
+        )
+    assert await list_open_assumptions(db_session, unit_id=unit.id, lessons=lessons) == []
+    await approve_path(db_session, version)
+    assert version.status == "approved"
+
+
+async def test_approve_open_assumptions_inverse_invariant(db_session, owner) -> None:
+    plan = _plan("grade4-photosynthesis-path.json")
+    unit = await _unit(
+        db_session,
+        owner_id=owner.id,
+        fixture_name="grade4-photosynthesis-path.json",
+    )
+    plan.lessons[0].external_prerequisites = ["alpha capability", "beta capability"]
+    version = await persist_path_plan(db_session, unit=unit, plan=plan)
+    lessons = list(
+        await db_session.scalars(
+            select(PathLessonModel)
+            .where(PathLessonModel.path_version_id == version.id)
+            .order_by(PathLessonModel.position)
+        )
+    )
+
+    assumptions = await list_open_assumptions(db_session, unit_id=unit.id, lessons=lessons)
+    assert assumptions
+    with pytest.raises(PathApprovalBlocked) as blocked:
+        await approve_path(db_session, version)
+    blocked_labels = {
+        label.strip("'\"")
+        for label in re.findall(r"'[^']+'|\"[^\"]+\"", str(blocked.value))
+    }
+    assert blocked_labels == {row["claimed"] for row in assumptions}
+
+    for row in assumptions:
+        await resolve_path_assumption(
+            db_session,
+            unit=unit,
+            version=version,
+            claimed=row["claimed"],
+            decision="known",
+        )
+    assert await list_open_assumptions(db_session, unit_id=unit.id, lessons=lessons) == []
+    await approve_path(db_session, version)
+    assert version.status == "approved"
+
+
+async def test_same_label_on_two_lessons_one_declaration(db_session, owner) -> None:
+    plan = _plan("grade4-photosynthesis-path.json")
+    unit = await _unit(
+        db_session,
+        owner_id=owner.id,
+        fixture_name="grade4-photosynthesis-path.json",
+    )
+    claimed = "shared prior knowledge"
+    plan.lessons[0].external_prerequisites = [claimed]
+    plan.lessons[1].external_prerequisites = [claimed]
+    await persist_path_plan(db_session, unit=unit, plan=plan)
+    count = await db_session.scalar(
+        select(func.count())
+        .select_from(UnitCapabilityDeclarationModel)
+        .where(
+            UnitCapabilityDeclarationModel.unit_id == unit.id,
+            UnitCapabilityDeclarationModel.label == claimed,
+        )
+    )
+    assert count == 1
+
+
+async def test_replan_same_label_keeps_confirmed_no_duplicate(db_session, owner) -> None:
+    plan = _plan("grade4-photosynthesis-path.json")
+    unit = await _unit(
+        db_session,
+        owner_id=owner.id,
+        fixture_name="grade4-photosynthesis-path.json",
+    )
+    claimed = "multiply any two fractions"
+    plan.lessons[0].external_prerequisites = [claimed]
+    first = await persist_path_plan(db_session, unit=unit, plan=plan)
+    await resolve_path_assumption(
+        db_session, unit=unit, version=first, claimed=claimed, decision="known"
+    )
+    plan.lessons[0].external_prerequisites = [claimed]
+    second = await persist_path_plan(
+        db_session, unit=unit, plan=plan, prior_version=first
+    )
+    rows = list(
+        await db_session.scalars(
+            select(UnitCapabilityDeclarationModel).where(
+                UnitCapabilityDeclarationModel.unit_id == unit.id,
+                UnitCapabilityDeclarationModel.label == claimed,
+            )
+        )
+    )
+    assert len(rows) == 1
+    assert rows[0].confirmed is True
+    lessons = list(
+        await db_session.scalars(
+            select(PathLessonModel)
+            .where(PathLessonModel.path_version_id == second.id)
+            .order_by(PathLessonModel.position)
+        )
+    )
+    assert await list_open_assumptions(db_session, unit_id=unit.id, lessons=lessons) == []
+
+
+async def test_replan_new_label_creates_unconfirmed_row(db_session, owner) -> None:
+    plan = _plan("grade4-photosynthesis-path.json")
+    unit = await _unit(
+        db_session,
+        owner_id=owner.id,
+        fixture_name="grade4-photosynthesis-path.json",
+    )
+    first = await persist_path_plan(db_session, unit=unit, plan=plan)
+    plan.lessons[0].external_prerequisites = ["brand new capability"]
+    second = await persist_path_plan(
+        db_session, unit=unit, plan=plan, prior_version=first
+    )
+    lessons = list(
+        await db_session.scalars(
+            select(PathLessonModel)
+            .where(PathLessonModel.path_version_id == second.id)
+            .order_by(PathLessonModel.position)
+        )
+    )
+    assumptions = await list_open_assumptions(db_session, unit_id=unit.id, lessons=lessons)
+    assert assumptions == [
+        {"claimed": "brand new capability", "needed_by": lessons[0].concept_slug}
+    ]
+    with pytest.raises(PathApprovalBlocked, match="brand new capability"):
+        await approve_path(db_session, second)
+
+
+async def test_case_differing_label_does_not_duplicate(db_session, owner) -> None:
+    plan = _plan("grade4-photosynthesis-path.json")
+    unit = await _unit(
+        db_session,
+        owner_id=owner.id,
+        fixture_name="grade4-photosynthesis-path.json",
+    )
+    plan.lessons[0].external_prerequisites = ["Divide Whole Numbers"]
+    # Ensure intake already has the casefold-equivalent confirmed row.
+    unit.starting_knowledge = list(unit.starting_knowledge or []) + ["divide whole numbers"]
+    await record_teacher_intake_declarations(db_session, unit.id, unit.starting_knowledge)
+    await persist_path_plan(db_session, unit=unit, plan=plan)
+    count = await db_session.scalar(
+        select(func.count())
+        .select_from(UnitCapabilityDeclarationModel)
+        .where(UnitCapabilityDeclarationModel.unit_id == unit.id)
+    )
+    folded = {
+        row.label.casefold()
+        for row in await db_session.scalars(
+            select(UnitCapabilityDeclarationModel).where(
+                UnitCapabilityDeclarationModel.unit_id == unit.id
+            )
+        )
+    }
+    assert "divide whole numbers" in folded
+    assert count == len(folded)

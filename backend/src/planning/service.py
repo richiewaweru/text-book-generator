@@ -10,6 +10,7 @@ from core.database.models import (
     PathLessonModel,
     PathLessonPrerequisiteModel,
     PathVersionModel,
+    UnitCapabilityDeclarationModel,
     UnitModel,
     UnitScopeContractModel,
 )
@@ -49,17 +50,109 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+async def _declarations(
+    session: AsyncSession,
+    unit_id: str,
+) -> list[UnitCapabilityDeclarationModel]:
+    return list(
+        await session.scalars(
+            select(UnitCapabilityDeclarationModel).where(
+                UnitCapabilityDeclarationModel.unit_id == unit_id
+            )
+        )
+    )
+
+
+async def _unconfirmed_declarations(
+    session: AsyncSession,
+    unit_id: str,
+) -> list[UnitCapabilityDeclarationModel]:
+    return list(
+        await session.scalars(
+            select(UnitCapabilityDeclarationModel)
+            .where(
+                UnitCapabilityDeclarationModel.unit_id == unit_id,
+                UnitCapabilityDeclarationModel.confirmed.is_(False),
+            )
+            .order_by(UnitCapabilityDeclarationModel.created_at)
+        )
+    )
+
+
+async def record_teacher_intake_declarations(
+    session: AsyncSession,
+    unit_id: str,
+    labels: list[str] | None,
+) -> None:
+    existing = {row.label.casefold(): row for row in await _declarations(session, unit_id)}
+    now = _utcnow()
+    for label in labels or []:
+        if not isinstance(label, str) or not label.strip():
+            continue
+        folded = label.casefold()
+        if folded in existing:
+            continue
+        row = UnitCapabilityDeclarationModel(
+            unit_id=unit_id,
+            label=label,
+            source="teacher_intake",
+            confirmed=True,
+            confirmed_at=now,
+        )
+        session.add(row)
+        existing[folded] = row
+    await session.flush()
+
+
+async def record_planner_declarations(
+    session: AsyncSession,
+    unit_id: str,
+    lessons: list[object],
+) -> None:
+    existing = {row.label.casefold(): row for row in await _declarations(session, unit_id)}
+    for lesson in lessons:
+        for label in getattr(lesson, "external_prerequisites", None) or []:
+            if not isinstance(label, str) or not label.strip():
+                continue
+            folded = label.casefold()
+            if folded in existing:
+                continue
+            row = UnitCapabilityDeclarationModel(
+                unit_id=unit_id,
+                label=label,
+                source="path_planner",
+                confirmed=False,
+            )
+            session.add(row)
+            existing[folded] = row
+    await session.flush()
+
+
+async def list_open_assumptions(
+    session: AsyncSession,
+    *,
+    unit_id: str,
+    lessons: list[object],
+) -> list[dict[str, str]]:
+    unconfirmed = await _unconfirmed_declarations(session, unit_id)
+    return open_assumptions(unconfirmed=unconfirmed, lessons=lessons)
+
+
 async def create_unit(session: AsyncSession, *, owner_id: str, request: UnitCreate) -> UnitModel:
     unit = UnitModel(owner_id=owner_id, **request.model_dump())
     session.add(unit)
     await session.flush()
+    await record_teacher_intake_declarations(session, unit.id, unit.starting_knowledge)
     return unit
 
 
 async def update_unit(session: AsyncSession, unit: UnitModel, request: UnitUpdate) -> UnitModel:
-    for field, value in request.model_dump(exclude_unset=True).items():
+    payload = request.model_dump(exclude_unset=True)
+    for field, value in payload.items():
         setattr(unit, field, value)
     await session.flush()
+    if "starting_knowledge" in payload:
+        await record_teacher_intake_declarations(session, unit.id, unit.starting_knowledge)
     return unit
 
 
@@ -193,6 +286,14 @@ async def persist_path_plan(
                     prerequisite_lesson_id=lesson_by_slug[prerequisite_slug].id,
                 )
             )
+    await session.flush()
+    persisted_lessons = list(lesson_by_slug.values())
+    await record_teacher_intake_declarations(
+        session,
+        unit.id,
+        scope.assumed_prerequisites,
+    )
+    await record_planner_declarations(session, unit.id, persisted_lessons)
     unit.active_path_version_id = version.id
     await session.flush()
     return version
@@ -359,13 +460,17 @@ async def resolve_path_assumption(
     claimed: str,
     decision: str,
 ) -> PathVersionModel:
-    """Confirm or decline an undeclared external prerequisite for the active path."""
-    scope = await session.get(UnitScopeContractModel, unit.id)
-    if scope is None:
-        raise PathValidationError(
-            "missing_scope_contract",
-            "Path assumption resolution blocked: scope contract is missing",
+    """Confirm or decline a capability declaration for the active path."""
+    declarations = await _declarations(session, unit.id)
+    declaration = next(
+        (row for row in declarations if row.label.casefold() == claimed.casefold()),
+        None,
+    )
+    if declaration is None:
+        raise ValueError(
+            f"Assumption {claimed!r} is not an open assumption for this path"
         )
+
     lessons = list(
         await session.scalars(
             select(PathLessonModel)
@@ -373,53 +478,40 @@ async def resolve_path_assumption(
             .order_by(PathLessonModel.position)
         )
     )
-    open_rows = open_assumptions(
-        starting_knowledge=unit.starting_knowledge,
-        assumed_prerequisites=scope.assumed_prerequisites,
-        lessons=lessons,
-        prerequisite_risks=version.prerequisite_risks,
-    )
-    match = next(
-        (row for row in open_rows if row["claimed"].casefold() == claimed.casefold()),
-        None,
-    )
-    if match is None:
-        settled = {
-            value.casefold()
-            for value in [
-                *(unit.starting_knowledge or []),
-                *(scope.assumed_prerequisites or []),
-            ]
-            if isinstance(value, str) and value.strip()
-        }
-        for risk in version.prerequisite_risks or []:
-            if isinstance(risk, dict):
-                missing = risk.get("missing")
-            else:
-                missing = getattr(risk, "missing", None)
-            if isinstance(missing, str) and missing.strip():
-                settled.add(missing.casefold())
-        if claimed.casefold() in settled:
-            # Idempotent: already confirmed via starting knowledge or recorded as a risk.
+    needed_by = ""
+    for lesson in lessons:
+        if lesson.skipped:
+            continue
+        if declaration.label in (lesson.external_prerequisites or []):
+            needed_by = lesson.concept_slug
+            break
+
+    if decision == "known":
+        if declaration.confirmed:
             await session.flush()
             return version
-        raise ValueError(
-            f"Assumption {claimed!r} is not an open assumption for this path"
-        )
-
-    exact_claimed = match["claimed"]
-    if decision == "known":
+        declaration.confirmed = True
+        declaration.confirmed_at = _utcnow()
         knowledge = list(unit.starting_knowledge or [])
-        if exact_claimed.casefold() not in {value.casefold() for value in knowledge}:
-            knowledge.append(exact_claimed)
+        if declaration.label.casefold() not in {value.casefold() for value in knowledge}:
+            knowledge.append(declaration.label)
             unit.starting_knowledge = knowledge
     elif decision == "teach":
+        risks = list(version.prerequisite_risks or [])
+        already = any(
+            isinstance(risk, dict)
+            and isinstance(risk.get("missing"), str)
+            and risk["missing"].casefold() == declaration.label.casefold()
+            for risk in risks
+        )
+        if declaration.confirmed or already:
+            await session.flush()
+            return version
         risk = {
-            "missing": exact_claimed,
-            "needed_by": match["needed_by"],
+            "missing": declaration.label,
+            "needed_by": needed_by,
             "note": "teacher declined",
         }
-        risks = list(version.prerequisite_risks or [])
         risks.append(risk)
         version.prerequisite_risks = risks
         version.reaches_destination = False
@@ -746,24 +838,13 @@ async def approve_path(session: AsyncSession, version: PathVersionModel) -> Path
     scope = await session.get(UnitScopeContractModel, unit.id)
     if scope is None:
         raise PathApprovalBlocked("Path approval blocked: scope contract is missing")
-    allowed_external = {
-        value.casefold()
-        for value in [*(scope.assumed_prerequisites or []), *(unit.starting_knowledge or [])]
-    }
-    prohibited = [term.casefold() for term in (scope.must_not_introduce or []) if term.strip()]
-    undeclared = sorted(
-        {
-            prerequisite
-            for lesson in lessons
-            for prerequisite in (lesson.external_prerequisites or [])
-            if prerequisite.casefold() not in allowed_external
-        }
-    )
-    if undeclared:
+    unconfirmed = await _unconfirmed_declarations(session, unit.id)
+    if unconfirmed:
         raise PathApprovalBlocked(
-            "Path approval blocked: undeclared external prerequisite "
-            + ", ".join(repr(value) for value in undeclared)
+            "Path approval blocked: unconfirmed prior knowledge — "
+            + ", ".join(repr(row.label) for row in unconfirmed)
         )
+    prohibited = [term.casefold() for term in (scope.must_not_introduce or []) if term.strip()]
     for lesson in lessons:
         if lesson.objective_hash != hash_path_objective(lesson.objective):
             raise PathApprovalBlocked("Path approval blocked: objective hash mismatch")

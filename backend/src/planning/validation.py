@@ -84,50 +84,35 @@ def validate_path_plan(plan: PathPlan) -> None:
 
 def open_assumptions(
     *,
-    starting_knowledge: list[str] | None,
-    assumed_prerequisites: list[str] | None,
+    unconfirmed: list[object],
     lessons: list[object],
-    prerequisite_risks: list[object] | None,
 ) -> list[dict[str, str]]:
-    """Derive undeclared external prerequisites awaiting teacher confirmation.
+    """Surface unconfirmed capability declarations for the teacher confirm panel.
 
-    An assumption is open when a lesson claims an external prerequisite that is
-    neither in unit/scope starting knowledge nor already recorded as a
-    prerequisite risk (e.g. after the teacher answers ``teach``).
+    ``needed_by`` is the first non-skipped lesson (by position order of ``lessons``)
+    whose ``external_prerequisites`` contains the declaration label exactly. Stale
+    rows with no matching lesson still appear so the teacher can dismiss them.
     """
-    declared = {
-        value.casefold()
-        for value in [*(assumed_prerequisites or []), *(starting_knowledge or [])]
-        if isinstance(value, str) and value.strip()
-    }
-    answered_as_risk: set[str] = set()
-    for risk in prerequisite_risks or []:
-        if isinstance(risk, dict):
-            missing = risk.get("missing")
-        else:
-            missing = getattr(risk, "missing", None)
-        if isinstance(missing, str) and missing.strip():
-            answered_as_risk.add(missing.casefold())
-
     result: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for lesson in lessons:
-        if getattr(lesson, "skipped", False):
+    for row in unconfirmed:
+        label = getattr(row, "label", None)
+        if not isinstance(label, str) or not label.strip():
             continue
-        slug = getattr(lesson, "concept_slug", None)
-        if not isinstance(slug, str) or not slug:
-            candidate = getattr(lesson, "concept_candidate", None)
-            slug = getattr(candidate, "slug", None) if candidate is not None else None
-        if not isinstance(slug, str) or not slug:
-            continue
-        for prerequisite in getattr(lesson, "external_prerequisites", None) or []:
-            if not isinstance(prerequisite, str) or not prerequisite.strip():
+        needed_by = ""
+        for lesson in lessons:
+            if getattr(lesson, "skipped", False):
                 continue
-            folded = prerequisite.casefold()
-            if folded in declared or folded in answered_as_risk or folded in seen:
+            slug = getattr(lesson, "concept_slug", None)
+            if not isinstance(slug, str) or not slug:
+                candidate = getattr(lesson, "concept_candidate", None)
+                slug = getattr(candidate, "slug", None) if candidate is not None else None
+            if not isinstance(slug, str) or not slug:
                 continue
-            seen.add(folded)
-            result.append({"claimed": prerequisite, "needed_by": slug})
+            externals = getattr(lesson, "external_prerequisites", None) or []
+            if label in externals:
+                needed_by = slug
+                break
+        result.append({"claimed": label, "needed_by": needed_by})
     return result
 
 

@@ -221,7 +221,7 @@ describe('/units/[id]', () => {
 		mocks.resolvePathAssumption.mockResolvedValue(buildPath({
 			status: 'draft',
 			revision: 3,
-			open_assumptions: [],
+			open_assumptions: [{ claimed: 'multiply any two fractions', needed_by: lessonTwo.concept_slug }],
 			reaches_destination: false,
 			prerequisite_risks: [{ missing: 'multiply any two fractions', needed_by: lessonTwo.concept_slug, note: 'teacher declined' }]
 		}));
@@ -233,7 +233,8 @@ describe('/units/[id]', () => {
 			expect.objectContaining({ id: 'path-1' }),
 			{ claimed: 'multiply any two fractions', decision: 'teach' }
 		);
-		expect(await screen.findByText("Something in this route relies on knowledge that isn't taught yet — fix that before locking it in.")).toBeTruthy();
+		expect(await screen.findByText('Confirm what the class already knows before locking it in.')).toBeTruthy();
+		expect(await screen.findByText(/1 thing to confirm/)).toBeTruthy();
 	});
 
 	it('refetches the path on a 409 without retrying the mutation', async () => {

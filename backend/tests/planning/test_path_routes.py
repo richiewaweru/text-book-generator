@@ -705,7 +705,12 @@ async def test_open_assumption_resolve_teach_over_http(db_session_factory) -> No
         )
         assert resolved.status_code == 200
         body = resolved.json()
-        assert body["open_assumptions"] == []
+        assert body["open_assumptions"] == [
+            {
+                "claimed": claimed,
+                "needed_by": plan.lessons[0].concept_candidate.slug,
+            }
+        ]
         assert body["reaches_destination"] is False
         assert body["prerequisite_risks"] == [
             {
