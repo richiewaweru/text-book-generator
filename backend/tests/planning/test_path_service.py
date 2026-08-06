@@ -640,3 +640,49 @@ async def test_case_differing_label_does_not_duplicate(db_session, owner) -> Non
     }
     assert "divide whole numbers" in folded
     assert count == len(folded)
+
+
+async def test_backfilled_legacy_unit_aligned_labels_approve_unaffected(
+    db_session, owner
+) -> None:
+    """Post-backfill: intake labels exact-match planner externals → no open confirms."""
+    aligned = ["multiply fractions", "understand fraction concept", "divide whole numbers"]
+    plan = _plan("grade4-photosynthesis-path.json")
+    unit = await create_unit(
+        db_session,
+        owner_id=owner.id,
+        request=UnitCreate(
+            title="Fractions legacy",
+            topic="Fractions",
+            subject="Math",
+            grade_level="Grade 5",
+            destination_objective=plan.destination_objective or "Destination",
+            starting_knowledge=aligned,
+        ),
+    )
+    plan.starting_knowledge = list(aligned)
+    plan.lessons[0].external_prerequisites = list(aligned)
+    for lesson in plan.lessons[1:]:
+        lesson.external_prerequisites = []
+    version = await persist_path_plan(db_session, unit=unit, plan=plan)
+    lessons = list(
+        await db_session.scalars(
+            select(PathLessonModel)
+            .where(PathLessonModel.path_version_id == version.id)
+            .order_by(PathLessonModel.position)
+        )
+    )
+
+    unconfirmed = [
+        row
+        for row in await db_session.scalars(
+            select(UnitCapabilityDeclarationModel).where(
+                UnitCapabilityDeclarationModel.unit_id == unit.id,
+                UnitCapabilityDeclarationModel.confirmed.is_(False),
+            )
+        )
+    ]
+    assert unconfirmed == []
+    assert await list_open_assumptions(db_session, unit_id=unit.id, lessons=lessons) == []
+    await approve_path(db_session, version)
+    assert version.status == "approved"
