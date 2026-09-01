@@ -47,4 +47,14 @@ describe('ResourceComposerPanel', () => {
 		expect(await screen.findByText('Lesson preparation is stale.')).toBeTruthy();
 		expect((screen.getByRole('button', { name: 'Create resource' }) as HTMLButtonElement).disabled).toBe(true);
 	});
+
+	it('blocks lessons whose preparation linkage needs repair', () => {
+		render(ResourceComposerPanel, {
+		unitId: 'unit-1', path, lessons: [lesson], groups, schedule: null, compositions: [], oncreated: vi.fn(),
+		statuses: { lessons: [{ path_lesson_id: 'lesson-1', state: 'warning', generation_id: 'pack-1', warnings: ['Preparation provenance is missing'] }] } as never
+	});
+
+	expect((screen.getByRole('checkbox', { name: /Plant inputs/ }) as HTMLInputElement).disabled).toBe(true);
+		expect(screen.getByText('needs repair')).toBeTruthy();
+	});
 });

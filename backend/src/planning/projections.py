@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database.models import (
     ConceptCardModel,
     GenerationModel,
-    LessonProvenanceModel,
     PackItemModel,
     PathLessonModel,
     PathVersionModel,
@@ -25,6 +24,7 @@ from core.database.models import (
 )
 from generation.pdf_export.components.answers_v3 import build_diagnostic_answer_key_content
 from planning.models import ResourceComposeRequest
+from planning.linkage import resolve_lesson_preparation
 
 
 TEMPLATE_VERSION = "resource-projection.v1"
@@ -324,6 +324,8 @@ async def _resolve_scope(
 async def _collect_sources(
     session: AsyncSession,
     *,
+    unit: UnitModel,
+    version: PathVersionModel,
     lessons: list[PathLessonModel],
     groups: list[UnitGroupModel],
 ) -> dict[str, Any]:
@@ -337,18 +339,20 @@ async def _collect_sources(
         if not lesson.pack_id:
             unavailable.append(f"{lesson.title}: lesson is not prepared")
             continue
-        coordinator = await session.get(GenerationModel, lesson.pack_id)
-        provenance = await session.get(LessonProvenanceModel, lesson.pack_id)
-        if coordinator is None or provenance is None or provenance.invalidated_at is not None:
-            unavailable.append(f"{lesson.title}: active preparation provenance is unavailable")
+        linkage = await resolve_lesson_preparation(
+            session, unit=unit, version=version, lesson=lesson
+        )
+        if not linkage.complete:
+            unavailable.append(
+                f"{lesson.title}: {linkage.reason or 'preparation linkage is incomplete'}"
+            )
             continue
-        if provenance.path_lesson_revision != lesson.revision or provenance.objective_hash != lesson.objective_hash:
-            unavailable.append(f"{lesson.title}: preparation is stale")
-            continue
-        pack_id = coordinator.pack_id
+        coordinator = linkage.generation
+        assert coordinator is not None
+        pack_id = linkage.source_pack_id
         source_generations: list[tuple[UnitGroupModel | None, GenerationModel]] = []
         if groups:
-            if not pack_id:
+            if not coordinator.pack_id:
                 unavailable.append(f"{lesson.title}: differentiated pack is unavailable")
                 continue
             children = list(
@@ -503,7 +507,13 @@ async def build_composition_payload(
         raise ProjectionUnavailable("The active path changed; refresh resource selections")
     scope = await _resolve_scope(session, unit=unit, version=version, request=request)
     lessons: list[PathLessonModel] = scope["lessons"]
-    sources = await _collect_sources(session, lessons=lessons, groups=scope["groups"])
+    sources = await _collect_sources(
+        session,
+        unit=unit,
+        version=version,
+        lessons=lessons,
+        groups=scope["groups"],
+    )
     component_refs = {component["ref"] for component in sources["components"]}
     unknown_components = set(request.component_refs) - component_refs
     if unknown_components:

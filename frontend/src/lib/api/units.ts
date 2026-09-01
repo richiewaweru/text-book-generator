@@ -32,10 +32,37 @@ import type {
 
 const jsonHeaders = { 'Content-Type': 'application/json' };
 
+const DEFAULT_TIMEOUT_MS = 30_000;
+const CONSTRUCTOR_TIMEOUT_MS = 90_000;
+const PLANNING_TIMEOUT_MS = 120_000;
+const PREPARATION_TIMEOUT_MS = 300_000;
+const RESOURCE_PREVIEW_TIMEOUT_MS = 45_000;
+
+function timeoutFor(path: string): number {
+	if (path.includes('/constructor/readback')) return CONSTRUCTOR_TIMEOUT_MS;
+	if (path.includes('/path:plan') || path.includes('/path:replan') || path.includes('/path:edit-chat')) {
+		return PLANNING_TIMEOUT_MS;
+	}
+	if (path.includes(':prepare') || path.includes(':regenerate')) return PREPARATION_TIMEOUT_MS;
+	if (path.includes('compose:preview')) return RESOURCE_PREVIEW_TIMEOUT_MS;
+	return DEFAULT_TIMEOUT_MS;
+}
+
 async function jsonRequest<T>(path: string, fallback: string, init?: RequestInit): Promise<T> {
-	const response = await apiFetch(path, init);
-	await ensureOk(response, fallback);
-	return response.json() as Promise<T>;
+	const controller = new AbortController();
+	const timer = globalThis.setTimeout(() => controller.abort(), timeoutFor(path));
+	try {
+		const response = await apiFetch(path, { ...init, signal: init?.signal ?? controller.signal });
+		await ensureOk(response, fallback);
+		return response.json() as Promise<T>;
+	} catch (error) {
+		if (error instanceof DOMException && error.name === 'AbortError' && !init?.signal?.aborted) {
+			throw new Error(`${fallback} The request timed out; please try again.`);
+		}
+		throw error;
+	} finally {
+		globalThis.clearTimeout(timer);
+	}
 }
 
 export function listUnits(): Promise<Unit[]> {

@@ -9,8 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth.middleware import get_current_user
 from core.capabilities import require_xplore_v2
 from core.database.models import (
-    GenerationModel,
-    LessonProvenanceModel,
     PathLessonModel,
     PathLessonPrerequisiteModel,
     ResourceCompositionModel,
@@ -27,6 +25,7 @@ from planning.agents import (
     run_plan_chat_edit,
 )
 from planning.bridge import PathPreparationBlocked, prepare_path_lesson
+from planning.linkage import resolve_lesson_preparation
 from planning.models import (
     ConstructorReadbackRequest,
     GuardedMergePathLessonsRequest,
@@ -656,33 +655,6 @@ async def get_path_status(
                 .order_by(PathLessonModel.position)
             )
         )
-        pack_ids = [lesson.pack_id for lesson in lessons if lesson.pack_id]
-        generations = {
-            row.id: row
-            for row in (
-                list(
-                    await session.scalars(
-                        select(GenerationModel).where(GenerationModel.id.in_(pack_ids))
-                    )
-                )
-                if pack_ids
-                else []
-            )
-        }
-        provenance = {
-            row.pack_id: row
-            for row in (
-                list(
-                    await session.scalars(
-                        select(LessonProvenanceModel).where(
-                            LessonProvenanceModel.pack_id.in_(pack_ids)
-                        )
-                    )
-                )
-                if pack_ids
-                else []
-            )
-        }
         statuses = {
             name: 0
             for name in (
@@ -706,19 +678,15 @@ async def get_path_status(
                 if lesson.merge_warning:
                     warnings.append("Adjacent merge review requires attention")
             else:
-                generation = generations.get(lesson.pack_id)
-                record = provenance.get(lesson.pack_id)
-                if generation is None or record is None:
-                    state = "warning"
-                    warnings.append("Preparation linkage is incomplete")
-                elif (
-                    record.path_lesson_id != lesson.id
-                    or record.objective_hash != lesson.objective_hash
-                    or record.path_lesson_revision not in {None, lesson.revision}
-                    or record.invalidated_at is not None
-                ):
-                    state = "stale"
+                linkage = await resolve_lesson_preparation(
+                    session, unit=unit, version=version, lesson=lesson
+                )
+                if not linkage.complete:
+                    state = "stale" if linkage.stale else "warning"
+                    warnings.append(linkage.reason or "Preparation linkage is incomplete")
                 else:
+                    generation = linkage.generation
+                    assert generation is not None
                     raw = str(generation.status or "unknown").casefold()
                     if raw in {"awaiting_review", "review"}:
                         state = "awaiting_review"
@@ -1133,16 +1101,37 @@ async def get_path_lesson_status(
                 can_prepare=version.status == "approved" and not lesson.skipped,
                 can_regenerate=False,
             ).model_dump(mode="json")
-        generation = await session.get(GenerationModel, lesson.pack_id)
-        provenance = await session.get(LessonProvenanceModel, lesson.pack_id)
-        if generation is None or provenance is None:
-            raise PathPreparationBlocked("Prepared lesson linkage is incomplete")
-        stale = (
-            provenance.path_lesson_id != lesson.id
-            or provenance.objective_hash != lesson.objective_hash
-            or provenance.path_lesson_revision not in {None, lesson.revision}
-            or provenance.invalidated_at is not None
+        linkage = await resolve_lesson_preparation(
+            session, unit=_unit, version=version, lesson=lesson
         )
+        if not linkage.complete:
+            if linkage.stale:
+                generation = linkage.generation
+                assert generation is not None
+                return PreparedLessonStatusResponse(
+                    path_lesson_id=lesson.id,
+                    lesson_revision=lesson.revision,
+                    generation_id=generation.id,
+                    generation_status="stale",
+                    workflow_stage="stale",
+                    objective_hash=lesson.objective_hash,
+                    stale=True,
+                    can_prepare=False,
+                    can_regenerate=version.status == "approved" and not lesson.skipped,
+                ).model_dump(mode="json")
+            return PreparedLessonStatusResponse(
+                path_lesson_id=lesson.id,
+                lesson_revision=lesson.revision,
+                generation_id=None,
+                generation_status="linkage_incomplete",
+                workflow_stage="linkage_incomplete",
+                objective_hash=lesson.objective_hash,
+                stale=False,
+                can_prepare=version.status == "approved" and not lesson.skipped,
+                can_regenerate=False,
+            ).model_dump(mode="json")
+        generation = linkage.generation
+        assert generation is not None
         try:
             chunked = await load_chunked_state(generation.id, session)
             workflow_stage = str(chunked.get("stage") or generation.status or "unknown")
@@ -1153,9 +1142,9 @@ async def get_path_lesson_status(
             lesson_revision=lesson.revision,
             generation_id=generation.id,
             generation_status=str(generation.status or "unknown"),
-            workflow_stage="stale" if stale else workflow_stage,
+            workflow_stage=workflow_stage,
             objective_hash=lesson.objective_hash,
-            stale=stale,
+            stale=False,
             can_prepare=False,
             can_regenerate=version.status == "approved" and not lesson.skipped,
         ).model_dump(mode="json")
@@ -1280,14 +1269,16 @@ async def get_path_lesson_marks_summary(
     session: AsyncSession = Depends(get_async_session),
 ) -> dict[str, object]:
     try:
-        unit, _version, lesson = await _owned_version_and_lesson(
+        unit, version, lesson = await _owned_version_and_lesson(
             session, unit_id=unit_id, lesson_id=lesson_id, owner_id=current_user.id
         )
         if group_id is not None:
             group = await session.get(UnitGroupModel, group_id)
             if group is None or group.unit_id != unit.id:
                 raise OutcomeValidationError("Marks group is not owned by this unit")
-        return await marks_summary(session, lesson=lesson, group_id=group_id)
+        return await marks_summary(
+            session, unit=unit, version=version, lesson=lesson, group_id=group_id
+        )
     except Exception as exc:
         _raise_http(exc)
 

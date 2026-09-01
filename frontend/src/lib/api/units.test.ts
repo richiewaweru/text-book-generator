@@ -204,3 +204,28 @@ describe('unit API helpers', () => {
 		});
 	});
 });
+
+describe('Units API request timeouts', () => {
+	it('aborts a stalled constructor request with a recoverable message', async () => {
+		vi.useFakeTimers();
+		const pendingApiFetch = vi.mocked(apiFetch);
+		pendingApiFetch.mockImplementation((_path: string, init: RequestInit = {}) =>
+			new Promise((_resolve, reject) => {
+				init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+			})
+		);
+
+		const { constructorReadback } = await import('./units');
+		const pending = constructorReadback({ subject: 'Science', grade_level: 'Grade 7', raw_text: 'Plants' });
+		const rejection = expect(pending).rejects.toThrow(/request timed out/i);
+		await vi.advanceTimersByTimeAsync(90_000);
+
+		await rejection;
+		vi.useRealTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.clearAllMocks();
+	});
+});

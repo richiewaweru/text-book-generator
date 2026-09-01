@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
-	getLessonActual: vi.fn(), getMarksSummary: vi.fn(), saveLessonActual: vi.fn(), saveMarks: vi.fn()
+	getLessonActual: vi.fn(), getPreparedLessonStatus: vi.fn(), getMarksSummary: vi.fn(), saveLessonActual: vi.fn(), saveMarks: vi.fn()
 }));
 vi.mock('$lib/api/units', () => api);
 
@@ -36,6 +36,11 @@ describe('LessonResultsPanel', () => {
 
 	it('records only aggregate option counts and labels summaries advisory', async () => {
 		api.getLessonActual.mockResolvedValue(null);
+		api.getPreparedLessonStatus.mockResolvedValue({
+			path_lesson_id: lesson.id, lesson_revision: lesson.revision, generation_id: lesson.pack_id,
+			generation_status: 'completed', workflow_stage: 'completed', objective_hash: lesson.objective_hash,
+			stale: false, can_prepare: false, can_regenerate: true
+		});
 		api.getMarksSummary.mockResolvedValue(summary);
 		api.saveMarks.mockResolvedValue({ ...summary, revision: 1 });
 		render(LessonResultsPanel, { props: { unitId: 'unit-1', path, lessons: [lesson], groups: null } });

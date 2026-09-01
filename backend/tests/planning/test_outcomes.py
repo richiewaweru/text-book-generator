@@ -9,6 +9,7 @@ from core.database.models import (
     GenerationModel,
     LearningPackModel,
     LessonActualModel,
+    LessonProvenanceModel,
     MarksEntryModel,
     PackItemModel,
     PathLessonModel,
@@ -89,7 +90,17 @@ async def _seed_outcomes(db_session):
         template_version="resource-projection.v1", source_snapshots=[{"hash": "immutable"}],
         document_json={"sections": [{"section_id": "question"}]},
     )
-    db_session.add_all([user, concept, unit, version, pack, coordinator, lesson, group, card, item, composition])
+    db_session.add_all([
+        user, concept, unit, version, pack, coordinator, lesson, group, card, item, composition,
+        LessonProvenanceModel(
+            pack_id=coordinator.id,
+            concept_id=concept.id,
+            path_version_id=version.id,
+            path_lesson_id=lesson.id,
+            objective_hash=lesson.objective_hash,
+            path_lesson_revision=lesson.revision,
+        ),
+    ])
     await db_session.flush()
     return user, unit, version, lesson, group, item, composition
 
@@ -198,5 +209,28 @@ async def test_marks_reject_cross_pack_item_ownership(db_session) -> None:
                 path_version_id=version.id, path_revision=version.revision,
                 lesson_revision=lesson.revision, marks_revision=0, group_id=group.id,
                 items=[{"item_id": foreign_item.id, "option_counts": {"A": 1}}],
+            ),
+        )
+
+
+async def test_marks_reject_incomplete_path_preparation_linkage(db_session) -> None:
+    user, unit, version, lesson, group, item, _composition = await _seed_outcomes(db_session)
+    lesson.pack_id = "missing-generation"
+    await db_session.flush()
+
+    with pytest.raises(OutcomeValidationError, match="linkage is incomplete"):
+        await record_marks(
+            db_session,
+            unit=unit,
+            version=version,
+            lesson=lesson,
+            user_id=user.id,
+            request=MarksWriteRequest(
+                path_version_id=version.id,
+                path_revision=version.revision,
+                lesson_revision=lesson.revision,
+                marks_revision=0,
+                group_id=group.id,
+                items=[{"item_id": item.id, "option_counts": {"A": 1, "B": 1, "C": 0}}],
             ),
         )

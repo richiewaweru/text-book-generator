@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database.models import (
     ConceptCardModel,
-    GenerationModel,
     LessonActualModel,
     MarksEntryModel,
     PackItemModel,
@@ -20,6 +19,7 @@ from core.database.models import (
     UnitModel,
 )
 from planning.models import LessonActualWriteRequest, MarksWriteRequest
+from planning.linkage import resolve_lesson_preparation
 
 
 class OutcomeValidationError(ValueError):
@@ -157,13 +157,29 @@ def _diagnosis(item: PackItemModel, option_id: str, option: dict[str, Any]) -> s
     return str(value) if value not in {None, ""} else None
 
 
-async def _lesson_pack_id(session: AsyncSession, lesson: PathLessonModel) -> str:
+async def _lesson_pack_id(
+    session: AsyncSession,
+    *,
+    unit: UnitModel,
+    version: PathVersionModel,
+    lesson: PathLessonModel,
+) -> str:
     if not lesson.pack_id:
         raise OutcomeValidationError("Marks require a prepared lesson with pack-owned items")
-    coordinator = await session.get(GenerationModel, lesson.pack_id)
-    if coordinator is None or not coordinator.pack_id:
-        raise OutcomeValidationError("Prepared lesson pack linkage is incomplete")
-    return coordinator.pack_id
+    linkage = await resolve_lesson_preparation(
+        session, unit=unit, version=version, lesson=lesson
+    )
+    if (
+        not linkage.complete
+        or linkage.source_pack_id is None
+        or linkage.generation is None
+        or not linkage.generation.pack_id
+    ):
+        raise OutcomeValidationError(
+            "Prepared lesson pack linkage is incomplete"
+            + (f": {linkage.reason.lower()}" if linkage.reason else "")
+        )
+    return linkage.source_pack_id
 
 
 async def record_marks(
@@ -175,7 +191,7 @@ async def record_marks(
     request: MarksWriteRequest,
     user_id: str,
 ) -> dict[str, Any]:
-    pack_id = await _lesson_pack_id(session, lesson)
+    pack_id = await _lesson_pack_id(session, unit=unit, version=version, lesson=lesson)
     if request.group_id is not None:
         group = await session.get(UnitGroupModel, request.group_id)
         if group is None or group.unit_id != unit.id:
@@ -241,13 +257,20 @@ async def record_marks(
             )
     await session.flush()
     return await marks_summary(
-        session, lesson=lesson, group_id=request.group_id, revision=revision
+        session,
+        unit=unit,
+        version=version,
+        lesson=lesson,
+        group_id=request.group_id,
+        revision=revision,
     )
 
 
 async def marks_summary(
     session: AsyncSession,
     *,
+    unit: UnitModel,
+    version: PathVersionModel,
     lesson: PathLessonModel,
     group_id: str | None,
     revision: int | None = None,
@@ -263,7 +286,7 @@ async def marks_summary(
             or 0
         )
     if revision == 0:
-        pack_id = await _lesson_pack_id(session, lesson)
+        pack_id = await _lesson_pack_id(session, unit=unit, version=version, lesson=lesson)
         available_items = list(
             await session.scalars(
                 select(PackItemModel)

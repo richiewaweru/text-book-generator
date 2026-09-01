@@ -245,3 +245,30 @@ async def test_stale_source_returns_explicit_unavailable_preview(db_session) -> 
     assert payload["status"] == "projection_unavailable"
     assert payload["can_create"] is False
     assert any("stale" in reason.lower() for reason in payload["unavailable_reasons"])
+
+
+async def test_missing_provenance_blocks_projection_without_exposing_sources(db_session) -> None:
+    unit, version, lesson, support, _core, _period, _item = await _seed_projection_sources(db_session)
+    provenance = await db_session.get(LessonProvenanceModel, lesson.pack_id)
+    assert provenance is not None
+    await db_session.delete(provenance)
+    await db_session.flush()
+
+    payload = await build_composition_payload(
+        db_session,
+        unit=unit,
+        version=version,
+        request=ResourceComposeRequest(
+            path_version_id=version.id,
+            path_revision=version.revision,
+            projection="revision_sheet",
+            path_lesson_ids=[lesson.id],
+            group_ids=[support.id],
+        ),
+        persist=False,
+    )
+
+    assert payload["status"] == "projection_unavailable"
+    assert payload["can_create"] is False
+    assert payload["selected_component_refs"] == []
+    assert any("provenance is missing" in reason.lower() for reason in payload["unavailable_reasons"])

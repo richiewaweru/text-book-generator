@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { createUnitResource, previewUnitResource } from '$lib/api/units';
-	import type { PathLesson, ResourceComposeInput, ResourceComposition, ResourceProjectionType, TeachingSchedule, UnitGroups, UnitPath } from '$lib/types/units';
+	import type { PathLesson, PathStatusAggregate, ResourceComposeInput, ResourceComposition, ResourceProjectionType, TeachingSchedule, UnitGroups, UnitPath } from '$lib/types/units';
 
-	let { unitId, path, lessons, groups, schedule, compositions, oncreated }: {
+	let { unitId, path, lessons, groups, schedule, compositions, statuses, oncreated }: {
 		unitId: string; path: UnitPath; lessons: PathLesson[]; groups: UnitGroups | null;
-		schedule: TeachingSchedule | null; compositions: ResourceComposition[];
+		schedule: TeachingSchedule | null; compositions: ResourceComposition[]; statuses?: PathStatusAggregate | null;
 		oncreated: (composition: ResourceComposition) => void;
 	} = $props();
 
@@ -27,9 +27,21 @@
 	let busy = $state<'preview' | 'create' | null>(null);
 	let error = $state<string | null>(null);
 
+	function lessonIsUsable(lesson: PathLesson): boolean {
+		if (!lesson.pack_id) return false;
+		const state = statuses?.lessons.find((item) => item.path_lesson_id === lesson.id)?.state;
+		return state === undefined || (state !== 'warning' && state !== 'stale');
+	}
+
+	function lessonAvailability(lesson: PathLesson): string {
+		if (!lesson.pack_id) return 'not prepared';
+		const state = statuses?.lessons.find((item) => item.path_lesson_id === lesson.id)?.state;
+		return state === 'stale' ? 'needs remake' : 'needs repair';
+	}
+
 	$effect(() => {
 		if (initialized) return;
-		lessonIds = lessons.filter((lesson) => lesson.pack_id).map((lesson) => lesson.id);
+		lessonIds = lessons.filter(lessonIsUsable).map((lesson) => lesson.id);
 		groupIds = groups?.groups.map((group) => group.id) ?? [];
 		initialized = true;
 	});
@@ -74,7 +86,7 @@
 	<div class="resource-head"><div><p class="eyebrow">Deterministic projections</p><h2 id="resources-title">Create classroom resources</h2><p>Compose approved lesson material and shared items without another model call.</p></div><span>{compositions.length} saved</span></div>
 	<div class="composer-grid">
 		<fieldset><legend>Type</legend>{#each projectionOptions as option}<label><input type="radio" bind:group={projection} value={option.value} onchange={() => (preview = null)} /> {option.label}</label>{/each}</fieldset>
-		<fieldset><legend>Concepts</legend>{#each lessons as lesson}<label><input type="checkbox" bind:group={lessonIds} value={lesson.id} disabled={!lesson.pack_id} /> {lesson.title}{#if !lesson.pack_id}<small>not prepared</small>{/if}</label>{/each}</fieldset>
+		<fieldset><legend>Concepts</legend>{#each lessons as lesson}<label><input type="checkbox" bind:group={lessonIds} value={lesson.id} disabled={!lessonIsUsable(lesson)} /> {lesson.title}{#if !lessonIsUsable(lesson)}<small>{lessonAvailability(lesson)}</small>{/if}</label>{/each}</fieldset>
 		<fieldset><legend>Periods</legend>{#if schedule?.periods.length}{#each schedule.periods as period}<label><input type="checkbox" bind:group={periodIds} value={period.id} /> {period.title}</label>{/each}{:else}<p>No teaching periods saved.</p>{/if}</fieldset>
 		<fieldset><legend>Groups</legend>{#if groups?.groups.length}{#each groups.groups as group}<label><input type="checkbox" bind:group={groupIds} value={group.id} /> {group.label}</label>{/each}{:else}<p>Everyone — one shared lesson for the whole class.</p>{/if}</fieldset>
 	</div>

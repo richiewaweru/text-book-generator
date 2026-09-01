@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getLessonActual, getMarksSummary, saveLessonActual, saveMarks } from '$lib/api/units';
-	import type { LessonActual, LessonActualStatus, LessonPace, MarksSummary, PathLesson, UnitGroups, UnitPath } from '$lib/types/units';
+	import { getLessonActual, getMarksSummary, getPreparedLessonStatus, saveLessonActual, saveMarks } from '$lib/api/units';
+	import type { LessonActual, LessonActualStatus, LessonPace, MarksSummary, PathLesson, PreparedLessonStatus, UnitGroups, UnitPath } from '$lib/types/units';
 
 	let { unitId, path, lessons, groups }: { unitId: string; path: UnitPath; lessons: PathLesson[]; groups: UnitGroups | null } = $props();
 	let lessonId = $state('');
 	let groupId = $state<string>('');
 	let actual = $state<LessonActual | null>(null);
 	let marks = $state<MarksSummary | null>(null);
+	let preparation = $state<PreparedLessonStatus | null>(null);
 	let status = $state<LessonActualStatus>('partial');
 	let pace = $state<LessonPace>('not_recorded');
 	let established = $state('');
@@ -45,10 +46,20 @@
 		if (!lesson) return;
 		busy = 'load'; error = null; marks = null;
 		try {
-			const loadedActual = await getLessonActual(unitId, lesson.id);
+			const [loadedActual, loadedPreparation] = await Promise.all([
+				getLessonActual(unitId, lesson.id),
+				getPreparedLessonStatus(unitId, lesson.id)
+			]);
 			fillActual(loadedActual);
-			if (lesson.pack_id) fillMarks(await getMarksSummary(unitId, lesson.id, groupId || null));
-			else fillMarks(null);
+			preparation = loadedPreparation;
+			if (loadedPreparation.generation_id && !loadedPreparation.stale && loadedPreparation.workflow_stage !== 'linkage_incomplete') {
+				fillMarks(await getMarksSummary(unitId, lesson.id, groupId || null));
+			} else {
+				fillMarks(null);
+				if (loadedPreparation.workflow_stage === 'linkage_incomplete') {
+					error = 'Shared checks are blocked because this lesson preparation is incomplete. Use Your lessons → Make the lesson again to repair it.';
+				}
+			}
 		} catch (err) { error = err instanceof Error ? err.message : 'Could not load lesson results.'; }
 		finally { busy = null; }
 	}
@@ -110,6 +121,8 @@
 			<section class="marks-card">
 				<div><p class="eyebrow">Shared checks</p><h3>Aggregate option counts</h3>{#if marks?.revision}<span>Revision {marks.revision}</span>{/if}</div>
 				{#if !lesson.pack_id}<p>Prepare this lesson before entering marks against its pack-owned shared items.</p>
+				{:else if preparation?.workflow_stage === 'linkage_incomplete'}
+					<p>Shared checks are unavailable until the lesson preparation link is repaired.</p>
 				{:else if marks}
 					{#if marks.items.length}{#each marks.items as item}<article><strong>{item.stem}</strong><div class="options">{#each item.option_counts as option}<label><span>{option.option_id}. {option.text}{#if option.misconception_id}<small>tagged: {option.misconception_id}</small>{/if}</span><input aria-label={`${item.stem} ${option.option_id} count`} type="number" min="0" value={counts[`${item.item_id}:${option.option_id}`] ?? 0} oninput={(event) => (counts[`${item.item_id}:${option.option_id}`] = Number(event.currentTarget.value))} /></label>{/each}</div><small>{item.total_count} responses in saved revision</small></article>{/each}<button class="primary" type="button" disabled={busy !== null} onclick={saveAggregateMarks}>{busy === 'marks' ? 'Saving…' : 'Save marks'}</button>{:else}<p>No current shared items are available for this lesson.</p>{/if}
 					<div class="advisory"><strong>Advisory summary</strong><p>{marks.advisory_note}</p>{#if marks.misconceptions.length}<ul>{#each marks.misconceptions as item}<li><strong>{item.count}</strong> responses → consistent with {item.label}</li>{/each}</ul>{:else}<p>No tagged misconception count has been recorded.</p>{/if}{#if marks.unclaimed_distractor_count}<p>{marks.unclaimed_distractor_count} distractor responses have no misconception tag and remain unclaimed.</p>{/if}</div>

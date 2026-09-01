@@ -272,6 +272,18 @@ describe('/units/[id]', () => {
 		expect(screen.queryByText(/prerequisite risk/i)).toBeNull();
 	});
 
+	it('surfaces incomplete preparation as a repair action instead of a ready lesson', async () => {
+		mocks.getPreparedLessonStatus.mockResolvedValue({
+			path_lesson_id: lessonOne.id, lesson_revision: lessonOne.revision, generation_id: null,
+			generation_status: 'linkage_incomplete', workflow_stage: 'linkage_incomplete', objective_hash: lessonOne.objective_hash,
+			stale: false, can_prepare: true, can_regenerate: false
+		});
+		render(UnitPage);
+
+		expect(await screen.findByText(/previous preparation is incomplete/i)).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Make the lesson' })).toBeTruthy();
+	});
+
 	it('offers Print and Make versions for my groups once a lesson is prepared', async () => {
 		mocks.getPreparedLessonStatus.mockResolvedValue({
 			path_lesson_id: lessonOne.id, lesson_revision: 1, generation_id: 'generation-1',

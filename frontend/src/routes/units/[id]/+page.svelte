@@ -80,6 +80,7 @@
 	const debugMode = import.meta.env.DEV;
 
 	const selected = $derived(path?.lessons.find((lesson) => lesson.id === selectedId) ?? null);
+	const selectedPreparationNeedsRepair = $derived(preparation?.workflow_stage === 'linkage_incomplete');
 	const openAssumptions = $derived(path?.open_assumptions ?? []);
 	const canLockIn = $derived(
 		Boolean(path?.reaches_destination) &&
@@ -155,6 +156,14 @@
 		editObjective = lesson.objective;
 		editMustEstablish = lesson.must_establish.join('\n');
 		editExclusions = lesson.exclusions.join('\n');
+	}
+
+	function lessonStatusLabel(lesson: PathLesson): string | null {
+		const state = aggregate?.lessons.find((item) => item.path_lesson_id === lesson.id)?.state;
+		if (state === 'warning') return 'needs attention';
+		if (state === 'stale') return 'needs remake';
+		if (state === 'ready' || state === 'awaiting_review' || state === 'generating') return 'prepared';
+		return null;
 	}
 
 	async function selectLesson(lesson: PathLesson): Promise<void> {
@@ -445,7 +454,7 @@
 			<div class="workspace">
 				<aside class="path-list" aria-label="Your lessons">
 					<p class="eyebrow">Your lessons</p>
-					<ol>{#each path.lessons as lesson, index (lesson.id)}<li class:active={lesson.id === selectedId} class:skipped={lesson.skipped}><button type="button" onclick={() => selectLesson(lesson)}><span>{index + 1}</span><span><strong>{lesson.title}</strong>{#if dependencySentences(lesson).length}<small>{dependencySentences(lesson).join(' · ')}</small>{:else if lesson.pack_id}<small>prepared</small>{/if}</span></button></li>{/each}</ol>
+					<ol>{#each path.lessons as lesson, index (lesson.id)}<li class:active={lesson.id === selectedId} class:skipped={lesson.skipped}><button type="button" onclick={() => selectLesson(lesson)}><span>{index + 1}</span><span><strong>{lesson.title}</strong>{#if dependencySentences(lesson).length}<small>{dependencySentences(lesson).join(' · ')}</small>{:else if lessonStatusLabel(lesson)}<small>{lessonStatusLabel(lesson)}</small>{/if}</span></button></li>{/each}</ol>
 				</aside>
 
 				{#if selected}
@@ -481,7 +490,7 @@
 						{/if}
 
 						<section class="prepare">
-							<div><p class="eyebrow">Preparation</p><h3>{preparation?.workflow_stage ?? 'Checking status…'}</h3><p>{preparation?.stale ? 'This lesson changed since it was last written and needs to be made again.' : 'This starts the lesson-writing review before anything is generated.'}</p></div>
+							<div><p class="eyebrow">Preparation</p><h3>{preparation?.workflow_stage ?? 'Checking status…'}</h3><p>{preparation?.stale ? 'This lesson changed since it was last written and needs to be made again.' : selectedPreparationNeedsRepair ? 'The previous preparation is incomplete. Make the lesson again to repair its linkage before opening results or resources.' : 'This starts the lesson-writing review before anything is generated.'}</p></div>
 							{#if preparation?.stale && preparation.can_regenerate}
 								<form class="regenerate" onsubmit={(event) => { event.preventDefault(); void regenerate(); }}>
 									<label><span>What changed</span><input bind:value={regenerationReason} minlength="3" maxlength="500" required /></label>
@@ -518,7 +527,7 @@
 			{:else if activeView === 'results'}
 				<LessonResultsPanel {unitId} {path} lessons={path.lessons} {groups} />
 			{:else if activeView === 'resources'}
-				<ResourceComposerPanel {unitId} {path} lessons={path.lessons} {groups} {schedule} {compositions} oncreated={(created) => (compositions = [created, ...compositions])} />
+				<ResourceComposerPanel {unitId} {path} lessons={path.lessons} {groups} {schedule} {compositions} statuses={aggregate} oncreated={(created) => (compositions = [created, ...compositions])} />
 			{/if}
 		{/if}
 	{/if}

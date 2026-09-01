@@ -23,6 +23,7 @@ from core.database.models import (
 from contracts.lectio import get_component_card
 from generation.path_preparation import initialise_path_generation
 from planning.agents import run_component_selector, run_path_structural_planner
+from planning.linkage import resolve_lesson_preparation
 from planning.models import (
     ComponentSelection,
     PathStructuralPlan,
@@ -331,17 +332,17 @@ async def prepare_path_lesson(
     if regenerate and not (regeneration_reason or "").strip():
         raise PathPreparationBlocked("Regeneration requires a recorded reason")
     if previous_pack_id and not regenerate:
-        generation = await session.get(GenerationModel, lesson.pack_id)
-        provenance = await session.get(LessonProvenanceModel, lesson.pack_id)
-        if generation is not None and provenance is not None:
-            if provenance.objective_hash != lesson.objective_hash:
-                raise PathPreparationBlocked(
-                    "Existing preparation is stale; use explicit regeneration"
-                )
-            if provenance.path_lesson_revision not in {None, lesson.revision}:
-                raise PathPreparationBlocked(
-                    "Existing preparation is for an earlier lesson revision; use explicit regeneration"
-                )
+        linkage = await resolve_lesson_preparation(
+            session, unit=unit, version=version, lesson=lesson
+        )
+        if linkage.stale:
+            raise PathPreparationBlocked(
+                "Existing preparation is stale; use explicit regeneration"
+            )
+        if linkage.complete:
+            generation = linkage.generation
+            provenance = linkage.provenance
+            assert generation is not None and provenance is not None
             if provenance.lesson_mode not in {None, request.lesson_mode} or sorted(
                 provenance.group_ids or []
             ) != sorted(request.group_ids):
