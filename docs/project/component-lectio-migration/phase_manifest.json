@@ -1,0 +1,21 @@
+{
+  "project": "component-lectio-runtime-migration",
+  "target_repo": "richiewaweru/text-book-generator",
+  "target_branch": "xplore",
+  "contract_repo": "richiewaweru/lectio",
+  "researched_lectio_version": "0.6.0",
+  "strict_tool_schema": "deferred",
+  "phases": [
+    ["00", "baseline"],
+    ["01", "general_lesson_spec"],
+    ["02", "intent_plan"],
+    ["03", "component_selection"],
+    ["04", "work_orders_prompts"],
+    ["05", "failure_policy"],
+    ["06", "checkpoints_resume"],
+    ["07", "worker_leases"],
+    ["08", "builder_native"],
+    ["09", "cutover_delete"],
+    ["10", "acceptance"]
+  ]
+}

@@ -1,0 +1,267 @@
+{
+  "project": "component-lectio-runtime-migration",
+  "phase": "00",
+  "recorded_at": "2026-09-02T21:00:00Z",
+  "git": {
+    "branch": "xplore",
+    "head": "27a114bc85717481673ee6dad875a603d58bebb9",
+    "head_message": "feat(planning): resolve lesson preparation through shared linkage",
+    "tracks": "origin/xplore",
+    "dirty_preserved": [
+      "RESTRUCTURE_PROGRESS.md",
+      "backend/src/core/config.py",
+      "backend/src/v3_execution/config/__init__.py",
+      "backend/src/v3_execution/prompts/item_prompt.py"
+    ],
+    "untracked_at_baseline_start": [
+      "docs/project/component-lectio-migration/"
+    ]
+  },
+  "lectio": {
+    "frontend_package_json": "0.6.0",
+    "frontend_installed": "0.6.0",
+    "backend_contract_version": "0.6.0",
+    "backend_contract_source": "lectio",
+    "contract_sync": {
+      "tool": "tools/update_lectio_contracts.py",
+      "ran": true,
+      "drift_after_sync": false,
+      "note": "Sync rewrote nothing; git status clean for backend/contracts and section_content.py"
+    }
+  },
+  "resource_specs": {
+    "files": [
+      "backend/resources/specs/lesson.yaml",
+      "backend/resources/specs/mini_booklet.yaml",
+      "backend/resources/specs/worksheet.yaml",
+      "backend/resources/specs/quiz.yaml",
+      "backend/resources/specs/exit_ticket.yaml",
+      "backend/resources/specs/practice_set.yaml",
+      "backend/resources/specs/quick_explainer.yaml"
+    ],
+    "lesson_arc": ["orient", "build", "model", "practice", "close"],
+    "selectable_in_production_ui": {
+      "source": "frontend/src/lib/components/studio/V3InputSurface.svelte RESOURCE_TYPES",
+      "types": [
+        "lesson",
+        "mini_booklet",
+        "worksheet",
+        "quiz",
+        "exit_ticket",
+        "practice_set",
+        "quick_explainer"
+      ],
+      "note": "All seven specs remain primary-selectable; Phase 09 removes non-lesson from primary flow"
+    }
+  },
+  "reuse_inventory": {
+    "all_exist": true,
+    "paths": [
+      "backend/resources/specs/lesson.yaml",
+      "backend/src/resource_specs/schema.py",
+      "backend/resources/component-selector-v1.txt",
+      "backend/src/contracts/lectio.py",
+      "backend/src/v3_blueprint/planning/section_expander.py",
+      "backend/src/v3_execution/runtime/lectio_validation.py",
+      "backend/src/v3_blueprint/planning/persistence.py",
+      "frontend/src/lib/builder/adapters/from-generation.ts",
+      "frontend/src/lib/builder/streaming/generation-stream.ts"
+    ]
+  },
+  "api_mounts": {
+    "units": "/api/v1/units",
+    "v3_studio": "/api/v1/v3",
+    "builder": "/api/v1/builder",
+    "blocks_generate": "/api/v1/blocks/generate",
+    "legacy_units": "/api/v1/legacy-units"
+  },
+  "v3_studio_key_routes": [
+    "POST /api/v1/v3/chunked/plan/start",
+    "GET /api/v1/v3/chunked/{generation_id}/status",
+    "GET /api/v1/v3/chunked/{generation_id}/events",
+    "POST /api/v1/v3/chunked/{generation_id}/approve",
+    "POST /api/v1/v3/chunked/{generation_id}/regenerate",
+    "POST /api/v1/v3/chunked/{generation_id}/retry-section",
+    "POST /api/v1/v3/generate/start",
+    "GET /api/v1/v3/generations/{generation_id}/events",
+    "GET /api/v1/v3/generations/{generation_id}/document",
+    "POST /api/v1/v3/generations/{generation_id}/visuals/{visual_id}/regenerate",
+    "POST /api/v1/v3/generations/{generation_id}/cards/{card_id}/repair",
+    "POST /api/v1/v3/generations/{generation_id}/export/pdf"
+  ],
+  "builder_routes": [
+    "POST /api/v1/builder/lessons",
+    "GET /api/v1/builder/lessons/{lesson_id}",
+    "PUT /api/v1/builder/lessons/{lesson_id}",
+    "POST /api/v1/builder/lessons/{lesson_id}/export/pdf"
+  ],
+  "v3_studio_production_callers": [
+    "backend/src/app.py",
+    "backend/src/generation/routes.py",
+    "backend/src/generation/path_preparation.py",
+    "backend/src/v3_execution/compile_orders.py",
+    "backend/src/v3_execution/prompts/question_writer.py",
+    "backend/src/v3_blueprint/planning/retry.py",
+    "backend/src/v3_blueprint/planning/section_expander.py",
+    "backend/src/v3_blueprint/planning/persistence.py",
+    "backend/src/v3_blueprint/shadow.py"
+  ],
+  "frontend_studio": {
+    "routes": [
+      "frontend/src/routes/studio/+page.svelte",
+      "frontend/src/routes/studio/generations/[id]/+page.svelte",
+      "frontend/src/routes/studio/print/[id]/+page.svelte"
+    ],
+    "api": "frontend/src/lib/api/v3.ts",
+    "adapter": "frontend/src/lib/builder/adapters/from-generation.ts"
+  },
+  "runtime_topology": {
+    "ownership": "in-memory v3_studio_store (_owners, queues, blueprints)",
+    "background_tasks": "router._spawn_background_task + _chunked_stage2_tasks / _background_tasks",
+    "locks": [
+      "_visual_regenerate_locks",
+      "_snapshot_write_locks"
+    ],
+    "stale_sweep": "V3GenerationWriter.fail_stale_running on app lifespan",
+    "persistence": {
+      "control_state": "GenerationModel.chunked_state_json + last_heartbeat",
+      "immutable_steps": "GenerationStepModel (part_id/variant_id/step/kind/payload)",
+      "lease_columns": false
+    }
+  },
+  "llm_nodes": [
+    {
+      "node": "v3_stage1_planner",
+      "module": "v3_blueprint/planning/structural_planner.py",
+      "prompt": "structural-planner",
+      "output": "StructuralPlan"
+    },
+    {
+      "node": "v3_stage2_expander",
+      "module": "v3_blueprint/planning/section_expander.py",
+      "prompt": "section-expander",
+      "output": "SectionBrief"
+    },
+    {
+      "node": "v3_knowledge_type_classifier",
+      "module": "v3_blueprint/knowledge_classifier.py",
+      "prompt": "knowledge-type-classifier-v1.txt",
+      "output": "KnowledgeTypeClassification"
+    },
+    {
+      "node": "v3_signal_extractor",
+      "module": "generation/v3_studio/agents.py",
+      "prompt": "SIGNAL_SYSTEM",
+      "output": "V3SignalSummary"
+    },
+    {
+      "node": "v3_narrow",
+      "module": "generation/v3_studio/router.py",
+      "prompt": "inline",
+      "output": "NarrowEnvelope"
+    },
+    {
+      "node": "v3_propose_intent",
+      "module": "generation/v3_studio/router.py",
+      "prompt": "PROPOSE_INTENT_SYSTEM",
+      "output": "V3ProposeIntentResponse"
+    },
+    {
+      "node": "v3_blueprint_adjust",
+      "module": "generation/v3_studio/agents.py",
+      "prompt": "ADJUST_SYSTEM",
+      "output": "ProductionBlueprintEnvelope"
+    },
+    {
+      "node": "v3_section_writer",
+      "module": "v3_execution/executors/section_writer.py",
+      "prompt": "section-writer",
+      "output": "dict JSON"
+    },
+    {
+      "node": "v3_question_writer",
+      "module": "v3_execution/executors/question_writer.py",
+      "prompt": "question-writer",
+      "output": "dict JSON"
+    },
+    {
+      "node": "v3_item_executor",
+      "module": "v3_execution/executors/item_executor.py",
+      "prompt": "quiz-items",
+      "output": "ItemGenerationResult"
+    }
+  ],
+  "prompts": {
+    "packaged_md": [
+      "constructor",
+      "path-planner",
+      "merge-critic",
+      "plan-editor",
+      "structural-planner",
+      "section-expander",
+      "section-writer",
+      "question-writer",
+      "quiz-items"
+    ],
+    "resource_txt": [
+      "component-selector-v1.txt",
+      "knowledge-type-classifier-v1.txt",
+      "path-planner-v1.txt",
+      "merge-critic-v1.txt",
+      "path-structural-planner-v1.txt"
+    ]
+  },
+  "retry_layers": {
+    "transport": "core/llm/runner.py RetryPolicy (default max_attempts=3)",
+    "executor": "v3_execution/config/retries.py V3_MAX_RETRIES + runtime/retry_runner.py",
+    "planning_stage": "v3_blueprint/planning/retry.py (2 domain attempts)",
+    "lease": "absent"
+  },
+  "generation_db_migrations": [
+    "20260328_0001_initial.py",
+    "20260328_0002_add_generation_json_storage.py",
+    "20260328_0005_add_generation_heartbeat.py",
+    "20260401_0007_add_generation_mode.py",
+    "20260501_0010_add_learning_packs.py",
+    "20260515_0014_backfill_v3_mode.py",
+    "20260517_0015_add_chunked_state_json.py",
+    "20260731_0017_add_xplore_pack_contracts.py",
+    "20260803_0031_add_generation_steps.py"
+  ],
+  "deviations_from_pack_research": [
+    "Local HEAD 27a114b is ahead of any researched GitHub snapshot in the pack",
+    "GenerationStepModel and lanes already exist from reshape wave",
+    "No lease/worker columns yet (Phase 07 target)",
+    "All seven resource specs still selectable in Studio UI"
+  ],
+  "baseline_commands": {
+    "contract_sync": {
+      "command": "uv run python tools/update_lectio_contracts.py",
+      "result": "synced; no git drift"
+    },
+    "backend_pytest": {
+      "command": "cd backend && uv run pytest -q --tb=no",
+      "result": "574 passed, 1 warning",
+      "exit_code": 0,
+      "log": "artifacts/baseline/backend-pytest.txt"
+    },
+    "frontend_vitest": {
+      "command": "cd frontend && npm test",
+      "result": "319 passed, 1 failed (timeout: src/routes/lessons/page.test.ts)",
+      "exit_code": 1,
+      "log": "artifacts/baseline/frontend-vitest.txt"
+    },
+    "frontend_check": {
+      "command": "cd frontend && npm run check",
+      "result": "0 errors, 2 warnings (unused CSS selector)",
+      "exit_code": 0,
+      "log": "artifacts/baseline/frontend-check.txt"
+    },
+    "frontend_build": {
+      "command": "cd frontend && npm run build",
+      "result": "built successfully (adapter-vercel)",
+      "exit_code": 0,
+      "log": "artifacts/baseline/frontend-build.txt"
+    }
+  }
+}
