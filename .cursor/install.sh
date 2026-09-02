@@ -36,9 +36,13 @@ log "Installing frontend dependencies (npm ci)"
 ( cd frontend && npm ci )
 
 # --- Local env files (gitignored; created only if missing) ------------------
+# Google OAuth client id may be provided as any of these secret names.
+GOOGLE_CLIENT_ID_RESOLVED="${GOOGLE_CLIENT_ID:-${PUBLIC_GOOGLE_CLIENT_ID:-${VITE_GOOGLE_CLIENT_ID:-}}}"
+
 if [ ! -f backend/.env ]; then
   log "Creating backend/.env"
-  JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+  # Reuse an injected JWT secret if present; otherwise generate one.
+  JWT_SECRET="${JWT_SECRET_KEY:-$(python3 -c 'import secrets; print(secrets.token_hex(32))')}"
   cat > backend/.env <<EOF
 APP_ENV=development
 
@@ -51,7 +55,7 @@ LOG_LEVEL=INFO
 LECTIO_CONTRACTS_DIR=./contracts
 DEFAULT_PAGINATION_LIMIT=20
 
-GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_RESOLVED}
 JWT_SECRET_KEY=${JWT_SECRET}
 JWT_ALGORITHM=HS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=10080
@@ -69,9 +73,11 @@ fi
 
 if [ ! -f frontend/.env ]; then
   log "Creating frontend/.env"
-  cat > frontend/.env <<'EOF'
+  # The browser build only sees PUBLIC_*/VITE_* vars, so map the resolved id in.
+  cat > frontend/.env <<EOF
 PUBLIC_API_URL=http://localhost:8000
-VITE_GOOGLE_CLIENT_ID=
+PUBLIC_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_RESOLVED}
+VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_RESOLVED}
 EOF
 fi
 
