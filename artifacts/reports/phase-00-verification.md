@@ -3,7 +3,7 @@
 ## Identity
 - branch: `xplore`
 - baseline HEAD: `27a114bc85717481673ee6dad875a603d58bebb9`
-- ending HEAD: _(this commit)_
+- ending HEAD: `67b695f` (`docs(migration): Phase 00 Component Lectio baseline inventory`)
 - dirty files preserved:
   - `RESTRUCTURE_PROGRESS.md` (docs note only)
   - `backend/src/core/config.py` (CRLF/whitespace noise)
