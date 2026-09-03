@@ -19,7 +19,7 @@ vi.mock('lectio', () => ({
 	}
 }));
 
-import { partitionGenerationIssues, v3PackToBuilderDocument } from './from-generation';
+import { generationToBuilderDocument, partitionGenerationIssues, v3PackToBuilderDocument } from './from-generation';
 
 describe('v3PackToBuilderDocument', () => {
 	it('adapts a v3 pack into a builder lesson document', () => {
@@ -149,5 +149,42 @@ describe('v3PackToBuilderDocument', () => {
 				repair_target_id: 'questions:practice'
 			})
 		);
+	});
+});
+
+describe('generationToBuilderDocument', () => {
+	it('uses LessonDocument directly for component_lectio without V3 pack adapter', () => {
+		const direct = {
+			schema: 'LessonDocument',
+			title: 'Ratios',
+			sections: [{ id: 'orient', title: 'Orient', block_ids: ['b1'] }],
+			blocks: {
+				b1: { id: 'b1', component_id: 'hook-hero', content: { headline: 'hi' }, position: 0 }
+			}
+		};
+		const lesson = generationToBuilderDocument(direct, { pipeline: 'component_lectio' });
+		expect(lesson).toBe(direct);
+		expect(lesson.blocks.b1.component_id).toBe('hook-hero');
+	});
+
+	it('still uses V3 pack adapter for v3_studio pipeline', () => {
+		const lesson = generationToBuilderDocument(
+			{
+				generation_id: 'gen_legacy',
+				template_id: 'guided-concept-path',
+				subject: 'History',
+				status: 'final_ready',
+				sections: [
+					{
+						section_id: 'section_1',
+						template_id: 'guided-concept-path',
+						header: { title: 'Trade', subject: 'History', grade_band: 'secondary' }
+					}
+				]
+			},
+			{ pipeline: 'v3_studio', routeGenerationId: 'gen_legacy' }
+		);
+		expect(lesson.source_generation_id).toBe('gen_legacy');
+		expect(lesson.sections.length).toBe(1);
 	});
 });

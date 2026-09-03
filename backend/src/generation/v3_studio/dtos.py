@@ -190,6 +190,7 @@ class V3ChunkedPlanStateDTO(BaseModel):
     generation_id: str
     pack_id: str | None = None
     stage: str
+    pipeline: str | None = None
     structural_plan: dict[str, Any] | None = None
     section_briefs: dict[str, Any] = Field(default_factory=dict)
     failed_sections: list[str] = Field(default_factory=list)
@@ -224,6 +225,7 @@ class V3ChunkedStatusDTO(BaseModel):
     generation_id: str
     pack_id: str | None = None
     stage: str
+    pipeline: str | None = None
     doc_version: str | None = None
     failed_sections: list[str] = Field(default_factory=list)
     blueprint_id: str | None = None

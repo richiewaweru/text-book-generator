@@ -96,6 +96,7 @@ export type V3ChunkedPlanStage =
 	| 'awaiting_review'
 	| 'plan_ready'
 	| 'stage2_running'
+	| 'component_lectio_running'
 	| 'variants_running'
 	| 'stage2_complete'
 	| 'assembly_blocked'
@@ -104,10 +105,13 @@ export type V3ChunkedPlanStage =
 	| 'complete'
 	| 'unknown';
 
+export type V3GenerationPipeline = 'component_lectio' | 'v3_studio';
+
 export interface V3ChunkedPlanState {
 	generation_id: string;
 	pack_id?: string | null;
 	stage: V3ChunkedPlanStage;
+	pipeline?: V3GenerationPipeline | string | null;
 	structural_plan: V3StructuralPlan | null;
 	section_briefs: Record<string, unknown>;
 	failed_sections: string[];
@@ -138,6 +142,7 @@ export interface V3ChunkedStatus {
 	generation_id: string;
 	pack_id?: string | null;
 	stage: V3ChunkedPlanStage;
+	pipeline?: V3GenerationPipeline | string | null;
 	doc_version: string | null;
 	failed_sections: string[];
 	blueprint_id: string | null;

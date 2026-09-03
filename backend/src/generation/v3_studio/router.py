@@ -48,6 +48,16 @@ from v3_blueprint.planning.persistence import (
     load_chunked_state,
     persist_chunked_state,
 )
+from generation.pipeline_dispatch import (
+    build_control_patch,
+    persist_pipeline_identity,
+    resolve_generation_pipeline,
+    select_default_pipeline,
+)
+from generation.component_lectio.service import (
+    fill_plan_components_for_legacy_studio,
+    run_component_lectio_execution,
+)
 from v3_blueprint.planning.retry import (
     retry_failed_section,
     run_stage1_with_retry,
@@ -299,6 +309,7 @@ def _normalize_chunked_state(generation_id: str, state: dict[str, Any]) -> V3Chu
         generation_id=generation_id,
         pack_id=state.get("pack_id") if isinstance(state.get("pack_id"), str) else None,
         stage=stage,
+        pipeline=resolve_generation_pipeline(state, generation_id=generation_id),
         structural_plan=state.get("structural_plan")
         if isinstance(state.get("structural_plan"), dict)
         else None,
@@ -348,6 +359,7 @@ def _normalize_chunked_status(
         generation_id=generation_id,
         pack_id=full_state.pack_id,
         stage=full_state.stage,
+        pipeline=full_state.pipeline,
         doc_version=doc_version if isinstance(doc_version, str) else None,
         failed_sections=full_state.failed_sections,
         blueprint_id=full_state.blueprint_id,
@@ -1577,6 +1589,8 @@ async def post_chunked_plan_start(
         user_id=current_user.id,
         blueprint_id=f"chunked-plan-{generation_id}",
     )
+    pipeline = select_default_pipeline()
+    await persist_pipeline_identity(generation_id, pipeline)
     await persist_chunked_state(
         generation_id,
         {
@@ -1588,6 +1602,7 @@ async def post_chunked_plan_start(
             ],
             "execution_started": False,
             "failed_sections": [],
+            **build_control_patch(pipeline),
         },
     )
 
@@ -1662,6 +1677,66 @@ async def post_chunked_plan_start(
     return _normalize_chunked_state(generation_id, state)
 
 
+async def _run_component_lectio_pipeline(
+    *,
+    generation_id: str,
+    user_id: str,
+) -> None:
+    """Background Component Lectio execution — never falls back to V3 Studio."""
+    async def emit_event(event: str, payload: dict[str, Any]) -> None:
+        await _chunked_emit_event(generation_id, event, payload)
+
+    try:
+        state = await load_chunked_state(generation_id)
+        plan_raw = state.get("structural_plan")
+        if not isinstance(plan_raw, dict):
+            await persist_chunked_state(
+                generation_id,
+                {"stage": "assembly_blocked", "error": "No structural plan"},
+            )
+            return
+        plan = adapt_legacy_structural_plan(
+            plan_raw,
+            source=f"generation:{generation_id}:component_lectio",
+        )
+        signals, form, resource_spec = _decode_chunked_context(state)
+        display_title = state.get("display_title")
+        if not isinstance(display_title, str) or not display_title.strip():
+            display_title = form.topic
+        await run_component_lectio_execution(
+            generation_id=generation_id,
+            plan=plan,
+            signals=signals,
+            form=form,
+            resource_spec=resource_spec,
+            emit_event=emit_event,
+            title=display_title,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "component_lectio pipeline failed generation_id=%s", generation_id
+        )
+        await persist_chunked_state(
+            generation_id,
+            {
+                "stage": "assembly_blocked",
+                "error": str(exc)[:400],
+                "error_type": type(exc).__name__,
+                "execution_started": True,
+            },
+        )
+        await emit_event(
+            "generation_failed",
+            {
+                "generation_id": generation_id,
+                "pipeline": "component_lectio",
+                "error": str(exc)[:400],
+            },
+        )
+    finally:
+        _chunked_stage2_tasks.pop(generation_id, None)
+
+
 @v3_studio_router.get("/chunked/{generation_id}/plan", response_model=V3ChunkedPlanDTO)
 async def get_chunked_plan(
     generation_id: str,
@@ -1690,6 +1765,7 @@ async def get_chunked_plan(
 @v3_studio_router.get("/chunked/{generation_id}/status", response_model=V3ChunkedStatusDTO)
 async def get_chunked_plan_status(
     generation_id: str,
+    response: Response,
     current_user: User = Depends(get_current_user),
 ) -> V3ChunkedStatusDTO:
     model = await _load_owned_generation(generation_id, current_user.id)
@@ -1697,7 +1773,11 @@ async def get_chunked_plan_status(
         state = await load_chunked_state(generation_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=404, detail="Chunked state not found") from exc
-    return _normalize_chunked_status(generation_id, state, model.document_json)
+    dto = _normalize_chunked_status(generation_id, state, model.document_json)
+    # Non-authoritative observability hint; persisted control.pipeline remains source of truth.
+    if dto.pipeline:
+        response.headers["X-Generation-Pipeline"] = dto.pipeline
+    return dto
 
 
 @v3_studio_router.get("/chunked/{generation_id}/events")
@@ -2559,7 +2639,7 @@ async def post_chunked_plan_approve(
         "stage2_error",
         "assembly_blocked",
     }:
-        if stage in {"stage2_running", "blueprint_ready", "complete"}:
+        if stage in {"stage2_running", "component_lectio_running", "blueprint_ready", "complete"}:
             return _normalize_chunked_state(generation_id, state)
         raise HTTPException(
             status_code=409,
@@ -2582,16 +2662,56 @@ async def post_chunked_plan_approve(
         latest = await load_chunked_state(generation_id)
         return _normalize_chunked_state(generation_id, latest)
 
+    pipeline = resolve_generation_pipeline(state, generation_id=generation_id)
     variants = [
         raw for raw in state.get("variants", [])
         if isinstance(raw, dict)
     ]
-    patch: dict[str, Any] = {
+    if body is not None and body.display_title and body.display_title.strip():
+        display_title = body.display_title.strip()
+    else:
+        display_title = None
+
+    # Component Lectio owns execution when selected — never silent-fallback to Studio.
+    if pipeline == "component_lectio":
+        patch: dict[str, Any] = {
+            "stage": "component_lectio_running",
+            "execution_started": True,
+        }
+        if display_title:
+            patch["display_title"] = display_title
+        await persist_chunked_state(generation_id, patch)
+        task = asyncio.create_task(
+            _run_component_lectio_pipeline(
+                generation_id=generation_id,
+                user_id=current_user.id,
+            )
+        )
+        _chunked_stage2_tasks[generation_id] = task
+        latest = await load_chunked_state(generation_id)
+        return _normalize_chunked_state(generation_id, latest)
+
+    # Legacy Studio path: fill empty Stage-1 components before Stage 2.
+    plan = adapt_legacy_structural_plan(
+        state["structural_plan"],
+        source=f"generation:{generation_id}:studio_bridge",
+    )
+    if all(not section.components for section in plan.sections):
+        filled = await fill_plan_components_for_legacy_studio(
+            plan,
+            generation_id=generation_id,
+        )
+        from v3_blueprint.planning.persistence import persist_structural_plan
+
+        await persist_structural_plan(generation_id, filled)
+        state = await load_chunked_state(generation_id)
+
+    patch = {
         "stage": "variants_running" if variants else "stage2_running",
         "execution_started": False,
     }
-    if body is not None and body.display_title and body.display_title.strip():
-        patch["display_title"] = body.display_title.strip()
+    if display_title:
+        patch["display_title"] = display_title
     if variants:
         generation_ids = await _prepare_variant_generations(
             coordinator_id=generation_id,
@@ -2712,6 +2832,44 @@ async def post_chunked_retry_section(
     plan_raw = state.get("structural_plan")
     if not isinstance(plan_raw, dict):
         raise HTTPException(status_code=409, detail="No structural plan available.")
+    pipeline = resolve_generation_pipeline(state, generation_id=generation_id)
+    # Component Lectio resume/retry binds to persisted pipeline (skips ready blocks in service).
+    if pipeline == "component_lectio":
+        running_task = _chunked_stage2_tasks.get(generation_id)
+        if running_task is not None and not running_task.done():
+            raise HTTPException(
+                status_code=409,
+                detail="Component Lectio is already running for this generation.",
+            )
+        if state.get("stage") == "assembly_blocked":
+            claimed = await V3GenerationWriter(async_session_factory).claim_resume_attempt(
+                generation_id
+            )
+            if not claimed:
+                latest = await load_chunked_state(generation_id)
+                return _normalize_chunked_state(generation_id, latest)
+        await _ensure_chunked_stream(
+            generation_id=generation_id,
+            user_id=current_user.id,
+            blueprint_id=str(state.get("blueprint_id") or f"chunked-plan-{generation_id}"),
+        )
+        await persist_chunked_state(
+            generation_id,
+            {
+                "stage": "component_lectio_running",
+                "execution_started": True,
+            },
+        )
+        task = asyncio.create_task(
+            _run_component_lectio_pipeline(
+                generation_id=generation_id,
+                user_id=current_user.id,
+            )
+        )
+        _chunked_stage2_tasks[generation_id] = task
+        latest = await load_chunked_state(generation_id)
+        return _normalize_chunked_state(generation_id, latest)
+
     failed_sections = [
         section for section in state.get("failed_sections", [])
         if isinstance(section, str)

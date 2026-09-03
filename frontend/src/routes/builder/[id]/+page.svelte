@@ -12,8 +12,8 @@
 	import { fetchV3Document, getChunkedPlan, getChunkedPlanStatus } from '$lib/api/v3';
 	import type { V3VisualBlock } from '$lib/api/v3';
 	import {
-		partitionGenerationIssues,
-		v3PackToBuilderDocument
+		generationToBuilderDocument,
+		partitionGenerationIssues
 	} from '$lib/builder/adapters/from-generation';
 	import type { BuilderIssue } from '$lib/builder/issues';
 	import type { V3PackDocument } from '$lib/studio/v3-pack-to-lectio-document';
@@ -136,7 +136,10 @@
 					return;
 				}
 				const pack = rawPack as V3PackDocument;
-				const adapted = v3PackToBuilderDocument(pack, { routeGenerationId: generationId });
+				const adapted = generationToBuilderDocument(pack, {
+					routeGenerationId: generationId,
+					pipeline: status.pipeline ?? null
+				});
 				store.insertSectionsFromGeneration(adapted, pendingPlan);
 				const nextVisualBlocks = (pack.visual_blocks ?? []) as V3VisualBlock[];
 				const visualSwaps = visualUrlSwaps(nextVisualBlocks);

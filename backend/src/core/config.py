@@ -1,11 +1,15 @@
 from pathlib import Path
 import os
 import secrets
+from typing import Literal
 from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+GenerationPipeline = Literal["component_lectio", "v3_studio"]
+_GENERATION_PIPELINES = frozenset({"component_lectio", "v3_studio"})
 
 
 def _default_env_file() -> Path:
@@ -121,6 +125,15 @@ class Settings(BaseSettings):
     v2_skeleton_shadow_enabled: bool = True
     xplore_v2_enabled: bool = True
     xplore_v2_beta_users: str = ""
+    # Runtime cutover: default production path is Component Lectio.
+    # Rollback: GENERATION_PIPELINE_DEFAULT=v3_studio (redeploy/restart).
+    generation_pipeline_default: GenerationPipeline = Field(
+        default="component_lectio",
+        validation_alias=AliasChoices(
+            "GENERATION_PIPELINE_DEFAULT",
+            "generation_pipeline_default",
+        ),
+    )
 
     # Output
     report_output_dir: str = "outputs/reports"
@@ -170,6 +183,17 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_log_level(cls, value: str | None) -> str:
         return (value or "INFO").strip().upper()
+
+    @field_validator("generation_pipeline_default", mode="before")
+    @classmethod
+    def _normalize_generation_pipeline_default(cls, value: object) -> str:
+        raw = "component_lectio" if value is None else str(value).strip().lower()
+        if raw not in _GENERATION_PIPELINES:
+            raise ValueError(
+                "GENERATION_PIPELINE_DEFAULT must be one of "
+                f"{sorted(_GENERATION_PIPELINES)}; got {value!r}"
+            )
+        return raw
 
     @model_validator(mode="after")
     def _validate_production_like_runtime(self) -> "Settings":
