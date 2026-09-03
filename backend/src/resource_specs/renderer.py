@@ -8,6 +8,8 @@ def render_spec_for_prompt(
     depth: str,
     active_roles: list[str],
     active_supports: list[str],
+    *,
+    include_component_lists: bool = True,
 ) -> str:
     limit = spec.depth_limit(depth)
     active_role_set = set(active_roles)
@@ -53,9 +55,15 @@ def render_spec_for_prompt(
         lines.append(f"Depth warning: {limit.warning}")
 
     lines.append("")
-    lines.append("Resource sections and component rules:")
+    lines.append(
+        "Resource sections and role intents:"
+        if not include_component_lists
+        else "Resource sections and component rules:"
+    )
     for section in sections:
-        lines.extend(_render_section(section))
+        lines.extend(
+            _render_section(section, include_component_lists=include_component_lists)
+        )
 
     support_blocks = [
         (key, modification)
@@ -70,13 +78,13 @@ def render_spec_for_prompt(
                 lines.append(f"  Instruction: {modification.intent_note}")
             if modification.note:
                 lines.append(f"  Note: {modification.note}")
-            if modification.preferred_components:
+            if include_component_lists and modification.preferred_components:
                 lines.append(
                     f"  Preferred components: {', '.join(modification.preferred_components)}"
                 )
             if modification.adds_section:
                 lines.append(f"  Adds section: {modification.adds_section}")
-            if modification.adds_component:
+            if include_component_lists and modification.adds_component:
                 lines.append(f"  Adds component: {modification.adds_component}")
 
     if spec.validation:
@@ -85,14 +93,19 @@ def render_spec_for_prompt(
     return "\n".join(lines)
 
 
-def _render_section(section: SectionSpec) -> list[str]:
+def _render_section(
+    section: SectionSpec,
+    *,
+    include_component_lists: bool = True,
+) -> list[str]:
     lines = ["", f"Section role: {section.role}", f"Intent: {section.intent.strip()}"]
-    if section.preferred_components:
-        lines.append(f"Preferred components: {', '.join(section.preferred_components)}")
-    if section.allowed_components:
-        lines.append(f"Also allowed: {', '.join(section.allowed_components)}")
-    if section.forbidden_components:
-        lines.append(f"Forbidden here: {', '.join(section.forbidden_components)}")
+    if include_component_lists:
+        if section.preferred_components:
+            lines.append(f"Preferred components: {', '.join(section.preferred_components)}")
+        if section.allowed_components:
+            lines.append(f"Also allowed: {', '.join(section.allowed_components)}")
+        if section.forbidden_components:
+            lines.append(f"Forbidden here: {', '.join(section.forbidden_components)}")
     if section.placement:
         lines.append(f"Placement: {section.placement}")
     if section.only_when_support:

@@ -21,17 +21,20 @@ from v3_execution.prompts.section_writer import build_section_writer_prompt
 def test_stage1_and_stage2_prompts_share_stable_prefix() -> None:
     prefix = build_v3_shared_prefix()
 
-    with patch("v3_blueprint.planning.structural_planner._planner_index_block", return_value="PLANNER BLOCK"):
-        assert build_stage1_system_prompt().startswith(prefix)
+    assert build_stage1_system_prompt().startswith(prefix)
     assert build_stage2_system_prompt().startswith(prefix)
 
 
-def test_stage1_component_selector_context_labels_cognitive_job_and_section_field() -> None:
+def test_stage1_prompt_excludes_lectio_component_catalogue() -> None:
+    prompt = build_stage1_system_prompt()
+    assert "IntentPlan" in prompt
+    assert "Do not reason over a Lectio component catalogue" in prompt
+    assert "AVAILABLE COMPONENTS" not in prompt
+    assert "@@PLANNER_INDEX_BLOCK@@" not in prompt
+    # Planner-index helper still exists for later selector phases.
+    planner_block = _planner_index_block()
     card = get_component_card("worked-example-card")
     assert card is not None
-
-    planner_block = _planner_index_block()
-
     assert (
         "worked-example-card "
         f"| section_field={card['section_field']} "
@@ -50,11 +53,12 @@ def test_path_prepared_stage1_uses_zero_to_three_belief_tested_misconceptions() 
     assert "A card has 0-3 real misconceptions" in path_prompt
 
 
-def test_stage1_role_instructions_name_skeleton_slots_as_authority() -> None:
+def test_stage1_role_instructions_name_resource_spec_roles_as_authority() -> None:
     prompt = build_stage1_system_prompt()
 
-    assert "supplied skeleton slot catalog" in prompt
-    assert "active resource spec roles" not in prompt
+    assert "active resource spec roles" in prompt
+    assert "supplied skeleton slot catalog" not in prompt
+    assert "Never name Lectio component slugs" in prompt
 
 
 def test_writer_prompts_share_stable_prefix() -> None:

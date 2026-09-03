@@ -9,16 +9,21 @@ from core.config import settings
 from core.llm.runner import RetryPolicy, run_llm
 from core.prompts import effective_prompt_text
 from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
-from generation.v3_studio.prompts import _planner_index_block, build_v3_shared_prefix
-from v3_blueprint.planning.models import StructuralPlan
-from v3_blueprint.planning.validators import validate_structural_plan_roles
+from generation.v3_studio.prompts import build_v3_shared_prefix
+from v3_blueprint.planning.models import (
+    IntentPlan,
+    StructuralPlan,
+    intent_plan_to_structural_plan,
+)
+from v3_blueprint.planning.validators import (
+    _allowed_roles_from_resource_spec,
+    validate_structural_plan_roles,
+)
 from v3_execution.config import get_v3_model, get_v3_model_settings, get_v3_slot, get_v3_spec
 from v3_execution.llm_helpers import structured_output_type_for_model
 
 _CALLER = "v3_chunked_architect"
 STAGE1_NODE = "v3_stage1_planner"
-
-_PLANNER_INDEX_MARKER = "@@PLANNER_INDEX_BLOCK@@"
 
 
 def _load_stage1_static_body() -> str:
@@ -27,9 +32,7 @@ def _load_stage1_static_body() -> str:
 
 def build_stage1_system_prompt(*, path_prepared: bool = False) -> str:
     shared_prefix = build_v3_shared_prefix()
-    planner_block = _planner_index_block()
-
-    static_body = _load_stage1_static_body().replace(_PLANNER_INDEX_MARKER, planner_block)
+    static_body = _load_stage1_static_body()
     prompt = f"{shared_prefix}{static_body}"
     if not path_prepared:
         return prompt
@@ -52,6 +55,48 @@ def build_stage1_system_prompt(*, path_prepared: bool = False) -> str:
     )
 
 
+def _intent_resource_spec_payload(resource_spec: dict) -> dict:
+    """Strip component catalogues so Stage 1 cannot select components."""
+    payload = {
+        "resource_type": resource_spec.get("resource_type"),
+        "depth": resource_spec.get("depth"),
+        "rendered": resource_spec.get("rendered"),
+    }
+    raw_spec = resource_spec.get("spec")
+    if not isinstance(raw_spec, dict):
+        return payload
+
+    sections = raw_spec.get("sections") if isinstance(raw_spec.get("sections"), dict) else {}
+    stripped_sections: dict[str, list[dict]] = {}
+    for group_name in ("required", "optional"):
+        group = sections.get(group_name)
+        if not isinstance(group, list):
+            continue
+        cleaned: list[dict] = []
+        for section in group:
+            if not isinstance(section, dict):
+                continue
+            cleaned.append(
+                {
+                    "role": section.get("role"),
+                    "intent": section.get("intent"),
+                    "max_count": section.get("max_count", 1),
+                }
+            )
+        stripped_sections[group_name] = cleaned
+
+    payload["spec"] = {
+        "id": raw_spec.get("id"),
+        "label": raw_spec.get("label"),
+        "version": raw_spec.get("version"),
+        "intent": raw_spec.get("intent"),
+        "depth": raw_spec.get("depth"),
+        "sections": stripped_sections,
+        "validation": raw_spec.get("validation") or [],
+    }
+    return payload
+
+
 def build_stage1_user_message(
     *,
     signals: V3SignalSummary,
@@ -60,15 +105,19 @@ def build_stage1_user_message(
     skeleton_catalog: dict | None = None,
     previous_errors: list[str] | None = None,
 ) -> str:
+    del skeleton_catalog  # Stage 1 role authority is the resource spec, not skeletons.
+    intent_spec = _intent_resource_spec_payload(resource_spec)
     payload = (
         f"Signals JSON:\n{signals.model_dump_json(indent=2)}\n\n"
         f"Form JSON:\n{form.model_dump_json(indent=2)}\n\n"
-        f"RESOURCE SPEC JSON:\n{json.dumps(resource_spec, indent=2, sort_keys=True)}"
+        f"RESOURCE SPEC JSON (roles/intents only; no component catalogue):\n"
+        f"{json.dumps(intent_spec, indent=2, sort_keys=True)}"
     )
-    slots = skeleton_catalog.get("slots") if isinstance(skeleton_catalog, dict) else None
-    if isinstance(slots, dict) and slots:
-        payload += "\n\nSKELETON SLOT IDS (the only valid section roles):\n" + ", ".join(
-            sorted(str(slot_id) for slot_id in slots)
+    roles = sorted(_allowed_roles_from_resource_spec(resource_spec))
+    if roles:
+        payload += (
+            "\n\nACTIVE RESOURCE SPEC ROLES (the only valid section roles):\n"
+            + ", ".join(roles)
         )
     if previous_errors:
         payload += (
@@ -81,9 +130,9 @@ def build_stage1_user_message(
 
 def _validate_stage1_roles(
     plan: StructuralPlan,
-    skeleton_catalog: dict | None,
+    resource_spec: dict | None,
 ) -> None:
-    errors = validate_structural_plan_roles(plan, skeleton_catalog)
+    errors = validate_structural_plan_roles(plan, resource_spec=resource_spec)
     if errors:
         raise ValueError(errors[0])
 
@@ -108,7 +157,7 @@ async def _call_stage1(
         slot = get_v3_slot(node)
         agent = Agent(
             model=model,
-            output_type=structured_output_type_for_model(StructuralPlan, spec=spec),
+            output_type=structured_output_type_for_model(IntentPlan, spec=spec),
             system_prompt=build_stage1_system_prompt(path_prepared=path_prepared),
         )
         result = await run_llm(
@@ -135,13 +184,14 @@ async def _call_stage1(
             ),
         )
         raw = result.output
-        if isinstance(raw, StructuralPlan):
-            plan = raw
+        if isinstance(raw, IntentPlan):
+            intent = raw
         elif hasattr(raw, "model_dump"):
-            plan = StructuralPlan.model_validate(raw.model_dump())
+            intent = IntentPlan.model_validate(raw.model_dump())
         else:
-            plan = StructuralPlan.model_validate(raw)
-        _validate_stage1_roles(plan, skeleton_catalog)
+            intent = IntentPlan.model_validate(raw)
+        plan = intent_plan_to_structural_plan(intent)
+        _validate_stage1_roles(plan, resource_spec)
         return plan
     except Exception as exc:
         tb = traceback.format_exc()

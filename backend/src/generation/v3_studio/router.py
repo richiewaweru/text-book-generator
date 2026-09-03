@@ -47,7 +47,6 @@ from v3_blueprint.planning.models import (
 from v3_blueprint.planning.persistence import (
     load_chunked_state,
     persist_chunked_state,
-    resume_stage2,
 )
 from v3_blueprint.planning.retry import (
     retry_failed_section,
@@ -377,6 +376,7 @@ def _build_chunked_resource_spec(
             depth=depth,
             active_roles=[],
             active_supports=[],
+            include_component_lists=False,
         )
         return {
             "resource_type": resource_type,
@@ -1264,16 +1264,24 @@ async def _run_chunked_stage2_pipeline(
             return item_summary
 
         async def _stage2_job() -> list:
-            return await resume_stage2(
+            # Reshape: each section lane runs brief → prose → questions with no
+            # global brief barrier. Full blueprint assembly follows below.
+            from v3_execution.runtime.stage2_lanes import run_stage2_lanes
+
+            return await run_stage2_lanes(
                 generation_id,
+                plan=plan,
+                signals=signals,
+                form=form,
+                resource_spec=resource_spec,
                 emit_event=emit_event,
             )
 
-        # 5.1: items read only card fields; stage2 reads only the approved plan —
-        # overlap them to prove independence before lanes.
+        # 5.1: items read only card fields; stage2 lanes read only the approved plan —
+        # overlap them. Lanes own brief→prose→questions (no all-briefs-first barrier).
         _item_summary, briefs = await asyncio.gather(_items_job(), _stage2_job())
         print(
-            f"\n[STAGE2 PIPELINE BRIEFS DONE] generation_id={generation_id}"
+            f"\n[STAGE2 PIPELINE LANES DONE] generation_id={generation_id}"
             f" briefs={len(briefs)}",
             flush=True,
         )

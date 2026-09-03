@@ -89,6 +89,11 @@ class ResourceSpec(BaseModel):
     validation: list[str] = Field(default_factory=list)
 
     def all_allowed_components_for_role(self, role: str) -> set[str]:
+        """Raw preferred∪allowed from the first matching section (no Lectio filter).
+
+        Prefer ``resource_specs.candidates.resolve_role_candidates`` for legal
+        AI candidate sets (template ∩ forbidden ∩ generation exclusions).
+        """
         for section in [*self.sections.required, *self.sections.optional]:
             if section.role == role:
                 return set(section.preferred_components) | set(section.allowed_components)
@@ -100,6 +105,16 @@ class ResourceSpec(BaseModel):
             if section.role == role:
                 role_forbidden = set(section.forbidden_components)
         return role_forbidden | set(self.forbidden_components)
+
+    def required_roles(self) -> list[str]:
+        """Stable ordered unique roles from required sections."""
+        roles: list[str] = []
+        seen: set[str] = set()
+        for section in self.sections.required:
+            if section.role not in seen:
+                seen.add(section.role)
+                roles.append(section.role)
+        return roles
 
     def depth_limit(self, depth: str) -> DepthVariant:
         return self.depth[depth]

@@ -9,6 +9,28 @@ log = logging.getLogger(__name__)
 
 CONTENT_INTENT_MAX_WORDS = 80
 
+# Lectio component slug patterns that must never appear as Stage 1 role purposes.
+_COMPONENT_SLUG_HINTS = (
+    "-block",
+    "-card",
+    "-stack",
+    "-strip",
+    "-rail",
+    "-grid",
+    "-alert",
+    "-prompt",
+    "-hero",
+    "-bridge",
+    "-divider",
+    "-family",
+    "-series",
+    "-compare",
+    "-check",
+    "-textbox",
+    "-blank",
+    "-answer",
+)
+
 
 def _word_count(text: str) -> int:
     return len(text.split())
@@ -37,26 +59,77 @@ def _allowed_roles_from_skeletons(skeleton_catalog: dict | None) -> set[str]:
     }
 
 
+def _allowed_roles_from_resource_spec(resource_spec: dict | None) -> set[str]:
+    if not isinstance(resource_spec, dict):
+        return set()
+    raw_spec = resource_spec.get("spec")
+    if not isinstance(raw_spec, dict):
+        return set()
+    sections = raw_spec.get("sections")
+    if not isinstance(sections, dict):
+        return set()
+    roles: set[str] = set()
+    for group_name in ("required", "optional"):
+        group = sections.get(group_name)
+        if not isinstance(group, list):
+            continue
+        for section in group:
+            if isinstance(section, dict):
+                role = section.get("role")
+                if isinstance(role, str) and role.strip():
+                    roles.add(role.strip())
+    return roles
+
+
 def validate_structural_plan_roles(
     plan: StructuralPlan,
-    skeleton_catalog: dict | None,
+    skeleton_catalog: dict | None = None,
+    *,
+    resource_spec: dict | None = None,
 ) -> list[str]:
-    allowed_roles = _allowed_roles_from_skeletons(skeleton_catalog)
+    allowed_roles = _allowed_roles_from_resource_spec(resource_spec)
+    authority = "among active resource spec roles"
+    if not allowed_roles:
+        allowed_roles = _allowed_roles_from_skeletons(skeleton_catalog)
+        authority = "a skeleton slot id"
     if not allowed_roles:
         log.warning(
-            "skeleton role validation unavailable; StructuralPlan roles were not "
-            "validated because no loaded skeleton slot catalog was supplied"
+            "role validation unavailable; StructuralPlan roles were not "
+            "validated because neither resource-spec roles nor skeleton slots "
+            "were supplied"
         )
         return []
 
     return [
         (
             f"Section '{section.id}' emitted role '{section.role}' "
-            f"which is not a skeleton slot id: {sorted(allowed_roles)}."
+            f"which is not {authority}: {sorted(allowed_roles)}."
         )
         for section in plan.sections
         if section.role not in allowed_roles
     ]
+
+
+def _section_is_intent_only(section: SectionPlan) -> bool:
+    return not section.components
+
+
+def _purpose_names_component(purpose: str) -> bool:
+    lowered = purpose.lower()
+    if any(token in lowered for token in _COMPONENT_SLUG_HINTS):
+        return True
+    # Common full slugs without hyphen suffix match above alone.
+    banned = (
+        "section-header",
+        "hook-hero",
+        "practice-stack",
+        "quiz-check",
+        "worked-example",
+        "fill-in-blank",
+        "short-answer",
+        "answer-key",
+    )
+    return any(token in lowered for token in banned)
 
 
 def validate_structural_plan(
@@ -73,7 +146,7 @@ def validate_structural_plan(
     }
     registry = _get_component_registry(all_slugs)
 
-    # 1. All slugs exist in registry
+    # 1. All slugs exist in registry (selection-filled plans only)
     for section in plan.sections:
         for comp in section.components:
             if comp.slug not in registry:
@@ -104,7 +177,7 @@ def validate_structural_plan(
             else:
                 seen_fields[field] = comp.slug
 
-    # 3. visual_required=true sections have a visual-capable slug
+    # 3. visual_required=true sections have a visual-capable slug when components exist
     visual_capable = {
         "diagram-block",
         "diagram-series",
@@ -113,7 +186,7 @@ def validate_structural_plan(
         "timeline-block",
     }
     for section in plan.sections:
-        if section.visual_required:
+        if section.visual_required and section.components:
             slugs = {c.slug for c in section.components}
             if not slugs.intersection(visual_capable):
                 errors.append(
@@ -121,6 +194,20 @@ def validate_structural_plan(
                     f"no visual-capable component. Add one of: "
                     f"{sorted(visual_capable)}"
                 )
+
+    # 3b. Intent-only sections must carry a concept-specific purpose (no components).
+    for section in plan.sections:
+        if not _section_is_intent_only(section):
+            continue
+        if not section.purpose.strip():
+            errors.append(
+                f"Section '{section.id}' is intent-only and must include a non-empty purpose."
+            )
+        elif _purpose_names_component(section.purpose):
+            errors.append(
+                f"Section '{section.id}' purpose must not name Lectio components; "
+                "describe the pedagogical job only."
+            )
 
     # 4. question_plan section_ids reference valid sections
     valid_section_ids = {s.id for s in plan.sections}
@@ -140,8 +227,10 @@ def validate_structural_plan(
         errors.append(f"Concept card id '{card_id}' is duplicated within the plan.")
 
     known_card_ids = set(card_ids)
+    known_misconception_ids: set[str] = set()
     for card in plan.cards:
         misconception_ids = [item.id for item in card.misconceptions]
+        known_misconception_ids.update(misconception_ids)
         duplicate_misconception_ids = sorted(
             item_id
             for item_id in set(misconception_ids)
@@ -168,6 +257,12 @@ def validate_structural_plan(
             errors.append(
                 f"Section '{section.id}' references unknown card_id '{section.card_id}'."
             )
+        for misconception_id in section.misconception_focus:
+            if misconception_id not in known_misconception_ids:
+                errors.append(
+                    f"Section '{section.id}' misconception_focus references unknown "
+                    f"id '{misconception_id}'."
+                )
 
     # 6. repair_focus present when lesson_mode=repair
     if plan.lesson_mode == "repair" and plan.repair_focus is None:
@@ -182,7 +277,13 @@ def validate_structural_plan(
             f"transition_note=null."
         )
 
-    errors.extend(validate_structural_plan_roles(plan, skeleton_catalog))
+    errors.extend(
+        validate_structural_plan_roles(
+            plan,
+            skeleton_catalog,
+            resource_spec=resource_spec,
+        )
+    )
 
     return errors
 

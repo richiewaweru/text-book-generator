@@ -1,11 +1,17 @@
-# Resource Spec: Lesson
-# Version: 1.0
+# Resource Spec: Lesson (production primary grammar)
+# Version: 1.1
 # Pedagogical owner: Lectio
-# Last updated: 2026-06-21
+# Last updated: 2026-09-03
+#
+# Component Lectio Phase 01: this file is the single general lesson spec.
+# Role lists are pedagogical constraints only (preferred / allowed / forbidden).
+# Lectio owns cognitive_job, capabilities, field contracts, and schemas —
+# do not duplicate those here. Candidate legality is computed by
+# resource_specs.candidates against the active Lectio template.
 
 id: lesson
 label: Lesson
-version: "1.0"
+version: "1.1"
 
 intent: |
   A lesson is the default full teaching resource. It introduces a concept,

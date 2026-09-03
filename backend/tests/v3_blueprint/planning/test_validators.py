@@ -114,33 +114,60 @@ def test_validate_structural_plan_catches_duplicate_section_field(monkeypatch) -
     )
 
 
-def test_validate_structural_plan_catches_role_outside_skeleton_slots() -> None:
+def test_validate_structural_plan_catches_role_outside_resource_spec() -> None:
     plan = _base_plan_with_components(
         components=[ComponentSlot(slug="hook-hero", purpose="surface anchor")]
     )
     plan.sections[0].role = "invalid_role"
     errors = validate_structural_plan(
         plan,
-        skeleton_catalog={
-            "slots": {"intro": {"role": "intro"}, "practice": {"role": "practice"}}
+        {
+            "resource_type": "lesson",
+            "spec": {
+                "sections": {
+                    "required": [
+                        {"role": "orient"},
+                        {"role": "build"},
+                        {"role": "model"},
+                        {"role": "practice"},
+                        {"role": "close"},
+                    ]
+                }
+            },
         },
     )
-    assert any("which is not a skeleton slot id" in error for error in errors)
+    assert any("which is not among active resource spec roles" in error for error in errors)
 
 
-def test_validate_structural_plan_accepts_a_role_declared_by_skeleton_slot_id() -> None:
+def test_validate_structural_plan_accepts_a_role_declared_by_resource_spec() -> None:
     plan = _base_plan_with_components(
         components=[ComponentSlot(slug="hook-hero", purpose="surface anchor")]
     )
     plan.sections[0].role = "model"
     errors = validate_structural_plan(
         plan,
+        {
+            "resource_type": "lesson",
+            "spec": {"sections": {"required": [{"role": "model"}]}},
+        },
+    )
+    assert not any("role" in error for error in errors)
+
+
+def test_validate_structural_plan_falls_back_to_skeleton_when_spec_roles_missing() -> None:
+    plan = _base_plan_with_components(
+        components=[ComponentSlot(slug="hook-hero", purpose="surface anchor")]
+    )
+    plan.sections[0].role = "model"
+    errors = validate_structural_plan(
+        plan,
+        {"resource_type": "lesson", "spec": {}},
         skeleton_catalog={"slots": {"model": {"role": "model"}}},
     )
     assert not any("role" in error for error in errors)
 
 
-def test_validate_structural_plan_warns_when_skeleton_roles_are_unavailable(caplog) -> None:
+def test_validate_structural_plan_warns_when_role_authorities_unavailable(caplog) -> None:
     plan = _base_plan_with_components(
         components=[ComponentSlot(slug="hook-hero", purpose="surface anchor")]
     )
@@ -152,7 +179,7 @@ def test_validate_structural_plan_warns_when_skeleton_roles_are_unavailable(capl
     )
 
     assert not any("role" in error for error in errors)
-    assert "skeleton role validation unavailable" in caplog.text
+    assert "role validation unavailable" in caplog.text
 
 
 def test_validate_section_brief_catches_dropped_component() -> None:

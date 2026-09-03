@@ -22,6 +22,7 @@ User recorded decision 2026-08-03 after three rounds (quality equal in round 2; 
 - `4.1-4.4: generation_steps append-only storage` — table + model (`part_id`/`variant_id`/`step`/`kind`); `insert_step`/`fold`/`load_chunked_state` overlay; briefs insert rows not blob RMW; migration backfills briefs from `chunked_state_json`; resume skips completed brief steps; tests 4 passed (`test_generation_steps`).
 - `5.1: overlap pack items with stage2` — `gather(items_job, resume_stage2)` in `_run_chunked_stage2_pipeline`.
 - `5.2-5.7: lanes prose→questions + early SECTION_READY` — `lanes.py`; lane budget 240s; `V3_CONCURRENCY_LANE_MAX`; SECTION_READY without visuals; visual step rows; `gather(answer_key, coherence)`; `V3_STAGE2_PARALLEL=false` → lane concurrency 1; tests 4+97 v3_execution passed.
+- `5.2 follow-up: brief into run_lane` — lanes are `brief → prose → questions`; `stage2_lanes.py` removes the all-briefs-first barrier; pipeline uses it before full blueprint assembly; tests in `test_lanes` + `test_stage2_lanes`.
 - `test: align expander reasoning expectation and stabilize SSE heartbeat` — suite-green follow-ups.
 - `docs: reshape handoff + superseded lanes pointer` — v1 baseline (superseded).
 - `0.1: V3_SKIP_EXPANDER writer branch` — historical.
@@ -53,13 +54,20 @@ User recorded decision 2026-08-03 after three rounds (quality equal in round 2; 
 
 ### Deferred
 
-- Brief step still completes in `resume_stage2` before blueprint assembly; lanes own **prose→questions** (and visual rows). Moving brief into `run_lane` would remove the remaining phase barrier — deferred to avoid a second rewrite of `_attempt_chunked_assembly` mid-session.
-- Live timing acceptance (#6) left for the user.
+- Live timing acceptance (#6) left for the user (ports busy / no browser this session).
 - §7.1 skeleton-by-lookup / `build`-role defect — out of scope (see KNOWN DEFECTS).
+
+### 2026-09-03 — brief into lanes (local continuation)
+
+- Closed Cloud Agent PR #95; local work continues without `.cursor/` Cloud install scripts.
+- Wired gitignored `backend/.env` DeepSeek `V3_*` slots from root `.env` (no servers started on 5173/8000).
+- **Moved brief into lanes:** `run_lane` is now `brief → prose → questions` (optional brief factory; skip/load existing steps). New `v3_execution/runtime/stage2_lanes.py` runs per-section lanes with no global brief barrier; `_run_chunked_stage2_pipeline` calls it instead of `resume_stage2`. Full blueprint assembly still follows lanes, then the runner resume-skips stored prose/questions.
+- Tests: `tests/v3_execution/test_lanes.py` + `test_stage2_lanes.py`; related suites **114 passed**; ruff clean on touched files.
+- Still parked: §9.6 live wall-clock; Google OAuth click-through; Cloud secret injection on public repo.
 
 ### Summary
 
-Shipped: expander kept; skip flag gone; `generation_steps` + fold/backfill; items∥stage2; lane budgets; early SECTION_READY; overlapped answer_key/coherence; env docs. Before/after live wall-clock not remeasured here — use round-3 medians (~191s with expander sequential) as baseline until a lane-mode live run.
+Shipped: expander kept; skip flag gone; `generation_steps` + fold/backfill; items∥stage2; lane budgets; early SECTION_READY; overlapped answer_key/coherence; **brief inside lanes** (`brief → prose → questions`, no all-briefs-first barrier); env docs. Before/after live wall-clock not remeasured here — use round-3 medians (~191s with expander sequential) as baseline until a lane-mode live run.
 
 ## Phase 0C — timing repeat (done)
 
