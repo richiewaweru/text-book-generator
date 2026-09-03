@@ -10,19 +10,24 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from contracts.lesson_document import assert_valid_lesson_document
+from generation.component_lectio.errors import AnswerKeyMappingError, WorkOrderIdentityError
 from generation.component_lectio.lane_dispatch import (
-    WorkOrderIdentityError,
     adapt_answer_key_order,
     adapt_content_order,
     adapt_items_order,
     adapt_visual_order,
-    payload_from_answer_key,
+    assemble_answer_key_from_refs,
     payload_from_component_block,
     payload_from_questions,
-    payload_from_visual,
+    payload_from_visuals,
+    question_refs_from_payload,
     questions_from_item_payload,
     resolve_exact_order,
     stamp_component_block,
+)
+from generation.component_lectio.payload_validation import (
+    ExactPayloadValidationError,
+    validate_exact_payload,
 )
 from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
 from v3_blueprint.planning.canonical_plan import (
@@ -62,6 +67,8 @@ from v3_execution.models import (
 )
 from v3_execution.runtime.failure_policy import (
     BudgetLedger,
+    FailureClass,
+    ClassifiedFailure,
     classify_failure,
     recovery_for,
 )
@@ -215,17 +222,64 @@ def _structured_error(
     failure_class: str,
     attempt: int,
 ) -> dict[str, Any]:
+    validation_errors: list[str]
+    if isinstance(exc, ExactPayloadValidationError):
+        validation_errors = list(exc.errors) or [str(exc)[:400]]
+        failure_class = "lectio_contract_validation"
+    else:
+        validation_errors = [str(exc)[:400]]
     return {
         "generation_id": generation_id,
         "section_id": order.section_id,
         "block_id": order.block_id,
         "component_id": order.locked_component_id,
+        "section_field": order.section_field,
         "lane": order.lane,
         "class": failure_class,
         "message": str(exc)[:400],
-        "validation_errors": [str(exc)[:400]],
+        "validation_errors": validation_errors,
         "attempt": attempt,
     }
+
+
+def _classify_block_failure(
+    exc: BaseException,
+    *,
+    order: ExactWorkOrder,
+) -> ClassifiedFailure:
+    if isinstance(exc, AnswerKeyMappingError):
+        return ClassifiedFailure(
+            FailureClass.TERMINAL_CODE_ERROR,
+            str(exc),
+            block_id=order.block_id,
+            terminal=True,
+        )
+    if isinstance(exc, ExactPayloadValidationError):
+        if order.lane == "answer_key":
+            return ClassifiedFailure(
+                FailureClass.TERMINAL_CODE_ERROR,
+                str(exc),
+                block_id=order.block_id,
+                terminal=True,
+            )
+        return ClassifiedFailure(
+            FailureClass.COMPONENT_REPAIRABLE,
+            str(exc),
+            block_id=order.block_id,
+            repairable=True,
+        )
+    if isinstance(exc, WorkOrderIdentityError):
+        return ClassifiedFailure(
+            FailureClass.TERMINAL_CODE_ERROR,
+            str(exc),
+            block_id=order.block_id,
+            terminal=True,
+        )
+    return classify_failure(
+        exc,
+        block_id=order.block_id,
+        kind_hint=order.lane if order.lane == "visual" else None,
+    )
 
 
 async def run_component_lectio_execution(
@@ -283,6 +337,7 @@ async def run_component_lectio_execution(
     pending_orders = [order for order in orders if order.block_id not in ready]
     ledgers: dict[str, BudgetLedger] = {}
     item_questions: dict[str, list[WriterQuestion]] = {}
+    item_refs: dict[str, list[dict[str, Any]]] = {}
     last_error: str | None = None
 
     await emit(
@@ -294,9 +349,57 @@ async def run_component_lectio_execution(
         },
     )
 
-    async def dispatch(order: ExactWorkOrder) -> dict[str, Any]:
+    async def _collect_question_refs(section_id: str) -> list[dict[str, Any]]:
+        refs = list(item_refs.get(section_id) or [])
+        if refs:
+            return refs
+        questions = list(item_questions.get(section_id) or [])
+        if questions:
+            return [
+                {
+                    "id": q.id,
+                    "question": q.purpose or q.id,
+                    "expected_answer": q.expected_answer,
+                    "difficulty": q.difficulty,
+                }
+                for q in questions
+            ]
+        store = await reconstruct_checkpoint_store(
+            generation_id,
+            plan_revision=canonical.plan_revision,
+            plan_hash=canonical.plan_hash,
+            desired_work=desired,
+        )
+        collected: list[dict[str, Any]] = []
+        for sibling in orders:
+            if sibling.lane == "items" and sibling.section_id == section_id:
+                ckpt = store.blocks.get(sibling.block_id)
+                if ckpt and ckpt.state == "ready":
+                    collected.extend(question_refs_from_payload(ckpt.payload))
+                    if not collected:
+                        for q in questions_from_item_payload(ckpt.payload):
+                            collected.append(
+                                {
+                                    "id": q.id,
+                                    "question": q.purpose or q.id,
+                                    "expected_answer": q.expected_answer,
+                                    "difficulty": q.difficulty,
+                                }
+                            )
+        return collected
+
+    async def dispatch(
+        order: ExactWorkOrder,
+        *,
+        repair_errors: list[str] | None = None,
+    ) -> dict[str, Any]:
         if order.lane == "content":
-            section_order = adapt_content_order(order, plan=filled, template_id=template_id)
+            section_order = adapt_content_order(
+                order,
+                plan=filled,
+                template_id=template_id,
+                prior_errors=repair_errors,
+            )
             generated = await execute_content(
                 section_order,
                 emit,
@@ -313,9 +416,9 @@ async def run_component_lectio_execution(
                 raise WorkOrderIdentityError(
                     f"Content output claimed {mapped_order.block_id}, expected {order.block_id}"
                 )
-            return payload
+            return validate_exact_payload(order, payload)
         if order.lane == "items":
-            q_order = adapt_items_order(order, plan=filled)
+            q_order = adapt_items_order(order, plan=filled, prior_errors=repair_errors)
             generated_q = await execute_item(
                 q_order,
                 emit,
@@ -323,10 +426,12 @@ async def run_component_lectio_execution(
                 generation_id=generation_id,
             )
             payload = payload_from_questions(generated_q, order)
-            item_questions[order.section_id] = questions_from_item_payload(payload)
-            return payload
+            validated = validate_exact_payload(order, payload)
+            item_questions[order.section_id] = questions_from_item_payload(validated)
+            item_refs[order.section_id] = question_refs_from_payload(validated)
+            return validated
         if order.lane == "visual":
-            v_order = adapt_visual_order(order, plan=filled)
+            v_order = adapt_visual_order(order, plan=filled, prior_errors=repair_errors)
             generated_v = await execute_vis(
                 v_order,
                 emit,
@@ -335,37 +440,33 @@ async def run_component_lectio_execution(
             )
             if not generated_v:
                 raise RuntimeError("visual executor returned no blocks")
-            visual = generated_v[0]
-            resolved = resolve_exact_order(visual, scoped_orders=[order])
+            # Prefer join by first frame; series/compare keep all frames.
+            resolved = resolve_exact_order(generated_v[0], scoped_orders=[order])
             if resolved.block_id != order.block_id:
                 raise WorkOrderIdentityError(
                     f"Visual output claimed {resolved.block_id}, expected {order.block_id}"
                 )
-            return payload_from_visual(visual, order)
+            payload = payload_from_visuals(generated_v, order)
+            return validate_exact_payload(order, payload)
         if order.lane == "answer_key":
-            questions = list(item_questions.get(order.section_id) or [])
-            if not questions:
-                store = await reconstruct_checkpoint_store(
-                    generation_id,
-                    plan_revision=canonical.plan_revision,
-                    plan_hash=canonical.plan_hash,
-                    desired_work=desired,
+            refs = await _collect_question_refs(order.section_id)
+            # Deterministic Lectio mapping is the portable source of truth.
+            # Injected answer_key_executor remains available for Studio/legacy callers
+            # but Component Lectio checkpoints must not persist generator-native shapes.
+            if execute_answers is not execute_answer_key:
+                _ = await execute_answers(
+                    adapt_answer_key_order(
+                        order,
+                        questions=questions_from_item_payload(
+                            {"question_refs": refs, "content": {}}
+                        ),
+                    ),
+                    emit,
+                    trace_id=generation_id,
+                    generation_id=generation_id,
                 )
-                for sibling in orders:
-                    if sibling.lane == "items" and sibling.section_id == order.section_id:
-                        ckpt = store.blocks.get(sibling.block_id)
-                        if ckpt and ckpt.state == "ready":
-                            questions.extend(questions_from_item_payload(ckpt.payload))
-            ak_order = adapt_answer_key_order(order, questions=questions)
-            generated_ak = await execute_answers(
-                ak_order,
-                emit,
-                trace_id=generation_id,
-                generation_id=generation_id,
-            )
-            if generated_ak is None:
-                raise RuntimeError("answer_key executor returned nothing")
-            return payload_from_answer_key(generated_ak, order)
+            payload = assemble_answer_key_from_refs(order, question_refs=refs)
+            return validate_exact_payload(order, payload)
         raise RuntimeError(f"Unknown work-order lane: {order.lane}")
 
     async def execute_one(order: ExactWorkOrder) -> None:
@@ -374,6 +475,7 @@ async def run_component_lectio_execution(
             return
         ledger = ledgers.setdefault(order.block_id, BudgetLedger())
         attempt = 1
+        repair_errors: list[str] | None = None
         try:
             payload = await dispatch(order)
             await _persist_ready_block(
@@ -387,11 +489,7 @@ async def run_component_lectio_execution(
             await emit("block_ready", {"generation_id": generation_id, "block_id": order.block_id})
             return
         except Exception as exc:  # noqa: BLE001
-            failure = classify_failure(
-                exc,
-                block_id=order.block_id,
-                kind_hint=order.lane if order.lane == "visual" else None,
-            )
+            failure = _classify_block_failure(exc, order=order)
             action = recovery_for(failure, ledger, sibling_block_ids=sorted(ready))
             log.warning(
                 "component_lectio_block_failure generation_id=%s block=%s class=%s action=%s",
@@ -402,8 +500,12 @@ async def run_component_lectio_execution(
             )
             if action.action in {"retry", "repair"}:
                 attempt = 2
+                if isinstance(exc, ExactPayloadValidationError):
+                    repair_errors = list(exc.errors)
+                else:
+                    repair_errors = [str(exc)[:400]]
                 try:
-                    payload = await dispatch(order)
+                    payload = await dispatch(order, repair_errors=repair_errors)
                     await _persist_ready_block(
                         generation_id,
                         block_id=order.block_id,
@@ -419,12 +521,16 @@ async def run_component_lectio_execution(
                     return
                 except Exception as retry_exc:  # noqa: BLE001
                     exc = retry_exc
-                    failure = classify_failure(retry_exc, block_id=order.block_id)
+                    failure = _classify_block_failure(retry_exc, order=order)
             error = _structured_error(
                 generation_id=generation_id,
                 order=order,
                 exc=exc,
-                failure_class=failure.failure_class.value,
+                failure_class=(
+                    "lectio_contract_validation"
+                    if isinstance(exc, ExactPayloadValidationError)
+                    else failure.failure_class.value
+                ),
                 attempt=attempt,
             )
             await _persist_failed_block(generation_id, order=order, error=error)

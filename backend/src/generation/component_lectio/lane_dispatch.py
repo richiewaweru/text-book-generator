@@ -5,6 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from contracts.lectio import get_component_card
+from generation.component_lectio.errors import WorkOrderIdentityError
+from generation.component_lectio.payload_strategies import (
+    SCHEMA_SUMMARIES,
+    assemble_answer_key_content,
+    assemble_items_content,
+    assemble_visual_content,
+    question_refs_from_payload,
+    questions_from_refs,
+)
 from v3_blueprint.planning.models import StructuralPlan
 from v3_blueprint.planning.work_orders import ExactWorkOrder, assert_writer_cannot_change_component
 from v3_execution.compile_orders import COMPONENT_TO_VISUAL_MODE
@@ -19,6 +28,7 @@ from v3_execution.models import (
     RegisterSpec,
     SectionWriterWorkOrder,
     SourceOfTruthEntry,
+    VisualFrameSpec,
     VisualGeneratorWorkOrder,
     VisualPlanItem,
     WriterMisconception,
@@ -27,9 +37,23 @@ from v3_execution.models import (
     WriterSectionComponent,
 )
 
-
-class WorkOrderIdentityError(ValueError):
-    """Generated output claimed an identity that does not match the ExactWorkOrder."""
+__all__ = [
+    "WorkOrderIdentityError",
+    "adapt_answer_key_order",
+    "adapt_content_order",
+    "adapt_items_order",
+    "adapt_visual_order",
+    "assemble_answer_key_from_refs",
+    "payload_from_answer_key",
+    "payload_from_component_block",
+    "payload_from_questions",
+    "payload_from_visual",
+    "payload_from_visuals",
+    "question_refs_from_payload",
+    "questions_from_item_payload",
+    "resolve_exact_order",
+    "stamp_component_block",
+]
 
 
 def resolve_exact_order(
@@ -108,6 +132,7 @@ def stamp_component_block(block: GeneratedComponentBlock, order: ExactWorkOrder)
             "section_id": order.section_id,
             "component_id": order.locked_component_id,
             "source_work_order_id": order.work_order_id,
+            "section_field": order.section_field or block.section_field,
         }
     )
 
@@ -117,6 +142,7 @@ def adapt_content_order(
     *,
     plan: StructuralPlan,
     template_id: str,
+    prior_errors: list[str] | None = None,
 ) -> SectionWriterWorkOrder:
     assert_writer_cannot_change_component(order, order.component_id)
     section_meta = {section.id: section for section in plan.sections}
@@ -151,10 +177,19 @@ def adapt_content_order(
         source_of_truth=[SourceOfTruthEntry(key="anchor", text=plan.anchor.example)],
         component_cards={order.component_id: card},
         template_id=template_id,
+        prior_validation_errors=list(prior_errors or []),
     )
 
 
-def adapt_items_order(order: ExactWorkOrder, *, plan: StructuralPlan) -> QuestionWriterWorkOrder:
+def adapt_items_order(
+    order: ExactWorkOrder,
+    *,
+    plan: StructuralPlan,
+    prior_errors: list[str] | None = None,
+) -> QuestionWriterWorkOrder:
+    schema_summary = SCHEMA_SUMMARIES.get(order.locked_component_id, "")
+    if not schema_summary and isinstance(order.schema_shape, dict):
+        schema_summary = str(order.schema_shape)[:800]
     return QuestionWriterWorkOrder(
         work_order_id=order.work_order_id,
         section_id=order.section_id,
@@ -170,13 +205,37 @@ def adapt_items_order(order: ExactWorkOrder, *, plan: StructuralPlan) -> Questio
         source_of_truth=[SourceOfTruthEntry(key="anchor", text=plan.anchor.example)],
         register=RegisterSpec(),
         consistency_rules=[],
+        component_id=order.locked_component_id,
+        section_field=order.section_field,
+        purpose=order.purpose,
+        schema_summary=schema_summary,
+        prior_validation_errors=list(prior_errors or []),
     )
 
 
-def adapt_visual_order(order: ExactWorkOrder, *, plan: StructuralPlan) -> VisualGeneratorWorkOrder:
+def adapt_visual_order(
+    order: ExactWorkOrder,
+    *,
+    plan: StructuralPlan,
+    prior_errors: list[str] | None = None,
+) -> VisualGeneratorWorkOrder:
     mode = COMPONENT_TO_VISUAL_MODE.get(order.component_id, "diagram")
     if mode not in {"diagram", "diagram_series", "diagram_compare", "image", "simulation"}:
         mode = "diagram"
+    frames: list[VisualFrameSpec] = []
+    if order.component_id == "diagram-compare":
+        frames = [
+            VisualFrameSpec(description=f"Before: {order.purpose}", must_show=[order.purpose]),
+            VisualFrameSpec(description=f"After: {order.purpose}", must_show=[order.purpose]),
+        ]
+        mode = "diagram_series"  # executor renders multi-frame via series path
+    elif order.component_id == "diagram-series":
+        frames = [
+            VisualFrameSpec(description=f"Step 1: {order.purpose}", must_show=[order.purpose]),
+            VisualFrameSpec(description=f"Step 2: {order.purpose}", must_show=[order.purpose]),
+            VisualFrameSpec(description=f"Step 3: {order.purpose}", must_show=[order.purpose]),
+        ]
+        mode = "diagram_series"
     return VisualGeneratorWorkOrder(
         work_order_id=order.work_order_id,
         resource_type="lesson",
@@ -188,8 +247,10 @@ def adapt_visual_order(order: ExactWorkOrder, *, plan: StructuralPlan) -> Visual
             mode=mode,  # type: ignore[arg-type]
             purpose=order.purpose,
             must_show=[order.purpose],
+            frames=frames,
         ),
         source_of_truth=[SourceOfTruthEntry(key="anchor", text=plan.anchor.example)],
+        prior_validation_errors=list(prior_errors or []),
     )
 
 
@@ -213,7 +274,7 @@ def payload_from_component_block(block: GeneratedComponentBlock, order: ExactWor
     return {
         "content": block.data,
         "component_id": order.locked_component_id,
-        "section_field": block.section_field,
+        "section_field": order.section_field or block.section_field,
         "position": block.position,
         "block_id": order.block_id,
         "work_order_id": order.work_order_id,
@@ -225,61 +286,54 @@ def payload_from_questions(
     blocks: list[GeneratedQuestionBlock],
     order: ExactWorkOrder,
 ) -> dict[str, Any]:
-    return {
-        "content": {
-            "items": [
-                {
-                    "question_id": block.question_id,
-                    "data": block.data,
-                    "expected_answer": block.expected_answer,
-                    "difficulty": block.difficulty,
-                }
-                for block in blocks
-            ]
-        },
-        "component_id": order.locked_component_id,
-        "block_id": order.block_id,
-        "work_order_id": order.work_order_id,
-        "lane": order.lane,
-    }
+    return assemble_items_content(order, blocks)
 
 
 def payload_from_visual(block: GeneratedVisualBlock, order: ExactWorkOrder) -> dict[str, Any]:
-    if block.component_id and block.component_id != order.locked_component_id:
-        raise WorkOrderIdentityError(
-            f"Visual writer changed component_id from '{order.locked_component_id}' "
-            f"to '{block.component_id}'"
-        )
-    return {
-        "content": {
-            "image_url": block.image_url,
-            "html_content": block.html_content,
-            "caption": block.caption,
-            "alt_text": block.alt_text,
-            "mode": block.mode,
-            "status": block.status,
-        },
-        "component_id": order.locked_component_id,
-        "block_id": order.block_id,
-        "work_order_id": order.work_order_id,
-        "lane": order.lane,
-    }
+    return assemble_visual_content(order, [block])
+
+
+def payload_from_visuals(
+    blocks: list[GeneratedVisualBlock],
+    order: ExactWorkOrder,
+) -> dict[str, Any]:
+    return assemble_visual_content(order, blocks)
 
 
 def payload_from_answer_key(block: GeneratedAnswerKeyBlock, order: ExactWorkOrder) -> dict[str, Any]:
-    return {
-        "content": {
-            "style": block.style,
-            "entries": block.entries,
-        },
-        "component_id": order.locked_component_id,
-        "block_id": order.block_id,
-        "work_order_id": order.work_order_id,
-        "lane": order.lane,
-    }
+    """Legacy generator envelope — prefer assemble_answer_key_from_refs for production."""
+    refs = []
+    for idx, entry in enumerate(block.entries, start=1):
+        if not isinstance(entry, dict):
+            continue
+        refs.append(
+            {
+                "id": str(entry.get("question_id") or f"q{idx}"),
+                "question": str(entry.get("question") or entry.get("question_id") or f"Question {idx}"),
+                "expected_answer": str(
+                    entry.get("correct_answer")
+                    or entry.get("student_answer")
+                    or entry.get("explanation")
+                    or ""
+                ),
+            }
+        )
+    return assemble_answer_key_content(order, question_refs=refs)
+
+
+def assemble_answer_key_from_refs(
+    order: ExactWorkOrder,
+    *,
+    question_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return assemble_answer_key_content(order, question_refs=question_refs)
 
 
 def questions_from_item_payload(payload: dict[str, Any]) -> list[WriterQuestion]:
+    refs = question_refs_from_payload(payload)
+    if refs:
+        return questions_from_refs(refs)
+    # Legacy fallback for older checkpoints
     content = payload.get("content") if isinstance(payload.get("content"), dict) else {}
     items = content.get("items") if isinstance(content, dict) else []
     questions: list[WriterQuestion] = []

@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from core.config import Settings
 from core.database.models import GenerationModel, UserModel
+from generation.component_lectio.fixtures import valid_content_for
 from generation.pipeline_dispatch import (
     build_control_patch,
     persist_pipeline_identity,
@@ -39,6 +40,8 @@ from v3_execution.models import (
 
 
 async def _fake_section_executor(work_order, emit, **kwargs):
+    from contracts.lectio import get_section_field_for_component
+
     blocks: list[GeneratedComponentBlock] = []
     for idx, component in enumerate(work_order.section.components):
         blocks.append(
@@ -46,9 +49,10 @@ async def _fake_section_executor(work_order, emit, **kwargs):
                 block_id=work_order.work_order_id,
                 section_id=work_order.section.id,
                 component_id=component.component_id,
-                section_field=component.component_id,
+                section_field=get_section_field_for_component(component.component_id)
+                or component.component_id,
                 position=idx,
-                data={"headline": "ok", "body": "ok"},
+                data=valid_content_for(component.component_id),
                 source_work_order_id=work_order.work_order_id,
             )
         )
@@ -56,13 +60,15 @@ async def _fake_section_executor(work_order, emit, **kwargs):
 
 
 async def _fake_question_executor(work_order, emit, **kwargs):
+    component_id = getattr(work_order, "component_id", None) or "practice-stack"
+    content = valid_content_for(component_id)
     return [
         GeneratedQuestionBlock(
             question_id=item.id,
             section_id=work_order.section_id,
             difficulty=item.difficulty,
-            data={"prompt": "ok"},
-            expected_answer="42",
+            data=content,
+            expected_answer="4",
             source_work_order_id=work_order.work_order_id,
         )
         for item in work_order.questions
@@ -70,17 +76,25 @@ async def _fake_question_executor(work_order, emit, **kwargs):
 
 
 async def _fake_visual_executor(work_order, emit, **kwargs):
+    component_id = work_order.visual.component_id or "diagram-block"
+    frames = list(work_order.visual.frames or [])
+    if component_id in {"diagram-compare", "diagram-series"} and len(frames) < 2:
+        frames = [object(), object(), object()][: 3 if component_id == "diagram-series" else 2]
+    count = max(1, len(frames))
     return [
         GeneratedVisualBlock(
             visual_id=work_order.visual.id,
             attaches_to=work_order.visual.attaches_to,
             mode=work_order.visual.mode,
-            image_url="https://example.test/diagram.png",
-            caption=work_order.visual.purpose,
-            alt_text=work_order.visual.purpose,
+            frame_index=idx if count > 1 else None,
+            image_url=f"https://example.test/{component_id}-{idx}.png",
+            caption=work_order.visual.purpose or "diagram",
+            alt_text=work_order.visual.purpose or "diagram",
             source_work_order_id=work_order.work_order_id,
-            component_id=work_order.visual.component_id,
+            component_id=component_id,
+            parent_visual_id=work_order.visual.id if count > 1 else None,
         )
+        for idx in range(count)
     ]
 
 
@@ -90,7 +104,14 @@ async def _fake_answer_key_executor(work_order, emit, **kwargs):
     return GeneratedAnswerKeyBlock(
         answer_key_id="ak-1",
         style=work_order.answer_key_plan.style,
-        entries=[{"question_id": q.id, "student_answer": q.expected_answer, "explanation": ""}],
+        entries=[
+            {
+                "question_id": q.id,
+                "question": q.purpose or q.id,
+                "correct_answer": q.expected_answer or "4",
+            }
+            for q in work_order.questions
+        ],
         source_work_order_id=work_order.work_order_id,
     )
 
@@ -267,6 +288,8 @@ async def test_gate5_real_executor_not_mock_writer(monkeypatch) -> None:
         return mock_pipeline.mock_writer(order)
 
     async def fake_section_executor(work_order, emit, **kwargs):
+        from contracts.lectio import get_section_field_for_component
+
         real_calls.append(work_order)
         blocks: list[GeneratedComponentBlock] = []
         for idx, component in enumerate(work_order.section.components):
@@ -275,9 +298,10 @@ async def test_gate5_real_executor_not_mock_writer(monkeypatch) -> None:
                     block_id=f"{work_order.section.id}:{component.component_id}",
                     section_id=work_order.section.id,
                     component_id=component.component_id,
-                    section_field=component.component_id,
+                    section_field=get_section_field_for_component(component.component_id)
+                    or component.component_id,
                     position=idx,
-                    data={"headline": "ok", "body": "ok"},
+                    data=valid_content_for(component.component_id),
                     source_work_order_id=work_order.work_order_id,
                 )
             )
@@ -386,6 +410,8 @@ async def test_gate8_resume_skips_ready_blocks() -> None:
     executed_work_orders: list[str] = []
 
     async def scoped_executor(work_order, emit, **kwargs):
+        from contracts.lectio import get_section_field_for_component
+
         executed_work_orders.append(work_order.work_order_id)
         blocks = []
         for idx, component in enumerate(work_order.section.components):
@@ -394,9 +420,10 @@ async def test_gate8_resume_skips_ready_blocks() -> None:
                     block_id=work_order.work_order_id,
                     section_id=work_order.section.id,
                     component_id=component.component_id,
-                    section_field=component.component_id,
+                    section_field=get_section_field_for_component(component.component_id)
+                    or component.component_id,
                     position=idx,
-                    data={"headline": "resume", "body": "ok"},
+                    data=valid_content_for(component.component_id, purpose="resume"),
                     source_work_order_id=work_order.work_order_id,
                 )
             )

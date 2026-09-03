@@ -31,6 +31,14 @@ class ExactWorkOrder(BaseModel):
     locked_component_id: str
     forbidden_sibling_fields: list[str] = Field(default_factory=list)
 
+    @property
+    def section_field(self) -> str:
+        card = self.component_card if isinstance(self.component_card, dict) else {}
+        field = card.get("section_field") or card.get("sectionField")
+        if isinstance(field, str) and field.strip():
+            return field.strip()
+        return ""
+
 
 def _is_generatable(component_id: str, card: dict[str, Any]) -> bool:
     if card.get("writer_excluded") is True:

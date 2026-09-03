@@ -198,6 +198,7 @@ class SectionWriterWorkOrder(BaseModel):
         ),
     )
     template_id: str
+    prior_validation_errors: list[str] = Field(default_factory=list)
 
 
 class WriterQuestion(BaseModel):
@@ -228,6 +229,11 @@ class QuestionWriterWorkOrder(BaseModel):
         serialization_alias="register",
     )
     consistency_rules: list[str] = Field(default_factory=list)
+    component_id: str | None = None
+    section_field: str | None = None
+    purpose: str | None = None
+    schema_summary: str | None = None
+    prior_validation_errors: list[str] = Field(default_factory=list)
 
 
 class VisualFrameSpec(BaseModel):
@@ -275,6 +281,7 @@ class VisualGeneratorWorkOrder(BaseModel):
     dependency: VisualDependency = "blueprint_only"
     visual: VisualPlanItem
     source_of_truth: list[SourceOfTruthEntry] = Field(default_factory=list)
+    prior_validation_errors: list[str] = Field(default_factory=list)
 
 
 class AnswerKeyPlanSpec(BaseModel):

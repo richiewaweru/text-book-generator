@@ -20,6 +20,30 @@ def _items_map(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _extract_component_content(
+    response: dict[str, Any],
+    *,
+    component_id: str,
+) -> dict[str, Any]:
+    if not isinstance(response, dict):
+        raise RuntimeError("question writer returned non-object JSON")
+    claimed = response.get("component_id")
+    if claimed is not None and claimed != component_id:
+        raise RuntimeError(
+            f"Writer attempted to change component_id from '{component_id}' to '{claimed}'"
+        )
+    content = response.get("content")
+    if isinstance(content, dict):
+        return content
+    # Allow bare Lectio objects when the model omits the envelope.
+    if "items" not in response:
+        return dict(response)
+    raise RuntimeError(
+        f"Component-aware question writer must return content for {component_id}, "
+        "not a generic items wrapper"
+    )
+
+
 async def execute_questions(
     order: QuestionWriterWorkOrder,
     emit_event: EmitFn,
@@ -43,6 +67,39 @@ async def execute_questions(
             user_prompt=prompt,
             model_overrides=model_overrides,
         )
+
+        if order.component_id:
+            content = _extract_component_content(response, component_id=order.component_id)
+            planned = order.questions[0] if order.questions else None
+            question_id = planned.id if planned else order.work_order_id
+            expected = planned.expected_answer if planned else ""
+            difficulty = planned.difficulty if planned else "core"
+            # Prefer solution.answer / quiz correct option when present.
+            if isinstance(content.get("problems"), list) and content["problems"]:
+                first = content["problems"][0]
+                if isinstance(first, dict):
+                    solution = first.get("solution") if isinstance(first.get("solution"), dict) else {}
+                    if solution.get("answer"):
+                        expected = str(solution["answer"])
+                    if first.get("difficulty"):
+                        difficulty = str(first["difficulty"])
+            elif isinstance(content.get("options"), list):
+                for option in content["options"]:
+                    if isinstance(option, dict) and option.get("correct") is True:
+                        expected = str(option.get("text") or expected)
+                        break
+            block = GeneratedQuestionBlock(
+                question_id=question_id,
+                section_id=order.section_id,
+                difficulty=difficulty,
+                data=content,
+                expected_answer=expected,
+                expected_working=planned.expected_working if planned else None,
+                diagram_required=planned.diagram_required if planned else False,
+                source_work_order_id=order.work_order_id,
+            )
+            return ExecutorOutcome(ok=True, blocks=[block], errors=[])
+
         bucket = _items_map(response)
         blocks: list[GeneratedQuestionBlock] = []
         errors: list[str] = []

@@ -42,13 +42,13 @@ async def execute_section(
         "section_writing_started",
         {"section_id": order.section.id, "generation_id": generation_id},
     )
-    _prior_errors: list[str] = []
+    _prior_errors: list[str] = list(order.prior_validation_errors or [])
 
     async def _attempt(already_retried: bool) -> ExecutorOutcome:
         warnings: list[str] = []
         errors: list[str] = []
         try:
-            if already_retried and _prior_errors:
+            if _prior_errors and (already_retried or order.prior_validation_errors):
                 prompt = build_section_writer_retry_prompt(order, _prior_errors)
             else:
                 prompt = build_section_writer_prompt(order)

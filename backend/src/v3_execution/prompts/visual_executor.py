@@ -77,8 +77,18 @@ Maintain consistent style and geometry; only depict new information.
             "- no decorative clutter or irrelevant background detail"
         )
 
-    return f"""Generate a clear educational illustration for print.
+    repair = ""
+    if order.prior_validation_errors:
+        error_lines = "\n".join(f"- {e}" for e in order.prior_validation_errors[:12])
+        repair = f"""
+REPAIR REQUIRED — previous visual assembly failed the exact Lectio contract.
+Validation errors:
+{error_lines}
+Repair the SAME component ({order.visual.component_id}). Do not change identity.
+"""
 
+    return f"""Generate a clear educational illustration for print.
+{repair}
 MODE: {order.visual.mode}
 
 VISUAL STYLE: {visual_style}

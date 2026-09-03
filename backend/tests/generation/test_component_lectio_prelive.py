@@ -8,7 +8,9 @@ import pytest
 
 from contracts.lesson_document import LessonDocumentValidationError, validate_lesson_document
 from core.database.models import GenerationModel, UserModel
-from generation.component_lectio.lane_dispatch import WorkOrderIdentityError, resolve_exact_order
+from generation.component_lectio.errors import WorkOrderIdentityError
+from generation.component_lectio.fixtures import valid_content_for
+from generation.component_lectio.lane_dispatch import resolve_exact_order
 from generation.component_lectio.service import (
     DEFAULT_PRODUCTION_SELECTOR,
     READY_STEP,
@@ -70,28 +72,35 @@ def _forced_selector(picks: dict[str, tuple[str, ...]] = INTEGRATION_PICKS):
 
 
 async def _fake_section_executor(work_order, emit, **kwargs):
-    return [
-        GeneratedComponentBlock(
-            block_id=work_order.work_order_id,
-            section_id=work_order.section.id,
-            component_id=component.component_id,
-            section_field=component.component_id,
-            position=idx,
-            data={"headline": "ok", "body": "ok"},
-            source_work_order_id=work_order.work_order_id,
+    from contracts.lectio import get_section_field_for_component
+
+    blocks = []
+    for idx, component in enumerate(work_order.section.components):
+        field = get_section_field_for_component(component.component_id) or component.component_id
+        blocks.append(
+            GeneratedComponentBlock(
+                block_id=work_order.work_order_id,
+                section_id=work_order.section.id,
+                component_id=component.component_id,
+                section_field=field,
+                position=idx,
+                data=valid_content_for(component.component_id, purpose="ok"),
+                source_work_order_id=work_order.work_order_id,
+            )
         )
-        for idx, component in enumerate(work_order.section.components)
-    ]
+    return blocks
 
 
 async def _fake_question_executor(work_order, emit, **kwargs):
+    component_id = work_order.component_id or "practice-stack"
+    content = valid_content_for(component_id, purpose=work_order.purpose or "ok")
     return [
         GeneratedQuestionBlock(
             question_id=item.id,
             section_id=work_order.section_id,
             difficulty=item.difficulty,
-            data={"prompt": "ok"},
-            expected_answer="42",
+            data=content,
+            expected_answer="4",
             source_work_order_id=work_order.work_order_id,
         )
         for item in work_order.questions
@@ -99,16 +108,36 @@ async def _fake_question_executor(work_order, emit, **kwargs):
 
 
 async def _fake_visual_executor(work_order, emit, **kwargs):
+    component_id = work_order.visual.component_id or "diagram-block"
+    frames = list(work_order.visual.frames or [])
+    if component_id in {"diagram-compare", "diagram-series"} and not frames:
+        frames = [None, None]
+    if frames:
+        return [
+            GeneratedVisualBlock(
+                visual_id=work_order.visual.id,
+                attaches_to=work_order.visual.attaches_to,
+                mode=work_order.visual.mode,
+                frame_index=idx,
+                image_url=f"https://example.test/{component_id}-{idx}.png",
+                caption=work_order.visual.purpose or "diagram",
+                alt_text=work_order.visual.purpose or "diagram",
+                source_work_order_id=work_order.work_order_id,
+                component_id=component_id,
+                parent_visual_id=work_order.visual.id,
+            )
+            for idx, _frame in enumerate(frames)
+        ]
     return [
         GeneratedVisualBlock(
             visual_id=work_order.visual.id,
             attaches_to=work_order.visual.attaches_to,
             mode=work_order.visual.mode,
             image_url="https://example.test/diagram.png",
-            caption=work_order.visual.purpose,
-            alt_text=work_order.visual.purpose,
+            caption=work_order.visual.purpose or "diagram",
+            alt_text=work_order.visual.purpose or "diagram",
             source_work_order_id=work_order.work_order_id,
-            component_id=work_order.visual.component_id,
+            component_id=component_id,
         )
     ]
 
@@ -120,7 +149,13 @@ async def _fake_answer_key_executor(work_order, emit, **kwargs):
         answer_key_id="ak-1",
         style=work_order.answer_key_plan.style,
         entries=[
-            {"question_id": q.id, "student_answer": q.expected_answer, "explanation": ""}
+            {
+                "question_id": q.id,
+                "question": q.purpose or q.id,
+                "correct_answer": q.expected_answer or "4",
+                "student_answer": q.expected_answer,
+                "explanation": "",
+            }
             for q in work_order.questions
         ],
         source_work_order_id=work_order.work_order_id,
