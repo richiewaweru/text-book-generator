@@ -23,11 +23,87 @@ from generation.v3_studio.router import (
     _run_component_lectio_pipeline,
 )
 from tests.v3_blueprint.planning.test_intent_plan import SUBJECT_FIXTURES, _intent_plan_for_subject
-from v3_blueprint.planning.canonical_plan import build_canonical_execution_plan
+from v3_blueprint.planning.canonical_plan import (
+    build_canonical_execution_plan,
+    heuristic_select_components,
+)
 from v3_blueprint.planning.models import intent_plan_to_structural_plan
 from v3_blueprint.planning.persistence import insert_step, load_chunked_state, persist_chunked_state
 from v3_blueprint.planning.work_orders import compile_exact_work_orders
-from v3_execution.models import GeneratedComponentBlock
+from v3_execution.models import (
+    GeneratedAnswerKeyBlock,
+    GeneratedComponentBlock,
+    GeneratedQuestionBlock,
+    GeneratedVisualBlock,
+)
+
+
+async def _fake_section_executor(work_order, emit, **kwargs):
+    blocks: list[GeneratedComponentBlock] = []
+    for idx, component in enumerate(work_order.section.components):
+        blocks.append(
+            GeneratedComponentBlock(
+                block_id=work_order.work_order_id,
+                section_id=work_order.section.id,
+                component_id=component.component_id,
+                section_field=component.component_id,
+                position=idx,
+                data={"headline": "ok", "body": "ok"},
+                source_work_order_id=work_order.work_order_id,
+            )
+        )
+    return blocks
+
+
+async def _fake_question_executor(work_order, emit, **kwargs):
+    return [
+        GeneratedQuestionBlock(
+            question_id=item.id,
+            section_id=work_order.section_id,
+            difficulty=item.difficulty,
+            data={"prompt": "ok"},
+            expected_answer="42",
+            source_work_order_id=work_order.work_order_id,
+        )
+        for item in work_order.questions
+    ]
+
+
+async def _fake_visual_executor(work_order, emit, **kwargs):
+    return [
+        GeneratedVisualBlock(
+            visual_id=work_order.visual.id,
+            attaches_to=work_order.visual.attaches_to,
+            mode=work_order.visual.mode,
+            image_url="https://example.test/diagram.png",
+            caption=work_order.visual.purpose,
+            alt_text=work_order.visual.purpose,
+            source_work_order_id=work_order.work_order_id,
+            component_id=work_order.visual.component_id,
+        )
+    ]
+
+
+async def _fake_answer_key_executor(work_order, emit, **kwargs):
+    if work_order is None:
+        return None
+    return GeneratedAnswerKeyBlock(
+        answer_key_id="ak-1",
+        style=work_order.answer_key_plan.style,
+        entries=[{"question_id": q.id, "student_answer": q.expected_answer, "explanation": ""}],
+        source_work_order_id=work_order.work_order_id,
+    )
+
+
+def _production_fakes(**overrides):
+    return {
+        "selector": heuristic_select_components,
+        "section_executor": _fake_section_executor,
+        "question_executor": _fake_question_executor,
+        "visual_executor": _fake_visual_executor,
+        "answer_key_executor": _fake_answer_key_executor,
+        **overrides,
+    }
 
 
 def _settings_env(monkeypatch, **extra: str) -> None:
@@ -213,11 +289,11 @@ async def test_gate5_real_executor_not_mock_writer(monkeypatch) -> None:
         generation_id=gen_id,
         plan=plan,
         title="Ratios",
-        section_executor=fake_section_executor,
+        **_production_fakes(section_executor=fake_section_executor),
     )
     assert real_calls, "expected real section executor to be invoked"
     assert mock_calls == [], "production path must not call mock_writer"
-    assert document["schema"] == "LessonDocument"
+    assert document["version"] == 1
     assert document["blocks"]
 
 
@@ -228,9 +304,9 @@ async def test_gate6_exact_component_identity_preserved() -> None:
     intent = _intent_plan_for_subject(**SUBJECT_FIXTURES[0])
     plan = intent_plan_to_structural_plan(intent)
     canonical, filled = build_canonical_execution_plan(plan, generation_id="id-gate6")
-    orders = compile_exact_work_orders(canonical, include_visual=False)
+    orders = compile_exact_work_orders(canonical, include_visual=True)
     assert orders
-    sample = orders[0]
+    sample = next(order for order in orders if order.lane == "content")
     section_orders = adapt_exact_orders_to_section_work_orders(
         orders,
         plan=filled,
@@ -288,7 +364,7 @@ async def test_gate8_resume_skips_ready_blocks() -> None:
     intent = _intent_plan_for_subject(**SUBJECT_FIXTURES[0])
     plan = intent_plan_to_structural_plan(intent)
     canonical, _filled = build_canonical_execution_plan(plan, generation_id=gen_id)
-    orders = compile_exact_work_orders(canonical, include_visual=False)
+    orders = compile_exact_work_orders(canonical, include_visual=True)
     assert len(orders) >= 2
     ready_ids = {orders[0].block_id, orders[-1].block_id}
     missing = [order for order in orders if order.block_id not in ready_ids]
@@ -307,15 +383,15 @@ async def test_gate8_resume_skips_ready_blocks() -> None:
             },
         )
 
-    executed_components: list[str] = []
+    executed_work_orders: list[str] = []
 
     async def scoped_executor(work_order, emit, **kwargs):
+        executed_work_orders.append(work_order.work_order_id)
         blocks = []
         for idx, component in enumerate(work_order.section.components):
-            executed_components.append(component.component_id)
             blocks.append(
                 GeneratedComponentBlock(
-                    block_id=f"{work_order.section.id}:{component.component_id}",
+                    block_id=work_order.work_order_id,
                     section_id=work_order.section.id,
                     component_id=component.component_id,
                     section_field=component.component_id,
@@ -330,12 +406,13 @@ async def test_gate8_resume_skips_ready_blocks() -> None:
         generation_id=gen_id,
         plan=plan,
         title="Resume",
-        section_executor=scoped_executor,
+        **_production_fakes(section_executor=scoped_executor),
     )
-    missing_components = {order.component_id for order in missing}
-    ready_components = {order.component_id for order in orders if order.block_id in ready_ids}
-    assert missing_components.issubset(set(executed_components))
-    assert ready_components.isdisjoint(set(executed_components))
+    missing_ids = {order.work_order_id for order in missing if order.lane == "content"}
+    ready_content = {order.work_order_id for order in orders if order.block_id in ready_ids and order.lane == "content"}
+    if missing_ids:
+        assert missing_ids.issubset(set(executed_work_orders))
+    assert ready_content.isdisjoint(set(executed_work_orders))
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-import type { LessonDocument } from 'lectio';
+import { validateDocument, type LessonDocument } from 'lectio';
 
 import { exportToLessonDocument } from '$lib/generation/export-document';
 import {
@@ -14,14 +14,78 @@ export type { GenerationIssuePartition } from '$lib/builder/generation-issues';
 
 export type GenerationPipelineId = 'component_lectio' | 'v3_studio';
 
-function isLessonDocumentLike(value: unknown): value is LessonDocument {
-	if (!value || typeof value !== 'object') return false;
+const REQUIRED_DOCUMENT_FIELDS = [
+	'version',
+	'id',
+	'title',
+	'subject',
+	'preset_id',
+	'source',
+	'sections',
+	'blocks',
+	'media'
+] as const;
+
+const REQUIRED_SECTION_FIELDS = ['id', 'template_id', 'block_ids', 'title', 'position'] as const;
+
+export class LectioDocumentValidationError extends Error {
+	errors: string[];
+	constructor(errors: string[]) {
+		super(errors.join('; '));
+		this.name = 'LectioDocumentValidationError';
+		this.errors = errors;
+	}
+}
+
+function structuralLessonDocumentErrors(value: unknown): string[] {
+	if (!value || typeof value !== 'object') {
+		return ['LessonDocument must be an object'];
+	}
 	const doc = value as Record<string, unknown>;
-	return (
-		(doc.schema === 'LessonDocument' || Array.isArray(doc.sections)) &&
-		typeof doc.blocks === 'object' &&
-		doc.blocks !== null
-	);
+	const errors: string[] = [];
+	for (const field of REQUIRED_DOCUMENT_FIELDS) {
+		if (!(field in doc)) {
+			errors.push(`Missing required field: ${field}`);
+		}
+	}
+	if (doc.version !== 1) {
+		errors.push(`Unsupported document version: ${String(doc.version)}. Expected 1.`);
+	}
+	if (!Array.isArray(doc.sections)) {
+		errors.push('sections must be an array');
+		return errors;
+	}
+	if (typeof doc.blocks !== 'object' || doc.blocks === null || Array.isArray(doc.blocks)) {
+		errors.push('blocks must be an object');
+		return errors;
+	}
+	for (let i = 0; i < doc.sections.length; i++) {
+		const section = doc.sections[i] as Record<string, unknown> | null;
+		if (!section || typeof section !== 'object') {
+			errors.push(`sections[${i}] must be an object`);
+			continue;
+		}
+		for (const field of REQUIRED_SECTION_FIELDS) {
+			if (!(field in section)) {
+				errors.push(`sections[${i}] missing required field: ${field}`);
+			}
+		}
+	}
+	return errors;
+}
+
+export function assertCanonicalLessonDocument(value: unknown): LessonDocument {
+	const errors = structuralLessonDocumentErrors(value);
+	if (errors.length) {
+		throw new LectioDocumentValidationError(errors);
+	}
+	const lesson = value as LessonDocument;
+	const validation = validateDocument(lesson);
+	if (validation && typeof validation === 'object' && 'valid' in validation && validation.valid === false) {
+		const details = Array.isArray(validation.errors) ? validation.errors : ['invalid LessonDocument'];
+		throw new LectioDocumentValidationError(details.map(String));
+	}
+	return lesson;
 }
 
 /**
@@ -35,14 +99,13 @@ export function generationToBuilderDocument(
 	options: AdaptV3PackOptions & { pipeline?: GenerationPipelineId | string | null } = {}
 ): LessonDocument {
 	const pipeline = options.pipeline ?? null;
-	if (pipeline === 'component_lectio' || (pipeline == null && isLessonDocumentLike(payload))) {
-		if (isLessonDocumentLike(payload)) {
-			return payload as LessonDocument;
-		}
+	if (pipeline === 'component_lectio') {
 		const nested = (payload as Record<string, unknown>).lesson_document;
-		if (isLessonDocumentLike(nested)) {
-			return nested as LessonDocument;
+		const candidate = payload;
+		if (nested && typeof nested === 'object') {
+			return assertCanonicalLessonDocument(nested);
 		}
+		return assertCanonicalLessonDocument(candidate);
 	}
 	return v3PackToBuilderDocument(payload as V3PackDocument, options);
 }

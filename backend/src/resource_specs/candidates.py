@@ -102,13 +102,15 @@ def _template_availability(template_id: str) -> tuple[set[str], dict[str, int], 
 
 
 def _is_generation_excluded(component_id: str) -> bool:
-    """True when Lectio marks the component off-limits for AI content generation."""
+    """True when Lectio marks the component off-limits for AI planning.
+
+    ``writer_excluded`` means the generic text writer must not emit the payload;
+    visual components remain selectable so the visual lane can execute them.
+    """
     if component_id in MANUAL_ONLY_COMPONENT_IDS:
         return True
     card = get_component_card(component_id)
     if not isinstance(card, dict):
-        return True
-    if card.get("writer_excluded") is True:
         return True
     return False
 

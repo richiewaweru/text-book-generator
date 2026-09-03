@@ -11,10 +11,11 @@ from generation.component_lectio.service import (
     load_ready_block_ids,
     reconstruct_checkpoint_store,
     run_component_lectio_execution,
+    DEFAULT_PRODUCTION_SELECTOR,
 )
 
 __all__ = [
-    "PipelineResult",
+    "DEFAULT_PRODUCTION_SELECTOR",
     "adapt_exact_orders_to_section_work_orders",
     "fill_plan_components_for_legacy_studio",
     "load_ready_block_ids",

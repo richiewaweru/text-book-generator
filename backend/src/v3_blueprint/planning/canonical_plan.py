@@ -7,9 +7,11 @@ validated CanonicalExecutionPlan with stable IDs / revision. No content generati
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,7 +28,7 @@ from v3_blueprint.planning.models import (
     StructuralPlan,
 )
 
-SelectorFn = Callable[[dict[str, Any]], "SelectorChoice"]
+SelectorFn = Callable[[dict[str, Any]], Union["SelectorChoice", Awaitable["SelectorChoice"]]]
 
 
 class SelectedComponent(BaseModel):
@@ -105,6 +107,7 @@ def _lightweight_candidate_metadata(candidate_ids: tuple[str, ...]) -> list[dict
                 "section_field": card.get("section_field") or card.get("sectionField"),
                 "role": card.get("role"),
                 "status": card.get("status"),
+                "capabilities": card.get("capabilities") or {},
             }
         )
     return cards
@@ -116,9 +119,10 @@ def build_selector_prompt_context(
     candidates: RoleCandidateSet,
     card_context: Mapping[str, Any] | None = None,
     remaining_budget: Mapping[str, int] | None = None,
+    lesson_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Prompt payload: narrowed candidates only — never full Lectio catalogue or schemas."""
-    return {
+    payload: dict[str, Any] = {
         "slot_id": section.id,
         "slot_purpose": section.purpose or section.title,
         "role": section.role,
@@ -129,7 +133,11 @@ def build_selector_prompt_context(
         "card": dict(card_context or {}),
         "component_budget": dict(remaining_budget or candidates.component_budget),
         "max_per_section": dict(candidates.max_per_section),
+        "remaining_budget": dict(remaining_budget or candidates.component_budget),
     }
+    if lesson_context:
+        payload["lesson"] = dict(lesson_context)
+    return payload
 
 
 def _section_field_for(component_id: str) -> str | None:
@@ -282,98 +290,63 @@ def _plan_hash(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def apply_selection_to_structural_plan(
-    plan: StructuralPlan,
-    selections: Mapping[str, SelectorChoice],
-) -> StructuralPlan:
-    """Fill ComponentSlot lists from validated selections (mutates a deep copy)."""
-    updated = plan.model_copy(deep=True)
-    for section in updated.sections:
-        choice = selections.get(section.id)
-        if choice is None:
-            continue
-        section.components = [
-            ComponentSlot(slug=item.slug, purpose=item.purpose)
-            for item in choice.components
-        ]
-    return updated
-
-
-def build_canonical_execution_plan(
-    plan: StructuralPlan,
+def _selector_inputs_for_section(
     *,
-    generation_id: str | None = None,
-    lesson_id: str | None = None,
-    resource_type: str = PRIMARY_RESOURCE_TYPE,
-    template_id: str = DEFAULT_TEMPLATE_ID,
-    plan_revision: int = 1,
-    selector: SelectorFn | None = None,
-    remaining_budget: Mapping[str, int] | None = None,
-) -> tuple[CanonicalExecutionPlan, StructuralPlan]:
-    """Intent StructuralPlan → validated selections → canonical plan + filled StructuralPlan."""
-    select = selector or heuristic_select_components
-    template = get_template_contract(template_id) or {}
-    budget = {
-        str(key): int(value)
-        for key, value in (template.get("component_budget") or {}).items()
-    }
-    if remaining_budget is not None:
-        budget.update({str(k): int(v) for k, v in remaining_budget.items()})
-
+    plan: StructuralPlan,
+    section: SectionPlan,
+    resource_type: str,
+    template_id: str,
+    budget: dict[str, int],
+    lesson_context: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], RoleCandidateSet]:
     card_by_id = {card.id: card for card in plan.cards}
-    selections: dict[str, SelectorChoice] = {}
-    errors: list[str] = []
+    candidates = resolve_role_candidates(
+        section.role,
+        resource_type=resource_type,
+        template_id=template_id,
+        remaining_budget=budget,
+    )
+    card = card_by_id.get(section.card_id) if section.card_id else None
+    card_context = (
+        {
+            "id": card.id,
+            "objective": card.objective,
+            "misconceptions": [m.model_dump() for m in card.misconceptions],
+            "prereqs": list(card.prereqs),
+        }
+        if card is not None
+        else {}
+    )
+    context = build_selector_prompt_context(
+        section=section,
+        candidates=candidates,
+        card_context=card_context,
+        remaining_budget=budget,
+        lesson_context=lesson_context,
+    )
+    return context, candidates
 
-    for section in plan.sections:
-        # Prefer existing components if already selected (idempotent re-entry).
-        if section.components:
-            choice = SelectorChoice(
-                components=[
-                    SelectedComponent(slug=c.slug, purpose=c.purpose, reason="preselected")
-                    for c in section.components
-                ]
-            )
-        else:
-            candidates = resolve_role_candidates(
-                section.role,
-                resource_type=resource_type,
-                template_id=template_id,
-                remaining_budget=budget,
-            )
-            card = card_by_id.get(section.card_id) if section.card_id else None
-            card_context = (
-                {
-                    "id": card.id,
-                    "objective": card.objective,
-                    "misconceptions": [m.model_dump() for m in card.misconceptions],
-                    "prereqs": list(card.prereqs),
-                }
-                if card is not None
-                else {}
-            )
-            context = build_selector_prompt_context(
-                section=section,
-                candidates=candidates,
-                card_context=card_context,
-                remaining_budget=budget,
-            )
-            choice = select(context)
-            errors.extend(
-                validate_selector_choice(
-                    choice,
-                    candidates=candidates,
-                    remaining_budget=budget,
-                )
-            )
-            for item in choice.components:
-                if item.slug in budget:
-                    budget[item.slug] = max(0, budget[item.slug] - 1)
 
-        selections[section.id] = choice
+def _preselected_choice(section: SectionPlan) -> SelectorChoice:
+    return SelectorChoice(
+        components=[
+            SelectedComponent(slug=c.slug, purpose=c.purpose, reason="preselected")
+            for c in section.components
+        ]
+    )
 
-    if errors:
-        raise SelectionValidationError(errors)
 
+def _finalize_canonical_plan(
+    plan: StructuralPlan,
+    selections: dict[str, SelectorChoice],
+    *,
+    generation_id: str | None,
+    lesson_id: str | None,
+    resource_type: str,
+    template_id: str,
+    plan_revision: int,
+    budget: dict[str, int],
+) -> tuple[CanonicalExecutionPlan, StructuralPlan]:
     filled = apply_selection_to_structural_plan(plan, selections)
     canonical_sections: list[CanonicalSection] = []
     canonical_blocks: list[CanonicalBlock] = []
@@ -409,6 +382,7 @@ def build_canonical_execution_plan(
             )
         )
 
+    template = get_template_contract(template_id) or {}
     hash_payload = {
         "generation_id": generation_id,
         "lesson_id": lesson_id,
@@ -434,3 +408,153 @@ def build_canonical_execution_plan(
         },
     )
     return canonical, filled
+
+
+def apply_selection_to_structural_plan(
+    plan: StructuralPlan,
+    selections: Mapping[str, SelectorChoice],
+) -> StructuralPlan:
+    """Fill ComponentSlot lists from validated selections (mutates a deep copy)."""
+    updated = plan.model_copy(deep=True)
+    for section in updated.sections:
+        choice = selections.get(section.id)
+        if choice is None:
+            continue
+        section.components = [
+            ComponentSlot(slug=item.slug, purpose=item.purpose)
+            for item in choice.components
+        ]
+    return updated
+
+
+def _initial_budget(
+    template_id: str,
+    remaining_budget: Mapping[str, int] | None,
+) -> dict[str, int]:
+    template = get_template_contract(template_id) or {}
+    budget = {
+        str(key): int(value)
+        for key, value in (template.get("component_budget") or {}).items()
+    }
+    if remaining_budget is not None:
+        budget.update({str(k): int(v) for k, v in remaining_budget.items()})
+    return budget
+
+
+def build_canonical_execution_plan(
+    plan: StructuralPlan,
+    *,
+    generation_id: str | None = None,
+    lesson_id: str | None = None,
+    resource_type: str = PRIMARY_RESOURCE_TYPE,
+    template_id: str = DEFAULT_TEMPLATE_ID,
+    plan_revision: int = 1,
+    selector: SelectorFn | None = None,
+    remaining_budget: Mapping[str, int] | None = None,
+    lesson_context: Mapping[str, Any] | None = None,
+) -> tuple[CanonicalExecutionPlan, StructuralPlan]:
+    """Intent StructuralPlan → validated selections → canonical plan + filled StructuralPlan."""
+    select = selector or heuristic_select_components
+    budget = _initial_budget(template_id, remaining_budget)
+    selections: dict[str, SelectorChoice] = {}
+    errors: list[str] = []
+
+    for section in plan.sections:
+        if section.components:
+            choice = _preselected_choice(section)
+        else:
+            context, candidates = _selector_inputs_for_section(
+                plan=plan,
+                section=section,
+                resource_type=resource_type,
+                template_id=template_id,
+                budget=budget,
+                lesson_context=lesson_context,
+            )
+            choice = select(context)
+            if inspect.isawaitable(choice):
+                raise TypeError(
+                    "Async selector requires build_canonical_execution_plan_async"
+                )
+            errors.extend(
+                validate_selector_choice(
+                    choice,
+                    candidates=candidates,
+                    remaining_budget=budget,
+                )
+            )
+            for item in choice.components:
+                if item.slug in budget:
+                    budget[item.slug] = max(0, budget[item.slug] - 1)
+        selections[section.id] = choice
+
+    if errors:
+        raise SelectionValidationError(errors)
+    return _finalize_canonical_plan(
+        plan,
+        selections,
+        generation_id=generation_id,
+        lesson_id=lesson_id,
+        resource_type=resource_type,
+        template_id=template_id,
+        plan_revision=plan_revision,
+        budget=budget,
+    )
+
+
+async def build_canonical_execution_plan_async(
+    plan: StructuralPlan,
+    *,
+    generation_id: str | None = None,
+    lesson_id: str | None = None,
+    resource_type: str = PRIMARY_RESOURCE_TYPE,
+    template_id: str = DEFAULT_TEMPLATE_ID,
+    plan_revision: int = 1,
+    selector: SelectorFn | None = None,
+    remaining_budget: Mapping[str, int] | None = None,
+    lesson_context: Mapping[str, Any] | None = None,
+) -> tuple[CanonicalExecutionPlan, StructuralPlan]:
+    """Async variant: production semantic selector may await an LLM."""
+    select = selector or heuristic_select_components
+    budget = _initial_budget(template_id, remaining_budget)
+    selections: dict[str, SelectorChoice] = {}
+    errors: list[str] = []
+
+    for section in plan.sections:
+        if section.components:
+            choice = _preselected_choice(section)
+        else:
+            context, candidates = _selector_inputs_for_section(
+                plan=plan,
+                section=section,
+                resource_type=resource_type,
+                template_id=template_id,
+                budget=budget,
+                lesson_context=lesson_context,
+            )
+            raw = select(context)
+            choice = await raw if inspect.isawaitable(raw) else raw
+            errors.extend(
+                validate_selector_choice(
+                    choice,
+                    candidates=candidates,
+                    remaining_budget=budget,
+                )
+            )
+            for item in choice.components:
+                if item.slug in budget:
+                    budget[item.slug] = max(0, budget[item.slug] - 1)
+        selections[section.id] = choice
+
+    if errors:
+        raise SelectionValidationError(errors)
+    return _finalize_canonical_plan(
+        plan,
+        selections,
+        generation_id=generation_id,
+        lesson_id=lesson_id,
+        resource_type=resource_type,
+        template_id=template_id,
+        plan_revision=plan_revision,
+        budget=budget,
+    )

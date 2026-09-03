@@ -119,10 +119,13 @@ def test_lesson_document_partial_open_and_human_fence() -> None:
         plan_hash=canonical.plan_hash,
         payload={"content": {"ok": True}},
     )
-    doc = assemble_lesson_document(canonical, store, title="Ratios")
-    assert doc["schema"] == "LessonDocument"
-    assert doc["partial"] is True
+    doc = assemble_lesson_document(canonical, store, title="Ratios", subject="Math")
+    assert doc["version"] == 1
+    assert doc["id"] == "gen-doc"
     assert first.block_id in doc["blocks"]
+    from v3_execution.runtime.lesson_document import lesson_is_partial
+
+    assert lesson_is_partial(canonical, store) is True
     # Human fence beats stale generator.
     fenced = assemble_lesson_document(
         canonical,

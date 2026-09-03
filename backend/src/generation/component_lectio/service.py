@@ -9,10 +9,31 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from contracts.lectio import get_component_card
+from contracts.lesson_document import assert_valid_lesson_document
+from generation.component_lectio.lane_dispatch import (
+    WorkOrderIdentityError,
+    adapt_answer_key_order,
+    adapt_content_order,
+    adapt_items_order,
+    adapt_visual_order,
+    payload_from_answer_key,
+    payload_from_component_block,
+    payload_from_questions,
+    payload_from_visual,
+    questions_from_item_payload,
+    resolve_exact_order,
+    stamp_component_block,
+)
 from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
 from v3_blueprint.planning.canonical_plan import (
+    SelectorFn,
     build_canonical_execution_plan,
+    build_canonical_execution_plan_async,
+    heuristic_select_components,
+)
+from v3_blueprint.planning.component_selector import (
+    lesson_context_from_inputs,
+    run_lectio_semantic_selector,
 )
 from v3_blueprint.planning.models import StructuralPlan
 from v3_blueprint.planning.persistence import (
@@ -27,22 +48,24 @@ from v3_blueprint.planning.work_orders import (
     assert_writer_cannot_change_component,
     compile_exact_work_orders,
 )
+from v3_execution.executors.answer_key_generator import execute_answer_key
+from v3_execution.executors.question_writer import execute_questions
 from v3_execution.executors.section_writer import execute_section
+from v3_execution.executors.visual_executor import execute_visual
 from v3_execution.models import (
+    GeneratedAnswerKeyBlock,
     GeneratedComponentBlock,
-    RegisterSpec,
+    GeneratedQuestionBlock,
+    GeneratedVisualBlock,
     SectionWriterWorkOrder,
-    SourceOfTruthEntry,
-    WriterMisconception,
-    WriterSection,
-    WriterSectionComponent,
+    WriterQuestion,
 )
 from v3_execution.runtime.failure_policy import (
     BudgetLedger,
     classify_failure,
     recovery_for,
 )
-from v3_execution.runtime.lesson_document import assemble_lesson_document
+from v3_execution.runtime.lesson_document import assemble_lesson_document, lesson_is_partial
 from v3_execution.runtime.checkpoints import (
     BlockCheckpoint,
     CheckpointStore,
@@ -53,9 +76,14 @@ log = logging.getLogger(__name__)
 
 EmitFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 SectionExecutorFn = Callable[..., Awaitable[list[GeneratedComponentBlock]]]
+QuestionExecutorFn = Callable[..., Awaitable[list[GeneratedQuestionBlock]]]
+VisualExecutorFn = Callable[..., Awaitable[list[GeneratedVisualBlock]]]
+AnswerKeyExecutorFn = Callable[..., Awaitable[GeneratedAnswerKeyBlock | None]]
 
 READY_STEP = "block_ready"
 FAILED_STEP = "block_failed"
+
+DEFAULT_PRODUCTION_SELECTOR = run_lectio_semantic_selector
 
 
 async def _silent_emit(_event: str, _payload: dict[str, Any]) -> None:
@@ -68,101 +96,25 @@ def adapt_exact_orders_to_section_work_orders(
     plan: StructuralPlan,
     template_id: str,
 ) -> list[SectionWriterWorkOrder]:
-    """Group content-lane ExactWorkOrders into SectionWriterWorkOrders.
-
-    Preserves locked component identity; writers must not change component_id.
-    Items/visual lanes are left for dedicated executors (content lane only here).
-    """
-    by_section: dict[str, list[ExactWorkOrder]] = {}
-    for order in orders:
-        if order.lane not in {"content", "items", "answer_key"}:
-            continue
-        # Content + items currently share section writer for this cutover;
-        # visual stays out of generic text writer.
-        if order.lane == "visual":
-            continue
-        by_section.setdefault(order.section_id, []).append(order)
-
-    section_meta = {section.id: section for section in plan.sections}
-    card_by_id = {card.id: card for card in plan.cards}
-    work_orders: list[SectionWriterWorkOrder] = []
-
-    for section_id, section_orders in by_section.items():
-        meta = section_meta.get(section_id)
-        components: list[WriterSectionComponent] = []
-        cards: dict[str, Any] = {}
-        for order in section_orders:
-            assert_writer_cannot_change_component(order, order.component_id)
-            components.append(
-                WriterSectionComponent(
-                    component_id=order.locked_component_id,
-                    teacher_label=order.locked_component_id,
-                    content_intent=order.purpose,
-                )
-            )
-            card = get_component_card(order.component_id) or dict(order.component_card)
-            cards[order.component_id] = card
-
-        misconceptions = []
-        if meta and meta.card_id and meta.card_id in card_by_id:
-            for item in card_by_id[meta.card_id].misconceptions:
-                misconceptions.append(
-                    WriterMisconception(id=item.id, description=item.description)
-                )
-
-        work_orders.append(
-            SectionWriterWorkOrder(
-                work_order_id=f"section::{section_id}",
-                section=WriterSection(
-                    id=section_id,
-                    title=meta.title if meta else section_id,
-                    learning_intent=meta.purpose if meta else "",
-                    role=meta.role if meta else "",
-                    transition_note=meta.transition_note if meta else None,
-                    card_id=meta.card_id if meta else None,
-                    anchor_example=plan.anchor.example,
-                    anchor_reuse_scope=plan.anchor.reuse_scope,
-                    misconceptions=misconceptions,
-                    components=components,
-                ),
-                register_spec=RegisterSpec(),
-                source_of_truth=[
-                    SourceOfTruthEntry(key="anchor", text=plan.anchor.example),
-                ],
-                component_cards=cards,
-                template_id=template_id,
-            )
-        )
-    return work_orders
+    """Adapt ExactWorkOrders into per-block SectionWriterWorkOrders (content lane)."""
+    return [
+        adapt_content_order(order, plan=plan, template_id=template_id)
+        for order in orders
+        if order.lane == "content"
+    ]
 
 
 def _blocks_from_executor(
     generated: list[GeneratedComponentBlock],
     *,
-    orders_by_component: dict[str, ExactWorkOrder],
+    scoped_orders: list[ExactWorkOrder],
 ) -> list[tuple[ExactWorkOrder, dict[str, Any]]]:
     results: list[tuple[ExactWorkOrder, dict[str, Any]]] = []
     for block in generated:
-        order = orders_by_component.get(block.component_id)
-        if order is None:
-            continue
-        if block.component_id != order.locked_component_id:
-            raise ValueError(
-                f"Writer attempted to change component_id from "
-                f"'{order.locked_component_id}' to '{block.component_id}'"
-            )
-        results.append(
-            (
-                order,
-                {
-                    "content": block.data,
-                    "component_id": block.component_id,
-                    "section_field": block.section_field,
-                    "position": block.position,
-                    "block_id": order.block_id,
-                },
-            )
-        )
+        order = resolve_exact_order(block, scoped_orders=scoped_orders)
+        stamped = stamp_component_block(block, order)
+        assert_writer_cannot_change_component(order, stamped.component_id)
+        results.append((order, payload_from_component_block(stamped, order)))
     return results
 
 
@@ -186,6 +138,20 @@ async def _persist_ready_block(
             "plan_hash": plan_hash,
             "payload": payload,
         },
+    )
+
+
+async def _persist_failed_block(
+    generation_id: str,
+    *,
+    order: ExactWorkOrder,
+    error: dict[str, Any],
+) -> None:
+    await insert_step(
+        generation_id,
+        part_id=order.block_id,
+        step=FAILED_STEP,
+        payload={"error": error},
     )
 
 
@@ -241,6 +207,27 @@ async def reconstruct_checkpoint_store(
     return store
 
 
+def _structured_error(
+    *,
+    generation_id: str,
+    order: ExactWorkOrder,
+    exc: BaseException,
+    failure_class: str,
+    attempt: int,
+) -> dict[str, Any]:
+    return {
+        "generation_id": generation_id,
+        "section_id": order.section_id,
+        "block_id": order.block_id,
+        "component_id": order.locked_component_id,
+        "lane": order.lane,
+        "class": failure_class,
+        "message": str(exc)[:400],
+        "validation_errors": [str(exc)[:400]],
+        "attempt": attempt,
+    }
+
+
 async def run_component_lectio_execution(
     *,
     generation_id: str,
@@ -252,36 +239,51 @@ async def run_component_lectio_execution(
     title: str | None = None,
     template_id: str = "guided-concept-path",
     section_executor: SectionExecutorFn | None = None,
+    question_executor: QuestionExecutorFn | None = None,
+    visual_executor: VisualExecutorFn | None = None,
+    answer_key_executor: AnswerKeyExecutorFn | None = None,
+    selector: SelectorFn | None = None,
 ) -> dict[str, Any]:
-    """Production entrypoint: selection → work orders → real executors → DB checkpoints."""
-    del signals, resource_spec  # reserved for future SoT enrichment
-    execute = section_executor or execute_section
+    """Production entrypoint: semantic selection → lanes → real executors → DB checkpoints."""
+    del resource_spec
+    execute_content = section_executor or execute_section
+    execute_item = question_executor or execute_questions
+    execute_vis = visual_executor or execute_visual
+    execute_answers = answer_key_executor or execute_answer_key
     emit: EmitFn = emit_event or _silent_emit
+    select = selector if selector is not None else DEFAULT_PRODUCTION_SELECTOR
+    lesson_context = lesson_context_from_inputs(form=form, signals=signals)
 
-    canonical, filled = build_canonical_execution_plan(
+    canonical, filled = await build_canonical_execution_plan_async(
         plan,
         generation_id=generation_id,
         lesson_id=title,
         template_id=template_id,
+        selector=select,
+        lesson_context=lesson_context,
     )
-    await persist_structural_plan(
-        generation_id,
-        filled,
-        form=form,
-    )
+    await persist_structural_plan(generation_id, filled, form=form)
     await persist_chunked_state(
         generation_id,
         {
             "canonical_plan": canonical.model_dump(mode="json"),
             "structural_plan": filled.model_dump(mode="json"),
             "stage": "component_lectio_running",
+            "control_meta": {
+                "plan_hash": canonical.plan_hash,
+                "plan_revision": canonical.plan_revision,
+                "pipeline": "component_lectio",
+            },
         },
     )
 
-    orders = compile_exact_work_orders(canonical, include_visual=False)
+    orders = compile_exact_work_orders(canonical, include_visual=True)
     desired = [order.block_id for order in orders]
     ready = await load_ready_block_ids(generation_id)
     pending_orders = [order for order in orders if order.block_id not in ready]
+    ledgers: dict[str, BudgetLedger] = {}
+    item_questions: dict[str, list[WriterQuestion]] = {}
+    last_error: str | None = None
 
     await emit(
         "component_lectio_execution_started",
@@ -292,103 +294,147 @@ async def run_component_lectio_execution(
         },
     )
 
-    section_orders = adapt_exact_orders_to_section_work_orders(
-        pending_orders,
-        plan=filled,
-        template_id=template_id,
-    )
-    orders_by_component = {order.component_id: order for order in pending_orders}
-    ledger = BudgetLedger()
-
-    for section_order in section_orders:
-        section_pending = [
-            c.component_id
-            for c in section_order.section.components
-            if orders_by_component.get(c.component_id)
-            and orders_by_component[c.component_id].block_id not in ready
-        ]
-        if not section_pending:
-            continue
-        try:
-            generated = await execute(
+    async def dispatch(order: ExactWorkOrder) -> dict[str, Any]:
+        if order.lane == "content":
+            section_order = adapt_content_order(order, plan=filled, template_id=template_id)
+            generated = await execute_content(
                 section_order,
                 emit,
                 trace_id=generation_id,
                 generation_id=generation_id,
             )
-            for order, payload in _blocks_from_executor(
-                generated,
-                orders_by_component=orders_by_component,
-            ):
-                await _persist_ready_block(
+            mapped = _blocks_from_executor(generated, scoped_orders=[order])
+            if not mapped:
+                raise WorkOrderIdentityError(
+                    f"Content executor returned no matching block for {order.block_id}"
+                )
+            mapped_order, payload = mapped[0]
+            if mapped_order.block_id != order.block_id:
+                raise WorkOrderIdentityError(
+                    f"Content output claimed {mapped_order.block_id}, expected {order.block_id}"
+                )
+            return payload
+        if order.lane == "items":
+            q_order = adapt_items_order(order, plan=filled)
+            generated_q = await execute_item(
+                q_order,
+                emit,
+                trace_id=generation_id,
+                generation_id=generation_id,
+            )
+            payload = payload_from_questions(generated_q, order)
+            item_questions[order.section_id] = questions_from_item_payload(payload)
+            return payload
+        if order.lane == "visual":
+            v_order = adapt_visual_order(order, plan=filled)
+            generated_v = await execute_vis(
+                v_order,
+                emit,
+                trace_id=generation_id,
+                generation_id=generation_id,
+            )
+            if not generated_v:
+                raise RuntimeError("visual executor returned no blocks")
+            visual = generated_v[0]
+            resolved = resolve_exact_order(visual, scoped_orders=[order])
+            if resolved.block_id != order.block_id:
+                raise WorkOrderIdentityError(
+                    f"Visual output claimed {resolved.block_id}, expected {order.block_id}"
+                )
+            return payload_from_visual(visual, order)
+        if order.lane == "answer_key":
+            questions = list(item_questions.get(order.section_id) or [])
+            if not questions:
+                store = await reconstruct_checkpoint_store(
                     generation_id,
-                    block_id=order.block_id,
-                    payload=payload,
                     plan_revision=canonical.plan_revision,
                     plan_hash=canonical.plan_hash,
+                    desired_work=desired,
                 )
-                ready.add(order.block_id)
-                await emit(
-                    "block_ready",
-                    {"generation_id": generation_id, "block_id": order.block_id},
-                )
+                for sibling in orders:
+                    if sibling.lane == "items" and sibling.section_id == order.section_id:
+                        ckpt = store.blocks.get(sibling.block_id)
+                        if ckpt and ckpt.state == "ready":
+                            questions.extend(questions_from_item_payload(ckpt.payload))
+            ak_order = adapt_answer_key_order(order, questions=questions)
+            generated_ak = await execute_answers(
+                ak_order,
+                emit,
+                trace_id=generation_id,
+                generation_id=generation_id,
+            )
+            if generated_ak is None:
+                raise RuntimeError("answer_key executor returned nothing")
+            return payload_from_answer_key(generated_ak, order)
+        raise RuntimeError(f"Unknown work-order lane: {order.lane}")
+
+    async def execute_one(order: ExactWorkOrder) -> None:
+        nonlocal last_error
+        if order.block_id in ready:
+            return
+        ledger = ledgers.setdefault(order.block_id, BudgetLedger())
+        attempt = 1
+        try:
+            payload = await dispatch(order)
+            await _persist_ready_block(
+                generation_id,
+                block_id=order.block_id,
+                payload=payload,
+                plan_revision=canonical.plan_revision,
+                plan_hash=canonical.plan_hash,
+            )
+            ready.add(order.block_id)
+            await emit("block_ready", {"generation_id": generation_id, "block_id": order.block_id})
+            return
         except Exception as exc:  # noqa: BLE001
-            failure = classify_failure(exc, block_id=section_order.section.id)
+            failure = classify_failure(
+                exc,
+                block_id=order.block_id,
+                kind_hint=order.lane if order.lane == "visual" else None,
+            )
             action = recovery_for(failure, ledger, sibling_block_ids=sorted(ready))
             log.warning(
-                "component_lectio_block_failure generation_id=%s section=%s class=%s action=%s",
+                "component_lectio_block_failure generation_id=%s block=%s class=%s action=%s",
                 generation_id,
-                section_order.section.id,
+                order.block_id,
                 failure.failure_class.value,
                 action.action,
             )
             if action.action in {"retry", "repair"}:
+                attempt = 2
                 try:
-                    generated = await execute(
-                        section_order,
-                        emit,
-                        trace_id=generation_id,
-                        generation_id=generation_id,
+                    payload = await dispatch(order)
+                    await _persist_ready_block(
+                        generation_id,
+                        block_id=order.block_id,
+                        payload=payload,
+                        plan_revision=canonical.plan_revision,
+                        plan_hash=canonical.plan_hash,
                     )
-                    for order, payload in _blocks_from_executor(
-                        generated,
-                        orders_by_component=orders_by_component,
-                    ):
-                        await _persist_ready_block(
-                            generation_id,
-                            block_id=order.block_id,
-                            payload=payload,
-                            plan_revision=canonical.plan_revision,
-                            plan_hash=canonical.plan_hash,
-                        )
-                        ready.add(order.block_id)
-                    continue
+                    ready.add(order.block_id)
+                    await emit(
+                        "block_ready",
+                        {"generation_id": generation_id, "block_id": order.block_id},
+                    )
+                    return
                 except Exception as retry_exc:  # noqa: BLE001
                     exc = retry_exc
-            for component in section_order.section.components:
-                order = orders_by_component.get(component.component_id)
-                if order is None or order.block_id in ready:
-                    continue
-                await insert_step(
-                    generation_id,
-                    part_id=order.block_id,
-                    step=FAILED_STEP,
-                    payload={
-                        "error": {
-                            "message": str(exc)[:400],
-                            "class": failure.failure_class.value,
-                        }
-                    },
-                )
-            await persist_chunked_state(
-                generation_id,
-                {
-                    "stage": "assembly_blocked",
-                    "error": str(exc)[:400],
-                    "error_type": type(exc).__name__,
-                },
+                    failure = classify_failure(retry_exc, block_id=order.block_id)
+            error = _structured_error(
+                generation_id=generation_id,
+                order=order,
+                exc=exc,
+                failure_class=failure.failure_class.value,
+                attempt=attempt,
             )
-            raise
+            await _persist_failed_block(generation_id, order=order, error=error)
+            last_error = error["message"]
+
+    ordered = [order for order in pending_orders if order.lane != "answer_key"] + [
+        order for order in pending_orders if order.lane == "answer_key"
+    ]
+    for order in ordered:
+        await execute_one(order)
 
     store = await reconstruct_checkpoint_store(
         generation_id,
@@ -396,23 +442,44 @@ async def run_component_lectio_execution(
         plan_hash=canonical.plan_hash,
         desired_work=desired,
     )
-    store.mark_terminal("complete")
+    partial = lesson_is_partial(canonical, store)
     document = assemble_lesson_document(
         canonical,
         store,
         title=title or (form.topic if form else "Lesson"),
+        subject=form.subject if form else "General",
+        template_id=template_id,
+        preset_id="default",
     )
+
+    if partial:
+        store.mark_terminal("failed")
+        await persist_chunked_state(
+            generation_id,
+            {
+                "stage": "assembly_blocked",
+                "error": last_error or "Required work remains incomplete",
+                "error_type": "ComponentLectioIncomplete",
+                "control_meta": {
+                    "plan_hash": canonical.plan_hash,
+                    "plan_revision": canonical.plan_revision,
+                    "pipeline": "component_lectio",
+                    "partial": True,
+                },
+            },
+        )
+        raise RuntimeError(last_error or "Required Component Lectio work remains incomplete")
+
+    assert_valid_lesson_document(document)
+    store.mark_terminal("complete")
+
     from core.database.models import GenerationModel
     from core.database.session import async_session_factory
 
     async with async_session_factory() as session:
         model = await session.get(GenerationModel, generation_id)
         if model is not None:
-            model.document_json = {
-                **document,
-                "status": "complete",
-                "pipeline": "component_lectio",
-            }
+            model.document_json = document
             await session.commit()
 
     await persist_chunked_state(
@@ -421,6 +488,12 @@ async def run_component_lectio_execution(
             "stage": "complete",
             "execution_started": True,
             "lesson_document": document,
+            "control_meta": {
+                "plan_hash": canonical.plan_hash,
+                "plan_revision": canonical.plan_revision,
+                "pipeline": "component_lectio",
+                "partial": False,
+            },
         },
     )
     await emit(
@@ -439,5 +512,6 @@ async def fill_plan_components_for_legacy_studio(
     _canonical, filled = build_canonical_execution_plan(
         plan,
         generation_id=generation_id,
+        selector=heuristic_select_components,
     )
     return filled

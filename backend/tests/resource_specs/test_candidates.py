@@ -70,22 +70,12 @@ def test_forbidden_and_generation_excluded_do_not_leak() -> None:
     for forbidden in ("practice-stack", "quiz-check", "short-answer", "fill-in-blank"):
         assert forbidden not in orient.candidates
 
-    # writer_excluded / visual-lane components are generation-excluded when listed.
-    for visual_id in (
-        "diagram-block",
-        "diagram-compare",
-        "diagram-series",
-        "simulation-block",
-        "timeline-block",
-    ):
-        for role in EXPECTED_ARC:
-            result = resolve_role_candidates(role)
-            assert visual_id not in result.candidates
-            if visual_id in result.excluded:
-                assert result.excluded[visual_id] == "generation_excluded"
+    # Visual writer_excluded components stay selectable for the visual lane.
+    assert "diagram-block" in orient.candidates
+    assert "image-block" not in orient.candidates
+    assert "video-embed" not in orient.candidates
 
     lesson = get_primary_spec()
-    # Force forbidden + manual-only into preferred so exclusion reasons are asserted.
     section = SectionSpec(
         role="orient",
         intent="test",
@@ -100,7 +90,7 @@ def test_forbidden_and_generation_excluded_do_not_leak() -> None:
     forced = resolve_section_candidates(section, spec=lesson)
     assert "practice-stack" not in forced.candidates
     assert forced.excluded["practice-stack"] == "role_forbidden"
-    assert forced.excluded["diagram-block"] == "generation_excluded"
+    assert "diagram-block" in forced.candidates
     for manual_id in MANUAL_ONLY_COMPONENT_IDS:
         assert manual_id not in forced.candidates
         assert forced.excluded[manual_id] == "manual_only"

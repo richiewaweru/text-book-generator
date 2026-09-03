@@ -16,7 +16,8 @@ vi.mock('lectio', () => ({
 			preset_id: metadata.preset_id, source: 'generated', source_generation_id: metadata.source_generation_id,
 			sections: documentSections, blocks, media: {}, created_at: 'now', updated_at: 'now'
 		};
-	}
+	},
+	validateDocument: () => ({ valid: true, errors: [] })
 }));
 
 import { generationToBuilderDocument, partitionGenerationIssues, v3PackToBuilderDocument } from './from-generation';
@@ -154,17 +155,52 @@ describe('v3PackToBuilderDocument', () => {
 
 describe('generationToBuilderDocument', () => {
 	it('uses LessonDocument directly for component_lectio without V3 pack adapter', () => {
-		const direct = {
-			schema: 'LessonDocument',
+        const direct = {
+			version: 1,
+			id: 'gen_lectio',
 			title: 'Ratios',
-			sections: [{ id: 'orient', title: 'Orient', block_ids: ['b1'] }],
+			subject: 'Math',
+			preset_id: 'default',
+			source: 'generated',
+			source_generation_id: 'gen_lectio',
+			sections: [
+				{
+					id: 'orient',
+					template_id: 'guided-concept-path',
+					block_ids: ['b1'],
+					title: 'Orient',
+					position: 0
+				}
+			],
 			blocks: {
 				b1: { id: 'b1', component_id: 'hook-hero', content: { headline: 'hi' }, position: 0 }
-			}
+			},
+			media: {},
+			created_at: '2026-09-03T00:00:00Z',
+			updated_at: '2026-09-03T00:00:00Z'
 		};
 		const lesson = generationToBuilderDocument(direct, { pipeline: 'component_lectio' });
-		expect(lesson).toBe(direct);
+		expect(lesson.id).toBe('gen_lectio');
 		expect(lesson.blocks.b1.component_id).toBe('hook-hero');
+	});
+
+	it('rejects a malformed Component Lectio document', () => {
+		expect(() =>
+			generationToBuilderDocument(
+				{
+					version: 1,
+					id: 'bad',
+					title: 'Ratios',
+					subject: 'Math',
+					preset_id: 'default',
+					source: 'generated',
+					sections: [{ id: 'orient', block_ids: ['b1'], title: 'Orient', position: 0 }],
+					blocks: { b1: { id: 'b1', component_id: 'hook-hero', content: {}, position: 0 } },
+					media: {}
+				},
+				{ pipeline: 'component_lectio' }
+			)
+		).toThrow(/template_id/);
 	});
 
 	it('still uses V3 pack adapter for v3_studio pipeline', () => {

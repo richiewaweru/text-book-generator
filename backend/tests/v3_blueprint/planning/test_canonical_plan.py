@@ -153,6 +153,16 @@ def test_misconception_prefers_pitfall_over_comparison_when_available() -> None:
         assert choice.components[0].slug == "pitfall-alert"
 
 
+def test_selector_context_contains_capabilities() -> None:
+    intent = _intent_plan_for_subject(**SUBJECT_FIXTURES[0])
+    plan = intent_plan_to_structural_plan(intent)
+    section = plan.sections[0]
+    candidates = resolve_role_candidates(section.role)
+    context = build_selector_prompt_context(section=section, candidates=candidates)
+    assert context["allowed_components"]
+    assert "capabilities" in context["allowed_components"][0]
+
+
 def test_out_of_set_selection_raises() -> None:
     intent = _intent_plan_for_subject(**SUBJECT_FIXTURES[0])
     plan = intent_plan_to_structural_plan(intent)

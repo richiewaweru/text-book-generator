@@ -1,11 +1,21 @@
-"""Assemble LessonDocument-shaped artifacts from checkpoints (Phase 08)."""
+"""Assemble canonical Lectio LessonDocument artifacts from checkpoints (Phase 08)."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from v3_blueprint.planning.canonical_plan import CanonicalExecutionPlan
 from v3_execution.runtime.checkpoints import CheckpointStore
+
+
+def lesson_is_partial(plan: CanonicalExecutionPlan, store: CheckpointStore) -> bool:
+    ready = {
+        block_id
+        for block_id, checkpoint in store.blocks.items()
+        if checkpoint.state == "ready"
+    }
+    return any(block_id not in ready for section in plan.sections for block_id in section.block_ids)
 
 
 def assemble_lesson_document(
@@ -15,13 +25,26 @@ def assemble_lesson_document(
     title: str,
     human_revision: int = 0,
     generator_revision: int | None = None,
+    subject: str = "General",
+    preset_id: str = "default",
+    template_id: str | None = None,
+    source: str = "generated",
+    created_at: str | None = None,
+    updated_at: str | None = None,
 ) -> dict[str, Any]:
-    """Build a Builder-openable LessonDocument-shaped dict from ready checkpoints.
+    """Build a Builder-openable Lectio LessonDocument from ready checkpoints.
 
     Human-edit fence: if human_revision > generator_revision, ready generator
     payloads for older revisions are ignored for those blocks.
+
+    Generation-runtime fields (plan_hash, pipeline, partial) stay out of this document.
     """
     gen_rev = plan.plan_revision if generator_revision is None else generator_revision
+    now = datetime.now(timezone.utc).isoformat()
+    stamp = created_at or now
+    generation_id = plan.generation_id or "lesson"
+    resolved_template = template_id or plan.template_id
+
     blocks: dict[str, Any] = {}
     sections: list[dict[str, Any]] = []
 
@@ -38,38 +61,41 @@ def assemble_lesson_document(
             if checkpoint is None:
                 continue
             if human_revision > gen_rev and checkpoint.plan_revision <= gen_rev:
-                # Stale generator loses to newer human edit fence.
                 continue
             meta = next(b for b in plan.blocks if b.block_id == block_id)
+            content = checkpoint.payload.get("content", {})
+            if not isinstance(content, dict):
+                content = {"value": content}
             blocks[block_id] = {
                 "id": block_id,
                 "component_id": meta.component_id,
-                "content": checkpoint.payload.get("content", {}),
+                "content": content,
                 "position": meta.position,
             }
             block_ids.append(block_id)
         sections.append(
             {
                 "id": section.section_id,
-                "title": section.title,
-                "role": section.role,
+                "template_id": resolved_template,
                 "block_ids": block_ids,
+                "title": section.title,
+                "position": section.position,
             }
         )
 
     return {
-        "schema": "LessonDocument",
+        "version": 1,
+        "id": generation_id,
         "title": title,
-        "plan_hash": plan.plan_hash,
-        "plan_revision": plan.plan_revision,
-        "human_revision": human_revision,
+        "subject": subject,
+        "preset_id": preset_id,
+        "source": source,
+        "source_generation_id": generation_id,
         "sections": sections,
         "blocks": blocks,
-        "partial": any(
-            block_id not in blocks
-            for section in plan.sections
-            for block_id in section.block_ids
-        ),
+        "media": {},
+        "created_at": stamp,
+        "updated_at": updated_at or stamp,
     }
 
 

@@ -15,8 +15,12 @@ def test_mocked_e2e_four_subjects_no_studio() -> None:
             title=f"{fixture['subject']}-{fixture['topic']}",
             generation_id=f"gen-{fixture['subject']}",
         )
-        assert result.document["schema"] == "LessonDocument"
-        assert result.document["partial"] is False
+        assert result.document["version"] == 1
+        assert result.document["id"]
+        assert result.document["blocks"]
+        from v3_execution.runtime.lesson_document import lesson_is_partial
+
+        assert lesson_is_partial(result.canonical, result.store) is False
         assert result.store.control.state == "complete"
         assert result.work_orders
         assert all(
@@ -48,7 +52,9 @@ def test_mocked_e2e_injects_validation_failure_and_repairs() -> None:
         writer=flaky_writer,
     )
     assert any(event.get("action") == "repair" for event in result.events if event["type"] == "failure")
-    assert result.document["partial"] is False
+    from v3_execution.runtime.lesson_document import lesson_is_partial
+
+    assert lesson_is_partial(result.canonical, result.store) is False
     assert target in result.document["blocks"]
 
 
