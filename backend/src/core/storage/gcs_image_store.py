@@ -10,7 +10,7 @@ from google.cloud import storage
 from google.oauth2 import service_account
 
 logger = logging.getLogger(__name__)
-_PRODUCTION_LIKE_ENVS = {"production", "staging"}
+PRODUCTION_LIKE_ENVS = frozenset({"production", "staging"})
 
 
 class GCSImageStore:
@@ -52,7 +52,7 @@ class GCSImageStore:
         self._bucket = client.bucket(resolved_bucket_name)
         self._base_url = os.getenv("GCS_IMAGE_BASE_URL", "")
         app_env = (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "development").strip().lower()
-        if app_env in _PRODUCTION_LIKE_ENVS and not self._base_url:
+        if app_env in PRODUCTION_LIKE_ENVS and not self._base_url:
             logger.warning("GCS image store falling back to expiring signed URLs in production")
 
     @property

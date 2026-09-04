@@ -7,7 +7,10 @@ from pathlib import Path
 from uuid import uuid4
 
 from core.config import settings
-from core.storage.gcs_image_store import GCSImageStore as CoreGCSImageStore
+from core.storage.gcs_image_store import (
+    PRODUCTION_LIKE_ENVS,
+    GCSImageStore as CoreGCSImageStore,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -246,7 +249,7 @@ class GCSImageStore(ImageStore):
 
 def get_image_store() -> ImageStore:
     env = settings.app_env
-    if env == "production":
+    if env in PRODUCTION_LIKE_ENVS:
         return GCSImageStore(bucket_name=settings.gcs_bucket_name)
     return LocalImageStore(base_path=Path("data/images"), base_url=settings.image_base_url)
 

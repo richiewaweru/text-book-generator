@@ -371,6 +371,35 @@ def test_image_store_uses_gcs_bucket_in_production(monkeypatch) -> None:
     assert store.bucket_name == "prod-diagrams"
 
 
+def test_image_store_uses_gcs_bucket_in_staging(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://textbook:textbook@db:5432/textbook_agent")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-staging-key")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://staging.example.com")
+    monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "https://staging.example.com")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "example-google-client-id")
+    monkeypatch.setenv("PDF_RENDER_BASE_URL", "https://staging.example.com")
+    monkeypatch.setenv("GCS_BUCKET_NAME", "staging-diagrams")
+
+    class StubGCSImageStore:
+        def __init__(self, bucket_name: str):
+            self.bucket_name = bucket_name
+
+    monkeypatch.setattr(
+        "media.storage.image_store.GCSImageStore",
+        StubGCSImageStore,
+    )
+    monkeypatch.setattr(
+        "media.storage.image_store.settings",
+        Settings(_env_file=None),
+    )
+
+    store = get_image_store()
+
+    assert isinstance(store, StubGCSImageStore)
+    assert store.bucket_name == "staging-diagrams"
+
+
 def test_gcs_image_store_uses_service_account_json_and_base_url(monkeypatch) -> None:
     monkeypatch.setenv("GCS_SERVICE_ACCOUNT_JSON", json.dumps({"project_id": "proj-1"}))
     monkeypatch.setenv("GCS_IMAGE_BASE_URL", "https://storage.googleapis.com/prod-diagrams")

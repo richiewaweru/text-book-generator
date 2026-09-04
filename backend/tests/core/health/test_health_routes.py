@@ -357,6 +357,41 @@ class TestHealthRoutes:
         assert payload["status"] == "unavailable"
         assert _dependency_by_name(payload, "gemini_image_probe")["status"] == "unreachable"
 
+    def test_image_probe_returns_503_when_xai_succeeds_but_gcs_is_unavailable(self):
+        app = create_app()
+
+        async def fake_runner():
+            return (
+                [
+                    DependencyStatus(
+                        name="grok_imagine_only",
+                        status="ok",
+                        detail="provider=xai; model=grok-imagine-image",
+                    ),
+                    DependencyStatus(
+                        name="v3_gcs_upload_only",
+                        status="unreachable",
+                        detail="provider=xai; model=grok-imagine-image; stage=gcs_upload; error=GCS bucket is not accessible",
+                    ),
+                ],
+                128,
+            )
+
+        health_routes.configure_health_extensions(image_probe_runner=fake_runner)
+
+        with TestClient(app) as client:
+            response = client.post("/health/image/probe")
+
+        assert response.status_code == 503
+        payload = response.json()
+        assert payload["status"] == "unavailable"
+        assert payload["probe_image_bytes"] == 128
+        assert _dependency_by_name(payload, "grok_imagine_only")["status"] == "ok"
+        gcs_dependency = _dependency_by_name(payload, "v3_gcs_upload_only")
+        assert gcs_dependency["status"] == "unreachable"
+        assert "stage=gcs_upload" in gcs_dependency["detail"]
+        assert "GCS bucket is not accessible" in gcs_dependency["detail"]
+
     async def test_generation_summary_counts_rows_from_database(self, db_session):
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         db_session.add(
