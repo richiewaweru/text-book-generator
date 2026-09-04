@@ -20,6 +20,7 @@ __all__ = [
     "fill_plan_components_for_legacy_studio",
     "load_ready_block_ids",
     "mock_writer",
+    "PipelineResult",
     "reconstruct_checkpoint_store",
     "run_component_lectio_execution",
     "run_mocked_component_lectio_pipeline",

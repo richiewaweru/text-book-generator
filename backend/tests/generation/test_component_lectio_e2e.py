@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from generation.component_lectio.pipeline import run_mocked_component_lectio_pipeline
 from tests.v3_blueprint.planning.test_intent_plan import SUBJECT_FIXTURES, _intent_plan_for_subject
-from v3_blueprint.planning.models import IntentPlan
 
 
 def test_mocked_e2e_four_subjects_no_studio() -> None:

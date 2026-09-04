@@ -11,7 +11,7 @@ from contracts.lectio import (
     get_component_schema_shape,
     get_planner_index,
 )
-from v3_blueprint.planning.canonical_plan import CanonicalBlock, CanonicalExecutionPlan
+from v3_blueprint.planning.canonical_plan import CanonicalExecutionPlan
 
 
 class ExactWorkOrder(BaseModel):

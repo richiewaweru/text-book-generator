@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any
 
 from core.config import GenerationPipeline, settings
 from v3_blueprint.planning.persistence import persist_chunked_state

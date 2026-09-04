@@ -17,7 +17,7 @@ from generation.component_lectio.service import (
     run_component_lectio_execution,
 )
 from generation.pipeline_dispatch import build_control_patch
-from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
+from generation.v3_studio.dtos import V3InputForm
 from resource_specs.candidates import resolve_role_candidates
 from tests.v3_blueprint.planning.test_intent_plan import SUBJECT_FIXTURES, _intent_plan_for_subject
 from v3_blueprint.planning.canonical_plan import (
@@ -41,7 +41,7 @@ from v3_execution.models import (
     GeneratedQuestionBlock,
     GeneratedVisualBlock,
 )
-from v3_execution.runtime.lesson_document import assemble_lesson_document, lesson_is_partial
+from v3_execution.runtime.lesson_document import lesson_is_partial
 
 
 INTEGRATION_PICKS = {
@@ -319,8 +319,6 @@ def test_s5_context_changes_selection() -> None:
 
 @pytest.mark.asyncio
 async def test_selector_repair_then_still_invalid_raises() -> None:
-    from resource_specs.candidates import RoleCandidateSet
-
     candidates = resolve_role_candidates("orient")
 
     async def always_bad(_payload):
@@ -601,7 +599,6 @@ async def test_r2_component_identity_locked_during_repair() -> None:
     plan = intent_plan_to_structural_plan(_intent_plan_for_subject(**SUBJECT_FIXTURES[0]))
 
     async def content(work_order, emit, **kwargs):
-        component = work_order.section.components[0]
         return [
             GeneratedComponentBlock(
                 block_id=work_order.work_order_id,
@@ -732,7 +729,6 @@ async def test_phase7_architecture_integration() -> None:
     )
     kinds = {order.lane for order in lanes}
     assert {"content", "items", "visual"} <= kinds
-    from v3_blueprint.planning.canonical_plan import CanonicalExecutionPlan
     from generation.component_lectio.service import reconstruct_checkpoint_store
 
     canonical, _ = build_canonical_execution_plan(plan, selector=_forced_selector(), generation_id=gen_id)
