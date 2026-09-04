@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+import json
+from typing import Any, get_args
 
 import pytest
 
 from contracts.lesson_document import validate_lesson_document
+from contracts.section_content import ReflectionType
 from core.database.models import GenerationModel, UserModel
-from generation.component_lectio.coverage_audit import coverage_gaps, production_selectable_components
+from core.database.session import async_session_factory
+from generation.component_lectio.coverage_audit import (
+    coverage_gaps,
+    production_selectable_components,
+)
 from generation.component_lectio.errors import AnswerKeyMappingError, WorkOrderIdentityError
 from generation.component_lectio.fixtures import valid_content_for
 from generation.component_lectio.payload_strategies import (
+    SCHEMA_SUMMARIES,
     assemble_answer_key_content,
     assemble_items_content,
     assemble_visual_content,
@@ -29,10 +36,15 @@ from generation.component_lectio.service import (
 )
 from generation.v3_studio.dtos import V3InputForm
 from tests.v3_blueprint.planning.test_intent_plan import SUBJECT_FIXTURES, _intent_plan_for_subject
-from v3_blueprint.planning.canonical_plan import SelectedComponent, SelectorChoice
+from v3_blueprint.planning.canonical_plan import (
+    CanonicalExecutionPlan,
+    SelectedComponent,
+    SelectorChoice,
+)
 from v3_blueprint.planning.models import intent_plan_to_structural_plan
-from v3_blueprint.planning.persistence import load_steps, persist_chunked_state
+from v3_blueprint.planning.persistence import load_chunked_state, load_steps, persist_chunked_state
 from v3_blueprint.planning.work_orders import ExactWorkOrder
+from v3_execution.runtime.lesson_document import assemble_lesson_document
 from v3_execution.models import (
     GeneratedComponentBlock,
     GeneratedQuestionBlock,
@@ -306,6 +318,12 @@ def test_gate_g_reflection_and_student_textbox():
         assert "prompt" in payload["content"]
 
 
+def test_reflection_schema_guidance_matches_lectio_enum():
+    allowed = "|".join(get_args(ReflectionType))
+    assert f"type({allowed})" in SCHEMA_SUMMARIES["reflection-prompt"]
+    assert "value" not in SCHEMA_SUMMARIES["reflection-prompt"]
+
+
 def test_gate_h_answer_key_deterministic_mapping():
     order = _order_stub(component_id="answer-key", lane="answer_key")
     payload = assemble_answer_key_content(
@@ -348,6 +366,63 @@ def test_gate_i_diagram_block():
     validate_exact_payload(order, payload)
 
 
+@pytest.mark.parametrize("status", ["failed", "omitted_quality"])
+def test_diagram_block_rejects_unusable_status(status: str):
+    order = _order_stub(component_id="diagram-block", lane="visual")
+    block = GeneratedVisualBlock(
+        visual_id=order.block_id,
+        attaches_to=order.section_id,
+        mode="diagram",
+        image_url="https://example.test/d.png",
+        source_work_order_id=order.work_order_id,
+        component_id="diagram-block",
+        status=status,
+    )
+    with pytest.raises(ValueError, match=status):
+        assemble_visual_content(order, [block])
+
+
+@pytest.mark.parametrize("status", ["ready", "flagged_quality"])
+def test_diagram_block_rejects_empty_visual_source(status: str):
+    order = _order_stub(component_id="diagram-block", lane="visual")
+    block = GeneratedVisualBlock(
+        visual_id=order.block_id,
+        attaches_to=order.section_id,
+        mode="diagram",
+        image_url="  ",
+        html_content="",
+        source_work_order_id=order.work_order_id,
+        component_id="diagram-block",
+        status=status,
+    )
+    with pytest.raises(ValueError, match="usable visual source"):
+        assemble_visual_content(order, [block])
+
+
+def test_flagged_diagram_preserves_quality_metadata_outside_content():
+    order = _order_stub(component_id="diagram-block", lane="visual")
+    block = GeneratedVisualBlock(
+        visual_id=order.block_id,
+        attaches_to=order.section_id,
+        mode="diagram",
+        image_url="https://example.test/d.png",
+        source_work_order_id=order.work_order_id,
+        component_id="diagram-block",
+        status="flagged_quality",
+        qc_reasons=["labels are crowded"],
+        qc_correction_hint="increase label spacing",
+    )
+
+    payload = assemble_visual_content(order, [block])
+
+    assert payload["visual_quality"] == {
+        "status": "flagged_quality",
+        "reasons": ["labels are crowded"],
+        "correction_hint": "increase label spacing",
+    }
+    assert "visual_quality" not in payload["content"]
+
+
 def test_gate_j_diagram_compare():
     order = _order_stub(component_id="diagram-compare", lane="visual")
     single = [
@@ -381,6 +456,26 @@ def test_gate_j_diagram_compare():
     validate_exact_payload(order, payload)
     assert "before_label" in payload["content"]
     assert "after_label" in payload["content"]
+
+
+@pytest.mark.parametrize("missing_index", [0, 1])
+def test_diagram_compare_requires_each_side_to_have_a_source(missing_index: int):
+    order = _order_stub(component_id="diagram-compare", lane="visual")
+    blocks = [
+        GeneratedVisualBlock(
+            visual_id=order.block_id,
+            attaches_to=order.section_id,
+            mode="diagram_compare",
+            frame_index=idx,
+            image_url=None if idx == missing_index else f"https://example.test/{idx}.png",
+            html_content=" " if idx == missing_index else None,
+            source_work_order_id=order.work_order_id,
+            component_id="diagram-compare",
+        )
+        for idx in range(2)
+    ]
+    with pytest.raises(ValueError, match="before/after visual source"):
+        assemble_visual_content(order, blocks)
 
 
 def test_gate_k_diagram_series():
@@ -418,6 +513,25 @@ def test_gate_k_diagram_series():
     payload = assemble_visual_content(order, blocks)
     validate_exact_payload(order, payload)
     assert len(payload["content"]["diagrams"]) == 3
+
+
+@pytest.mark.parametrize("missing_index", [0, 1, 2])
+def test_diagram_series_requires_every_frame_to_have_a_source(missing_index: int):
+    order = _order_stub(component_id="diagram-series", lane="visual")
+    blocks = [
+        GeneratedVisualBlock(
+            visual_id=order.block_id,
+            attaches_to=order.section_id,
+            mode="diagram_series",
+            frame_index=idx,
+            image_url=None if idx == missing_index else f"https://example.test/{idx}.png",
+            source_work_order_id=order.work_order_id,
+            component_id="diagram-series",
+        )
+        for idx in range(3)
+    ]
+    with pytest.raises(ValueError, match=f"frame {missing_index + 1}"):
+        assemble_visual_content(order, blocks)
 
 
 def test_gate_n_no_component_substitution():
@@ -630,7 +744,17 @@ async def test_gate_h_answer_key_db_reconstruction():
         generation_id=generation_id,
         plan=plan,
         form=_form(),
-        **_exec_kwargs(selector=_forced_selector({"orient": ("hook-hero",), "build": ("explanation-block",), "model": ("worked-example-card",), "practice": ("practice-stack",), "close": ("summary-block",)})),
+        **_exec_kwargs(
+            selector=_forced_selector(
+                {
+                    "orient": ("hook-hero",),
+                    "build": ("explanation-block",),
+                    "model": ("worked-example-card",),
+                    "practice": ("practice-stack",),
+                    "close": ("summary-block",),
+                }
+            )
+        ),
     )
     assert document
     rows = await load_steps(generation_id)
@@ -699,6 +823,156 @@ async def test_gate_q_failure_stays_scoped():
 
 
 @pytest.mark.asyncio
+async def test_unusable_visual_exhaustion_fails_only_visual_work_item():
+    generation_id = f"visual-exhaust-{uuid.uuid4().hex[:8]}"
+    await _seed_generation(generation_id)
+    plan = intent_plan_to_structural_plan(_intent_plan_for_subject(**SUBJECT_FIXTURES[0]))
+    visual_calls = 0
+
+    async def always_failed_visual(work_order, emit, **kwargs):
+        nonlocal visual_calls
+        visual_calls += 1
+        return [
+            GeneratedVisualBlock(
+                visual_id=work_order.visual.id,
+                attaches_to=work_order.visual.attaches_to,
+                mode=work_order.visual.mode,
+                source_work_order_id=work_order.work_order_id,
+                component_id=work_order.visual.component_id,
+                status="failed",
+                error_message="provider returned no usable image",
+            )
+        ]
+
+    picks = {
+        "orient": ("hook-hero",),
+        "build": ("explanation-block",),
+        "model": ("worked-example-card", "diagram-block"),
+        "practice": ("practice-stack",),
+        "close": ("summary-block",),
+    }
+    with pytest.raises(RuntimeError, match="unusable status 'failed'"):
+        await run_component_lectio_execution(
+            generation_id=generation_id,
+            plan=plan,
+            form=_form(),
+            **_exec_kwargs(
+                selector=_forced_selector(picks),
+                visual_executor=always_failed_visual,
+            ),
+        )
+
+    rows = await load_steps(generation_id)
+    failed_visuals = [
+        row
+        for row in rows
+        if row.step == FAILED_STEP
+        and isinstance(row.payload, dict)
+        and row.payload.get("error", {}).get("component_id") == "diagram-block"
+    ]
+    ready_components = {
+        row.payload["payload"].get("component_id")
+        for row in rows
+        if row.step == READY_STEP
+        and isinstance(row.payload, dict)
+        and isinstance(row.payload.get("payload"), dict)
+    }
+    assert visual_calls == 2
+    assert len(failed_visuals) == 1
+    assert all(row.part_id != failed_visuals[0].part_id for row in rows if row.step == READY_STEP)
+    assert {"hook-hero", "explanation-block", "worked-example-card", "practice-stack"} <= (
+        ready_components
+    )
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        assert model is not None
+        state = model.chunked_state_json or {}
+        assert model.status == "failed"
+        assert model.quality_passed is False
+        assert model.completed_at is not None
+        assert model.document_json is None
+        assert state["stage"] == "assembly_blocked"
+
+
+@pytest.mark.asyncio
+async def test_flagged_visual_quality_is_checkpoint_metadata_only():
+    generation_id = f"visual-flagged-{uuid.uuid4().hex[:8]}"
+    await _seed_generation(generation_id)
+    plan = intent_plan_to_structural_plan(_intent_plan_for_subject(**SUBJECT_FIXTURES[0]))
+
+    async def flagged_visual(work_order, emit, **kwargs):
+        return [
+            GeneratedVisualBlock(
+                visual_id=work_order.visual.id,
+                attaches_to=work_order.visual.attaches_to,
+                mode=work_order.visual.mode,
+                image_url="https://example.test/flagged.png",
+                source_work_order_id=work_order.work_order_id,
+                component_id=work_order.visual.component_id,
+                status="flagged_quality",
+                qc_reasons=["labels are crowded"],
+                qc_correction_hint="increase label spacing",
+            )
+        ]
+
+    document = await run_component_lectio_execution(
+        generation_id=generation_id,
+        plan=plan,
+        form=_form(),
+        **_exec_kwargs(
+            selector=_forced_selector(
+                {
+                    "orient": ("hook-hero",),
+                    "build": ("explanation-block",),
+                    "model": ("worked-example-card", "diagram-block"),
+                    "practice": ("practice-stack",),
+                    "close": ("summary-block",),
+                }
+            ),
+            visual_executor=flagged_visual,
+        ),
+    )
+
+    rows = await load_steps(generation_id)
+    visual_rows = [
+        row
+        for row in rows
+        if row.step == READY_STEP
+        and isinstance(row.payload, dict)
+        and isinstance(row.payload.get("payload"), dict)
+        and row.payload["payload"].get("component_id") == "diagram-block"
+    ]
+    assert len(visual_rows) == 1
+    checkpoint_payload = visual_rows[0].payload["payload"]
+    assert checkpoint_payload["visual_quality"] == {
+        "status": "flagged_quality",
+        "reasons": ["labels are crowded"],
+        "correction_hint": "increase label spacing",
+    }
+
+    state = await load_chunked_state(generation_id)
+    canonical = CanonicalExecutionPlan.model_validate(state["canonical_plan"])
+    store = await reconstruct_checkpoint_store(
+        generation_id,
+        plan_revision=canonical.plan_revision,
+        plan_hash=canonical.plan_hash,
+        desired_work=[block.block_id for block in canonical.blocks],
+    )
+    reassembled = assemble_lesson_document(
+        canonical,
+        store,
+        title=_form().topic,
+        subject=_form().subject,
+    )
+    assert reassembled["blocks"] == document["blocks"]
+    assert reassembled["sections"] == document["sections"]
+    serialized_document = json.dumps(reassembled)
+    assert "visual_quality" not in serialized_document
+    assert "labels are crowded" not in serialized_document
+    assert "increase label spacing" not in serialized_document
+
+
+@pytest.mark.asyncio
 async def test_gate_r_retry_exhaustion():
     generation_id = f"exhaust-{uuid.uuid4().hex[:8]}"
     await _seed_generation(generation_id)
@@ -743,7 +1017,7 @@ async def test_gate_r_retry_exhaustion():
     assert err["section_field"]
     assert err["validation_errors"]
     assert err["attempt"] == 2
-    chunk = await reconstruct_checkpoint_store(
+    await reconstruct_checkpoint_store(
         generation_id, plan_revision=1, plan_hash="x", desired_work=[]
     )
     # pipeline sticky via chunked state
@@ -761,6 +1035,7 @@ async def test_gate_s_process_style_resume():
     generation_id = f"resume-{uuid.uuid4().hex[:8]}"
     await _seed_generation(generation_id)
     plan = intent_plan_to_structural_plan(_intent_plan_for_subject(**SUBJECT_FIXTURES[0]))
+
     # Seed by running once with a failing quiz, then fix executor and resume.
     async def first_pass_quiz(work_order, emit, **kwargs):
         return [
@@ -791,7 +1066,9 @@ async def test_gate_s_process_style_resume():
                 question_executor=first_pass_quiz,
             ),
         )
-    ready_before = {row.part_id for row in await load_steps(generation_id) if row.step == READY_STEP}
+    ready_before = {
+        row.part_id for row in await load_steps(generation_id) if row.step == READY_STEP
+    }
     executed: list[str] = []
 
     async def resume_section(work_order, emit, **kwargs):

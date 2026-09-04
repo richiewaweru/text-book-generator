@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from contracts.lesson_document import assert_valid_lesson_document
+from core.database.models import GenerationModel
+from core.database.session import async_session_factory
 from generation.component_lectio.errors import AnswerKeyMappingError, WorkOrderIdentityError
 from generation.component_lectio.lane_dispatch import (
     adapt_answer_key_order,
@@ -46,7 +49,6 @@ from v3_blueprint.planning.persistence import (
     load_steps,
     persist_chunked_state,
     persist_structural_plan,
-    step_exists,
 )
 from v3_blueprint.planning.work_orders import (
     ExactWorkOrder,
@@ -97,6 +99,130 @@ async def _silent_emit(_event: str, _payload: dict[str, Any]) -> None:
     return None
 
 
+def _utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+async def persist_component_lectio_start(
+    generation_id: str,
+    *,
+    display_title: str | None = None,
+) -> None:
+    """Atomically mark Component Lectio running and clear prior terminal output."""
+    now = _utc_now_naive()
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        if model is None:
+            raise ValueError(f"Generation '{generation_id}' not found")
+        state = dict(model.chunked_state_json or {})
+        state.pop("lesson_document", None)
+        control_meta = dict(state.get("control_meta") or {})
+        control_meta["pipeline"] = "component_lectio"
+        state.update(
+            {
+                "stage": "component_lectio_running",
+                "execution_started": True,
+                "error": None,
+                "error_type": None,
+                "error_code": None,
+                "control_meta": control_meta,
+            }
+        )
+        if display_title:
+            state["display_title"] = display_title
+        model.chunked_state_json = state
+        model.status = "running"
+        model.document_json = None
+        model.quality_passed = None
+        model.error = None
+        model.error_type = None
+        model.error_code = None
+        model.completed_at = None
+        model.last_heartbeat = now
+        await session.commit()
+
+
+async def persist_component_lectio_failure(
+    generation_id: str,
+    exc: BaseException,
+) -> None:
+    """Atomically persist matching scalar and chunked terminal failure state."""
+    now = _utc_now_naive()
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        if model is None:
+            raise ValueError(f"Generation '{generation_id}' not found")
+        state = dict(model.chunked_state_json or {})
+        state.pop("lesson_document", None)
+        message = str(state.get("error") or str(exc) or type(exc).__name__)[:400]
+        error_type = str(state.get("error_type") or type(exc).__name__)
+        error_code = str(state.get("error_code") or "component_lectio_failed")
+        control_meta = dict(state.get("control_meta") or {})
+        control_meta["pipeline"] = "component_lectio"
+        state.update(
+            {
+                "stage": "assembly_blocked",
+                "execution_started": True,
+                "error": message,
+                "error_type": error_type,
+                "error_code": error_code,
+                "control_meta": control_meta,
+            }
+        )
+        model.chunked_state_json = state
+        model.status = "failed"
+        model.document_json = None
+        model.quality_passed = False
+        model.error = message
+        model.error_type = error_type
+        model.error_code = error_code
+        model.last_heartbeat = now
+        model.completed_at = now
+        await session.commit()
+
+
+async def _persist_component_lectio_success(
+    generation_id: str,
+    *,
+    document: dict[str, Any],
+    plan_revision: int,
+    plan_hash: str,
+) -> None:
+    """Atomically persist the final document and matching terminal state."""
+    now = _utc_now_naive()
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        if model is None:
+            raise ValueError(f"Generation '{generation_id}' not found")
+        state = dict(model.chunked_state_json or {})
+        state.update(
+            {
+                "stage": "complete",
+                "execution_started": True,
+                "lesson_document": document,
+                "error": None,
+                "error_type": None,
+                "error_code": None,
+                "control_meta": {
+                    "plan_hash": plan_hash,
+                    "plan_revision": plan_revision,
+                    "pipeline": "component_lectio",
+                    "partial": False,
+                },
+            }
+        )
+        model.chunked_state_json = state
+        model.status = "completed"
+        model.document_json = document
+        model.quality_passed = True
+        model.error = None
+        model.error_type = None
+        model.error_code = None
+        model.last_heartbeat = now
+        model.completed_at = now
+        await session.commit()
+
+
 def adapt_exact_orders_to_section_work_orders(
     orders: list[ExactWorkOrder],
     *,
@@ -132,9 +258,9 @@ async def _persist_ready_block(
     payload: dict[str, Any],
     plan_revision: int,
     plan_hash: str,
+    attempt: int,
+    recovery: str | None = None,
 ) -> None:
-    if await step_exists(generation_id, part_id=block_id, step=READY_STEP):
-        return
     await insert_step(
         generation_id,
         part_id=block_id,
@@ -143,6 +269,8 @@ async def _persist_ready_block(
             "block_id": block_id,
             "plan_revision": plan_revision,
             "plan_hash": plan_hash,
+            "attempt": attempt,
+            "recovery": recovery,
             "payload": payload,
         },
     )
@@ -158,7 +286,11 @@ async def _persist_failed_block(
         generation_id,
         part_id=order.block_id,
         step=FAILED_STEP,
-        payload={"error": error},
+        payload={
+            "attempt": error.get("attempt"),
+            "recovery": "exhausted",
+            "error": error,
+        },
     )
 
 
@@ -168,6 +300,8 @@ async def load_ready_block_ids(generation_id: str) -> set[str]:
     for row in rows:
         if row.step == READY_STEP:
             ready.add(row.part_id)
+        elif row.step == FAILED_STEP:
+            ready.discard(row.part_id)
     return ready
 
 
@@ -207,9 +341,9 @@ async def reconstruct_checkpoint_store(
                 plan_revision=plan_revision,
                 plan_hash=plan_hash,
                 state="failed",
-                last_error=payload.get("error") if isinstance(payload.get("error"), dict) else {
-                    "message": str(payload)
-                },
+                last_error=payload.get("error")
+                if isinstance(payload.get("error"), dict)
+                else {"message": str(payload)},
             )
     return store
 
@@ -282,7 +416,7 @@ def _classify_block_failure(
     )
 
 
-async def run_component_lectio_execution(
+async def _execute_component_lectio_execution(
     *,
     generation_id: str,
     plan: StructuralPlan,
@@ -321,6 +455,7 @@ async def run_component_lectio_execution(
         generation_id,
         {
             "canonical_plan": canonical.model_dump(mode="json"),
+            "selection_trace": canonical.selection_trace,
             "structural_plan": filled.model_dump(mode="json"),
             "stage": "component_lectio_running",
             "control_meta": {
@@ -484,6 +619,7 @@ async def run_component_lectio_execution(
                 payload=payload,
                 plan_revision=canonical.plan_revision,
                 plan_hash=canonical.plan_hash,
+                attempt=attempt,
             )
             ready.add(order.block_id)
             await emit("block_ready", {"generation_id": generation_id, "block_id": order.block_id})
@@ -512,6 +648,8 @@ async def run_component_lectio_execution(
                         payload=payload,
                         plan_revision=canonical.plan_revision,
                         plan_hash=canonical.plan_hash,
+                        attempt=attempt,
+                        recovery=action.action,
                     )
                     ready.add(order.block_id)
                     await emit(
@@ -579,34 +717,56 @@ async def run_component_lectio_execution(
     assert_valid_lesson_document(document)
     store.mark_terminal("complete")
 
-    from core.database.models import GenerationModel
-    from core.database.session import async_session_factory
-
-    async with async_session_factory() as session:
-        model = await session.get(GenerationModel, generation_id)
-        if model is not None:
-            model.document_json = document
-            await session.commit()
-
-    await persist_chunked_state(
+    await _persist_component_lectio_success(
         generation_id,
-        {
-            "stage": "complete",
-            "execution_started": True,
-            "lesson_document": document,
-            "control_meta": {
-                "plan_hash": canonical.plan_hash,
-                "plan_revision": canonical.plan_revision,
-                "pipeline": "component_lectio",
-                "partial": False,
-            },
-        },
+        document=document,
+        plan_revision=canonical.plan_revision,
+        plan_hash=canonical.plan_hash,
     )
     await emit(
         "component_lectio_complete",
         {"generation_id": generation_id, "pipeline": "component_lectio"},
     )
     return document
+
+
+async def run_component_lectio_execution(
+    *,
+    generation_id: str,
+    plan: StructuralPlan,
+    signals: V3SignalSummary | None = None,
+    form: V3InputForm | None = None,
+    resource_spec: dict[str, Any] | None = None,
+    emit_event: EmitFn | None = None,
+    title: str | None = None,
+    template_id: str = "guided-concept-path",
+    section_executor: SectionExecutorFn | None = None,
+    question_executor: QuestionExecutorFn | None = None,
+    visual_executor: VisualExecutorFn | None = None,
+    answer_key_executor: AnswerKeyExecutorFn | None = None,
+    selector: SelectorFn | None = None,
+) -> dict[str, Any]:
+    """Run Component Lectio with truthful scalar and chunked lifecycle state."""
+    await persist_component_lectio_start(generation_id)
+    try:
+        return await _execute_component_lectio_execution(
+            generation_id=generation_id,
+            plan=plan,
+            signals=signals,
+            form=form,
+            resource_spec=resource_spec,
+            emit_event=emit_event,
+            title=title,
+            template_id=template_id,
+            section_executor=section_executor,
+            question_executor=question_executor,
+            visual_executor=visual_executor,
+            answer_key_executor=answer_key_executor,
+            selector=selector,
+        )
+    except Exception as exc:
+        await persist_component_lectio_failure(generation_id, exc)
+        raise
 
 
 async def fill_plan_components_for_legacy_studio(

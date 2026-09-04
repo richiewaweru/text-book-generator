@@ -56,6 +56,8 @@ from generation.pipeline_dispatch import (
 )
 from generation.component_lectio.service import (
     fill_plan_components_for_legacy_studio,
+    persist_component_lectio_failure,
+    persist_component_lectio_start,
     run_component_lectio_execution,
 )
 from v3_blueprint.planning.retry import (
@@ -270,11 +272,7 @@ def _generation_title(model: GenerationModel) -> str:
 
 
 def _template_id(model: GenerationModel) -> str:
-    return (
-        model.resolved_template_id
-        or model.requested_template_id
-        or "guided-concept-path"
-    )
+    return model.resolved_template_id or model.requested_template_id or "guided-concept-path"
 
 
 def _render_chunked_sse(event: str, payload: dict[str, Any]) -> str:
@@ -317,9 +315,7 @@ def _normalize_chunked_state(generation_id: str, state: dict[str, Any]) -> V3Chu
         if isinstance(state.get("section_briefs"), dict)
         else {},
         failed_sections=[
-            str(section)
-            for section in state.get("failed_sections", [])
-            if isinstance(section, str)
+            str(section) for section in state.get("failed_sections", []) if isinstance(section, str)
         ]
         if isinstance(state.get("failed_sections"), list)
         else [],
@@ -427,9 +423,7 @@ async def post_v3_narrow(
     current_user: User = Depends(get_current_user),
 ) -> V3NarrowResponse:
     class NarrowEnvelope(BaseModel):
-        candidates: list[V3SubtopicCandidate] = Field(
-            default_factory=list
-        )
+        candidates: list[V3SubtopicCandidate] = Field(default_factory=list)
 
     node = "v3_narrow"
     model = get_v3_model(node)
@@ -477,11 +471,7 @@ async def post_v3_narrow(
             section_id=None,
             node=node,
             model_settings=get_v3_model_settings(node),
-            retry_policy=RetryPolicy(
-                call_timeout_seconds=float(
-                    V3_TIMEOUTS["narrow"]
-                )
-            ),
+            retry_policy=RetryPolicy(call_timeout_seconds=float(V3_TIMEOUTS["narrow"])),
         )
         raw = result.output
         if isinstance(raw, NarrowEnvelope):
@@ -542,7 +532,9 @@ async def post_v3_propose_intent(
         )
         return V3ProposeIntentResponse.model_validate(result.output)
     except Exception as exc:
-        logger.exception("v3 propose intent failed topic=%s user=%s", body.topic[:80], current_user.id)
+        logger.exception(
+            "v3 propose intent failed topic=%s user=%s", body.topic[:80], current_user.id
+        )
         raise HTTPException(status_code=502, detail="Could not draft the lesson intent.") from exc
     finally:
         _close_pre_generation_trace(trace_id=trace_id)
@@ -654,9 +646,7 @@ async def _resolve_owned_card_scope(
 
 
 def _card_dto(card: ConceptCardModel) -> V3ConceptCardDTO:
-    misconceptions = (
-        card.misconceptions if isinstance(card.misconceptions, list) else []
-    )
+    misconceptions = card.misconceptions if isinstance(card.misconceptions, list) else []
     return V3ConceptCardDTO(
         id=card.slug,
         pack_id=card.pack_id,
@@ -674,10 +664,7 @@ def _card_dto(card: ConceptCardModel) -> V3ConceptCardDTO:
 def _section_briefs_from_state(plan: StructuralPlan, state: dict[str, Any]) -> list[SectionBrief]:
     section_briefs_raw = state.get("section_briefs")
     section_briefs_map = section_briefs_raw if isinstance(section_briefs_raw, dict) else {}
-    failed_sections = {
-        item for item in state.get("failed_sections", [])
-        if isinstance(item, str)
-    }
+    failed_sections = {item for item in state.get("failed_sections", []) if isinstance(item, str)}
 
     briefs: list[SectionBrief] = []
     for section in plan.sections:
@@ -738,17 +725,25 @@ async def _start_generation_from_chunked_blueprint(
     )
     generation_writer = V3GenerationWriter(async_session_factory)
     template_id = "guided-concept-path"
-    effective_title = (display_title or blueprint.metadata.title).strip() or blueprint.metadata.title
+    effective_title = (
+        display_title or blueprint.metadata.title
+    ).strip() or blueprint.metadata.title
     existing_document = await generation_writer.get_document_json(generation_id, user_id) or {}
-    existing_progress = existing_document.get("progress") if isinstance(existing_document, dict) else None
+    existing_progress = (
+        existing_document.get("progress") if isinstance(existing_document, dict) else None
+    )
     existing_statuses = (
         existing_progress.get("sections") if isinstance(existing_progress, dict) else None
     )
-    ready_ids = {
-        section_id
-        for section_id, status in existing_statuses.items()
-        if isinstance(existing_statuses, dict) and status == "ready"
-    } if isinstance(existing_statuses, dict) else set()
+    ready_ids = (
+        {
+            section_id
+            for section_id, status in existing_statuses.items()
+            if isinstance(existing_statuses, dict) and status == "ready"
+        }
+        if isinstance(existing_statuses, dict)
+        else set()
+    )
     preserved_ready_sections = [
         deepcopy(section)
         for section in existing_document.get("sections", [])
@@ -909,14 +904,9 @@ async def _attempt_chunked_assembly(
     resource_spec: dict[str, Any],
     display_title: str | None = None,
 ) -> None:
-    failed_sections = [
-        brief.section_id
-        for brief in briefs
-        if getattr(brief, "_failed", False)
-    ]
+    failed_sections = [brief.section_id for brief in briefs if getattr(brief, "_failed", False)]
     print(
-        f"\n[ASSEMBLY ATTEMPT] generation_id={generation_id}"
-        f" sections={len(briefs)}",
+        f"\n[ASSEMBLY ATTEMPT] generation_id={generation_id} sections={len(briefs)}",
         flush=True,
     )
     try:
@@ -997,8 +987,7 @@ async def _attempt_chunked_assembly(
         },
     )
     print(
-        f"\n[EXECUTION STARTING] generation_id={generation_id}"
-        f" blueprint_id={blueprint_id}",
+        f"\n[EXECUTION STARTING] generation_id={generation_id} blueprint_id={blueprint_id}",
         flush=True,
     )
     try:
@@ -1054,33 +1043,30 @@ async def _generate_shared_pack_items(
         ready_card_ids = {
             card.id
             for card in cards
-            if len(
-                [
-                    item
-                    for item in item_rows
-                    if item.card_id == card.id and not item.stale
-                ]
-            )
-            == 5
+            if len([item for item in item_rows if item.card_id == card.id and not item.stale]) == 5
         }
 
     notation = plan.variant_spec().voice.notation
     pending_cards = [row for row in cards if row.id not in ready_card_ids]
-    results: list[ItemGenerationResult] = list(
-        await asyncio.gather(
-            *(
-                execute_items(
-                    _approved_card_for_items(
-                        row,
-                        subject=form.subject,
-                        level=form.grade_level,
-                        notation=notation,
+    results: list[ItemGenerationResult] = (
+        list(
+            await asyncio.gather(
+                *(
+                    execute_items(
+                        _approved_card_for_items(
+                            row,
+                            subject=form.subject,
+                            level=form.grade_level,
+                            notation=notation,
+                        )
                     )
+                    for row in pending_cards
                 )
-                for row in pending_cards
             )
         )
-    ) if pending_cards else []
+        if pending_cards
+        else []
+    )
 
     if results:
         await _persist_item_results(pack_id, results)
@@ -1166,10 +1152,7 @@ async def _persist_item_results(
                         for option in item.options
                     ],
                     "correct_key": correct.key,
-                    "diagnoses": {
-                        option.key: option.diagnoses
-                        for option in item.options
-                    },
+                    "diagnoses": {option.key: option.diagnoses for option in item.options},
                     "stale": False,
                 }
                 if existing is None:
@@ -1222,9 +1205,7 @@ async def _run_chunked_stage2_pipeline(
             writer = V3GenerationWriter(async_session_factory)
             await writer.record_prompt_hashes(generation_id, prompt_hashes)
         except Exception:  # noqa: BLE001
-            logger.exception(
-                "Failed to stamp prompt hashes generation_id=%s", generation_id
-            )
+            logger.exception("Failed to stamp prompt hashes generation_id=%s", generation_id)
 
         state = await load_chunked_state(generation_id)
         plan_raw = state.get("structural_plan")
@@ -1291,10 +1272,18 @@ async def _run_chunked_stage2_pipeline(
 
         # 5.1: items read only card fields; stage2 lanes read only the approved plan —
         # overlap them. Lanes own brief→prose→questions (no all-briefs-first barrier).
-        _item_summary, briefs = await asyncio.gather(_items_job(), _stage2_job())
+        item_task = asyncio.create_task(_items_job())
+        stage2_task = asyncio.create_task(_stage2_job())
+        try:
+            _item_summary, briefs = await asyncio.gather(item_task, stage2_task)
+        except BaseException:
+            for task in (item_task, stage2_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(item_task, stage2_task, return_exceptions=True)
+            raise
         print(
-            f"\n[STAGE2 PIPELINE LANES DONE] generation_id={generation_id}"
-            f" briefs={len(briefs)}",
+            f"\n[STAGE2 PIPELINE LANES DONE] generation_id={generation_id} briefs={len(briefs)}",
             flush=True,
         )
         await _attempt_chunked_assembly(
@@ -1362,8 +1351,7 @@ def _variant_plan_for_fanout(
     variant_plans = state.get("variant_structural_plans")
     selected_plan = (
         deepcopy(variant_plans.get(variant_label))
-        if isinstance(variant_plans, dict)
-        and isinstance(variant_plans.get(variant_label), dict)
+        if isinstance(variant_plans, dict) and isinstance(variant_plans.get(variant_label), dict)
         else deepcopy(state.get("structural_plan"))
     )
     canonical_plan = state.get("structural_plan")
@@ -1385,17 +1373,10 @@ async def _prepare_variant_generations(
     variants_raw = state.get("variants")
     if not isinstance(pack_id, str) or not isinstance(variants_raw, list):
         return {}
-    variants = [
-        VariantSpec.model_validate(raw)
-        for raw in variants_raw
-        if isinstance(raw, dict)
-    ]
+    variants = [VariantSpec.model_validate(raw) for raw in variants_raw if isinstance(raw, dict)]
     existing_map = state.get("variant_generation_ids")
     generation_ids = (
-        {
-            str(label): str(generation_id)
-            for label, generation_id in existing_map.items()
-        }
+        {str(label): str(generation_id) for label, generation_id in existing_map.items()}
         if isinstance(existing_map, dict)
         else {}
     )
@@ -1537,8 +1518,7 @@ async def post_chunked_plan_start(
     pack_id = str(uuid.uuid4())
     form = body.form
     variants = [
-        VariantSpec.model_validate(variant.model_dump(mode="json"))
-        for variant in body.variants
+        VariantSpec.model_validate(variant.model_dump(mode="json")) for variant in body.variants
     ] or [core_variant_spec()]
     labels = [variant.label.casefold() for variant in variants]
     if len(labels) != len(set(labels)):
@@ -1566,10 +1546,12 @@ async def post_chunked_plan_start(
                 learning_job_type="xplore_variants",
                 subject=form.subject.strip() or "General",
                 topic=form.topic.strip() or "Generated lesson",
-                pack_plan_json=json.dumps({
-                    "resources": resources,
-                    "shared_quiz": True,
-                }),
+                pack_plan_json=json.dumps(
+                    {
+                        "resources": resources,
+                        "shared_quiz": True,
+                    }
+                ),
                 status="pending",
                 resource_count=len(resources),
                 completed_count=0,
@@ -1596,10 +1578,7 @@ async def post_chunked_plan_start(
         {
             "stage": "stage1_running",
             "pack_id": pack_id,
-            "variants": [
-                variant.model_dump(mode="json")
-                for variant in variants
-            ],
+            "variants": [variant.model_dump(mode="json") for variant in variants],
             "execution_started": False,
             "failed_sections": [],
             **build_control_patch(pipeline),
@@ -1618,9 +1597,7 @@ async def post_chunked_plan_start(
             generation_id=generation_id,
             trace_id=str(uuid.uuid4()),
         )
-        await V3GenerationWriter(async_session_factory).mark_awaiting_review(
-            generation_id
-        )
+        await V3GenerationWriter(async_session_factory).mark_awaiting_review(generation_id)
         await persist_chunked_state(
             generation_id,
             {
@@ -1646,6 +1623,7 @@ async def post_chunked_plan_start(
         ) from exc
     except Exception as exc:  # noqa: BLE001
         import traceback
+
         tb = traceback.format_exc()
         print(
             f"\n[CHUNKED STAGE1 ERROR] generation_id={generation_id}\n"
@@ -1683,6 +1661,7 @@ async def _run_component_lectio_pipeline(
     user_id: str,
 ) -> None:
     """Background Component Lectio execution — never falls back to V3 Studio."""
+
     async def emit_event(event: str, payload: dict[str, Any]) -> None:
         await _chunked_emit_event(generation_id, event, payload)
 
@@ -1690,9 +1669,9 @@ async def _run_component_lectio_pipeline(
         state = await load_chunked_state(generation_id)
         plan_raw = state.get("structural_plan")
         if not isinstance(plan_raw, dict):
-            await persist_chunked_state(
+            await persist_component_lectio_failure(
                 generation_id,
-                {"stage": "assembly_blocked", "error": "No structural plan"},
+                RuntimeError("No structural plan"),
             )
             return
         plan = adapt_legacy_structural_plan(
@@ -1713,18 +1692,8 @@ async def _run_component_lectio_pipeline(
             title=display_title,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.exception(
-            "component_lectio pipeline failed generation_id=%s", generation_id
-        )
-        await persist_chunked_state(
-            generation_id,
-            {
-                "stage": "assembly_blocked",
-                "error": str(exc)[:400],
-                "error_type": type(exc).__name__,
-                "execution_started": True,
-            },
-        )
+        logger.exception("component_lectio pipeline failed generation_id=%s", generation_id)
+        await persist_component_lectio_failure(generation_id, exc)
         await emit_event(
             "generation_failed",
             {
@@ -1834,9 +1803,7 @@ async def get_card_library(
 ) -> list[V3CardLibraryItemDTO]:
     async with async_session_factory() as session:
         pack_rows = await session.execute(
-            select(LearningPackModel.id).where(
-                LearningPackModel.user_id == current_user.id
-            )
+            select(LearningPackModel.id).where(LearningPackModel.user_id == current_user.id)
         )
         generation_rows = await session.execute(
             select(GenerationModel.id, GenerationModel.pack_id).where(
@@ -1852,18 +1819,14 @@ async def get_card_library(
                 ConceptCardModel.id.desc(),
             )
         )
-        cards = [
-            card for card in rows.scalars()
-            if card.pack_id in owned_pack_ids
-        ]
+        cards = [card for card in rows.scalars() if card.pack_id in owned_pack_ids]
 
     needle = search.strip().casefold()
     if needle:
         cards = [
-            card for card in cards
-            if needle in " ".join(
-                [card.slug, card.title, card.objective]
-            ).casefold()
+            card
+            for card in cards
+            if needle in " ".join([card.slug, card.title, card.objective]).casefold()
         ]
     unique: list[ConceptCardModel] = []
     seen: set[str] = set()
@@ -1882,11 +1845,7 @@ async def get_card_library(
             title=card.title,
             objective=card.objective,
             prereqs=list(card.prereqs or []),
-            misconceptions=(
-                card.misconceptions
-                if isinstance(card.misconceptions, list)
-                else []
-            ),
+            misconceptions=(card.misconceptions if isinstance(card.misconceptions, list) else []),
             created_at=_iso(card.created_at),
         )
         for card in unique
@@ -1953,18 +1912,17 @@ async def reuse_concept_card(
             raise HTTPException(status_code=404, detail="Source concept card not found")
         source_scope = await session.get(LearningPackModel, source.pack_id)
         source_generation = await session.get(GenerationModel, source.pack_id)
-        source_owned = (
-            source_scope is not None and source_scope.user_id == current_user.id
-        ) or (
-            source_generation is not None
-            and source_generation.user_id == current_user.id
+        source_owned = (source_scope is not None and source_scope.user_id == current_user.id) or (
+            source_generation is not None and source_generation.user_id == current_user.id
         )
         if not source_owned:
             source_pack_generation = await session.execute(
-                select(GenerationModel.id).where(
+                select(GenerationModel.id)
+                .where(
                     GenerationModel.pack_id == source.pack_id,
                     GenerationModel.user_id == current_user.id,
-                ).limit(1)
+                )
+                .limit(1)
             )
             source_owned = source_pack_generation.first() is not None
         if not source_owned:
@@ -1995,9 +1953,7 @@ async def reuse_concept_card(
         target.source_card_id = source.id
         target.source_pack_id = source.pack_id
         await session.execute(
-            update(PackItemModel)
-            .where(PackItemModel.card_id == target.id)
-            .values(stale=True)
+            update(PackItemModel).where(PackItemModel.card_id == target.id).values(stale=True)
         )
         await session.commit()
         await session.refresh(target)
@@ -2064,32 +2020,17 @@ async def patch_pack_concept_card(
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-        previous_rows = (
-            card.misconceptions
-            if isinstance(card.misconceptions, list)
-            else []
-        )
-        previous = {
-            str(item.get("id")): item
-            for item in previous_rows
-            if isinstance(item, dict)
-        }
+        previous_rows = card.misconceptions if isinstance(card.misconceptions, list) else []
+        previous = {str(item.get("id")): item for item in previous_rows if isinstance(item, dict)}
         misconceptions: list[dict[str, str]] = []
         for item in body.misconceptions:
             old = previous.get(item.id)
-            unchanged = (
-                isinstance(old, dict)
-                and old.get("description") == item.description
-            )
+            unchanged = isinstance(old, dict) and old.get("description") == item.description
             misconceptions.append(
                 {
                     "id": item.id,
                     "description": item.description,
-                    "source": (
-                        str(old.get("source") or "drafted")
-                        if unchanged
-                        else "teacher"
-                    ),
+                    "source": (str(old.get("source") or "drafted") if unchanged else "teacher"),
                 }
             )
 
@@ -2098,9 +2039,7 @@ async def patch_pack_concept_card(
         card.misconceptions = misconceptions
         card.teacher_edited = True
         await session.execute(
-            update(PackItemModel)
-            .where(PackItemModel.card_id == card.id)
-            .values(stale=True)
+            update(PackItemModel).where(PackItemModel.card_id == card.id).values(stale=True)
         )
         await session.commit()
         await session.refresh(card)
@@ -2122,9 +2061,7 @@ async def _load_item_reviews(
     card_id: str | None = None,
 ) -> list[V3CardItemReviewDTO]:
     async with async_session_factory() as session:
-        card_query = select(ConceptCardModel).where(
-            ConceptCardModel.pack_id == pack_id
-        )
+        card_query = select(ConceptCardModel).where(ConceptCardModel.pack_id == pack_id)
         if card_id is not None:
             card_query = card_query.where(ConceptCardModel.slug == card_id)
         card_rows = await session.execute(
@@ -2133,9 +2070,7 @@ async def _load_item_reviews(
         cards = list(card_rows.scalars())
         item_query = select(PackItemModel).where(PackItemModel.pack_id == pack_id)
         if card_id is not None:
-            item_query = item_query.where(
-                PackItemModel.card_id.in_([card.id for card in cards])
-            )
+            item_query = item_query.where(PackItemModel.card_id.in_([card.id for card in cards]))
         item_rows = await session.execute(
             item_query.order_by(PackItemModel.card_id, PackItemModel.created_at, PackItemModel.id)
         )
@@ -2165,7 +2100,7 @@ async def _load_item_reviews(
                     elif option.diagnoses in coverage:
                         coverage[option.diagnoses] += 1
                 prefix = f"{pack_id}:"
-                question_id = row.id[len(prefix):] if row.id.startswith(prefix) else row.id
+                question_id = row.id[len(prefix) :] if row.id.startswith(prefix) else row.id
                 item_dtos.append(
                     V3PackItemDTO(
                         id=row.id,
@@ -2185,9 +2120,7 @@ async def _load_item_reviews(
                     items=item_dtos,
                     coverage=coverage,
                     missing_misconceptions=[
-                        item_id
-                        for item_id, count in coverage.items()
-                        if count == 0
+                        item_id for item_id, count in coverage.items() if count == 0
                     ],
                     unmapped_options=unmapped,
                     stale=any(bool(row.stale) for row in card_items),
@@ -2227,9 +2160,7 @@ async def patch_pack_item(
         if card is None:
             raise HTTPException(status_code=404, detail="Concept card not found")
         known_ids = {
-            str(item.get("id"))
-            for item in (card.misconceptions or [])
-            if isinstance(item, dict)
+            str(item.get("id")) for item in (card.misconceptions or []) if isinstance(item, dict)
         }
         options = [
             ItemOption(
@@ -2267,10 +2198,7 @@ async def patch_pack_item(
             for option in options
         ]
         row.correct_key = correct.key
-        row.diagnoses = {
-            option.key: option.diagnoses
-            for option in options
-        }
+        row.diagnoses = {option.key: option.diagnoses for option in options}
         row.stale = False
         card_id = row.card_id
         await session.commit()
@@ -2340,9 +2268,7 @@ async def post_pack_concept_cards_approve(
     )
     async with async_session_factory() as session:
         result = await session.execute(
-            select(ConceptCardModel).where(
-                ConceptCardModel.pack_id == card_pack_id
-            )
+            select(ConceptCardModel).where(ConceptCardModel.pack_id == card_pack_id)
         )
         cards = list(result.scalars())
         if not cards:
@@ -2369,11 +2295,7 @@ async def _load_xplore_pack(
 ) -> tuple[V3XplorePackDTO, LearningPackModel, GenerationModel]:
     async with async_session_factory() as session:
         pack = await session.get(LearningPackModel, pack_id)
-        if (
-            pack is None
-            or pack.user_id != user_id
-            or pack.learning_job_type != "xplore_variants"
-        ):
+        if pack is None or pack.user_id != user_id or pack.learning_job_type != "xplore_variants":
             raise HTTPException(status_code=404, detail="Xplore pack not found")
         rows = await session.execute(
             select(GenerationModel)
@@ -2382,11 +2304,7 @@ async def _load_xplore_pack(
         )
         generations = list(rows.scalars())
         coordinator = next(
-            (
-                generation
-                for generation in generations
-                if generation.pack_resource_id is None
-            ),
+            (generation for generation in generations if generation.pack_resource_id is None),
             None,
         )
         if coordinator is None:
@@ -2397,9 +2315,7 @@ async def _load_xplore_pack(
         shared_item_count = len(list(item_rows.scalars()))
 
     coordinator_state = (
-        coordinator.chunked_state_json
-        if isinstance(coordinator.chunked_state_json, dict)
-        else {}
+        coordinator.chunked_state_json if isinstance(coordinator.chunked_state_json, dict) else {}
     )
     variant_specs = [
         VariantSpec.model_validate(raw)
@@ -2413,14 +2329,11 @@ async def _load_xplore_pack(
     for spec in variant_specs:
         generation_id = generation_ids.get(spec.label)
         generation = (
-            generations_by_id.get(str(generation_id))
-            if generation_id is not None
-            else None
+            generations_by_id.get(str(generation_id)) if generation_id is not None else None
         )
         state = (
             generation.chunked_state_json
-            if generation is not None
-            and isinstance(generation.chunked_state_json, dict)
+            if generation is not None and isinstance(generation.chunked_state_json, dict)
             else {}
         )
         stage = str(state.get("stage") or "pending")
@@ -2432,10 +2345,7 @@ async def _load_xplore_pack(
         issues = []
         if isinstance(state.get("error"), str) and state["error"].strip():
             issues.append(state["error"].strip())
-        issues.extend(
-            f"Section failed: {section_id}"
-            for section_id in failed_sections
-        )
+        issues.extend(f"Section failed: {section_id}" for section_id in failed_sections)
         if generation is None:
             status = "pending"
         elif generation.status == "deleted":
@@ -2462,8 +2372,7 @@ async def _load_xplore_pack(
 
     live_variants = [variant for variant in variants if variant.status != "deleted"]
     editor_ready = bool(live_variants) and all(
-        variant.status in {"landed", "failed"}
-        for variant in live_variants
+        variant.status in {"landed", "failed"} for variant in live_variants
     )
     landed_count = sum(variant.status == "landed" for variant in live_variants)
     if editor_ready and landed_count:
@@ -2518,13 +2427,15 @@ async def post_xplore_variant_retry(
 
     state = await load_chunked_state(variant.generation_id)
     plan_raw = state.get("structural_plan")
-    section_ids = [
-        str(section.get("id"))
-        for section in plan_raw.get("sections", [])
+    section_ids = (
+        [
+            str(section.get("id"))
+            for section in plan_raw.get("sections", [])
+            if isinstance(plan_raw, dict) and isinstance(section, dict) and section.get("id")
+        ]
         if isinstance(plan_raw, dict)
-        and isinstance(section, dict)
-        and section.get("id")
-    ] if isinstance(plan_raw, dict) else []
+        else []
+    )
     await persist_chunked_state(
         variant.generation_id,
         {
@@ -2584,7 +2495,8 @@ async def delete_xplore_variant(
 
     coordinator_state = await load_chunked_state(coordinator.id)
     variants = [
-        raw for raw in coordinator_state.get("variants", [])
+        raw
+        for raw in coordinator_state.get("variants", [])
         if isinstance(raw, dict) and raw.get("label") != variant_label
     ]
     generation_ids = {
@@ -2646,7 +2558,9 @@ async def post_chunked_plan_approve(
             detail="Generation is not awaiting explicit approval",
         )
     if stage in {"stage2_error", "assembly_blocked"}:
-        claimed = await V3GenerationWriter(async_session_factory).claim_resume_attempt(generation_id)
+        claimed = await V3GenerationWriter(async_session_factory).claim_resume_attempt(
+            generation_id
+        )
         if not claimed:
             latest = await load_chunked_state(generation_id)
             return _normalize_chunked_state(generation_id, latest)
@@ -2663,10 +2577,7 @@ async def post_chunked_plan_approve(
         return _normalize_chunked_state(generation_id, latest)
 
     pipeline = resolve_generation_pipeline(state, generation_id=generation_id)
-    variants = [
-        raw for raw in state.get("variants", [])
-        if isinstance(raw, dict)
-    ]
+    variants = [raw for raw in state.get("variants", []) if isinstance(raw, dict)]
     if body is not None and body.display_title and body.display_title.strip():
         display_title = body.display_title.strip()
     else:
@@ -2674,13 +2585,7 @@ async def post_chunked_plan_approve(
 
     # Component Lectio owns execution when selected — never silent-fallback to Studio.
     if pipeline == "component_lectio":
-        patch: dict[str, Any] = {
-            "stage": "component_lectio_running",
-            "execution_started": True,
-        }
-        if display_title:
-            patch["display_title"] = display_title
-        await persist_chunked_state(generation_id, patch)
+        await persist_component_lectio_start(generation_id, display_title=display_title)
         task = asyncio.create_task(
             _run_component_lectio_pipeline(
                 generation_id=generation_id,
@@ -2790,9 +2695,7 @@ async def post_chunked_plan_regenerate(
             generation_id=generation_id,
             trace_id=str(uuid.uuid4()),
         )
-        await V3GenerationWriter(async_session_factory).mark_awaiting_review(
-            generation_id
-        )
+        await V3GenerationWriter(async_session_factory).mark_awaiting_review(generation_id)
         await persist_chunked_state(
             generation_id,
             {
@@ -2821,7 +2724,9 @@ async def post_chunked_plan_regenerate(
     return _normalize_chunked_state(generation_id, latest)
 
 
-@v3_studio_router.post("/chunked/{generation_id}/retry-section", response_model=V3ChunkedPlanStateDTO)
+@v3_studio_router.post(
+    "/chunked/{generation_id}/retry-section", response_model=V3ChunkedPlanStateDTO
+)
 async def post_chunked_retry_section(
     generation_id: str,
     body: V3ChunkedRetrySectionRequest,
@@ -2853,13 +2758,7 @@ async def post_chunked_retry_section(
             user_id=current_user.id,
             blueprint_id=str(state.get("blueprint_id") or f"chunked-plan-{generation_id}"),
         )
-        await persist_chunked_state(
-            generation_id,
-            {
-                "stage": "component_lectio_running",
-                "execution_started": True,
-            },
-        )
+        await persist_component_lectio_start(generation_id)
         task = asyncio.create_task(
             _run_component_lectio_pipeline(
                 generation_id=generation_id,
@@ -2871,20 +2770,23 @@ async def post_chunked_retry_section(
         return _normalize_chunked_state(generation_id, latest)
 
     failed_sections = [
-        section for section in state.get("failed_sections", [])
-        if isinstance(section, str)
+        section for section in state.get("failed_sections", []) if isinstance(section, str)
     ]
     if body.section_id not in failed_sections:
         raise HTTPException(status_code=409, detail="Section is not marked as failed.")
     if state.get("stage") == "assembly_blocked":
-        claimed = await V3GenerationWriter(async_session_factory).claim_resume_attempt(generation_id)
+        claimed = await V3GenerationWriter(async_session_factory).claim_resume_attempt(
+            generation_id
+        )
         if not claimed:
             latest = await load_chunked_state(generation_id)
             return _normalize_chunked_state(generation_id, latest)
 
     running_task = _chunked_stage2_tasks.get(generation_id)
     if running_task is not None and not running_task.done():
-        raise HTTPException(status_code=409, detail="Stage 2 is already running for this generation.")
+        raise HTTPException(
+            status_code=409, detail="Stage 2 is already running for this generation."
+        )
 
     plan = adapt_legacy_structural_plan(
         plan_raw,
@@ -2951,9 +2853,7 @@ async def post_chunked_retry_section(
         )
 
     failed_after_retry = [
-        brief.section_id
-        for brief in updated_briefs
-        if getattr(brief, "_failed", False)
+        brief.section_id for brief in updated_briefs if getattr(brief, "_failed", False)
     ]
     await _chunked_emit_event(
         generation_id,
@@ -3169,7 +3069,9 @@ async def _pump_sse_to_queue(
                     status = str(payload.get("status") or "")
                     await generation_writer.update_document_progress_stage(
                         generation_id,
-                        stage="completed" if status in {"passed", "passed_with_warnings"} else "failed",
+                        stage="completed"
+                        if status in {"passed", "passed_with_warnings"}
+                        else "failed",
                     )
                 await generation_writer.write_resource_finalised(generation_id, payload)
                 return
@@ -3248,9 +3150,7 @@ async def _pump_sse_to_queue(
             # Runs as its own retained task so a cancelled pump still lands the
             # generation on a terminal snapshot and the frontend stops polling.
             _spawn_background_task(
-                _write_pump_failure(
-                    pump_failure or "Generation ended without a terminal event."
-                )
+                _write_pump_failure(pump_failure or "Generation ended without a terminal event.")
             )
         _snapshot_write_locks.pop(generation_id, None)
         queue.put_nowait(None)
@@ -3285,7 +3185,9 @@ async def post_v3_generate_start(
     )
     generation_writer = V3GenerationWriter(async_session_factory)
     try:
-        effective_title = (body.display_title or blueprint.metadata.title).strip() or blueprint.metadata.title
+        effective_title = (
+            body.display_title or blueprint.metadata.title
+        ).strip() or blueprint.metadata.title
         await trace_writer.start_run(
             user_id=current_user.id,
             blueprint_id=body.blueprint_id,
@@ -3595,9 +3497,7 @@ async def _with_shared_pack_assessment(
         if not items:
             return document_json
         card_result = await session.execute(
-            select(ConceptCardModel).where(
-                ConceptCardModel.pack_id == model.pack_id
-            )
+            select(ConceptCardModel).where(ConceptCardModel.pack_id == model.pack_id)
         )
         cards = list(card_result.scalars())
 
@@ -3606,11 +3506,7 @@ async def _with_shared_pack_assessment(
             misconception.get("description") or misconception.get("id")
         )
         for card in cards
-        for misconception in (
-            card.misconceptions
-            if isinstance(card.misconceptions, list)
-            else []
-        )
+        for misconception in (card.misconceptions if isinstance(card.misconceptions, list) else [])
         if isinstance(misconception, dict) and misconception.get("id")
     }
     item_payloads = [
@@ -3626,10 +3522,7 @@ async def _with_shared_pack_assessment(
     ]
     quiz_sections = []
     for index, item in enumerate(item_payloads, start=1):
-        options = [
-            option for option in item["options"]
-            if isinstance(option, dict)
-        ]
+        options = [option for option in item["options"] if isinstance(option, dict)]
         quiz_sections.append(
             {
                 "section_id": f"shared-diagnostic-{index:02d}",
@@ -3637,9 +3530,7 @@ async def _with_shared_pack_assessment(
                 "card_id": item["card_id"],
                 "header": {
                     "title": (
-                        "Shared diagnostic"
-                        if index == 1
-                        else f"Shared diagnostic · {index}"
+                        "Shared diagnostic" if index == 1 else f"Shared diagnostic · {index}"
                     ),
                     "subject": model.subject,
                     "grade_band": "secondary",
@@ -3671,9 +3562,7 @@ async def _with_shared_pack_assessment(
         section
         for section in next_document.get("sections", [])
         if isinstance(section, dict)
-        and not str(section.get("section_id") or "").startswith(
-            "shared-diagnostic-"
-        )
+        and not str(section.get("section_id") or "").startswith("shared-diagnostic-")
     ]
     next_document["sections"] = [*base_sections, *quiz_sections]
     next_document["answer_key"] = build_diagnostic_answer_key_content(
@@ -3757,7 +3646,11 @@ def _single_component_order(
     generation_id: str,
 ) -> SectionWriterWorkOrder:
     cloned = order.model_copy(deep=True)
-    selected = next(component for component in cloned.section.components if component.component_id == component_id)
+    selected = next(
+        component
+        for component in cloned.section.components
+        if component.component_id == component_id
+    )
     selected.corrections = [
         *selected.corrections,
         Correction(
@@ -3779,9 +3672,7 @@ def _card_section_orders(
 ) -> list[SectionWriterWorkOrder]:
     blueprint = ProductionBlueprint.model_validate(artifact["blueprint"])
     section_ids = {
-        section.section_id
-        for section in blueprint.sections
-        if section.card_id == card_id
+        section.section_id for section in blueprint.sections if section.card_id == card_id
     }
     if not section_ids:
         raise HTTPException(status_code=404, detail="Card repair target not found")
@@ -3849,7 +3740,9 @@ def _replace_visual_blocks(
 ) -> None:
     raw_blocks = document_json.get("visual_blocks")
     if not isinstance(raw_blocks, list):
-        document_json["visual_blocks"] = [b.model_dump(mode="json", exclude_none=True) for b in new_blocks]
+        document_json["visual_blocks"] = [
+            b.model_dump(mode="json", exclude_none=True) for b in new_blocks
+        ]
         return
 
     source_work_order_id = target.source_work_order_id
@@ -3883,7 +3776,11 @@ def _patch_section_visuals(
     for section in sections:
         if not isinstance(section, dict) or section.get("section_id") not in affected_ids:
             continue
-        ready_blocks = [block for block in new_blocks if block.attaches_to == section.get("section_id") and block.image_url]
+        ready_blocks = [
+            block
+            for block in new_blocks
+            if block.attaches_to == section.get("section_id") and block.image_url
+        ]
         section.pop("diagram", None)
         section.pop("diagram_series", None)
         if not ready_blocks:
@@ -4008,8 +3905,7 @@ async def repair_v3_card(
     issue_hints = [
         str(issue.get("qc_correction_hint") or issue.get("message") or "").strip()
         for issue in document_json.get("booklet_issues", [])
-        if isinstance(issue, dict)
-        and issue.get("repair_target_id") == card_id
+        if isinstance(issue, dict) and issue.get("repair_target_id") == card_id
     ]
     supplied_hint = body.correction_hint.strip() if body and body.correction_hint else ""
     correction_hint = supplied_hint or "\n".join(hint for hint in issue_hints if hint)
@@ -4044,18 +3940,12 @@ async def repair_v3_card(
     prior_issues = [
         issue
         for issue in document_json.get("booklet_issues", [])
-        if (
-            isinstance(issue, dict)
-            and issue.get("repair_target_id") == card_id
-        )
+        if (isinstance(issue, dict) and issue.get("repair_target_id") == card_id)
     ]
     retained_issues = [
         issue
         for issue in document_json.get("booklet_issues", [])
-        if not (
-            isinstance(issue, dict)
-            and issue.get("repair_target_id") == card_id
-        )
+        if not (isinstance(issue, dict) and issue.get("repair_target_id") == card_id)
     ]
     blueprint = ProductionBlueprint.model_validate(artifact["blueprint"])
     rubric = next(
@@ -4099,9 +3989,7 @@ async def repair_v3_card(
                         if check.check == "notation"
                         else "card_misconception_unconfronted"
                     ),
-                    "message": (
-                        f"Card '{card_id}' failed {check.check}: {check.reason}"
-                    ),
+                    "message": (f"Card '{card_id}' failed {check.check}: {check.reason}"),
                     "section_id": f"{blueprint.voice.variant_label}:{card_id}",
                     "repair_target_id": card_id,
                     "qc_correction_hint": check.correction_hint or check.reason,
@@ -4221,11 +4109,7 @@ async def post_v3_export_pdf(
     sections = document_json.get("sections")
     if not isinstance(sections, list) or not sections:
         raise HTTPException(status_code=404, detail="Document not found")
-    template_id = (
-        model.resolved_template_id
-        or model.requested_template_id
-        or "guided-concept-path"
-    )
+    template_id = model.resolved_template_id or model.requested_template_id or "guided-concept-path"
 
     auth_token = jwt_handler.create_access_token(current_user.id, current_user.email)
     pdf_request = PDFExportRequest(

@@ -6,8 +6,9 @@ Legality still comes from lesson.yaml + candidate resolver + Lectio cards.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, get_args
 
+from contracts.section_content import ReflectionType
 from generation.component_lectio.errors import (
     AnswerKeyMappingError,
     UnsupportedProductionComponent,
@@ -58,6 +59,9 @@ CONTENT_COMPONENT_IDS: frozenset[str] = frozenset(
     }
 )
 
+_REFLECTION_TYPES = "|".join(get_args(ReflectionType))
+
+
 SCHEMA_SUMMARIES: dict[str, str] = {
     "practice-stack": (
         "PracticeContent: {problems:[{difficulty, question, hints:[{level,text}], "
@@ -72,7 +76,7 @@ SCHEMA_SUMMARIES: dict[str, str] = {
         "FillInBlankContent: {instruction?, segments:[{text,is_blank,answer?}], word_bank?}"
     ),
     "reflection-prompt": (
-        "ReflectionContent: {prompt, type(open|pair-share|sentence-stem|timed|connect|predict|value), "
+        f"ReflectionContent: {{prompt, type({_REFLECTION_TYPES}), "
         "space?, sentence_stem?, time_minutes?, pair_instruction?}"
     ),
     "student-textbox": "StudentTextboxContent: {prompt, lines?, label?}",
@@ -92,7 +96,9 @@ def _envelope(order: ExactWorkOrder, content: dict[str, Any], **extra: Any) -> d
     return payload
 
 
-def assemble_content_payload(order: ExactWorkOrder, content: dict[str, Any], **extra: Any) -> dict[str, Any]:
+def assemble_content_payload(
+    order: ExactWorkOrder, content: dict[str, Any], **extra: Any
+) -> dict[str, Any]:
     """Content lane: executor already emits Lectio field content in block.data."""
     return _envelope(order, content, **extra)
 
@@ -161,7 +167,9 @@ def _question_refs_from_fill_in_blank(content: dict[str, Any]) -> list[dict[str,
     ]
 
 
-def _question_refs_from_promptish(content: dict[str, Any], *, key: str = "prompt") -> list[dict[str, Any]]:
+def _question_refs_from_promptish(
+    content: dict[str, Any], *, key: str = "prompt"
+) -> list[dict[str, Any]]:
     return [
         {
             "id": "q1",
@@ -193,9 +201,7 @@ def assemble_items_content(
     """Convert question-writer output into exact Lectio item-component content."""
     component_id = order.locked_component_id
     if component_id not in ITEM_COMPONENT_IDS:
-        raise UnsupportedProductionComponent(
-            f"No items payload strategy for {component_id}"
-        )
+        raise UnsupportedProductionComponent(f"No items payload strategy for {component_id}")
     if not blocks:
         raise ValueError(f"items executor returned no blocks for {order.block_id}")
 
@@ -207,9 +213,7 @@ def assemble_items_content(
     if set(content.keys()) == {"items"} or (
         "items" in content and "problems" not in content and component_id == "practice-stack"
     ):
-        raise ValueError(
-            f"Generic items wrapper is not valid Lectio content for {component_id}"
-        )
+        raise ValueError(f"Generic items wrapper is not valid Lectio content for {component_id}")
 
     refs = extract_question_refs(component_id, content)
     if not refs and primary.expected_answer:
@@ -241,9 +245,36 @@ def assemble_visual_content(
                 f"Visual writer changed component_id from '{order.locked_component_id}' "
                 f"to '{block.component_id}'"
             )
+        if block.status in {"failed", "omitted_quality"}:
+            raise ValueError(
+                f"visual executor returned unusable status '{block.status}' for {order.block_id}"
+            )
+
+    def usable_source(block: GeneratedVisualBlock) -> bool:
+        return bool(
+            (isinstance(block.image_url, str) and block.image_url.strip())
+            or (isinstance(block.html_content, str) and block.html_content.strip())
+        )
+
+    flagged = [block for block in blocks if block.status == "flagged_quality"]
+    quality_metadata: dict[str, Any] = {}
+    if flagged:
+        reasons = [reason for block in flagged for reason in block.qc_reasons]
+        correction_hints = [
+            block.qc_correction_hint.strip()
+            for block in flagged
+            if block.qc_correction_hint and block.qc_correction_hint.strip()
+        ]
+        quality_metadata["visual_quality"] = {
+            "status": "flagged_quality",
+            "reasons": list(dict.fromkeys(reasons)),
+            "correction_hint": "\n".join(dict.fromkeys(correction_hints)) or None,
+        }
 
     if component_id == "diagram-block":
         block = blocks[0]
+        if not usable_source(block):
+            raise ValueError("diagram-block missing usable visual source")
         content = {
             "caption": block.caption or order.purpose or "Diagram",
             "alt_text": block.alt_text or block.caption or order.purpose or "Diagram",
@@ -252,7 +283,7 @@ def assemble_visual_content(
             content["image_url"] = block.image_url
         if block.html_content:
             content["svg_content"] = block.html_content
-        return _envelope(order, content)
+        return _envelope(order, content, **quality_metadata)
 
     if component_id == "diagram-compare":
         if len(blocks) < 2:
@@ -261,6 +292,8 @@ def assemble_visual_content(
                 "generic single-image output is insufficient"
             )
         before, after = blocks[0], blocks[1]
+        if not usable_source(before) or not usable_source(after):
+            raise ValueError("diagram-compare missing before/after visual source")
         content: dict[str, Any] = {
             "before_label": "Before",
             "after_label": "After",
@@ -275,12 +308,7 @@ def assemble_visual_content(
             content["before_svg"] = before.html_content
         if after.html_content:
             content["after_svg"] = after.html_content
-        if not any(
-            content.get(key)
-            for key in ("before_image_url", "before_svg", "after_image_url", "after_svg")
-        ):
-            raise ValueError("diagram-compare missing before/after visual source")
-        return _envelope(order, content)
+        return _envelope(order, content, **quality_metadata)
 
     if component_id == "diagram-series":
         if len(blocks) < 2:
@@ -289,6 +317,8 @@ def assemble_visual_content(
             )
         diagrams = []
         for idx, block in enumerate(blocks, start=1):
+            if not usable_source(block):
+                raise ValueError(f"diagram-series frame {idx} missing usable visual source")
             step: dict[str, Any] = {
                 "step_label": f"Step {idx}",
                 "caption": block.caption or f"Step {idx}",
@@ -302,11 +332,9 @@ def assemble_visual_content(
             "title": order.purpose or "Diagram series",
             "diagrams": diagrams,
         }
-        return _envelope(order, content)
+        return _envelope(order, content, **quality_metadata)
 
-    raise UnsupportedProductionComponent(
-        f"No visual payload strategy for {component_id}"
-    )
+    raise UnsupportedProductionComponent(f"No visual payload strategy for {component_id}")
 
 
 def assemble_answer_key_content(
@@ -325,9 +353,7 @@ def assemble_answer_key_content(
         question = str(ref.get("question") or "").strip()
         correct = str(ref.get("expected_answer") or ref.get("correct_answer") or "").strip()
         if not question:
-            raise AnswerKeyMappingError(
-                f"answer-key mapping missing question text for entry {idx}"
-            )
+            raise AnswerKeyMappingError(f"answer-key mapping missing question text for entry {idx}")
         if not correct:
             raise AnswerKeyMappingError(
                 f"answer-key mapping missing correct_answer for entry {idx}"

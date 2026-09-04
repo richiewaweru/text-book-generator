@@ -13,6 +13,7 @@ from core.auth.middleware import get_current_user
 from core.database.models import GenerationModel, UserModel
 from core.database.session import async_session_factory
 from core.entities.user import User
+from generation.pipeline_dispatch import build_control_patch
 from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
 from generation.v3_studio.session_store import v3_studio_store
 from v3_blueprint.planning.models import (
@@ -409,6 +410,115 @@ async def test_chunked_approve_marks_stage2_running() -> None:
     assert resp.json()["stage"] == "stage2_running"
 
 
+async def _seed_component_lectio_endpoint_generation(
+    *,
+    generation_id: str,
+    stage: str,
+) -> None:
+    from generation.v3_studio.router import _ensure_chunked_generation_row, _ensure_chunked_stream
+
+    await _ensure_user(TEST_USER_A)
+    await _ensure_chunked_generation_row(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        subject="Math",
+        context="Equivalent fractions",
+    )
+    await _ensure_chunked_stream(
+        generation_id=generation_id,
+        user_id=TEST_USER_A.id,
+        blueprint_id=f"chunked-plan-{generation_id}",
+    )
+    signals, form = _seed_context_models()
+    await persist_structural_plan(
+        generation_id,
+        _sample_structural_plan(),
+        signals=signals,
+        form=form,
+        resource_spec={"resource_type": "lesson", "depth": "standard", "spec": {}, "rendered": "x"},
+    )
+    await persist_chunked_state(
+        generation_id,
+        {
+            "stage": stage,
+            "execution_started": False,
+            "failed_sections": ["intro"],
+            **build_control_patch("component_lectio"),
+        },
+    )
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        assert model is not None
+        model.status = "failed"
+        model.document_json = {"stale": True}
+        model.error = "stale error"
+        model.error_type = "StaleError"
+        model.error_code = "stale_error"
+        model.quality_passed = False
+        model.completed_at = model.created_at
+        await session.commit()
+
+
+async def _assert_component_lectio_running_state(generation_id: str) -> None:
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        assert model is not None
+        state = model.chunked_state_json or {}
+        assert model.status == "running"
+        assert model.document_json is None
+        assert model.error is None
+        assert model.error_type is None
+        assert model.error_code is None
+        assert model.quality_passed is None
+        assert model.completed_at is None
+        assert model.last_heartbeat is not None
+        assert state["stage"] == "component_lectio_running"
+        assert state["execution_started"] is True
+
+
+@pytest.mark.asyncio
+async def test_component_lectio_approve_commits_scalar_running_state_before_schedule() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    generation_id = str(uuid.uuid4())
+    await _seed_component_lectio_endpoint_generation(
+        generation_id=generation_id,
+        stage="awaiting_review",
+    )
+
+    with patch(
+        "generation.v3_studio.router._run_component_lectio_pipeline",
+        new=AsyncMock(return_value=None),
+    ):
+        async with _client() as client:
+            response = await client.post(f"/api/v1/v3/chunked/{generation_id}/approve")
+
+    assert response.status_code == 200
+    await _assert_component_lectio_running_state(generation_id)
+
+
+@pytest.mark.asyncio
+async def test_component_lectio_retry_commits_scalar_running_state_before_schedule() -> None:
+    app.dependency_overrides[get_current_user] = _override_user_a
+    generation_id = str(uuid.uuid4())
+    await _seed_component_lectio_endpoint_generation(
+        generation_id=generation_id,
+        stage="assembly_blocked",
+    )
+
+    with patch(
+        "generation.v3_studio.router._run_component_lectio_pipeline",
+        new=AsyncMock(return_value=None),
+    ):
+        async with _client() as client:
+            response = await client.post(
+                f"/api/v1/v3/chunked/{generation_id}/retry-section",
+                json={"section_id": "intro"},
+            )
+
+    assert response.status_code == 200
+    await _assert_component_lectio_running_state(generation_id)
+
+
 @pytest.mark.asyncio
 async def test_chunked_approve_is_user_scoped() -> None:
     app.dependency_overrides[get_current_user] = _override_user_a
@@ -688,7 +798,7 @@ async def test_stage2_pipeline_exception_persists_resumeable_error_state() -> No
 
     with (
         patch(
-            "generation.v3_studio.router.resume_stage2",
+            "v3_execution.runtime.stage2_lanes.run_stage2_lanes",
             new=AsyncMock(side_effect=RuntimeError("stage2 exploded")),
         ),
         patch("generation.v3_studio.router._chunked_emit_event", new=AsyncMock()),
