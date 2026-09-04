@@ -77,9 +77,7 @@ def test_validate_rejects_budget_exhaustion() -> None:
     if "practice-stack" not in candidates.candidates:
         pytest.skip("practice-stack not in candidates")
     choice = SelectorChoice(
-        components=[
-            SelectedComponent(slug="practice-stack", purpose="practice", reason="r")
-        ]
+        components=[SelectedComponent(slug="practice-stack", purpose="practice", reason="r")]
     )
     errors = validate_selector_choice(
         choice,
@@ -119,6 +117,50 @@ def test_canonical_plan_deterministic_ids_across_subjects() -> None:
         )
         assert again.plan_hash == first.plan_hash
     assert len(set(hashes)) == len(SUBJECT_FIXTURES)
+
+
+def test_canonical_plan_retains_selection_evidence_outside_hash() -> None:
+    intent = _intent_plan_for_subject(**SUBJECT_FIXTURES[0])
+    plan = intent_plan_to_structural_plan(intent)
+
+    def traced_selector(context):
+        allowed = context["allowed_components"]
+        picked = allowed[0]["component_id"]
+        return SelectorChoice(
+            components=[
+                SelectedComponent(
+                    slug=picked,
+                    purpose=f"Use {picked} for this intent.",
+                    reason="best legal candidate",
+                )
+            ],
+            budget_pressure="none",
+        )
+
+    canonical, _ = build_canonical_execution_plan(plan, selector=traced_selector)
+
+    assert len(canonical.selection_trace) == len(plan.sections)
+    first = canonical.selection_trace[0]
+    assert first["candidate_set"]
+    assert first["budget_before"]
+    assert first["legal"] is True
+    assert first["selected"][0]["reason"] == "best legal candidate"
+    assert first["selected"][0]["block_id"]
+    assert first["selected"][0]["lane"]
+
+    def same_execution_different_reason(context):
+        choice = traced_selector(context)
+        choice.components[0].reason = "same choice, different explanation"
+        return choice
+
+    reason_changed, _ = build_canonical_execution_plan(
+        plan,
+        selector=same_execution_different_reason,
+    )
+    assert reason_changed.plan_hash == canonical.plan_hash
+    assert (
+        reason_changed.selection_trace[0]["selected"][0]["reason"] != first["selected"][0]["reason"]
+    )
 
 
 def test_misconception_prefers_pitfall_over_comparison_when_available() -> None:
@@ -169,9 +211,7 @@ def test_out_of_set_selection_raises() -> None:
 
     def bad_selector(_context):
         return SelectorChoice(
-            components=[
-                SelectedComponent(slug="timeline-block", purpose="nope", reason="x")
-            ]
+            components=[SelectedComponent(slug="timeline-block", purpose="nope", reason="x")]
         )
 
     with pytest.raises(SelectionValidationError):

@@ -86,6 +86,7 @@ class CanonicalExecutionPlan(BaseModel):
     blocks: list[CanonicalBlock]
     component_budget_remaining: dict[str, int] = Field(default_factory=dict)
     max_per_section: dict[str, int] = Field(default_factory=dict)
+    selection_trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @dataclass
@@ -184,9 +185,7 @@ def validate_selector_choice(
 
     for item in choice.components:
         if item.slug not in allowed:
-            errors.append(
-                f"role '{candidates.role}' selected '{item.slug}' outside candidate set"
-            )
+            errors.append(f"role '{candidates.role}' selected '{item.slug}' outside candidate set")
             continue
         if item.slug in seen_slugs:
             errors.append(f"role '{candidates.role}' duplicated component '{item.slug}'")
@@ -195,9 +194,7 @@ def validate_selector_choice(
             errors.append(f"role '{candidates.role}' component '{item.slug}' missing purpose")
         section_field = _section_field_for(item.slug)
         if not section_field:
-            errors.append(
-                f"role '{candidates.role}' component '{item.slug}' missing section_field"
-            )
+            errors.append(f"role '{candidates.role}' component '{item.slug}' missing section_field")
         elif section_field in seen_fields:
             errors.append(
                 f"role '{candidates.role}' components '{item.slug}' and "
@@ -206,16 +203,12 @@ def validate_selector_choice(
         else:
             seen_fields[section_field] = item.slug
         if item.slug in budget and budget[item.slug] <= 0:
-            errors.append(
-                f"role '{candidates.role}' selected '{item.slug}' with exhausted budget"
-            )
+            errors.append(f"role '{candidates.role}' selected '{item.slug}' with exhausted budget")
         if item.slug in candidates.max_per_section:
             cap = candidates.max_per_section[item.slug]
             count = sum(1 for c in choice.components if c.slug == item.slug)
             if count > cap:
-                errors.append(
-                    f"role '{candidates.role}' exceeds max_per_section for '{item.slug}'"
-                )
+                errors.append(f"role '{candidates.role}' exceeds max_per_section for '{item.slug}'")
     return errors
 
 
@@ -346,6 +339,7 @@ def _finalize_canonical_plan(
     template_id: str,
     plan_revision: int,
     budget: dict[str, int],
+    selection_inputs: Mapping[str, dict[str, Any]],
 ) -> tuple[CanonicalExecutionPlan, StructuralPlan]:
     filled = apply_selection_to_structural_plan(plan, selections)
     canonical_sections: list[CanonicalSection] = []
@@ -392,6 +386,40 @@ def _finalize_canonical_plan(
         "sections": [s.model_dump() for s in canonical_sections],
         "blocks": [b.model_dump() for b in canonical_blocks],
     }
+    selection_trace: list[dict[str, Any]] = []
+    blocks_by_section_component = {
+        (block.section_id, block.component_id): block for block in canonical_blocks
+    }
+    for index, section in enumerate(plan.sections):
+        section_id = _stable_section_id(section.role, index, section.id)
+        choice = selections[section.id]
+        trace_input = selection_inputs.get(section.id, {})
+        selected: list[dict[str, Any]] = []
+        for item in choice.components:
+            block = blocks_by_section_component.get((section_id, item.slug))
+            selected.append(
+                {
+                    "component_id": item.slug,
+                    "purpose": item.purpose,
+                    "reason": item.reason,
+                    "block_id": block.block_id if block is not None else None,
+                    "lane": block.work_kind if block is not None else None,
+                    "section_field": block.section_field if block is not None else None,
+                }
+            )
+        selection_trace.append(
+            {
+                "section_id": section_id,
+                "role": section.role,
+                "intent": section.purpose or section.title,
+                "candidate_set": list(trace_input.get("candidate_set") or []),
+                "budget_before": dict(trace_input.get("budget_before") or {}),
+                "selected": selected,
+                "budget_pressure": choice.budget_pressure,
+                "legal": True,
+            }
+        )
+
     canonical = CanonicalExecutionPlan(
         generation_id=generation_id,
         lesson_id=lesson_id,
@@ -403,9 +431,9 @@ def _finalize_canonical_plan(
         blocks=canonical_blocks,
         component_budget_remaining=budget,
         max_per_section={
-            str(key): int(value)
-            for key, value in (template.get("max_per_section") or {}).items()
+            str(key): int(value) for key, value in (template.get("max_per_section") or {}).items()
         },
+        selection_trace=selection_trace,
     )
     return canonical, filled
 
@@ -421,8 +449,7 @@ def apply_selection_to_structural_plan(
         if choice is None:
             continue
         section.components = [
-            ComponentSlot(slug=item.slug, purpose=item.purpose)
-            for item in choice.components
+            ComponentSlot(slug=item.slug, purpose=item.purpose) for item in choice.components
         ]
     return updated
 
@@ -433,8 +460,7 @@ def _initial_budget(
 ) -> dict[str, int]:
     template = get_template_contract(template_id) or {}
     budget = {
-        str(key): int(value)
-        for key, value in (template.get("component_budget") or {}).items()
+        str(key): int(value) for key, value in (template.get("component_budget") or {}).items()
     }
     if remaining_budget is not None:
         budget.update({str(k): int(v) for k, v in remaining_budget.items()})
@@ -457,11 +483,16 @@ def build_canonical_execution_plan(
     select = selector or heuristic_select_components
     budget = _initial_budget(template_id, remaining_budget)
     selections: dict[str, SelectorChoice] = {}
+    selection_inputs: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
 
     for section in plan.sections:
         if section.components:
             choice = _preselected_choice(section)
+            selection_inputs[section.id] = {
+                "candidate_set": [component.slug for component in section.components],
+                "budget_before": dict(budget),
+            }
         else:
             context, candidates = _selector_inputs_for_section(
                 plan=plan,
@@ -473,9 +504,7 @@ def build_canonical_execution_plan(
             )
             choice = select(context)
             if inspect.isawaitable(choice):
-                raise TypeError(
-                    "Async selector requires build_canonical_execution_plan_async"
-                )
+                raise TypeError("Async selector requires build_canonical_execution_plan_async")
             errors.extend(
                 validate_selector_choice(
                     choice,
@@ -483,6 +512,10 @@ def build_canonical_execution_plan(
                     remaining_budget=budget,
                 )
             )
+            selection_inputs[section.id] = {
+                "candidate_set": list(candidates.candidates),
+                "budget_before": dict(budget),
+            }
             for item in choice.components:
                 if item.slug in budget:
                     budget[item.slug] = max(0, budget[item.slug] - 1)
@@ -499,6 +532,7 @@ def build_canonical_execution_plan(
         template_id=template_id,
         plan_revision=plan_revision,
         budget=budget,
+        selection_inputs=selection_inputs,
     )
 
 
@@ -518,11 +552,16 @@ async def build_canonical_execution_plan_async(
     select = selector or heuristic_select_components
     budget = _initial_budget(template_id, remaining_budget)
     selections: dict[str, SelectorChoice] = {}
+    selection_inputs: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
 
     for section in plan.sections:
         if section.components:
             choice = _preselected_choice(section)
+            selection_inputs[section.id] = {
+                "candidate_set": [component.slug for component in section.components],
+                "budget_before": dict(budget),
+            }
         else:
             context, candidates = _selector_inputs_for_section(
                 plan=plan,
@@ -541,6 +580,10 @@ async def build_canonical_execution_plan_async(
                     remaining_budget=budget,
                 )
             )
+            selection_inputs[section.id] = {
+                "candidate_set": list(candidates.candidates),
+                "budget_before": dict(budget),
+            }
             for item in choice.components:
                 if item.slug in budget:
                     budget[item.slug] = max(0, budget[item.slug] - 1)
@@ -557,4 +600,5 @@ async def build_canonical_execution_plan_async(
         template_id=template_id,
         plan_revision=plan_revision,
         budget=budget,
+        selection_inputs=selection_inputs,
     )
