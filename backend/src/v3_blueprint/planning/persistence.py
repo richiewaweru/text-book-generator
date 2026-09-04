@@ -125,6 +125,10 @@ async def load_steps(
         )
         if variant_id is not None:
             stmt = stmt.where(GenerationStepModel.variant_id == variant_id)
+        stmt = stmt.order_by(
+            GenerationStepModel.created_at.asc(),
+            GenerationStepModel.id.asc(),
+        )
         result = await db.execute(stmt)
         return list(result.scalars().all())
 

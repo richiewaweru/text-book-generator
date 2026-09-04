@@ -164,15 +164,6 @@ class GenerationStepModel(Base):
     """
 
     __tablename__ = "generation_steps"
-    __table_args__ = (
-        UniqueConstraint(
-            "generation_id",
-            "part_id",
-            "variant_id",
-            "step",
-            name="uq_generation_steps_part_variant_step",
-        ),
-    )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     generation_id = Column(
