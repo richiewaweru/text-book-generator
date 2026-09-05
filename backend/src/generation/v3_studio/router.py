@@ -141,6 +141,8 @@ logger = logging.getLogger(__name__)
 
 _CALLER = "v3_studio"
 HEARTBEAT_SECONDS = 15
+_SIGNAL_EXTRACTION_NODE = "v3_signal_extractor"
+_SIGNAL_EXTRACTION_ERROR_DETAIL = "Could not read your teaching brief."
 v3_studio_router = APIRouter(prefix="/v3", tags=["v3-studio"])
 _chunked_stage2_tasks: dict[str, asyncio.Task[None]] = {}
 _visual_regenerate_locks: dict[str, asyncio.Lock] = {}
@@ -413,6 +415,16 @@ async def post_signals(
     _register_pre_generation_trace(trace_id=trace_id, user_id=str(current_user.id))
     try:
         return await extract_signals(body, trace_id=trace_id)
+    except Exception as exc:
+        logger.error(
+            "v3 signal extraction failed",
+            extra={
+                "trace_id": trace_id,
+                "node": _SIGNAL_EXTRACTION_NODE,
+                "error_type": type(exc).__name__,
+            },
+        )
+        raise HTTPException(status_code=502, detail=_SIGNAL_EXTRACTION_ERROR_DETAIL) from exc
     finally:
         _close_pre_generation_trace(trace_id=trace_id)
 

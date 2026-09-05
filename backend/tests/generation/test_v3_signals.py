@@ -86,6 +86,42 @@ async def test_signals_registers_and_closes_trace_for_telemetry():
 
 
 @pytest.mark.asyncio
+async def test_signals_maps_extraction_failure_to_safe_json_error_and_closes_trace():
+    published: list[tuple[str, object]] = []
+
+    def capture(trace_id: str, event: object) -> None:
+        published.append((trace_id, event))
+
+    with (
+        patch("generation.v3_studio.router.event_bus.publish", side_effect=capture),
+        patch(
+            "generation.v3_studio.router.extract_signals",
+            new=AsyncMock(side_effect=RuntimeError("provider payload must not be logged")),
+        ),
+        patch("generation.v3_studio.router.logger.error") as log_error,
+    ):
+        app.dependency_overrides[get_current_user] = lambda: TEST_USER
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/api/v1/v3/signals", json=PAYLOAD)
+
+    assert resp.status_code == 502
+    assert resp.headers["content-type"].startswith("application/json")
+    assert resp.json() == {"detail": "Could not read your teaching brief."}
+    assert len(published) == 2
+    trace_id, registered = published[0]
+    closed_trace_id, closed = published[1]
+    assert trace_id == closed_trace_id
+    assert isinstance(registered, TraceRegisteredEvent)
+    assert isinstance(closed, TraceClosedEvent)
+    log_error.assert_called_once()
+    assert log_error.call_args.args == ("v3 signal extraction failed",)
+    assert log_error.call_args.kwargs["extra"]["trace_id"] == trace_id
+    assert log_error.call_args.kwargs["extra"]["node"] == "v3_signal_extractor"
+    assert log_error.call_args.kwargs["extra"]["error_type"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
 async def test_extract_signals_uses_prompted_output_for_deepseek_models() -> None:
     captured: dict[str, object] = {}
 
