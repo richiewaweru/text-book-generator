@@ -693,7 +693,7 @@ async def _execute_component_lectio_execution(
         title=title or (form.topic if form else "Lesson"),
         subject=form.subject if form else "General",
         template_id=template_id,
-        preset_id="default",
+        preset_id="blue-classroom",
     )
 
     if partial:

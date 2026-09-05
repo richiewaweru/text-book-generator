@@ -122,6 +122,7 @@ def test_lesson_document_partial_open_and_human_fence() -> None:
     doc = assemble_lesson_document(canonical, store, title="Ratios", subject="Math")
     assert doc["version"] == 1
     assert doc["id"] == "gen-doc"
+    assert doc["preset_id"] == "blue-classroom"
     assert first.block_id in doc["blocks"]
     from v3_execution.runtime.lesson_document import lesson_is_partial
 

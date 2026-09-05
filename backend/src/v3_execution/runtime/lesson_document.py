@@ -26,7 +26,7 @@ def assemble_lesson_document(
     human_revision: int = 0,
     generator_revision: int | None = None,
     subject: str = "General",
-    preset_id: str = "default",
+    preset_id: str = "blue-classroom",
     template_id: str | None = None,
     source: str = "generated",
     created_at: str | None = None,

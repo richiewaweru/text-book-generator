@@ -698,6 +698,7 @@ async def test_gate_p_final_document_round_trip():
         **_exec_kwargs(),
     )
     validate_lesson_document(document)
+    assert document["preset_id"] == "blue-classroom"
     component_ids = {block["component_id"] for block in document["blocks"].values()}
     for required in (
         "hook-hero",
