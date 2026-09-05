@@ -204,23 +204,46 @@
 		loading = true;
 		error = null;
 		try {
-			unit = await getUnit(unitId);
-			groups = await getUnitGroups(unitId);
-			selectedGroupIds = groups.groups.map((group) => group.id);
-			if (unit.active_path_version_id) {
-				[path, history, aggregate, schedule, compositions] = await Promise.all([
+			const nextUnit = await getUnit(unitId);
+			const nextGroups = await getUnitGroups(unitId);
+			const nextSelectedGroupIds = nextGroups.groups.map((group) => group.id);
+			let nextPath: UnitPath | null = null;
+			let nextHistory: PathVersionSummary[] = [];
+			let nextAggregate: PathStatusAggregate | null = null;
+			let nextSchedule: TeachingSchedule | null = null;
+			let nextCompositions: ResourceComposition[] = [];
+			let nextSelectedId: string | null = null;
+			let nextShape: LessonShapePreview | null = null;
+			let nextPreparation: PreparedLessonStatus | null = null;
+			if (nextUnit.active_path_version_id) {
+				[nextPath, nextHistory, nextAggregate, nextSchedule, nextCompositions] = await Promise.all([
 					getUnitPath(unitId), getPathHistory(unitId), getPathStatus(unitId),
 					getTeachingSchedule(unitId), listUnitResources(unitId)
 				]);
-			} else {
-				path = null; history = []; aggregate = null; schedule = null; compositions = [];
 			}
-			if (path?.lessons.length) {
+			if (nextPath?.lessons.length) {
 				const target = options.preserveSelection
-					? path.lessons.find((lesson) => lesson.id === selectedId) ?? path.lessons[0]
-					: path.lessons[0];
-				await selectLesson(target);
+					? nextPath.lessons.find((lesson) => lesson.id === selectedId) ?? nextPath.lessons[0]
+					: nextPath.lessons[0];
+				nextSelectedId = target.id;
+				[nextShape, nextPreparation] = await Promise.all([
+					getLessonShape(unitId, target.id, lessonMode, misconceptionCount),
+					getPreparedLessonStatus(unitId, target.id)
+				]);
+				fillEditor(target);
 			}
+			groups = nextGroups;
+			selectedGroupIds = nextSelectedGroupIds;
+			path = nextPath;
+			history = nextHistory;
+			aggregate = nextAggregate;
+			schedule = nextSchedule;
+			compositions = nextCompositions;
+			selectedId = nextSelectedId;
+			shape = nextShape;
+			preparation = nextPreparation;
+			// Publish the unit last so the empty state cannot render during hydration.
+			unit = nextUnit;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Could not load the unit workspace.';
 		} finally {
@@ -495,7 +518,7 @@
 							{#if preparation?.stale && preparation.can_regenerate}
 								<form class="regenerate" onsubmit={(event) => { event.preventDefault(); void regenerate(); }}>
 									<label><span>What changed</span><input bind:value={regenerationReason} minlength="3" maxlength="500" required /></label>
-									<button class="primary" type="submit" disabled={busy !== null || !shape?.can_prepare || regenerationReason.trim().length < 3}>{busy === 'regenerate' ? 'Making it again…' : 'Make it again'}</button>
+									<button class="primary" type="submit" disabled={busy !== null || !preparation?.can_regenerate || regenerationReason.trim().length < 3}>{busy === 'regenerate' ? 'Making it again…' : 'Make it again'}</button>
 								</form>
 				{:else if preparation?.generation_id}
 					<div class="ready-actions">

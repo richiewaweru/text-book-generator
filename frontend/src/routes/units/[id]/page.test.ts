@@ -56,6 +56,12 @@ function buildPath(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((res) => { resolve = res; });
+	return { promise, resolve };
+}
+
 describe('/units/[id]', () => {
 	beforeEach(() => {
 		Object.values(mocks).forEach((mock) => mock.mockReset());
@@ -103,10 +109,21 @@ describe('/units/[id]', () => {
 
 	it('shows the numbered lesson list with plain-language dependency sentences', async () => {
 		render(UnitPage);
-		expect(await screen.findByText('Plant inputs')).toBeTruthy();
+		expect((await screen.findAllByText('Plant inputs')).length).toBeGreaterThan(0);
 		expect(screen.getByText('Plant outputs')).toBeTruthy();
 		expect(screen.getByText('needs lesson 1')).toBeTruthy();
 		expect(screen.queryByText(/concept path/i)).toBeNull();
+	});
+
+	it('does not publish the empty state before workspace hydration completes', async () => {
+		const pathResponse = deferred<ReturnType<typeof buildPath>>();
+		mocks.getUnitPath.mockReturnValue(pathResponse.promise);
+		render(UnitPage);
+		await vi.waitFor(() => expect(mocks.getUnitPath).toHaveBeenCalled());
+		const flashedEmptyState = Boolean(screen.queryByText('Build your lessons'));
+		pathResponse.resolve(buildPath());
+		await screen.findAllByText('Plant inputs');
+		expect(flashedEmptyState).toBe(false);
 	});
 
 	it('shows an inline merge question and combines lessons when the teacher agrees', async () => {
@@ -302,5 +319,37 @@ describe('/units/[id]', () => {
 		expect(
 			screen.getByText('All versions share the same quiz, so you can compare the whole class fairly.')
 		).toBeTruthy();
+	});
+
+	it('submits explicit regeneration for a stale lesson', async () => {
+		mocks.getLessonShape.mockResolvedValue({
+			path_lesson_id: lessonOne.id, lesson_revision: lessonOne.revision, objective: lessonOne.objective,
+			objective_hash: lessonOne.objective_hash, concept_id: lessonOne.concept_id, scope_exclusions: [],
+			lesson_mode: 'first_exposure', misconception_count: 1, skeleton_id: 'factual-core', skeleton_version: 1,
+			canonical: {
+				group_profile: 'core', support_level: 'medium', slots: [], toggles_applied: [], warnings: [],
+				structural_diff: [], blocking_issues: []
+			}, variants: [], deviations: [], available_slots: [], blocking_issues: [], can_prepare: false
+		});
+		mocks.getPreparedLessonStatus.mockResolvedValue({
+			path_lesson_id: lessonOne.id, lesson_revision: lessonOne.revision, generation_id: 'generation-1',
+			generation_status: 'stale', workflow_stage: 'stale', objective_hash: 'old-hash',
+			stale: true, can_prepare: false, can_regenerate: true
+		});
+		mocks.regeneratePathLesson.mockResolvedValue({
+			generation_id: 'generation-2', path_lesson_id: lessonOne.id, objective: lessonOne.objective,
+			objective_hash: lessonOne.objective_hash, skeleton_id: 'factual-core', skeleton_version: 1,
+			slots: ['orient'], section_roles: ['orient'], status: 'awaiting_review', reused: false,
+			regeneration_reason: 'The lesson changed after preparation.'
+		});
+
+		render(UnitPage);
+		const button = await screen.findByRole('button', { name: 'Make it again' });
+		expect(button.hasAttribute('disabled')).toBe(false);
+		await fireEvent.click(button);
+		expect(mocks.regeneratePathLesson).toHaveBeenCalledWith(
+			'unit-1', expect.objectContaining({ id: 'path-1' }), expect.objectContaining({ id: lessonOne.id }),
+			'first_exposure', 'The lesson changed after preparation.', ['group-core']
+		);
 	});
 });
