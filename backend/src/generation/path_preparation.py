@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database.models import ConceptCardModel, GenerationModel, LessonProvenanceModel
+from generation.pipeline_dispatch import build_control_patch, select_default_pipeline
 from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
 from resource_specs.loader import get_spec
 from resource_specs.renderer import render_spec_for_prompt
@@ -33,7 +34,9 @@ def _scope_note(scope_contract: dict[str, Any]) -> str:
     terminology = [str(item) for item in scope_contract.get("terminology", [])]
     exclusions = [str(item) for item in scope_contract.get("must_not_introduce", [])]
     notation = scope_contract.get("notation")
-    lines = ["This lesson is owned by an approved unit path; preserve its exact objective and scope."]
+    lines = [
+        "This lesson is owned by an approved unit path; preserve its exact objective and scope."
+    ]
     if terminology:
         lines.append(f"Use unit terminology exactly: {', '.join(terminology)}.")
     if notation:
@@ -91,6 +94,8 @@ async def initialise_path_generation(
         "display_title": plan.cards[0].title,
         "execution_started": False,
         "path_prepared": True,
+        # Units owns admission. Select once and persist before any later state merge.
+        **build_control_patch(select_default_pipeline()),
     }
     if variants:
         state.update(

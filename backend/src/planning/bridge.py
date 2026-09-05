@@ -110,10 +110,19 @@ async def _preparation_context(
             .order_by(PathLessonModel.position)
         )
     )
-    prior_established = list(dict.fromkeys([
-        *list(unit.starting_knowledge or []),
-        *(capability for prior in earlier if not prior.skipped for capability in (prior.must_establish or [])),
-    ]))
+    prior_established = list(
+        dict.fromkeys(
+            [
+                *list(unit.starting_knowledge or []),
+                *(
+                    capability
+                    for prior in earlier
+                    if not prior.skipped
+                    for capability in (prior.must_establish or [])
+                ),
+            ]
+        )
+    )
     prerequisite_ids = list(
         await session.scalars(
             select(PathLessonPrerequisiteModel.prerequisite_lesson_id).where(
@@ -149,7 +158,9 @@ def _build_structural_plan(
     if generated.deviation_request is not None:
         raise PathPreparationBlocked("A skeleton deviation requires teacher approval")
     if generated.objective_concern:
-        raise PathPreparationBlocked(f"Structural planner objective concern: {generated.objective_concern}")
+        raise PathPreparationBlocked(
+            f"Structural planner objective concern: {generated.objective_concern}"
+        )
     if len(generated.cards) != 1:
         raise PathPreparationBlocked("Path preparation must produce exactly one concept card")
     card_payload = dict(generated.cards[0])
@@ -336,9 +347,7 @@ async def prepare_path_lesson(
             session, unit=unit, version=version, lesson=lesson
         )
         if linkage.stale:
-            raise PathPreparationBlocked(
-                "Existing preparation is stale; use explicit regeneration"
-            )
+            raise PathPreparationBlocked("Existing preparation is stale; use explicit regeneration")
         if linkage.complete:
             generation = linkage.generation
             provenance = linkage.provenance
@@ -387,9 +396,7 @@ async def prepare_path_lesson(
         for item in deviations
         if item.lesson_mode == request.lesson_mode and item.skeleton_id == skeleton_id
     ]
-    pending_deviations = [
-        item for item in relevant_deviations if item.status == "pending_teacher"
-    ]
+    pending_deviations = [item for item in relevant_deviations if item.status == "pending_teacher"]
     if pending_deviations:
         raise PathPreparationBlocked(
             "Shape preparation has a pending deviation; approve or reject it first"
@@ -490,8 +497,7 @@ async def prepare_path_lesson(
             for group in groups
         ],
         "variant_previews": [
-            variant.model_dump(mode="json")
-            for variant in preparation_group_preview.variants
+            variant.model_dump(mode="json") for variant in preparation_group_preview.variants
         ],
     }
     generated = await structural_planner(fixed_context)
@@ -591,40 +597,36 @@ async def prepare_path_lesson(
     )
     session.add(generation)
     provenance = LessonProvenanceModel(
-            pack_id=generation_id,
-            concept_id=lesson.concept_id,
-            path_version_id=version.id,
-            path_lesson_id=lesson.id,
-            objective_hash=lesson.objective_hash,
-            skeleton_id=preview.skeleton_id,
-            skeleton_version=preview.skeleton_version,
-            knowledge_type=lesson.primary_knowledge_type,
-            knowledge_type_source=lesson.knowledge_type_source,
-            toggles_applied=list(
-                dict.fromkeys(
-                    toggle
-                    for variant in group_preview.variants
-                    for toggle in variant.toggles_applied
-                )
-            ),
-            deviations_requested=[deviation_payload(item) for item in relevant_deviations],
-            deviations_approved=[
-                deviation_payload(item)
-                for item in relevant_deviations
-                if item.status == "approved"
-            ],
-            deviations_applied=[deviation.model_dump(mode="json") for deviation in approved_deviations],
-            path_lesson_revision=lesson.revision,
-            lesson_mode=request.lesson_mode,
-            group_ids=sorted(request.group_ids),
-            preparation_key=_preparation_key(
-                version_id=version.id,
-                lesson_id=lesson.id,
-                revision=lesson.revision,
-            ),
-            supersedes_pack_id=previous_pack_id if regenerate else None,
-            regeneration_reason=regeneration_reason if regenerate else None,
-        )
+        pack_id=generation_id,
+        concept_id=lesson.concept_id,
+        path_version_id=version.id,
+        path_lesson_id=lesson.id,
+        objective_hash=lesson.objective_hash,
+        skeleton_id=preview.skeleton_id,
+        skeleton_version=preview.skeleton_version,
+        knowledge_type=lesson.primary_knowledge_type,
+        knowledge_type_source=lesson.knowledge_type_source,
+        toggles_applied=list(
+            dict.fromkeys(
+                toggle for variant in group_preview.variants for toggle in variant.toggles_applied
+            )
+        ),
+        deviations_requested=[deviation_payload(item) for item in relevant_deviations],
+        deviations_approved=[
+            deviation_payload(item) for item in relevant_deviations if item.status == "approved"
+        ],
+        deviations_applied=[deviation.model_dump(mode="json") for deviation in approved_deviations],
+        path_lesson_revision=lesson.revision,
+        lesson_mode=request.lesson_mode,
+        group_ids=sorted(request.group_ids),
+        preparation_key=_preparation_key(
+            version_id=version.id,
+            lesson_id=lesson.id,
+            revision=lesson.revision,
+        ),
+        supersedes_pack_id=previous_pack_id if regenerate else None,
+        regeneration_reason=regeneration_reason if regenerate else None,
+    )
     session.add(provenance)
     if regenerate and previous_pack_id:
         previous = await session.get(LessonProvenanceModel, previous_pack_id)

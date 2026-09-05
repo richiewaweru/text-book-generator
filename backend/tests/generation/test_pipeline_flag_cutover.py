@@ -254,7 +254,7 @@ async def test_gate4_no_automatic_legacy_fallback_on_lectio_failure(monkeypatch)
         fake_studio,
     )
     monkeypatch.setattr(
-        "generation.v3_studio.router.run_component_lectio_execution",
+        "generation.component_lectio.launcher.run_component_lectio_execution",
         boom,
     )
     monkeypatch.setattr(

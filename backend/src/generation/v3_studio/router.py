@@ -58,8 +58,8 @@ from generation.component_lectio.service import (
     fill_plan_components_for_legacy_studio,
     persist_component_lectio_failure,
     persist_component_lectio_start,
-    run_component_lectio_execution,
 )
+from generation.component_lectio.launcher import launch_component_lectio
 from v3_blueprint.planning.retry import (
     retry_failed_section,
     run_stage1_with_retry,
@@ -1678,31 +1678,7 @@ async def _run_component_lectio_pipeline(
         await _chunked_emit_event(generation_id, event, payload)
 
     try:
-        state = await load_chunked_state(generation_id)
-        plan_raw = state.get("structural_plan")
-        if not isinstance(plan_raw, dict):
-            await persist_component_lectio_failure(
-                generation_id,
-                RuntimeError("No structural plan"),
-            )
-            return
-        plan = adapt_legacy_structural_plan(
-            plan_raw,
-            source=f"generation:{generation_id}:component_lectio",
-        )
-        signals, form, resource_spec = _decode_chunked_context(state)
-        display_title = state.get("display_title")
-        if not isinstance(display_title, str) or not display_title.strip():
-            display_title = form.topic
-        await run_component_lectio_execution(
-            generation_id=generation_id,
-            plan=plan,
-            signals=signals,
-            form=form,
-            resource_spec=resource_spec,
-            emit_event=emit_event,
-            title=display_title,
-        )
+        await launch_component_lectio(generation_id=generation_id, emit_event=emit_event)
     except Exception as exc:  # noqa: BLE001
         logger.exception("component_lectio pipeline failed generation_id=%s", generation_id)
         await persist_component_lectio_failure(generation_id, exc)

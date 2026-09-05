@@ -47,6 +47,7 @@ from media.diagnostics.v3_image_pipeline_diagnostic import (
     run_grok_probe,
 )
 from planning.routes import router as planning_router
+from generation.units_routes import router as units_generation_router
 from planning.compatibility import router as compatibility_router
 from resource_specs.loader import initialize_registry as initialize_resource_registry
 from telemetry import telemetry_router
@@ -117,8 +118,12 @@ async def _run_cached_image_probe() -> tuple[list[DependencyStatus], int | None]
     provider = str(grok_probe.details.get("provider") or "xai")
     model = str(grok_probe.details.get("model") or "grok-imagine-image")
     image_bytes = grok_probe.details.get("image_bytes")
-    upload_bytes = image_bytes if isinstance(image_bytes, bytes) and image_bytes else _FALLBACK_PROBE_IMAGE
-    upload_source = "grok_probe" if isinstance(image_bytes, bytes) and image_bytes else "embedded_fallback_png"
+    upload_bytes = (
+        image_bytes if isinstance(image_bytes, bytes) and image_bytes else _FALLBACK_PROBE_IMAGE
+    )
+    upload_source = (
+        "grok_probe" if isinstance(image_bytes, bytes) and image_bytes else "embedded_fallback_png"
+    )
     gcs_probe = await run_gcs_probe(upload_bytes, upload_source)
 
     result = (
@@ -130,7 +135,6 @@ async def _run_cached_image_probe() -> tuple[list[DependencyStatus], int | None]
     )
     _image_probe_cache = (now, result)
     return result
-
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -160,9 +164,7 @@ def _allowed_frontend_origins(frontend_origin: str, env: str = "development") ->
                 "FRONTEND_ORIGIN must be set to a specific domain in production. "
                 "A wildcard origin ('*') is not permitted."
             )
-        logger.warning(
-            "CORS is open to all origins. This is only acceptable in local development."
-        )
+        logger.warning("CORS is open to all origins. This is only acceptable in local development.")
         return ["*"]
 
     origins = [origin.strip() for origin in frontend_origin.split(",") if origin.strip()]
@@ -220,7 +222,7 @@ async def lifespan(app: FastAPI):
 
     telemetry_monitor.configure(
         llm_call_repository_factory=load_llm_call_repository,
-            )
+    )
     if settings.run_migrations_on_startup:
         await asyncio.to_thread(upgrade_database)
     try:
@@ -301,6 +303,7 @@ def create_app() -> FastAPI:
     app.include_router(generation_router)
     app.include_router(skeleton_router)
     app.include_router(planning_router)
+    app.include_router(units_generation_router)
     app.include_router(compatibility_router)
     app.include_router(telemetry_router)
 

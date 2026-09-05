@@ -35,14 +35,11 @@ from planning.schedule import write_groups
 from planning.service import approve_path, create_unit, persist_path_plan
 from planning.shapes import decide_shape_deviation, request_shape_deviation
 from v3_blueprint.planning.objective_ownership import hash_path_objective
-from v3_blueprint.planning.persistence import load_chunked_state
+from v3_blueprint.planning.persistence import load_chunked_state, persist_chunked_state
 
 
 FIXTURE = (
-    Path(__file__).resolve().parents[3]
-    / "handoff"
-    / "fixtures"
-    / "grade4-photosynthesis-path.json"
+    Path(__file__).resolve().parents[3] / "handoff" / "fixtures" / "grade4-photosynthesis-path.json"
 )
 
 
@@ -55,7 +52,9 @@ async def _fake_structural_planner(context: dict) -> PathStructuralPlan:
                 "id": slot["slot_id"],
                 "title": f"{slot['purpose']} — an advisory explanation that may exceed the display limit",
                 "role": slot["slot_id"],
-                "card_id": None if slot["slot_id"] in {"orient", "close"} else context["concept_id"],
+                "card_id": None
+                if slot["slot_id"] in {"orient", "close"}
+                else context["concept_id"],
                 "visual_required": slot["visual_required"],
                 "transition_note": (
                     "The model may provide a useful but overly detailed transition note that "
@@ -171,6 +170,12 @@ async def test_prepare_bridge_locks_slots_and_objective_hash(db_session) -> None
     state = await load_chunked_state(response.generation_id, db_session)
     assert state["stage"] == "awaiting_review"
     assert state["path_prepared"] is True
+    assert state["control"]["pipeline"] == "component_lectio"
+    assert state["control"]["pipeline_version"] == 1
+    assert isinstance(state["control"]["selected_at"], str)
+    await persist_chunked_state(response.generation_id, {"stage": "reviewed"}, db_session)
+    merged_state = await load_chunked_state(response.generation_id, db_session)
+    assert merged_state["control"] == state["control"]
     assert state["structural_plan"]["cards"][0]["objective"] == lesson.objective
     card = await db_session.get(
         ConceptCardModel,
@@ -246,8 +251,11 @@ async def test_later_preparation_receives_actuals_as_explicit_advisory_context(d
         db_session,
         owner_id=user.id,
         request=UnitCreate(
-            title="Photosynthesis", topic="Photosynthesis", subject="Science",
-            grade_level="Grade 4", destination_objective=plan.destination_objective or "Destination",
+            title="Photosynthesis",
+            topic="Photosynthesis",
+            subject="Science",
+            grade_level="Grade 4",
+            destination_objective=plan.destination_objective or "Destination",
             starting_knowledge=plan.starting_knowledge,
         ),
     )
@@ -269,9 +277,13 @@ async def test_later_preparation_receives_actuals_as_explicit_advisory_context(d
         lesson=first,
         user_id=user.id,
         request=LessonActualWriteRequest(
-            path_version_id=version.id, path_revision=version.revision,
-            lesson_revision=first.revision, actual_revision=0, status="partial",
-            pace="slower", established_concepts=[first.must_establish[0]],
+            path_version_id=version.id,
+            path_revision=version.revision,
+            lesson_revision=first.revision,
+            actual_revision=0,
+            status="partial",
+            pace="slower",
+            established_concepts=[first.must_establish[0]],
             unresolved_misconceptions=["soil-food"],
             teacher_note="Use a recovery prompt before new material.",
         ),
@@ -483,8 +495,7 @@ async def test_prepare_bridge_uses_persisted_groups_and_one_shared_pack(db_sessi
     assert extension_roles != core_roles
     assert all(roles.count("check") == 1 for roles in (support_roles, core_roles, extension_roles))
     assert {
-        variant_plans[label]["lesson_intent"]["goal"]
-        for label in ("Support", "Core", "Extension")
+        variant_plans[label]["lesson_intent"]["goal"] for label in ("Support", "Core", "Extension")
     } == {lesson.objective}
     card = await db_session.get(
         ConceptCardModel,
