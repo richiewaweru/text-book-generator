@@ -2,6 +2,7 @@
 	import type { MediaReference, VideoEmbedContent } from 'lectio';
 	import { Film } from 'lucide-svelte';
 	import { connectivityStore } from '$lib/builder/stores/connectivity.svelte';
+	import { protectCurrencyContent } from '$lib/lectio/render-content';
 	import {
 		CalloutBlock,
 		ComparisonGrid,
@@ -79,6 +80,7 @@
 	};
 
 	const Component = $derived(componentMap[componentId] as typeof SectionHeader | undefined);
+	const renderableContent = $derived(protectCurrencyContent(content));
 
 	const videoContent = $derived(content as unknown as VideoEmbedContent);
 	const videoRef = $derived(videoContent.media_id ? media[videoContent.media_id] : undefined);
@@ -87,7 +89,7 @@
 
 {#if componentId === 'video-embed'}
 	{#if connectivityStore.online}
-		<VideoEmbed content={content as never} {media} />
+		<VideoEmbed content={renderableContent as never} {media} />
 	{:else}
 		<div
 			class="video-offline-placeholder rounded-lg border border-slate-200 bg-slate-50 p-6 text-center text-slate-700"
@@ -105,15 +107,15 @@
 		</div>
 	{/if}
 {:else if componentId === 'image-block'}
-	<ImageBlock content={content as never} {media} />
+	<ImageBlock content={renderableContent as never} {media} />
 {:else if componentId === 'diagram-block'}
-	<DiagramBlock content={content as never} {media} />
+	<DiagramBlock content={renderableContent as never} {media} />
 {:else if componentId === 'diagram-compare'}
-	<DiagramCompare content={content as never} {media} />
+	<DiagramCompare content={renderableContent as never} {media} />
 {:else if componentId === 'diagram-series'}
-	<DiagramSeries content={content as never} {media} />
+	<DiagramSeries content={renderableContent as never} {media} />
 {:else if Component}
-	<Component content={content as never} />
+	<Component content={renderableContent as never} />
 {:else}
 	<div class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
 		Unknown component: {componentId}
