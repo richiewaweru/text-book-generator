@@ -2,7 +2,7 @@ import { ensureOk } from '$lib/api/errors';
 import { apiFetch } from '$lib/api/client';
 import type { LessonDocument } from 'lectio';
 
-export type BuilderLessonSourceType = 'manual' | 'v3_generation' | 'template';
+export type BuilderLessonSourceType = 'manual' | 'v3_generation' | 'component_lectio' | 'template';
 
 export interface BuilderLessonSummary {
 	id: string;

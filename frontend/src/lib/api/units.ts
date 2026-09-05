@@ -349,6 +349,87 @@ export function getPreparedLessonStatus(unitId: string, lessonId: string): Promi
 	);
 }
 
+export type LessonGenerationStage = 'awaiting_review' | 'running' | 'partial' | 'failed' | 'complete';
+
+export interface LessonGenerationReview {
+	generation_id: string;
+	pipeline: string;
+	stage: string;
+	document_present: boolean;
+	failed_blocks: string[];
+	retryable: boolean;
+	builder_id?: string | null;
+	display_title?: string | null;
+	review_cards: LessonReviewCard[];
+}
+
+export interface LessonReviewCard {
+	id: string;
+	title: string;
+	objective: string;
+	prereqs: string[];
+	misconception_descriptions: string[];
+}
+
+export interface LessonGenerationProgress {
+	generation_id: string;
+	pipeline: string;
+	stage: string;
+	document_present: boolean;
+	failed_blocks: string[];
+	retryable: boolean;
+	builder_id?: string | null;
+	display_title?: string | null;
+	review_cards: LessonReviewCard[];
+}
+
+export interface OpenBuilderLessonResponse {
+	builder_id: string;
+}
+
+function lessonGenerationBody(pathVersionId: string, pathRevision: number) {
+	return JSON.stringify({ path_version_id: pathVersionId, path_revision: pathRevision });
+}
+
+export function reviewLessonGeneration(unitId: string, lessonId: string, pathVersionId: string, pathRevision: number): Promise<LessonGenerationReview> {
+	return jsonRequest(
+		`/api/v1/units/${encodeURIComponent(unitId)}/path/lessons/${encodeURIComponent(lessonId)}/generation:review`,
+		'Could not load the lesson review.',
+		{ method: 'POST', headers: jsonHeaders, body: lessonGenerationBody(pathVersionId, pathRevision) }
+	);
+}
+
+export function approveLessonGeneration(unitId: string, lessonId: string, pathVersionId: string, pathRevision: number): Promise<LessonGenerationProgress> {
+	return jsonRequest(
+		`/api/v1/units/${encodeURIComponent(unitId)}/path/lessons/${encodeURIComponent(lessonId)}/generation:approve`,
+		'Could not approve the lesson generation.',
+		{ method: 'POST', headers: jsonHeaders, body: lessonGenerationBody(pathVersionId, pathRevision) }
+	);
+}
+
+export function getLessonGenerationProgress(unitId: string, lessonId: string): Promise<LessonGenerationProgress> {
+	return jsonRequest(
+		`/api/v1/units/${encodeURIComponent(unitId)}/path/lessons/${encodeURIComponent(lessonId)}/generation`,
+		'Could not load lesson generation progress.'
+	);
+}
+
+export function retryLessonGeneration(unitId: string, lessonId: string, pathVersionId: string, pathRevision: number): Promise<LessonGenerationProgress> {
+	return jsonRequest(
+		`/api/v1/units/${encodeURIComponent(unitId)}/path/lessons/${encodeURIComponent(lessonId)}/generation:retry`,
+		'Could not retry the lesson generation.',
+		{ method: 'POST', headers: jsonHeaders, body: lessonGenerationBody(pathVersionId, pathRevision) }
+	);
+}
+
+export function openLessonInBuilder(unitId: string, lessonId: string, pathVersionId: string, pathRevision: number): Promise<OpenBuilderLessonResponse> {
+	return jsonRequest(
+		`/api/v1/units/${encodeURIComponent(unitId)}/path/lessons/${encodeURIComponent(lessonId)}/generation:open-builder`,
+		'Could not open the lesson in Builder.',
+		{ method: 'POST', headers: jsonHeaders, body: lessonGenerationBody(pathVersionId, pathRevision) }
+	);
+}
+
 export function previewSkeleton(objective: string, lessonMode: LessonMode): Promise<SkeletonPreview> {
 	return jsonRequest('/api/v1/skeletons:preview', 'Could not preview the lesson shape.', {
 		method: 'POST',

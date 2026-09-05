@@ -29,6 +29,7 @@
 	import LessonVersionsPanel from '$lib/components/units/LessonVersionsPanel.svelte';
 	import LessonResultsPanel from '$lib/components/units/LessonResultsPanel.svelte';
 	import ResourceComposerPanel from '$lib/components/units/ResourceComposerPanel.svelte';
+	import LessonGenerationReview from '$lib/components/units/LessonGenerationReview.svelte';
 	import type {
 		LessonMode,
 		MergeCriticResult,
@@ -322,15 +323,15 @@
 	async function prepare(): Promise<void> {
 		if (!selected) return;
 		await act('prepare', async () => {
-			const prepared = await preparePathLesson(unitId, path as UnitPath, selected, lessonMode, selectedGroupIds);
-			window.location.href = `/studio?generation_id=${encodeURIComponent(prepared.generation_id)}`;
+			await preparePathLesson(unitId, path as UnitPath, selected, lessonMode, selectedGroupIds);
+			preparation = await getPreparedLessonStatus(unitId, selected.id);
 		}, false);
 	}
 
 	async function regenerate(): Promise<void> {
 		if (!selected || regenerationReason.trim().length < 3) return;
 		await act('regenerate', async () => {
-			const prepared = await regeneratePathLesson(
+			await regeneratePathLesson(
 				unitId,
 				path as UnitPath,
 				selected,
@@ -338,7 +339,7 @@
 				regenerationReason.trim(),
 				selectedGroupIds
 			);
-			window.location.href = `/studio?generation_id=${encodeURIComponent(prepared.generation_id)}`;
+			preparation = await getPreparedLessonStatus(unitId, selected.id);
 		}, false);
 	}
 
@@ -496,12 +497,17 @@
 									<label><span>What changed</span><input bind:value={regenerationReason} minlength="3" maxlength="500" required /></label>
 									<button class="primary" type="submit" disabled={busy !== null || !shape?.can_prepare || regenerationReason.trim().length < 3}>{busy === 'regenerate' ? 'Making it again…' : 'Make it again'}</button>
 								</form>
-							{:else if preparation?.generation_id}
-								<div class="ready-actions">
-									<a class="primary link" href={`/studio?generation_id=${encodeURIComponent(preparation.generation_id)}`}>Open review</a>
-									<a class="secondary link" href={`/studio/print/${encodeURIComponent(preparation.generation_id)}`}>Print</a>
-									<button class="secondary" type="button" onclick={() => (showVersions = true)}>Make versions for my groups</button>
-								</div>
+				{:else if preparation?.generation_id}
+					<div class="ready-actions">
+						<LessonGenerationReview
+						{unitId}
+						lessonId={selected.id}
+						generationId={preparation.generation_id}
+						pathVersionId={path.id}
+						pathRevision={path.revision}
+						/>
+						<button class="secondary" type="button" onclick={() => (showVersions = true)}>Make versions for my groups</button>
+					</div>
 							{:else}<button class="primary" type="button" disabled={path.status !== 'approved' || selected.skipped || busy !== null || !shape?.can_prepare} onclick={prepare}>{busy === 'prepare' ? 'Making the lesson…' : 'Make the lesson'}</button>{/if}
 						</section>
 					</main>
@@ -567,7 +573,6 @@
 	.primary, .secondary, .text-button { cursor: pointer; }
 	.primary, .secondary { border-radius: 7px; font-size: 13px; font-weight: 600; padding: 9px 13px; }
 	.primary { border: 1px solid var(--accent); background: var(--accent); color: white; }
-	.primary.link, .secondary.link { display: inline-block; text-decoration: none; }
 	.secondary { border: 1px solid var(--rule); background: var(--surface); color: var(--ink); }
 	button:disabled { cursor: not-allowed; opacity: .45; }
 	.view-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); margin-bottom: 22px; }

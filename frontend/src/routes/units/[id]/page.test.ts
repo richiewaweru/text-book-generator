@@ -12,7 +12,9 @@ const mocks = vi.hoisted(() => ({
 	getPathHistory: vi.fn(), getPathStatus: vi.fn(), getHistoricalPath: vi.fn(), restorePathVersion: vi.fn(),
 	getPreparedLessonStatus: vi.fn(), approveUnitPath: vi.fn(), planUnitPath: vi.fn(),
 	patchPathLesson: vi.fn(), mergePathLessons: vi.fn(), preparePathLesson: vi.fn(),
-	regeneratePathLesson: vi.fn(), editUnitPathByChat: vi.fn(), resolvePathAssumption: vi.fn()
+	regeneratePathLesson: vi.fn(), editUnitPathByChat: vi.fn(), resolvePathAssumption: vi.fn(),
+	reviewLessonGeneration: vi.fn(), getLessonGenerationProgress: vi.fn(), approveLessonGeneration: vi.fn(),
+	retryLessonGeneration: vi.fn(), openLessonInBuilder: vi.fn()
 }));
 
 vi.mock('$app/state', () => ({ page: { params: { id: 'unit-1' } } }));
@@ -95,6 +97,7 @@ describe('/units/[id]', () => {
 			generation_status: null, workflow_stage: 'unprepared', objective_hash: 'hash-1',
 			stale: false, can_prepare: true, can_regenerate: false
 		});
+		mocks.reviewLessonGeneration.mockResolvedValue({ generation_id: 'generation-1', pipeline: 'component_lectio', stage: 'awaiting_review', document_present: false, failed_blocks: [], retryable: false });
 	});
 	afterEach(cleanup);
 
@@ -284,14 +287,16 @@ describe('/units/[id]', () => {
 		expect(screen.getByRole('button', { name: 'Make the lesson' })).toBeTruthy();
 	});
 
-	it('offers Print and Make versions for my groups once a lesson is prepared', async () => {
+	it('shows inline review and Make versions for my groups once a lesson is prepared', async () => {
 		mocks.getPreparedLessonStatus.mockResolvedValue({
 			path_lesson_id: lessonOne.id, lesson_revision: 1, generation_id: 'generation-1',
 			generation_status: 'awaiting_review', workflow_stage: 'awaiting_review', objective_hash: 'hash-1',
 			stale: false, can_prepare: false, can_regenerate: true
 		});
 		render(UnitPage);
-		expect(await screen.findByRole('link', { name: 'Print' })).toBeTruthy();
+		expect(await screen.findByRole('button', { name: /approve and write lesson/i })).toBeTruthy();
+		expect(screen.queryByRole('link', { name: 'Print' })).toBeNull();
+		expect(screen.queryByRole('link', { name: /studio/i })).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'Make versions for my groups' }));
 		expect(await screen.findByRole('heading', { name: 'Make versions for my groups' })).toBeTruthy();
 		expect(
