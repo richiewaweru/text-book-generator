@@ -9,6 +9,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Index,
     JSON,
     String,
     Text,
@@ -483,7 +484,9 @@ class PathLessonDeviationModel(Base):
     replacement_slot = Column(String, nullable=True)
     reason = Column(Text, nullable=False)
     requested_by = Column(String, nullable=False)
-    status = Column(String, nullable=False, default="pending_teacher", server_default="pending_teacher")
+    status = Column(
+        String, nullable=False, default="pending_teacher", server_default="pending_teacher"
+    )
     requested_at = Column(DateTime, default=_utcnow, nullable=False)
     decided_at = Column(DateTime, nullable=True)
     decided_by = Column(String, ForeignKey("users.id"), nullable=True)
@@ -554,9 +557,7 @@ class TeachingPeriodLessonModel(Base):
 
 class UnitGroupModel(Base):
     __tablename__ = "unit_groups"
-    __table_args__ = (
-        UniqueConstraint("unit_id", "profile", name="uq_unit_group_profile"),
-    )
+    __table_args__ = (UniqueConstraint("unit_id", "profile", name="uq_unit_group_profile"),)
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     unit_id = Column(String, ForeignKey("units.id"), nullable=False, index=True)
@@ -729,11 +730,24 @@ class EditableLessonModel(Base):
 
     __tablename__ = "editable_lessons"
 
+    __table_args__ = (
+        Index(
+            "uq_editable_lessons_component_generation",
+            "user_id",
+            "source_generation_id",
+            unique=True,
+            postgresql_where=(Column("source_type") == "component_lectio"),
+            sqlite_where=(Column("source_type") == "component_lectio"),
+        ),
+    )
+
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     source_generation_id = Column(String, nullable=True)
     source_type = Column(String, nullable=False, default="manual", server_default="manual")
-    title = Column(String, nullable=False, default="Untitled lesson", server_default="Untitled lesson")
+    title = Column(
+        String, nullable=False, default="Untitled lesson", server_default="Untitled lesson"
+    )
     class_label = Column(String, nullable=True)
     document_json = Column(JSON_DOCUMENT_TYPE, nullable=False)
     created_at = Column(DateTime, default=_utcnow, nullable=False)

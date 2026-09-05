@@ -5,11 +5,12 @@ from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app import app
 from core.auth.middleware import get_current_user
 from core.dependencies import get_gcs_image_store
-from core.database.models import GenerationModel, UserModel
+from core.database.models import EditableLessonModel, GenerationModel, UserModel
 from core.database.session import get_async_session
 from core.entities.user import User
 
@@ -71,6 +72,18 @@ def _minimal_lesson(document_id: str = "client-doc-id") -> dict:
     }
 
 
+def _component_lectio_lesson(generation_id: str) -> dict:
+    document = _minimal_lesson(generation_id)
+    document.update(
+        {
+            "source": "generated",
+            "source_generation_id": generation_id,
+            "id": generation_id,
+        }
+    )
+    return document
+
+
 def _lesson_with_answers(document_id: str = "client-doc-id") -> dict:
     return {
         "version": 1,
@@ -122,7 +135,9 @@ def _lesson_with_answers(document_id: str = "client-doc-id") -> dict:
                         {
                             "difficulty": "warm",
                             "question": "Simplify 6/8",
-                            "hints": [{"level": 1, "text": "Divide numerator and denominator by 2"}],
+                            "hints": [
+                                {"level": 1, "text": "Divide numerator and denominator by 2"}
+                            ],
                             "solution": {"approach": "Divide by 2", "answer": "3/4"},
                         }
                     ]
@@ -274,7 +289,9 @@ class TestBuilderLessonRoutes:
             assert updated["title"] == "Fractions final"
             assert updated["class_label"] == "Year 7 Mathematics"
             assert updated["document"]["id"] == lesson_id
-            assert updated["document"]["blocks"][block_id]["content"]["body"] == "Updated explanation"
+            assert (
+                updated["document"]["blocks"][block_id]["content"]["body"] == "Updated explanation"
+            )
 
             delete_response = await client.delete(f"/api/v1/builder/lessons/{lesson_id}")
             assert delete_response.status_code == 204
@@ -345,6 +362,119 @@ class TestBuilderLessonRoutes:
             )
             assert denied_response.status_code == 404
 
+    async def test_open_component_lectio_generation_is_idempotent_and_builder_native(
+        self, db_session_factory
+    ):
+        generation_id = "component-generation-a"
+        async with db_session_factory() as session:
+            session.add(
+                GenerationModel(
+                    id=generation_id,
+                    user_id=USER_A.id,
+                    subject="mathematics",
+                    context="Solve one-step equations",
+                    requested_template_id="guided-concept-path",
+                    requested_preset_id="default",
+                    status="completed",
+                    quality_passed=True,
+                    document_json=_component_lectio_lesson(generation_id),
+                    chunked_state_json={"control_meta": {"pipeline": "component_lectio"}},
+                )
+            )
+            await session.commit()
+
+        async with await _client() as client:
+            first = await client.post(
+                f"/api/v1/builder/lessons/from-component-lectio/{generation_id}"
+            )
+            second = await client.post(
+                f"/api/v1/builder/lessons/from-component-lectio/{generation_id}"
+            )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        first_body = first.json()
+        second_body = second.json()
+        assert second_body["id"] == first_body["id"]
+        assert first_body["source_type"] == "component_lectio"
+        assert first_body["source_generation_id"] == generation_id
+        assert first_body["document"]["id"] == first_body["id"]
+        assert first_body["document"]["source_generation_id"] == generation_id
+
+        async with db_session_factory() as session:
+            rows = list(
+                (
+                    await session.scalars(
+                        select(EditableLessonModel).where(
+                            EditableLessonModel.source_generation_id == generation_id,
+                            EditableLessonModel.source_type == "component_lectio",
+                        )
+                    )
+                ).all()
+            )
+        assert len(rows) == 1
+
+    async def test_open_component_lectio_rejects_incomplete_and_invalid_documents(
+        self, db_session_factory
+    ):
+        async with db_session_factory() as session:
+            session.add_all(
+                [
+                    GenerationModel(
+                        id="component-generation-running",
+                        user_id=USER_A.id,
+                        subject="mathematics",
+                        context="",
+                        requested_template_id="guided-concept-path",
+                        requested_preset_id="default",
+                        status="running",
+                        document_json=_component_lectio_lesson("component-generation-running"),
+                        chunked_state_json={"control": {"pipeline": "component_lectio"}},
+                    ),
+                    GenerationModel(
+                        id="component-generation-invalid",
+                        user_id=USER_A.id,
+                        subject="mathematics",
+                        context="",
+                        requested_template_id="guided-concept-path",
+                        requested_preset_id="default",
+                        status="completed",
+                        chunked_state_json={"control": {"pipeline": "component_lectio"}},
+                        document_json={"version": 1},
+                    ),
+                    GenerationModel(
+                        id="component-generation-unmarked",
+                        user_id=USER_A.id,
+                        subject="mathematics",
+                        context="",
+                        requested_template_id="guided-concept-path",
+                        requested_preset_id="default",
+                        status="completed",
+                        document_json=_component_lectio_lesson("component-generation-unmarked"),
+                        chunked_state_json={"stage": "complete"},
+                    ),
+                ]
+            )
+            await session.commit()
+
+        async with await _client() as client:
+            incomplete = await client.post(
+                "/api/v1/builder/lessons/from-component-lectio/component-generation-running"
+            )
+            invalid = await client.post(
+                "/api/v1/builder/lessons/from-component-lectio/component-generation-invalid"
+            )
+            unmarked = await client.post(
+                "/api/v1/builder/lessons/from-component-lectio/component-generation-unmarked"
+            )
+
+        assert incomplete.status_code == 409
+        assert "completed" in incomplete.json()["detail"]
+        assert invalid.status_code == 422
+        assert "Missing required field" in invalid.json()["detail"]
+        assert unmarked.status_code == 409
+        assert "Component Lectio" in unmarked.json()["detail"]
+
     async def test_rejects_unknown_component_and_bad_section_references(self):
         invalid_component = _minimal_lesson()
         block_id = invalid_component["sections"][0]["block_ids"][0]
@@ -366,7 +496,9 @@ class TestBuilderLessonRoutes:
         assert unknown_component_response.status_code == 400
         assert missing_block_response.status_code == 422
 
-    async def test_media_upload_uses_gcs_with_lesson_owned_path(self, _install_dependency_overrides):
+    async def test_media_upload_uses_gcs_with_lesson_owned_path(
+        self, _install_dependency_overrides
+    ):
         async with await _client() as client:
             created = await client.post(
                 "/api/v1/builder/lessons",
@@ -469,7 +601,10 @@ class TestBuilderLessonRoutes:
 
         assert teacher_doc["blocks"]["quiz-1"]["content"]["options"][1]["correct"] is True
         assert teacher_doc["blocks"]["short-1"]["content"]["mark_scheme"]
-        assert teacher_doc["blocks"]["practice-1"]["content"]["problems"][0]["solution"]["answer"] == "3/4"
+        assert (
+            teacher_doc["blocks"]["practice-1"]["content"]["problems"][0]["solution"]["answer"]
+            == "3/4"
+        )
         assert teacher_doc["blocks"]["fib-1"]["content"]["segments"][1]["answer"] == "4"
 
         student_options = student_doc["blocks"]["quiz-1"]["content"]["options"]
@@ -484,10 +619,15 @@ class TestBuilderLessonRoutes:
         # Export views must not mutate the persisted teacher-owned lesson.
         assert saved_doc["blocks"]["quiz-1"]["content"]["options"][1]["correct"] is True
         assert saved_doc["blocks"]["short-1"]["content"]["mark_scheme"]
-        assert saved_doc["blocks"]["practice-1"]["content"]["problems"][0]["solution"]["answer"] == "3/4"
+        assert (
+            saved_doc["blocks"]["practice-1"]["content"]["problems"][0]["solution"]["answer"]
+            == "3/4"
+        )
         assert saved_doc["blocks"]["fib-1"]["content"]["segments"][1]["answer"] == "4"
 
-    async def test_print_document_and_export_pdf_enforce_ownership(self, _install_dependency_overrides):
+    async def test_print_document_and_export_pdf_enforce_ownership(
+        self, _install_dependency_overrides
+    ):
         async with await _client() as client:
             created = await client.post(
                 "/api/v1/builder/lessons",
@@ -554,7 +694,9 @@ class TestBuilderLessonRoutes:
                     }
                 }
 
-            with patch("builder.routes.render_generation_print_preflight", side_effect=fake_preflight):
+            with patch(
+                "builder.routes.render_generation_print_preflight", side_effect=fake_preflight
+            ):
                 response = await client.post(
                     f"/api/v1/builder/lessons/{lesson_id}/print-preflight",
                     json={"audience": "student"},
@@ -599,7 +741,9 @@ class TestBuilderLessonRoutes:
                     print_page_debug=None,
                 )
 
-            with patch("builder.routes.export_generation_pdf", side_effect=fake_export_generation_pdf):
+            with patch(
+                "builder.routes.export_generation_pdf", side_effect=fake_export_generation_pdf
+            ):
                 response = await client.post(
                     f"/api/v1/builder/lessons/{lesson_id}/export/pdf",
                     json={"audience": "student"},
