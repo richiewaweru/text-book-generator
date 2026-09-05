@@ -26,6 +26,7 @@
 	let timer: ReturnType<typeof setInterval> | null = null;
 	let pollInFlight = false;
 	let opened = $state(false);
+	let generationInitiated = $state(false);
 
 	function stage(value: string | undefined): 'awaiting_review' | 'running' | 'partial' | 'failed' | 'complete' {
 		const normalized = (value ?? '').toLowerCase();
@@ -71,7 +72,7 @@
 		progress = next;
 		if (stage(next.stage) === 'complete') {
 			stopPolling();
-			void openBuilder();
+			if (generationInitiated) void openBuilder();
 		} else if (stage(next.stage) === 'running' || stage(next.stage) === 'partial') {
 			startPolling();
 		} else {
@@ -93,7 +94,7 @@
 		try {
 			review = await reviewLessonGeneration(unitId, lessonId, pathVersionId, pathRevision);
 			if (stage(review.stage) === 'running' || stage(review.stage) === 'partial') startPolling();
-			if (stage(review.stage) === 'complete') { progress = review; await openBuilder(); }
+			if (stage(review.stage) === 'complete') progress = review;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Could not load the lesson review.';
 		} finally { busy = null; }
@@ -101,14 +102,22 @@
 
 	async function approve(): Promise<void> {
 		busy = 'approving'; error = null;
-		try { applyProgress(await approveLessonGeneration(unitId, lessonId, pathVersionId, pathRevision)); }
+		try {
+			const next = await approveLessonGeneration(unitId, lessonId, pathVersionId, pathRevision);
+			generationInitiated = true;
+			applyProgress(next);
+		}
 		catch (err) { error = err instanceof Error ? err.message : 'Could not approve the lesson generation.'; }
 		finally { busy = null; }
 	}
 
 	async function retry(): Promise<void> {
 		busy = 'retrying'; error = null;
-		try { applyProgress(await retryLessonGeneration(unitId, lessonId, pathVersionId, pathRevision)); }
+		try {
+			const next = await retryLessonGeneration(unitId, lessonId, pathVersionId, pathRevision);
+			generationInitiated = true;
+			applyProgress(next);
+		}
 		catch (err) { error = err instanceof Error ? err.message : 'Could not retry the lesson generation.'; }
 		finally { busy = null; }
 	}
