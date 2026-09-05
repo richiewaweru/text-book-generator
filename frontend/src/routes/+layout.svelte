@@ -14,6 +14,8 @@
 	const authed = fromStore(authIsAuthenticated);
 	let xploreV2 = $state(false);
 	let capabilitiesReady = $state(false);
+	let capabilitiesUserId = $state<string | null>(null);
+	let capabilitiesRequestUserId = $state<string | null>(null);
 
 	const isStudioPrintRoute = $derived(
 		page.url.pathname.startsWith('/studio/print/') && page.url.searchParams.get('print') === 'true'
@@ -24,13 +26,40 @@
 	const isUnitsRoute = $derived(page.url.pathname.startsWith('/units'));
 	const isWorkspaceRoute = $derived(isLessonsRoute || isUnitsRoute);
 
+	async function loadCapabilitiesForUser(userId: string): Promise<void> {
+		if (capabilitiesUserId === userId || capabilitiesRequestUserId === userId) return;
+
+		capabilitiesRequestUserId = userId;
+		capabilitiesReady = false;
+		try {
+			xploreV2 = (await getCapabilities()).xplore_v2;
+			capabilitiesUserId = userId;
+		} catch {
+			xploreV2 = false;
+			capabilitiesUserId = userId;
+		} finally {
+			if (capabilitiesRequestUserId === userId) capabilitiesRequestUserId = null;
+			if (user.current?.id === userId) capabilitiesReady = true;
+		}
+	}
+
 	onMount(() => {
-		void bootstrapAuth(fetchCurrentUser).then(async (currentUser) => {
-			if (currentUser) {
-				try { xploreV2 = (await getCapabilities()).xplore_v2; } catch { xploreV2 = false; }
-			}
+		void bootstrapAuth(fetchCurrentUser);
+	});
+
+	$effect(() => {
+		if (!initialized.current) return;
+
+		const userId = user.current?.id ?? null;
+		if (!userId) {
+			xploreV2 = false;
+			capabilitiesUserId = null;
+			capabilitiesRequestUserId = null;
 			capabilitiesReady = true;
-		});
+			return;
+		}
+
+		void loadCapabilitiesForUser(userId);
 	});
 
 	$effect(() => {

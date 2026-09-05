@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Layout from './+layout.svelte';
 
-const { initializedStore, userStore, authedStore, goto, profileUser } = vi.hoisted(() => {
+const { initializedStore, userStore, authedStore, goto, profileUser, bootstrapAuth, getCapabilities } = vi.hoisted(() => {
 	function createStore<T>(initialValue: T) {
 		let current = initialValue;
 		const subscribers = new Set<(value: T) => void>();
@@ -43,6 +43,8 @@ const { initializedStore, userStore, authedStore, goto, profileUser } = vi.hoist
 		userStore,
 		authedStore,
 		goto: vi.fn(),
+		bootstrapAuth: vi.fn(),
+		getCapabilities: vi.fn(),
 		profileUser: {
 			id: 'user-1',
 			email: 'teacher@example.com',
@@ -69,16 +71,15 @@ vi.mock('$lib/api/auth', () => ({
 	fetchCurrentUser: vi.fn()
 }));
 
+vi.mock('$lib/api/capabilities', () => ({
+	getCapabilities
+}));
+
 vi.mock('$lib/stores/auth', () => ({
 	authInitialized: initializedStore,
 	authIsAuthenticated: authedStore,
 	authUser: userStore,
-	bootstrapAuth: vi.fn(async () => {
-		userStore.set(profileUser);
-		authedStore.set(true);
-		initializedStore.set(true);
-		return profileUser;
-	}),
+	bootstrapAuth,
 	logout: vi.fn()
 }));
 
@@ -88,6 +89,14 @@ describe('root route session resume', () => {
 		userStore.set(null);
 		authedStore.set(false);
 		goto.mockReset();
+		getCapabilities.mockReset();
+		getCapabilities.mockResolvedValue({ xplore_v2: true });
+		bootstrapAuth.mockImplementation(async () => {
+			userStore.set(profileUser);
+			authedStore.set(true);
+			initializedStore.set(true);
+			return profileUser;
+		});
 	});
 
 	afterEach(() => {
@@ -107,10 +116,52 @@ describe('root route session resume', () => {
 		await waitFor(() =>
 			expect(goto).toHaveBeenCalledWith('/lessons', { replaceState: true })
 		);
+		await waitFor(() => expect(getCapabilities).toHaveBeenCalledTimes(1));
+		expect(screen.getByRole('link', { name: 'Units' })).toBeTruthy();
 		expect(screen.getByRole('link', { name: 'Lectio' }).getAttribute('href')).toBe('/lessons');
 		expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('href')).toBe('/settings');
 		expect(screen.queryByRole('link', { name: 'Dashboard' })).toBeNull();
 		expect(screen.queryByRole('link', { name: 'Builder' })).toBeNull();
 		expect(screen.queryByText('⌘K')).toBeNull();
+	});
+
+	it('loads Units when onboarding authenticates without a full reload', async () => {
+		bootstrapAuth.mockImplementation(async () => {
+			initializedStore.set(true);
+			return null;
+		});
+
+		render(Layout, {
+			props: {
+				children: createRawSnippet(() => ({
+					render: () => '<p>Lessons...</p>'
+				}))
+			}
+		});
+
+		await screen.findByText('Lessons...');
+		expect(getCapabilities).not.toHaveBeenCalled();
+
+		userStore.set(profileUser);
+		authedStore.set(true);
+
+		await waitFor(() => expect(screen.getByRole('link', { name: 'Units' })).toBeTruthy());
+		expect(getCapabilities).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps Units hidden when the capability request fails', async () => {
+		getCapabilities.mockRejectedValue(new Error('capabilities unavailable'));
+
+		render(Layout, {
+			props: {
+				children: createRawSnippet(() => ({
+					render: () => '<p>Lessons...</p>'
+				}))
+			}
+		});
+
+		await waitFor(() => expect(screen.getByRole('link', { name: 'Home' })).toBeTruthy());
+		await waitFor(() => expect(getCapabilities).toHaveBeenCalledTimes(1));
+		expect(screen.queryByRole('link', { name: 'Units' })).toBeNull();
 	});
 });
