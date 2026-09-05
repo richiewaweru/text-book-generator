@@ -34,7 +34,11 @@ const jsonHeaders = { 'Content-Type': 'application/json' };
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const CONSTRUCTOR_TIMEOUT_MS = 90_000;
-const PLANNING_TIMEOUT_MS = 120_000;
+// Path planning may invoke the planner plus adjacent merge critics. Keep the
+// client deadline aligned with the backend's stage-one budget so a successful
+// commit is not reported as a failed request just because the response is
+// still being assembled.
+const PLANNING_TIMEOUT_MS = 300_000;
 const PREPARATION_TIMEOUT_MS = 300_000;
 const RESOURCE_PREVIEW_TIMEOUT_MS = 45_000;
 

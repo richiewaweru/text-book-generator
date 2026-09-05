@@ -115,6 +115,24 @@ describe('/units/[id]', () => {
 		expect(screen.queryByText(/concept path/i)).toBeNull();
 	});
 
+	it('reconciles a committed plan when the planning request times out', async () => {
+		const unplannedUnit = { ...unit, status: 'draft', active_path_version_id: null };
+		const committedPath = buildPath({ id: 'path-2', unit_id: 'unit-1', status: 'draft' });
+		mocks.getUnit
+			.mockResolvedValueOnce(unplannedUnit)
+			.mockResolvedValueOnce({ ...unplannedUnit, active_path_version_id: 'path-2' })
+			.mockResolvedValue({ ...unplannedUnit, active_path_version_id: 'path-2' });
+		mocks.planUnitPath.mockRejectedValue(new Error('Could not plan the lessons. The request timed out; please try again.'));
+		mocks.getUnitPath.mockResolvedValue(committedPath);
+		render(UnitPage);
+
+		await screen.findByText('Build your lessons');
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Plan the lessons' })[0]);
+
+		expect((await screen.findAllByText('Plant inputs')).length).toBeGreaterThan(0);
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
 	it('does not publish the empty state before workspace hydration completes', async () => {
 		const pathResponse = deferred<ReturnType<typeof buildPath>>();
 		mocks.getUnitPath.mockReturnValue(pathResponse.promise);

@@ -251,7 +251,16 @@
 		}
 	}
 
-	async function act(label: string, action: () => Promise<unknown>, reload = true): Promise<void> {
+	function isTimeoutError(value: unknown): boolean {
+		return value instanceof Error && /request timed out|timed out|timeout/i.test(value.message);
+	}
+
+	async function act(
+		label: string,
+		action: () => Promise<unknown>,
+		reload = true,
+		reconcileOnTimeout?: () => Promise<boolean>
+	): Promise<void> {
 		busy = label;
 		error = null;
 		try {
@@ -259,6 +268,15 @@
 			if (reload) await load({ preserveSelection: true });
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'That change did not go through.';
+			if (reconcileOnTimeout && isTimeoutError(err)) {
+				try {
+					// A planner can commit before the response is returned. Re-read the
+					// authoritative unit/path before telling the teacher it failed.
+					if (await reconcileOnTimeout()) return;
+				} catch {
+					// Preserve the original timeout when the reconciliation read also fails.
+				}
+			}
 			error = message;
 			if (isApiError(err) && err.status === 409) {
 				await load({ preserveSelection: true });
@@ -271,11 +289,16 @@
 
 	async function planOrReplan(replan: boolean): Promise<void> {
 		if (!unit) return;
+		const previousPath = path;
 		await act(replan ? 'replan' : 'plan', async () => {
 			path = await planUnitPath(unitId, plannerInput(unit as Unit), replan, path ?? undefined);
 			unit = await getUnit(unitId);
 			if (path.lessons.length) await selectLesson(path.lessons[0]);
-		}, false);
+		}, false, async () => {
+			await load({ preserveSelection: true });
+			if (!path) return false;
+			return !replan || path.id !== previousPath?.id || path.revision !== previousPath?.revision;
+		});
 	}
 
 	async function saveLesson(event: SubmitEvent): Promise<void> {
