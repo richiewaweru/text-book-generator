@@ -8,7 +8,11 @@ from v3_execution.models import ExecutorOutcome, GeneratedQuestionBlock, Questio
 from v3_execution.prompts.question_writer import build_question_writer_prompt
 from v3_execution.config.retries import V3_MAX_RETRIES
 from v3_execution.runtime.retry_runner import run_with_retries
-from v3_execution.runtime.validation import validate_question_batch
+from v3_execution.runtime.validation import (
+    validate_question_batch,
+    validate_question_content,
+    validate_question_block,
+)
 
 
 EmitFn = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -57,8 +61,15 @@ async def execute_questions(
         {"section_id": order.section_id, "generation_id": generation_id},
     )
 
-    async def _attempt(_: bool) -> ExecutorOutcome:
-        prompt = build_question_writer_prompt(order)
+    async def _call(
+        attempt_order: QuestionWriterWorkOrder,
+        *,
+        correction_hint: str | None = None,
+    ) -> dict[str, Any]:
+        prompt = build_question_writer_prompt(
+            attempt_order,
+            correction_hint=correction_hint,
+        )
         response = await run_json_agent(
             node_name="v3_question_writer",
             trace_id=trace_id,
@@ -66,6 +77,53 @@ async def execute_questions(
             system_prompt="You output JSON only.",
             user_prompt=prompt,
             model_overrides=model_overrides,
+        )
+        return response
+
+    def _standard_blocks(
+        response: dict[str, Any],
+        attempt_order: QuestionWriterWorkOrder,
+    ) -> tuple[list[GeneratedQuestionBlock], list[str]]:
+        bucket = _items_map(response)
+        blocks: list[GeneratedQuestionBlock] = []
+        errors: list[str] = []
+
+        for planned in attempt_order.questions:
+            entry = bucket.get(planned.id)
+            if entry is None:
+                errors.append(f"Missing stem for question {planned.id}")
+                continue
+            stem = entry.get("stem") if isinstance(entry, dict) else str(entry)
+
+            block = GeneratedQuestionBlock(
+                question_id=planned.id,
+                section_id=attempt_order.section_id,
+                difficulty=planned.difficulty,
+                data={
+                    "question": stem,
+                    "difficulty": planned.difficulty,
+                    "hints": [],
+                },
+                expected_answer=planned.expected_answer,
+                expected_working=planned.expected_working,
+                diagram_required=planned.diagram_required,
+                source_work_order_id=attempt_order.work_order_id,
+            )
+            blocks.append(block)
+
+        errors.extend(validate_question_batch(blocks, attempt_order))
+        return blocks, errors
+
+    component_prior_errors: list[str] = []
+
+    async def _component_attempt(already_retried: bool) -> ExecutorOutcome:
+        response = await _call(
+            order,
+            correction_hint=(
+                "\n".join(component_prior_errors)
+                if already_retried
+                else None
+            ),
         )
 
         if order.component_id:
@@ -98,47 +156,99 @@ async def execute_questions(
                 diagram_required=planned.diagram_required if planned else False,
                 source_work_order_id=order.work_order_id,
             )
-            return ExecutorOutcome(ok=True, blocks=[block], errors=[])
+            errors = validate_question_content(block.data, question_id=question_id)
+            component_prior_errors[:] = errors
+            return ExecutorOutcome(ok=not errors, blocks=[block], errors=errors)
 
-        bucket = _items_map(response)
-        blocks: list[GeneratedQuestionBlock] = []
-        errors: list[str] = []
+        raise AssertionError("component attempt called for a non-component order")
 
-        for planned in order.questions:
-            entry = bucket.get(planned.id)
-            if entry is None:
-                errors.append(f"Missing stem for question {planned.id}")
-                continue
-            stem = entry.get("stem") if isinstance(entry, dict) else str(entry)
-
-            difficulty = planned.difficulty
-            data = {
-                "question": stem,
-                "difficulty": difficulty,
-                "hints": [],
-            }
-            blocks.append(
-                GeneratedQuestionBlock(
-                    question_id=planned.id,
-                    section_id=order.section_id,
-                    difficulty=difficulty,
-                    data=data,
-                    expected_answer=planned.expected_answer,
-                    expected_working=planned.expected_working,
-                    diagram_required=planned.diagram_required,
-                    source_work_order_id=order.work_order_id,
-                )
+    if order.component_id:
+        outcome = await run_with_retries(
+            f"questions:{order.section_id}",
+            _component_attempt,
+            # Component-aware output is one whole block: allow only the existing
+            # initial attempt plus one correction attempt.
+            max_retries=min(1, V3_MAX_RETRIES["question_writer"]),
+        )
+    else:
+        # Generate the batch once, then retry only malformed/missing questions. This
+        # keeps valid siblings stable and retains the existing one-retry-per-block cap.
+        initial_response = await _call(order)
+        initial_blocks, initial_errors = _standard_blocks(initial_response, order)
+        blocks_by_id = {block.question_id: block for block in initial_blocks}
+        errors_by_id: dict[str, list[str]] = {question.id: [] for question in order.questions}
+        for block in initial_blocks:
+            errors_by_id[block.question_id].extend(
+                validate_question_block(block, order)
             )
+        for question in order.questions:
+            if question.id not in blocks_by_id:
+                errors_by_id[question.id].append(
+                    f"Missing stem for question {question.id}"
+                )
 
-        errors.extend(validate_question_batch(blocks, order))
-        ok = len(errors) == 0
-        return ExecutorOutcome(ok=ok, blocks=blocks, errors=errors)
+        failed_ids = [question.id for question in order.questions if errors_by_id[question.id]]
+        known_block_errors = {
+            error for question_errors in errors_by_id.values() for error in question_errors
+        }
+        batch_only_errors = [
+            error for error in initial_errors if error not in known_block_errors
+        ]
+        if not failed_ids and not batch_only_errors:
+            outcome = ExecutorOutcome(ok=True, blocks=initial_blocks, errors=[])
+        elif batch_only_errors:
+            outcome = ExecutorOutcome(
+                ok=False,
+                blocks=initial_blocks,
+                errors=batch_only_errors,
+            )
+        else:
+            final_blocks: dict[str, GeneratedQuestionBlock] = {
+                block.question_id: block
+                for block in initial_blocks
+                if not errors_by_id[block.question_id]
+            }
+            retry_errors: list[str] = []
+            for question in order.questions:
+                question_errors = errors_by_id[question.id]
+                if not question_errors:
+                    continue
+                retry_order = order.model_copy(update={"questions": [question]})
 
-    outcome = await run_with_retries(
-        f"questions:{order.section_id}",
-        _attempt,
-        max_retries=V3_MAX_RETRIES["question_writer"],
-    )
+                async def _retry(
+                    _: bool,
+                    *,
+                    _order=retry_order,
+                    _errors=question_errors,
+                ) -> ExecutorOutcome:
+                    response = await _call(_order, correction_hint="\n".join(_errors))
+                    retry_blocks, errors = _standard_blocks(response, _order)
+                    return ExecutorOutcome(ok=not errors, blocks=retry_blocks, errors=errors)
+
+                retry_budget = V3_MAX_RETRIES["question_writer"]
+                if retry_budget:
+                    # The initial batch call already consumed the first attempt for
+                    # this question; only the remaining retry budget belongs here.
+                    retried = await run_with_retries(
+                        f"question:{question.id}",
+                        _retry,
+                        max_retries=max(0, retry_budget - 1),
+                    )
+                else:
+                    retried = ExecutorOutcome(
+                        ok=False,
+                        blocks=[],
+                        errors=question_errors,
+                    )
+                if retried.ok:
+                    final_blocks[question.id] = retried.blocks[0]
+                else:
+                    retry_errors.extend(retried.errors)
+            outcome = ExecutorOutcome(
+                ok=not retry_errors,
+                blocks=[final_blocks[q.id] for q in order.questions if q.id in final_blocks],
+                errors=retry_errors,
+            )
     if not outcome.ok:
         raise RuntimeError("; ".join(outcome.errors))
 

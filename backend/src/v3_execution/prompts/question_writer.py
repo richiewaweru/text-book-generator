@@ -10,10 +10,18 @@ def _load_static_body() -> str:
     return effective_prompt_text("question-writer")
 
 
-def build_question_writer_prompt(order: QuestionWriterWorkOrder) -> str:
+def build_question_writer_prompt(
+    order: QuestionWriterWorkOrder,
+    *,
+    correction_hint: str | None = None,
+) -> str:
     shared_prefix = build_v3_shared_prefix()
     if order.component_id:
-        return _build_component_aware_prompt(order, shared_prefix=shared_prefix)
+        return _build_component_aware_prompt(
+            order,
+            shared_prefix=shared_prefix,
+            correction_hint=correction_hint,
+        )
 
     questions_spec = "\n\n".join(
         f"""Question {q.id}:
@@ -28,8 +36,17 @@ def build_question_writer_prompt(order: QuestionWriterWorkOrder) -> str:
   Constraints: {", ".join(q.student_facing_constraints) or "none"}"""
         for q in order.questions
     )
+    repair = ""
+    if correction_hint:
+        repair = f"""
+REPAIR REQUIRED — a previous question output was not acceptable.
+{correction_hint}
+Return only final student-facing question wording. Do not include drafting,
+self-correction, or meta commentary.
+"""
     return f"""{shared_prefix}
 {_load_static_body()}
+{repair}
 {questions_spec}
 
 ANCHOR FACTS (do not change these):
@@ -49,12 +66,16 @@ def _build_component_aware_prompt(
     order: QuestionWriterWorkOrder,
     *,
     shared_prefix: str,
+    correction_hint: str | None = None,
 ) -> str:
     schema = order.schema_summary or f"exact Lectio content for {order.component_id}"
     purpose = order.purpose or "Teach the lesson objective via this component."
     repair = ""
-    if order.prior_validation_errors:
-        error_lines = "\n".join(f"  - {e}" for e in order.prior_validation_errors[:12])
+    validation_errors = order.prior_validation_errors
+    if correction_hint:
+        validation_errors = [*validation_errors, correction_hint]
+    if validation_errors:
+        error_lines = "\n".join(f"  - {e}" for e in validation_errors[:12])
         repair = f"""
 REPAIR REQUIRED — previous output failed the exact Lectio contract.
 Validation errors:

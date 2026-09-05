@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 from contracts.lectio import get_section_field_for_component
@@ -84,7 +85,59 @@ def validate_question_block(
             errors.append(f"Difficulty changed: {planned.difficulty} → {block.difficulty}")
         if block.expected_answer != planned.expected_answer:
             errors.append(f"Expected answer changed for {block.question_id}")
+    errors.extend(validate_question_content(block.data, question_id=block.question_id))
     return errors
+
+
+_QUESTION_TEXT_KEYS = frozenset({"question", "stem", "prompt"})
+_DRAFTING_MARKER_RE = re.compile(
+    r"\b(?:wait|actually|oops|correction|corrected|revised?|adjust(?:ment)?|"
+    r"sorry|i\s+meant|let\s+me\s+(?:re)?solve)\s*[,!:—-]",
+    re.IGNORECASE,
+)
+_TRAILING_SIMILAR_RE = re.compile(r"\bor\s+similar\s*(?:\.{2,}|…)+\s*$", re.IGNORECASE)
+
+
+def _question_texts(value: object, *, key: str | None = None) -> Iterable[str]:
+    if isinstance(value, str):
+        if key in _QUESTION_TEXT_KEYS:
+            yield value
+        return
+    if isinstance(value, dict):
+        for child_key, child in value.items():
+            yield from _question_texts(child, key=str(child_key))
+        return
+    if isinstance(value, list):
+        for child in value:
+            yield from _question_texts(child, key=key)
+
+
+def _question_text_errors(text: str, *, question_id: str) -> list[str]:
+    normalized = " ".join(text.split())
+    if not normalized:
+        return []
+    if _DRAFTING_MARKER_RE.search(normalized) or _TRAILING_SIMILAR_RE.search(normalized):
+        return [
+            f"Question {question_id} contains model drafting or self-correction residue; "
+            "return only the final student-facing question."
+        ]
+    return []
+
+
+def validate_question_content(
+    data: dict,
+    *,
+    question_id: str,
+) -> list[str]:
+    """Reject obvious model revision residue in student-facing question text.
+
+    This intentionally catches only unambiguous drafting patterns. General grammar is
+    too language- and subject-dependent to reject deterministically without false positives.
+    """
+    errors: list[str] = []
+    for text in _question_texts(data):
+        errors.extend(_question_text_errors(text, question_id=question_id))
+    return list(dict.fromkeys(errors))
 
 
 def validate_visual_block(
@@ -160,5 +213,6 @@ __all__ = [
     "validate_component_block",
     "validate_question_batch",
     "validate_question_block",
+    "validate_question_content",
     "validate_visual_block",
 ]
