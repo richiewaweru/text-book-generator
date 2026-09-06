@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onMount } from 'svelte';
 	import { fromStore } from 'svelte/store';
 	import { goto } from '$app/navigation';
 	import { isApiError } from '$lib/api/errors';
-	import { fetchV3Document, getChunkedPlanStatus, getV3Generations } from '$lib/api/v3';
+	import { getCanonicalGenerations, type CanonicalGenerationSummary } from '$lib/api/generations';
 	import {
 		deleteBuilderLesson,
 		getBuilderLesson,
@@ -12,10 +12,7 @@
 		type BuilderLessonSummary
 	} from '$lib/builder/api/lesson-crud';
 	import NewLessonSplitButton from '$lib/components/workspace/NewLessonSplitButton.svelte';
-	import { createGenerationPoller } from '$lib/generation/generation-poller';
 	import { authUser, logout } from '$lib/stores/auth';
-	import type { V3PackDocument } from '$lib/studio/v3-pack-to-lectio-document';
-	import type { V3GenerationHistoryItem } from '$lib/types/v3';
 	import { deriveLessonRows, type LessonRow, type LessonState } from '$lib/workspace/lesson-state';
 	import type { LessonDocument } from 'lectio';
 
@@ -23,10 +20,8 @@
 	let errorMessage = $state<string | null>(null);
 	let rows = $state<LessonRow[]>([]);
 	let lessons = $state<BuilderLessonSummary[]>([]);
-	let generations = $state<V3GenerationHistoryItem[]>([]);
-	let generationDocumentsById = $state<Record<string, V3PackDocument | undefined>>({});
+	let generations = $state<CanonicalGenerationSummary[]>([]);
 	let lessonDocumentsById = $state<Record<string, LessonDocument | undefined>>({});
-	let documentVersionsByGenerationId = $state<Record<string, string | null | undefined>>({});
 	let deletingLessonId = $state<string | null>(null);
 	let deleteError = $state<string | null>(null);
 	const user = fromStore(authUser);
@@ -37,7 +32,6 @@
 	const drafts = $derived(rows.filter((row) => row.state === 'draft'));
 	const greeting = $derived(new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening');
 	const firstName = $derived(user.current?.name?.trim().split(/\s+/)[0] ?? '');
-	const workspacePoller = createGenerationPoller(pollWritingRows);
 
 	function dismissedIssueIds(): Record<string, string[]> {
 		if (typeof localStorage === 'undefined') return {};
@@ -61,64 +55,48 @@
 	}
 
 	function rebuildRows(): void {
-		rows = deriveLessonRows({
+		const builderRows = deriveLessonRows({
 			lessons,
-			generations,
-			generationDocumentsById,
 			lessonDocumentsById,
 			dismissedIssueIdsByLessonId: dismissedIssueIds()
 		});
+		const builderGenerationIds = new Set(
+			lessons
+				.map((lesson) => lesson.source_generation_id)
+				.filter((value): value is string => Boolean(value))
+		);
+		const generationRows = generations
+			.filter((generation) => !builderGenerationIds.has(generation.generation_id))
+			.map(generationRow);
+		rows = [...builderRows, ...generationRows].sort(
+			(left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
+		);
 	}
 
-	async function pollWritingRows(): Promise<void> {
-		const writingGenerationIds = rows
-			.filter((row) => row.state === 'writing')
-			.map((row) => lessons.find((lesson) => lesson.id === row.id)?.source_generation_id)
-			.filter((id): id is string => Boolean(id));
-		if (writingGenerationIds.length === 0) {
-			workspacePoller.stop();
-			return;
-		}
+	function generationRow(generation: CanonicalGenerationSummary): LessonRow {
+		const stage = generation.stage.toLowerCase();
+		const failed = generation.status === 'failed' || stage.includes('failed') || stage.includes('blocked') || stage.includes('error');
+		const awaitingReview = ['awaiting_review', 'prepared', 'plan_ready'].includes(stage);
+		const writing = !failed && !awaitingReview && generation.status !== 'completed';
+		const href = generation.builder_id
+			? `/builder/${encodeURIComponent(generation.builder_id)}`
+			: generation.pack_id
+				? `/units/${encodeURIComponent(generation.pack_id)}`
+				: '/units';
 
-		const statuses = await Promise.all(
-			writingGenerationIds.map(async (generationId) => [
-				generationId,
-				await getChunkedPlanStatus(generationId)
-			] as const)
-		);
-		for (const [generationId, status] of statuses) {
-			const terminal =
-				status.stage === 'complete' ||
-				status.stage === 'assembly_blocked' ||
-				status.stage === 'stage2_error' ||
-				status.next_action === 'done';
-			const versionChanged =
-				typeof status.doc_version === 'string' &&
-				status.doc_version !== documentVersionsByGenerationId[generationId];
-			if (versionChanged || terminal) {
-				try {
-					generationDocumentsById = {
-						...generationDocumentsById,
-						[generationId]: (await fetchV3Document(generationId)) as V3PackDocument
-					};
-				} catch {
-					// Keep the last known snapshot and retry while the row remains active.
-				}
-			}
-			documentVersionsByGenerationId = {
-				...documentVersionsByGenerationId,
-				[generationId]: status.doc_version
-			};
-			if (status.stage === 'assembly_blocked' || status.stage === 'stage2_error') {
-				generations = generations.map((generation) =>
-					generation.id === generationId
-						? { ...generation, status: 'failed_finalisation' }
-						: generation
-				);
-			}
-		}
-		rebuildRows();
-		if (!rows.some((row) => row.state === 'writing')) workspacePoller.stop();
+		return {
+			id: generation.builder_id ?? `generation:${generation.generation_id}`,
+			title: generation.pack_resource_label || generation.subject || 'Untitled lesson',
+			classLabel: null,
+			subject: generation.subject || null,
+			state: failed ? 'attention' : writing ? 'writing' : awaitingReview ? 'attention' : 'ready',
+			sectionsDone: null,
+			sectionsTotal: null,
+			flagCount: failed ? 1 : 0,
+			awaitingReview,
+			updatedAt: generation.last_heartbeat || generation.completed_at || generation.created_at,
+			href
+		};
 	}
 
 	function relativeTime(value: string): string {
@@ -177,18 +155,16 @@
 		try {
 			const [loadedLessons, loadedGenerations] = await Promise.all([
 				listBuilderLessons(),
-				getV3Generations()
+				getCanonicalGenerations(20, 0)
 			]);
-			lessons = loadedLessons;
-			generations = loadedGenerations;
-			const generationIds = new Set(
-				lessons
-					.map((lesson) => lesson.source_generation_id)
-					.filter((id): id is string => Boolean(id))
+			// Historical pipeline rows remain auditable server-side but are not an active
+			// product surface and must not be opened from the dashboard.
+			lessons = loadedLessons.filter((lesson) => lesson.source_type !== 'v3_generation');
+			generations = loadedGenerations.filter(
+				(generation) => generation.pipeline === 'component_lectio'
 			);
-			const [lessonRecords, generationEntries] = await Promise.all([
-				Promise.all(
-					lessons.map(async (lesson) => {
+			const lessonRecords = await Promise.all(
+				lessons.map(async (lesson) => {
 						try {
 							return await getBuilderLesson(lesson.id);
 						} catch (error) {
@@ -196,26 +172,13 @@
 							return undefined;
 						}
 					})
-				),
-				Promise.all(
-					[...generationIds].map(async (generationId) => {
-						try {
-							return [generationId, (await fetchV3Document(generationId)) as V3PackDocument] as const;
-						} catch (error) {
-							if (isApiError(error) && error.status === 401) throw error;
-							return [generationId, undefined] as const;
-						}
-					})
-				)
-			]);
+			);
 			lessonDocumentsById = Object.fromEntries(
 				lessonRecords
 					.filter((record): record is BuilderLessonRecord => Boolean(record))
 					.map((record) => [record.id, record.document])
 			);
-			generationDocumentsById = Object.fromEntries(generationEntries);
 			rebuildRows();
-			if (rows.some((row) => row.state === 'writing')) workspacePoller.start();
 		} catch (error) {
 			if (isApiError(error) && error.status === 401) {
 				logout();
@@ -232,7 +195,6 @@
 		void loadWorkspace();
 	});
 
-	onDestroy(() => workspacePoller.stop());
 </script>
 
 <svelte:head>
