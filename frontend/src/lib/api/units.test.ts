@@ -224,6 +224,28 @@ describe('Units API request timeouts', () => {
 		vi.useRealTimers();
 	});
 
+	it('keeps a serial preparation alive past the single-call stage-one timeout', async () => {
+		vi.useFakeTimers();
+		const pendingApiFetch = vi.mocked(apiFetch);
+		pendingApiFetch.mockImplementation((_path: string, init: RequestInit = {}) =>
+			new Promise((_resolve, reject) => {
+				init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+			})
+		);
+
+		const pending = preparePathLesson('unit-1', activePath, activeLesson, 'first_exposure');
+		let settled = false;
+		void pending.then(() => { settled = true; }, () => { settled = true; });
+		await vi.advanceTimersByTimeAsync(300_000);
+		expect(settled).toBe(false);
+
+		const rejection = expect(pending).rejects.toThrow(
+			/server may still be finishing; reload to check the saved status before retrying/i
+		);
+		await vi.advanceTimersByTimeAsync(1_500_000);
+		await rejection;
+	});
+
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.clearAllMocks();

@@ -310,6 +310,24 @@ describe('/units/[id]', () => {
 		expect(screen.queryByText(/prerequisite risk/i)).toBeNull();
 	});
 
+	it('reconciles a preparation committed after the client request timed out', async () => {
+		render(UnitPage);
+		expect(await screen.findByRole('button', { name: 'Make the lesson' })).toBeTruthy();
+		mocks.preparePathLesson.mockRejectedValue(
+			new Error('Could not prepare the lesson. The request timed out. The server may still be finishing; reload to check the saved status before retrying.')
+		);
+		mocks.getPreparedLessonStatus.mockResolvedValue({
+			path_lesson_id: lessonOne.id, lesson_revision: lessonOne.revision, generation_id: 'generation-1',
+			generation_status: 'awaiting_review', workflow_stage: 'awaiting_review', objective_hash: lessonOne.objective_hash,
+			stale: false, can_prepare: false, can_regenerate: true
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Make the lesson' }));
+		expect(await screen.findByRole('button', { name: /approve and write lesson/i })).toBeTruthy();
+		expect(screen.queryByText(/server may still be finishing/i)).toBeNull();
+		expect(mocks.preparePathLesson).toHaveBeenCalledTimes(1);
+	});
+
 	it('surfaces incomplete preparation as a repair action instead of a ready lesson', async () => {
 		mocks.getPreparedLessonStatus.mockResolvedValue({
 			path_lesson_id: lessonOne.id, lesson_revision: lessonOne.revision, generation_id: null,

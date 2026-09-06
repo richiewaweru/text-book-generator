@@ -38,7 +38,17 @@ const CONSTRUCTOR_TIMEOUT_MS = 90_000;
 // commit is not reported as a failed request just because the response is
 // still being assembled.
 const PLANNING_TIMEOUT_MS = 300_000;
-const PREPARATION_TIMEOUT_MS = 300_000;
+// Preparation is intentionally serial: the backend makes at most one
+// component-selector call per expanded slot (six slots max), then one
+// structural-planner call. Each stage-one call is bounded to 240 seconds.
+// Allow the complete bounded sequence plus two minutes for persistence and
+// response serialization. This keeps the browser from aborting a legitimate
+// preparation while retaining a finite client-side deadline.
+const PREPARATION_MAX_STAGE_ONE_CALLS = 7;
+const PREPARATION_STAGE_ONE_TIMEOUT_MS = 240_000;
+const PREPARATION_PERSISTENCE_MARGIN_MS = 120_000;
+const PREPARATION_TIMEOUT_MS =
+	PREPARATION_MAX_STAGE_ONE_CALLS * PREPARATION_STAGE_ONE_TIMEOUT_MS + PREPARATION_PERSISTENCE_MARGIN_MS;
 const RESOURCE_PREVIEW_TIMEOUT_MS = 45_000;
 
 function timeoutFor(path: string): number {
@@ -60,7 +70,10 @@ async function jsonRequest<T>(path: string, fallback: string, init?: RequestInit
 		return response.json() as Promise<T>;
 	} catch (error) {
 		if (error instanceof DOMException && error.name === 'AbortError' && !init?.signal?.aborted) {
-			throw new Error(`${fallback} The request timed out; please try again.`);
+			const recovery = path.includes(':prepare') || path.includes(':regenerate')
+				? 'The server may still be finishing; reload to check the saved status before retrying.'
+				: 'Please try again.';
+			throw new Error(`${fallback} The request timed out. ${recovery}`);
 		}
 		throw error;
 	} finally {

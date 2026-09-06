@@ -371,11 +371,19 @@
 		await act('prepare', async () => {
 			await preparePathLesson(unitId, path as UnitPath, selected, lessonMode, selectedGroupIds);
 			preparation = await getPreparedLessonStatus(unitId, selected.id);
-		}, false);
+		}, false, async () => {
+			const next = await getPreparedLessonStatus(unitId, selected.id);
+			preparation = next;
+			// A client timeout must never trigger an automatic retry. If the
+			// server committed while the response was in flight, treat that one
+			// submission as successful and expose its authoritative status.
+			return Boolean(next.generation_id);
+		});
 	}
 
 	async function regenerate(): Promise<void> {
 		if (!selected || regenerationReason.trim().length < 3) return;
+		const previousGenerationId = preparation?.generation_id ?? null;
 		await act('regenerate', async () => {
 			await regeneratePathLesson(
 				unitId,
@@ -386,7 +394,11 @@
 				selectedGroupIds
 			);
 			preparation = await getPreparedLessonStatus(unitId, selected.id);
-		}, false);
+		}, false, async () => {
+			const next = await getPreparedLessonStatus(unitId, selected.id);
+			preparation = next;
+			return Boolean(next.generation_id && next.generation_id !== previousGenerationId);
+		});
 	}
 
 	async function viewVersion(version: PathVersionSummary): Promise<void> {
