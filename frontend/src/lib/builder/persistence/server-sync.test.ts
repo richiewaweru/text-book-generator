@@ -12,8 +12,13 @@ describe('Builder direct source loading', () => {
 	it('loads Component Lectio records through Builder CRUD without V3 fallback', async () => {
 		const document = { id: 'builder-1', title: 'Photosynthesis', sections: [] };
 		getBuilderLesson.mockResolvedValue({ id: 'builder-1', source_type: 'component_lectio', source_generation_id: 'generation-1', document });
-		await expect(loadBuilderLessonWithFallback('builder-1')).resolves.toEqual({ document, source: 'server' });
+		await expect(loadBuilderLessonWithFallback('builder-1')).resolves.toEqual({ document, source: 'server', sourceGenerationId: 'generation-1' });
 		expect(getBuilderLesson).toHaveBeenCalledWith('builder-1');
 		expect(saveDocument).toHaveBeenCalledWith(document);
+	});
+
+	it('rejects historical V3 Builder rows instead of opening a legacy editor', async () => {
+		getBuilderLesson.mockResolvedValue({ id: 'legacy-1', source_type: 'v3_generation', source_generation_id: 'generation-1', document: {} });
+		await expect(loadBuilderLessonWithFallback('legacy-1')).rejects.toMatchObject({ status: 410, errorType: 'legacy_pipeline_retired' });
 	});
 });

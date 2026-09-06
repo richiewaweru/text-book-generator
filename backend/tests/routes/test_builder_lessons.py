@@ -350,7 +350,7 @@ class TestBuilderLessonRoutes:
                     "document": _minimal_lesson(),
                 },
             )
-            assert ok_response.status_code == 201
+            assert ok_response.status_code == 410
 
             denied_response = await client.post(
                 "/api/v1/builder/lessons",
@@ -360,7 +360,36 @@ class TestBuilderLessonRoutes:
                     "document": _minimal_lesson(),
                 },
             )
-            assert denied_response.status_code == 404
+            assert denied_response.status_code == 410
+
+    async def test_historical_builder_lessons_are_retired_server_side(self, db_session_factory):
+        async with db_session_factory() as session:
+            session.add(
+                EditableLessonModel(
+                    id="legacy-builder-lesson",
+                    user_id=USER_A.id,
+                    source_generation_id="legacy-generation",
+                    source_type="v3_generation",
+                    title="Historical lesson",
+                    document_json=_minimal_lesson("legacy-builder-lesson"),
+                )
+            )
+            await session.commit()
+
+        async with await _client() as client:
+            listed = await client.get("/api/v1/builder/lessons")
+            loaded = await client.get("/api/v1/builder/lessons/legacy-builder-lesson")
+            updated = await client.put(
+                "/api/v1/builder/lessons/legacy-builder-lesson",
+                json={"document": _minimal_lesson("legacy-builder-lesson")},
+            )
+            deleted = await client.delete("/api/v1/builder/lessons/legacy-builder-lesson")
+
+        assert listed.status_code == 200
+        assert all(item["id"] != "legacy-builder-lesson" for item in listed.json())
+        for response in (loaded, updated, deleted):
+            assert response.status_code == 410
+            assert response.json()["detail"]["code"] == "legacy_pipeline_retired"
 
     async def test_open_component_lectio_generation_is_idempotent_and_builder_native(
         self, db_session_factory

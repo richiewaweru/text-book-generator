@@ -56,6 +56,18 @@ export async function getBuilderLesson(id: string): Promise<BuilderLessonRecord>
 	return response.json() as Promise<BuilderLessonRecord>;
 }
 
+/** Idempotently materialize a canonical Component Lectio generation in Builder. */
+export async function openComponentLectioBuilderLesson(
+	generationId: string
+): Promise<BuilderLessonRecord> {
+	const response = await apiFetch(
+		`/api/v1/builder/lessons/from-component-lectio/${encodeURIComponent(generationId)}`,
+		{ method: 'POST' }
+	);
+	await ensureOk(response, 'Failed to open the lesson in Builder.');
+	return response.json() as Promise<BuilderLessonRecord>;
+}
+
 export async function updateBuilderLesson(
 	id: string,
 	request: UpdateBuilderLessonRequest

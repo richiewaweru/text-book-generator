@@ -1,5 +1,5 @@
 import type { LessonDocument } from 'lectio';
-import { isApiError } from '$lib/api/errors';
+import { ApiError, isApiError } from '$lib/api/errors';
 import {
 	deleteBuilderLesson,
 	getBuilderLesson,
@@ -82,12 +82,15 @@ export async function flushBuilderSyncQueue(): Promise<SyncResult> {
 
 export async function loadBuilderLessonWithFallback(
 	lessonId: string
-): Promise<{ document: LessonDocument; source: 'server' | 'idb' }> {
+): Promise<{ document: LessonDocument; source: 'server' | 'idb'; sourceGenerationId?: string | null }> {
 	ensureBuilderSyncAdapterRegistered();
 	try {
 		const remote = await getBuilderLesson(lessonId);
+		if (remote.source_type === 'v3_generation') {
+			throw new ApiError(410, 'This legacy lesson workflow has been retired.', 'legacy_pipeline_retired');
+		}
 		await saveDocument(remote.document);
-		return { document: remote.document, source: 'server' };
+		return { document: remote.document, source: 'server', sourceGenerationId: remote.source_generation_id };
 	} catch (error) {
 		if (!_isRetryableSyncError(error)) {
 			throw error;
@@ -99,4 +102,3 @@ export async function loadBuilderLessonWithFallback(
 		return { document: cached, source: 'idb' };
 	}
 }
-

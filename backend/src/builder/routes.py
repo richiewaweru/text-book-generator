@@ -40,6 +40,12 @@ router = APIRouter(prefix="/api/v1/builder", tags=["builder"])
 logger = logging.getLogger(__name__)
 
 _VALID_SOURCES = {"manual", "v3_generation", "component_lectio", "template"}
+_ACTIVE_SOURCES = {"manual", "component_lectio", "template"}
+_RETIRED_SOURCES = {"v3_generation", "v3_studio", "legacy", "legacy_unit"}
+_LEGACY_PIPELINE_RETIRED = {
+    "code": "legacy_pipeline_retired",
+    "message": "The Legacy Studio pipeline has been retired. Use the Units workflow.",
+}
 _MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
 _MAX_MEDIA_UPLOAD_BYTES = 10 * 1024 * 1024
 _ALLOWED_MEDIA_UPLOAD_MIME_TYPES: dict[str, str] = {
@@ -257,6 +263,12 @@ async def _owned_lesson_or_404(
     )
     model = result.scalar_one_or_none()
     if model is None:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    if model.source_type in _RETIRED_SOURCES or str(model.source_type).startswith("legacy"):
+        raise HTTPException(status_code=410, detail=_LEGACY_PIPELINE_RETIRED)
+    if model.source_type not in _ACTIVE_SOURCES:
+        # Unknown source types are not enumerated through the active Builder
+        # surface, even if a stale row happens to be owned by this user.
         raise HTTPException(status_code=404, detail="Lesson not found")
     return model
 
@@ -485,6 +497,8 @@ async def create_builder_lesson(
 ) -> BuilderLessonDetailResponse:
     if body.source_type not in _VALID_SOURCES:
         raise HTTPException(status_code=422, detail=f"Unsupported source_type: {body.source_type}")
+    if body.source_type == "v3_generation":
+        raise HTTPException(status_code=410, detail=_LEGACY_PIPELINE_RETIRED)
     if body.source_type in {"v3_generation", "component_lectio"} and not body.source_generation_id:
         raise HTTPException(
             status_code=422,
@@ -596,7 +610,10 @@ async def list_builder_lessons(
 ) -> list[BuilderLessonListItem]:
     result = await session.execute(
         select(EditableLessonModel)
-        .where(EditableLessonModel.user_id == current_user.id)
+        .where(
+            EditableLessonModel.user_id == current_user.id,
+            EditableLessonModel.source_type.in_(_ACTIVE_SOURCES),
+        )
         .order_by(EditableLessonModel.updated_at.desc())
     )
     items = [_to_list_item(model) for model in result.scalars().all()]
