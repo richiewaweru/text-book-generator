@@ -54,7 +54,7 @@
 					<p>{resource.phase}</p>
 				</div>
 				{#if resource.generation_id && resource.phase === 'done'}
-					<a href={`/studio/generations/${resource.generation_id}`}>Open</a>
+					<span class="available">Available in the active Units workflow</span>
 				{/if}
 			</div>
 		{/each}
@@ -120,14 +120,9 @@
 		background: #9b3d2b;
 	}
 
-	a {
-		color: #24436a;
-		font-weight: 700;
-		text-decoration: none;
-	}
+	.available { color: #2f7c43; font-size: 0.85rem; font-weight: 700; }
 
 	.error {
 		color: #8d3a26;
 	}
 </style>
-

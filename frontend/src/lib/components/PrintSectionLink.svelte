@@ -15,7 +15,9 @@
 		if (typeof window === 'undefined') {
 			return '';
 		}
-		return `${window.location.origin}/studio/generations/${generationId}#section-${section.section_id}`;
+		// Interactive print links return to the active workspace. Legacy generation
+		// routes are retired and must not be embedded in new documents.
+		return `${window.location.origin}/lessons`;
 	});
 	const qrSvg = $derived.by(() => {
 		if (!isInteractive || !sectionUrl) {

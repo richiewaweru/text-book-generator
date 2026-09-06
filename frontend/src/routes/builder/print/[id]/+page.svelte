@@ -9,7 +9,7 @@
 		forceEagerImages,
 		waitForPrintImages,
 		type PrintImageWaitResult
-	} from '$lib/studio/print-readiness';
+	} from '$lib/print/print-readiness';
 
 	const lessonId = $derived(page.params.id);
 	const token = $derived(page.url.searchParams.get('token'));

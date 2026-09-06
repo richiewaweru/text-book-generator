@@ -1,5 +1,5 @@
 export type PackStatus = 'pending' | 'running' | 'complete' | 'failed';
-export type ResourcePhase = 'pending' | 'planning' | 'queued' | 'generating' | 'done' | 'failed';
+export type ResourcePhase = 'pending' | 'planning' | 'awaiting_review' | 'queued' | 'generating' | 'done' | 'failed';
 
 export interface PackLearningPlan {
 	objective: string;

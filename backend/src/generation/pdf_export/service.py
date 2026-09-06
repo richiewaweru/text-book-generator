@@ -23,7 +23,7 @@ from generation.pdf_export.components.cover import clean_cover_title, generate_c
 from generation.pdf_export.components.toc import generate_toc_pdf
 from generation.pdf_export.config import PDFExportConfig
 from generation.pdf_export.rendering.playwright import render_generation_pdf
-from generation.pdf_export.v3_pack_pipeline_document import build_pipeline_document_for_v3_pdf
+from generation.canonical import build_pipeline_document_for_lesson_document, canonical_document
 from contracts.document import PipelineDocument
 
 logger = logging.getLogger(__name__)
@@ -206,48 +206,50 @@ async def export_generation_pdf(
     )
 
 
-async def export_v3_studio_pdf(
+async def export_canonical_generation_pdf(
     *,
-    generation_id: str,
-    user_id: str,
-    title: str,
-    subject: str,
-    template_id: str,
-    document_json: dict[str, Any],
+    generation: Any,
     auth_token: str,
     request: PDFExportRequest,
     settings: Settings,
     request_id: str | None = None,
+    render_path: str | None = None,
 ) -> PDFExportResult:
-    """PDF export for v3 Studio: Playwright renders the dedicated SSR print route at `/studio/print/{generation_id}`."""
-    generation = PDFGenerationContext(
-        id=generation_id,
-        user_id=user_id,
-        subject=title or "Lesson",
-        context=subject or "",
-        mode="v3",
-        status="completed",
-        requested_template_id=template_id,
-        requested_preset_id="blue-classroom",
-    )
-    document = build_pipeline_document_for_v3_pdf(
-        generation_id=generation_id,
-        title=title or "Lesson",
-        subject=subject or "",
-        template_id=template_id,
-        document_json=document_json,
-    )
-    v3_ak = document_json.get("answer_key")
-    v3_ak_dict = v3_ak if isinstance(v3_ak, dict) else None
-    return await export_generation_pdf(
+    """Export a canonical Component Lectio LessonDocument.
+
+    Callers supply an already-authorized ``GenerationModel``.  This adapter
+    performs no Studio/session lookup and refuses unmarked or malformed
+    historical rows before invoking the shared PDF assembly pipeline.
+    """
+    document_json = canonical_document(generation)
+    if document_json is None:
+        raise ValueError("Generation does not contain a canonical LessonDocument")
+    pipeline_document = build_pipeline_document_for_lesson_document(
         generation=generation,
-        document=document,
+        document=document_json,
+    )
+    context = PDFGenerationContext(
+        id=generation.id,
+        user_id=generation.user_id,
+        subject=str(document_json.get("title") or generation.subject or "Lesson"),
+        context=str(document_json.get("subject") or generation.context or ""),
+        mode="component_lectio",
+        status="completed",
+        requested_template_id=pipeline_document.template_id,
+        requested_preset_id=pipeline_document.preset_id,
+        resolved_template_id=pipeline_document.template_id,
+        resolved_preset_id=pipeline_document.preset_id,
+        quality_passed=generation.quality_passed,
+        created_at=generation.created_at,
+    )
+    return await export_generation_pdf(
+        generation=context,
+        document=pipeline_document,
         auth_token=auth_token,
         request=request,
         settings=settings,
         request_id=request_id,
-        render_path=f"/studio/print/{generation_id}",
-        v3_answer_key=v3_ak_dict,
+        render_path=render_path,
     )
 
 

@@ -4,6 +4,7 @@ from generation.pdf_export.service import (
     PDFExportOptions,
     PDFExportRequest,
     PDFExportResult,
+    export_canonical_generation_pdf,
     export_generation_pdf,
 )
 
@@ -11,5 +12,6 @@ __all__ = [
     "PDFExportOptions",
     "PDFExportRequest",
     "PDFExportResult",
+    "export_canonical_generation_pdf",
     "export_generation_pdf",
 ]

@@ -20,7 +20,7 @@
 				<strong>{resource.label}</strong>
 				<p>{resource.resource_type.replaceAll('_', ' ')} · {resource.status}</p>
 				{#if resource.generation_id}
-					<a href={`/studio/generations/${resource.generation_id}`}>Open</a>
+					<span class="available">Available in the active Units workflow</span>
 				{/if}
 			</article>
 		{/each}
@@ -63,11 +63,7 @@
 		background: rgba(255, 255, 255, 0.68);
 	}
 
-	a {
-		color: #24436a;
-		font-weight: 700;
-		text-decoration: none;
-	}
+	.available { color: #2f7c43; font-size: 0.85rem; font-weight: 700; }
 
 	button {
 		width: fit-content;
@@ -79,4 +75,3 @@
 		cursor: pointer;
 	}
 </style>
-

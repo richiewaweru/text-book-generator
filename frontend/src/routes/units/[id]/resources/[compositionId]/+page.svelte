@@ -3,9 +3,8 @@
 	import { page } from '$app/state';
 	import { providePrintMode } from 'lectio';
 	import { getUnitResource } from '$lib/api/units';
-	import V3LectioPrintDocumentView from '$lib/components/studio/V3LectioPrintDocumentView.svelte';
-	import { adaptV3PackToLectioDocument, type V3PackDocument } from '$lib/studio/v3-pack-to-lectio-document';
-	import type { GenerationDocument } from '$lib/types';
+	import LessonReadOnlyView from '$lib/builder/components/canvas/LessonReadOnlyView.svelte';
+	import type { LessonDocument } from 'lectio';
 	import type { ResourceComposition } from '$lib/types/units';
 	import '$lib/styles/print.css';
 
@@ -15,16 +14,13 @@
 	providePrintMode(() => printMode);
 
 	let composition = $state<ResourceComposition | null>(null);
-	let document = $state<GenerationDocument | null>(null);
+	let document = $state<LessonDocument | null>(null);
 	let error = $state<string | null>(null);
 
 	onMount(async () => {
 		try {
 			composition = await getUnitResource(unitId, compositionId);
-			document = adaptV3PackToLectioDocument(composition.document as V3PackDocument, {
-				routeGenerationId: composition.id ?? compositionId,
-				includeAnswerKey: true
-			});
+			document = composition.document as unknown as LessonDocument;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Could not render this resource.';
 		}
@@ -55,7 +51,7 @@
 	{#if error}
 		<p class="resource-error" role="alert">{error}</p>
 	{:else if document}
-		<V3LectioPrintDocumentView {document} />
+		<LessonReadOnlyView {document} />
 	{:else}
 		<p class="loading">Preparing resource…</p>
 	{/if}
