@@ -561,9 +561,11 @@
 						{unitId}
 						lessonId={selected.id}
 						generationId={preparation.generation_id}
-						pathVersionId={path.id}
-						pathRevision={path.revision}
-						/>
+							pathVersionId={path.id}
+							pathRevision={path.revision}
+							initialStage={preparation?.workflow_stage}
+							initialBuilderId={preparation?.builder_id}
+							/>
 						<button class="secondary" type="button" onclick={() => (showVersions = true)}>Make versions for my groups</button>
 					</div>
 							{:else}<button class="primary" type="button" disabled={path.status !== 'approved' || selected.skipped || busy !== null || !shape?.can_prepare} onclick={prepare}>{busy === 'prepare' ? 'Making the lesson…' : 'Make the lesson'}</button>{/if}

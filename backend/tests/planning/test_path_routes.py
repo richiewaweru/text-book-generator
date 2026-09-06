@@ -12,6 +12,7 @@ from core.database.models import PathLessonModel, UserModel
 from core.dependencies import get_async_session
 from core.entities.user import User
 from planning.models import PathPlan, UnitCreate
+from planning.routes import _authoritative_prepared_stage
 from planning.service import approve_path, create_unit, persist_path_plan
 
 
@@ -99,6 +100,16 @@ def test_phase5_unit_and_path_routes_are_registered() -> None:
         ("/api/v1/units/{unit_id}/compositions/{composition_id}", "GET"),
     }
     assert expected <= routes
+
+
+def test_prepared_status_uses_completed_document_as_authoritative_ready_state() -> None:
+    generation = type(
+        "Generation",
+        (),
+        {"status": "completed", "document_json": {"version": 1, "blocks": []}},
+    )()
+
+    assert _authoritative_prepared_stage(generation, "awaiting_review") == "complete"
 
 
 def test_path_planner_openapi_has_no_count_or_duration_input() -> None:
@@ -195,6 +206,8 @@ async def test_unprepared_lesson_status_is_explicit_over_http(db_session_factory
         "stale": False,
         "can_prepare": True,
         "can_regenerate": False,
+        "document_present": False,
+        "builder_id": None,
     }
 
 

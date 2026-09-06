@@ -65,4 +65,18 @@ describe('LessonGenerationReview', () => {
 		await waitFor(() => expect(screen.getByText(/Builder lesson is not ready/i)).toBeTruthy());
 		expect(goto).not.toHaveBeenCalled();
 	});
+
+	it('keeps a completed prepared status ready when review hydration is stale', async () => {
+		api.reviewLessonGeneration.mockResolvedValue({ generation_id: 'gen-complete', pipeline: 'component_lectio', stage: 'awaiting_review', document_present: true, failed_blocks: [], retryable: false });
+		render(LessonGenerationReview, {
+			unitId: 'unit-1', lessonId: 'lesson-complete', generationId: 'gen-complete', pathVersionId: 'path-1', pathRevision: 2,
+			initialStage: 'complete', initialBuilderId: 'builder-complete'
+		});
+
+		expect(await screen.findByRole('button', { name: 'Open in Builder' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: /approve and write lesson/i })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Open in Builder' }));
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/builder/builder-complete'));
+		expect(api.openLessonInBuilder).not.toHaveBeenCalled();
+	});
 });

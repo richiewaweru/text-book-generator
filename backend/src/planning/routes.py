@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth.middleware import get_current_user
 from core.capabilities import require_xplore_v2
 from core.database.models import (
+    EditableLessonModel,
     PathLessonModel,
     PathLessonPrerequisiteModel,
     ResourceCompositionModel,
@@ -113,6 +114,42 @@ from planning.validation import (
     validate_path_plan,
 )
 from v3_blueprint.planning.persistence import load_chunked_state
+
+
+def _authoritative_prepared_stage(
+    generation: object,
+    chunked_stage: str | None,
+) -> str:
+    """Derive the UI stage from the durable terminal contract first.
+
+    The chunked state is useful for in-flight progress, but a completed
+    generation with its document is the authoritative ready state.  This
+    prevents an older review-stage snapshot from reopening the approval card
+    after the page is reloaded.
+    """
+
+    status_value = str(getattr(generation, "status", "") or "").casefold()
+    has_document = isinstance(getattr(generation, "document_json", None), dict)
+    if status_value == "completed" and has_document:
+        return "complete"
+    if status_value == "completed" and not has_document:
+        return "assembly_blocked"
+    return str(chunked_stage or getattr(generation, "status", None) or "unknown")
+
+
+async def _component_builder_id(
+    session: AsyncSession,
+    *,
+    generation_id: str,
+    user_id: str,
+) -> str | None:
+    return await session.scalar(
+        select(EditableLessonModel.id).where(
+            EditableLessonModel.user_id == user_id,
+            EditableLessonModel.source_generation_id == generation_id,
+            EditableLessonModel.source_type == "component_lectio",
+        )
+    )
 
 
 router = APIRouter(
@@ -1100,6 +1137,8 @@ async def get_path_lesson_status(
                 stale=False,
                 can_prepare=version.status == "approved" and not lesson.skipped,
                 can_regenerate=False,
+                document_present=False,
+                builder_id=None,
             ).model_dump(mode="json")
         linkage = await resolve_lesson_preparation(
             session, unit=_unit, version=version, lesson=lesson
@@ -1118,6 +1157,10 @@ async def get_path_lesson_status(
                     stale=True,
                     can_prepare=False,
                     can_regenerate=version.status == "approved" and not lesson.skipped,
+                    document_present=isinstance(generation.document_json, dict),
+                    builder_id=await _component_builder_id(
+                        session, generation_id=generation.id, user_id=_unit.owner_id
+                    ),
                 ).model_dump(mode="json")
             return PreparedLessonStatusResponse(
                 path_lesson_id=lesson.id,
@@ -1129,14 +1172,21 @@ async def get_path_lesson_status(
                 stale=False,
                 can_prepare=version.status == "approved" and not lesson.skipped,
                 can_regenerate=False,
+                document_present=False,
+                builder_id=None,
             ).model_dump(mode="json")
         generation = linkage.generation
         assert generation is not None
         try:
             chunked = await load_chunked_state(generation.id, session)
-            workflow_stage = str(chunked.get("stage") or generation.status or "unknown")
+            workflow_stage = _authoritative_prepared_stage(
+                generation, str(chunked.get("stage") or "")
+            )
         except ValueError:
-            workflow_stage = str(generation.status or "unknown")
+            workflow_stage = _authoritative_prepared_stage(generation, None)
+        builder_id = await _component_builder_id(
+            session, generation_id=generation.id, user_id=_unit.owner_id
+        )
         return PreparedLessonStatusResponse(
             path_lesson_id=lesson.id,
             lesson_revision=lesson.revision,
@@ -1147,6 +1197,8 @@ async def get_path_lesson_status(
             stale=False,
             can_prepare=False,
             can_regenerate=version.status == "approved" and not lesson.skipped,
+            document_present=isinstance(generation.document_json, dict),
+            builder_id=builder_id,
         ).model_dump(mode="json")
     except Exception as exc:
         _raise_http(exc)

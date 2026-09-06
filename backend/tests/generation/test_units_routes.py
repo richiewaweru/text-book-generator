@@ -68,6 +68,27 @@ async def test_status_contains_pipeline_stage_document_and_retry_fields(
 
 
 @pytest.mark.asyncio
+async def test_status_prefers_completed_document_over_stale_review_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def context(*args, **kwargs):
+        result = _context(
+            {"control": {"pipeline": "component_lectio"}, "stage": "awaiting_review"}
+        )
+        result[3].status = "completed"
+        result[3].document_json = {"version": 1, "blocks": []}
+        return result
+
+    monkeypatch.setattr(units_routes, "_generation_context", context)
+    result = await units_routes.get_units_generation_status(
+        "unit-1", "lesson-1", SimpleNamespace(id="user-1"), None
+    )
+
+    assert result.stage == "complete"
+    assert result.document_present is True
+
+
+@pytest.mark.asyncio
 async def test_approve_dispatches_persisted_component_pipeline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

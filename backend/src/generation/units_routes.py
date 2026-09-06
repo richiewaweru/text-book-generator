@@ -106,7 +106,16 @@ async def _builder_id(
 async def _status(
     session: AsyncSession | None, generation: GenerationModel, state: dict[str, Any], user_id: str
 ) -> UnitsGenerationStatus:
-    stage = str(state.get("stage") or generation.status or "unknown")
+    scalar_status = str(generation.status or "").casefold()
+    has_document = isinstance(generation.document_json, dict)
+    if scalar_status == "completed" and has_document:
+        # The scalar terminal state and document are committed atomically. A
+        # stale review snapshot must not reopen the approval card on reload.
+        stage = "complete"
+    elif scalar_status == "completed" and not has_document:
+        stage = "assembly_blocked"
+    else:
+        stage = str(state.get("stage") or generation.status or "unknown")
     failed = state.get("failed_blocks") or state.get("failed_sections") or []
     raw_plan = state.get("structural_plan")
     raw_cards = raw_plan.get("cards", []) if isinstance(raw_plan, dict) else []

@@ -11,12 +11,14 @@
 		type LessonGenerationReview as Review
 	} from '$lib/api/units';
 
-	let { unitId, lessonId, generationId, pathVersionId, pathRevision } = $props<{
+	let { unitId, lessonId, generationId, pathVersionId, pathRevision, initialStage, initialBuilderId } = $props<{
 		unitId: string;
 		lessonId: string;
 		generationId: string;
 		pathVersionId: string;
 		pathRevision: number;
+		initialStage?: string;
+		initialBuilderId?: string | null;
 	}>();
 
 	let review = $state<Review | null>(null);
@@ -37,8 +39,15 @@
 		return 'awaiting_review';
 	}
 
-	const currentStage = $derived(stage(progress?.stage ?? review?.stage));
+	const currentStage = $derived.by(() => {
+		const fetched = stage(progress?.stage ?? review?.stage);
+		// The prepared-status response is the page's authoritative snapshot. If
+		// it already proves a completed document, do not let a stale review
+		// response reopen the approval card during hydration.
+		return stage(initialStage) === 'complete' && fetched !== 'failed' ? 'complete' : fetched;
+	});
 	const retryable = $derived(progress?.retryable ?? review?.retryable ?? false);
+	const resolvedBuilderId = $derived(progress?.builder_id ?? review?.builder_id ?? initialBuilderId ?? null);
 
 	function stopPolling(): void {
 		if (timer) clearInterval(timer);
@@ -55,8 +64,8 @@
 		opened = true;
 		busy = 'opening';
 		try {
-			const result = progress?.builder_id
-				? { builder_id: progress.builder_id }
+			const result = resolvedBuilderId
+				? { builder_id: resolvedBuilderId }
 				: await openLessonInBuilder(unitId, lessonId, pathVersionId, pathRevision);
 			if (!result.builder_id) throw new Error('Builder lesson is not ready yet. Please try again.');
 			await goto(`/builder/${encodeURIComponent(result.builder_id)}`);
@@ -93,6 +102,9 @@
 		error = null;
 		try {
 			review = await reviewLessonGeneration(unitId, lessonId, pathVersionId, pathRevision);
+			if (stage(initialStage) === 'complete' && stage(review.stage) !== 'failed') {
+				review = { ...review, stage: 'complete', builder_id: review.builder_id ?? initialBuilderId };
+			}
 			if (stage(review.stage) === 'running' || stage(review.stage) === 'partial') startPolling();
 			if (stage(review.stage) === 'complete') progress = review;
 		} catch (err) {

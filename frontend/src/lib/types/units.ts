@@ -177,6 +177,8 @@ export interface PreparedLessonStatus {
 	stale: boolean;
 	can_prepare: boolean;
 	can_regenerate: boolean;
+	document_present: boolean;
+	builder_id: string | null;
 }
 
 export interface SkeletonSlotPreview {

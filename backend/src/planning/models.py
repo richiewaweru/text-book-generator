@@ -348,6 +348,8 @@ class PreparedLessonStatusResponse(StrictModel):
     stale: bool
     can_prepare: bool
     can_regenerate: bool
+    document_present: bool = False
+    builder_id: str | None = None
 
 
 class MergeCriticResult(StrictModel):
