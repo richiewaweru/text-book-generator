@@ -7,10 +7,11 @@ import json
 from typing import Any, get_args
 
 import pytest
+from sqlalchemy import select
 
 from contracts.lesson_document import validate_lesson_document
 from contracts.section_content import ReflectionType
-from core.database.models import GenerationModel, UserModel
+from core.database.models import EditableLessonModel, GenerationModel, UserModel
 from core.database.session import async_session_factory
 from generation.component_lectio.coverage_audit import (
     coverage_gaps,
@@ -31,6 +32,7 @@ from generation.component_lectio.payload_validation import (
 from generation.component_lectio.service import (
     FAILED_STEP,
     READY_STEP,
+    _persist_component_lectio_success,
     reconstruct_checkpoint_store,
     run_component_lectio_execution,
 )
@@ -1169,6 +1171,46 @@ async def test_gate_s_process_style_resume():
     assert "quiz-check" in executed
     ready_after = {row.part_id for row in await load_steps(generation_id) if row.step == READY_STEP}
     assert ready_before.issubset(ready_after)
+
+    # Completion owns the Builder handoff and is idempotent across retries.
+    builder_id = await _persist_component_lectio_success(
+        generation_id,
+        document=document,
+        plan_revision=1,
+        plan_hash="resume-hash",
+    )
+    async with async_session_factory() as session:
+        builder_rows = list(
+            await session.scalars(
+                select(EditableLessonModel).where(
+                    EditableLessonModel.source_generation_id == generation_id,
+                    EditableLessonModel.source_type == "component_lectio",
+                )
+            )
+        )
+        model = await session.get(GenerationModel, generation_id)
+        assert model is not None
+        assert len(builder_rows) == 1
+        assert builder_rows[0].id == builder_id
+        assert (model.chunked_state_json or {})["builder_id"] == builder_id
+
+    repeated_builder_id = await _persist_component_lectio_success(
+        generation_id,
+        document=document,
+        plan_revision=1,
+        plan_hash="resume-hash",
+    )
+    assert repeated_builder_id == builder_id
+    async with async_session_factory() as session:
+        assert (
+            await session.scalar(
+                select(EditableLessonModel.id).where(
+                    EditableLessonModel.source_generation_id == generation_id,
+                    EditableLessonModel.source_type == "component_lectio",
+                )
+            )
+            == builder_id
+        )
 
 
 def test_items_assembler_rejects_generic_wrapper():

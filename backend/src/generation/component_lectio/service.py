@@ -10,6 +10,9 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import update
+
+from builder.service import get_or_create_component_lectio_builder_lesson
 from contracts.lesson_document import assert_valid_lesson_document
 from core.database.models import GenerationModel
 from core.database.session import async_session_factory
@@ -187,7 +190,7 @@ async def _persist_component_lectio_success(
     document: dict[str, Any],
     plan_revision: int,
     plan_hash: str,
-) -> None:
+) -> str:
     """Atomically persist the final document and matching terminal state."""
     now = _utc_now_naive()
     async with async_session_factory() as session:
@@ -220,7 +223,20 @@ async def _persist_component_lectio_success(
         model.error_code = None
         model.last_heartbeat = now
         model.completed_at = now
+        builder = await get_or_create_component_lectio_builder_lesson(
+            session, generation=model, user_id=model.user_id
+        )
+        state["builder_id"] = builder.id
+        # Assign a fresh mapping so SQLAlchemy's JSON change tracking persists
+        # the linkage added after the terminal-state assignment above.
+        model.chunked_state_json = {**state}
+        await session.execute(
+            update(GenerationModel)
+            .where(GenerationModel.id == model.id)
+            .values(chunked_state_json={**state})
+        )
         await session.commit()
+        return builder.id
 
 
 def adapt_exact_orders_to_section_work_orders(
