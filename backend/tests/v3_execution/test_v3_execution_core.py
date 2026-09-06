@@ -795,7 +795,7 @@ async def test_execute_visual_qc_reject_omits_without_retry_or_upload(
 
 
 @pytest.mark.asyncio
-async def test_execute_visual_qc_error_fails_visual_without_uploading(
+async def test_execute_visual_qc_error_flags_visual_after_uploading(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     order = VisualGeneratorWorkOrder(
@@ -844,10 +844,12 @@ async def test_execute_visual_qc_error_fails_visual_without_uploading(
     blocks = await execute_visual(order, emit, trace_id="trace", generation_id="gen")
 
     assert len(blocks) == 1
-    assert blocks[0].status == "failed"
-    assert blocks[0].image_url is None
-    assert "visual_qc failed" in (blocks[0].error_message or "")
-    assert store.uploads == []
+    assert blocks[0].status == "flagged_quality"
+    assert blocks[0].image_url == "https://cdn.example/vis-qc-error.png"
+    assert blocks[0].qc_reasons == ["visual quality check unavailable"]
+    assert blocks[0].qc_correction_hint == "Review visual quality before publishing."
+    assert blocks[0].error_message is None
+    assert store.uploads == [b"image"]
 
 
 @pytest.mark.asyncio
