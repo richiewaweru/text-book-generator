@@ -138,7 +138,18 @@ class Settings(BaseSettings):
     # Output
     report_output_dir: str = "outputs/reports"
     pdf_temp_dir: str = "outputs/pdf"
+    # IMAGE_BASE_URL was historically also used for local image storage.  It
+    # is now reserved as a legacy compatibility value; direct image providers
+    # use the same variable in older deployments, so new deployments should
+    # set IMAGE_STORAGE_BASE_URL explicitly when overriding this route.
     image_base_url: str = "http://localhost:8000/images"
+    image_storage_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "IMAGE_STORAGE_BASE_URL",
+            "image_storage_base_url",
+        ),
+    )
     gcs_bucket_name: str = "textbook-diagrams"
 
     # Authentication
@@ -234,5 +245,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
 

@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from core.config import settings
@@ -14,6 +16,73 @@ from core.storage.gcs_image_store import (
 
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_LOCAL_IMAGE_BASE_URL = "http://localhost:8000/images"
+_KNOWN_PROVIDER_API_HOSTS = frozenset({"api.x.ai", "api.openai.com"})
+
+
+def _provider_base_urls() -> tuple[str, ...]:
+    """Return configured provider endpoints, kept separate from storage URLs."""
+
+    values: list[str] = []
+    if os.getenv("IMAGE_PROVIDER"):
+        direct_url = os.getenv("IMAGE_BASE_URL")
+        if direct_url:
+            values.append(direct_url)
+    if os.getenv("PIPELINE_IMAGE_PROVIDER"):
+        pipeline_url = os.getenv("PIPELINE_IMAGE_BASE_URL")
+        if pipeline_url:
+            values.append(pipeline_url)
+    return tuple(values)
+
+
+def _is_provider_endpoint(url: str) -> bool:
+    candidate = urlsplit(url.strip())
+    if candidate.hostname in _KNOWN_PROVIDER_API_HOSTS:
+        return True
+
+    for configured in _provider_base_urls():
+        provider = urlsplit(configured.strip())
+        if (
+            candidate.scheme.lower() == provider.scheme.lower()
+            and candidate.netloc.lower() == provider.netloc.lower()
+            and candidate.path.rstrip("/") == provider.path.rstrip("/")
+        ):
+            return True
+    return False
+
+
+def _validate_storage_base_url(url: str) -> str:
+    normalized = url.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError("Image storage base URL must be an absolute HTTP(S) URL")
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise ValueError("Image storage base URL must use HTTP(S)")
+    if _is_provider_endpoint(normalized):
+        raise ValueError(
+            "Image storage base URL must not point at an image provider endpoint; "
+            "set IMAGE_STORAGE_BASE_URL to the served storage route"
+        )
+    return normalized
+
+
+def _resolve_local_storage_base_url() -> str:
+    explicit = settings.image_storage_base_url
+    if explicit and explicit.strip():
+        return _validate_storage_base_url(explicit)
+
+    legacy = settings.image_base_url or _DEFAULT_LOCAL_IMAGE_BASE_URL
+    # In direct-provider mode IMAGE_BASE_URL belongs to the provider.  If an
+    # older config also exposes it as the storage URL, fall back to the route
+    # served by this app instead of returning an API endpoint to the Builder.
+    if _is_provider_endpoint(legacy):
+        logger.warning(
+            "Ignoring legacy IMAGE_BASE_URL for local image storage because it "
+            "is a provider endpoint; use IMAGE_STORAGE_BASE_URL for storage"
+        )
+        return _DEFAULT_LOCAL_IMAGE_BASE_URL
+    return _validate_storage_base_url(legacy)
 
 
 class ImageStore(ABC):
@@ -56,7 +125,7 @@ class ImageStore(ABC):
 class LocalImageStore(ImageStore):
     def __init__(self, base_path: Path, base_url: str):
         self.base_path = base_path
-        self.base_url = base_url.rstrip("/")
+        self.base_url = _validate_storage_base_url(base_url)
         self.base_path.mkdir(parents=True, exist_ok=True)
 
     async def store_image(
@@ -251,5 +320,8 @@ def get_image_store() -> ImageStore:
     env = settings.app_env
     if env in PRODUCTION_LIKE_ENVS:
         return GCSImageStore(bucket_name=settings.gcs_bucket_name)
-    return LocalImageStore(base_path=Path("data/images"), base_url=settings.image_base_url)
+    return LocalImageStore(
+        base_path=Path("data/images"),
+        base_url=_resolve_local_storage_base_url(),
+    )
 

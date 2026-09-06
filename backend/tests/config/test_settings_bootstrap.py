@@ -6,7 +6,11 @@ from pathlib import Path
 import re
 import tomllib
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.testclient import TestClient
 import pytest
 import yaml
 from pydantic import ValidationError
@@ -314,12 +318,12 @@ def test_settings_expose_image_storage_envs(monkeypatch) -> None:
     monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-development-key")
     monkeypatch.setenv("FRONTEND_ORIGIN", "http://localhost:5173")
     monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "http://127.0.0.1:5173")
-    monkeypatch.setenv("IMAGE_BASE_URL", "http://localhost:8000/custom-images")
+    monkeypatch.setenv("IMAGE_STORAGE_BASE_URL", "http://localhost:8000/custom-images")
     monkeypatch.setenv("GCS_BUCKET_NAME", "custom-diagrams")
 
     settings = Settings(_env_file=None)
 
-    assert settings.image_base_url == "http://localhost:8000/custom-images"
+    assert settings.image_storage_base_url == "http://localhost:8000/custom-images"
     assert settings.gcs_bucket_name == "custom-diagrams"
 
 
@@ -329,7 +333,7 @@ def test_image_store_uses_app_env_and_typed_settings(monkeypatch) -> None:
     monkeypatch.setenv("JWT_SECRET_KEY", "super-secret-development-key")
     monkeypatch.setenv("FRONTEND_ORIGIN", "http://localhost:5173")
     monkeypatch.setenv("LESSON_BUILDER_PUBLIC_URL", "http://127.0.0.1:5173")
-    monkeypatch.setenv("IMAGE_BASE_URL", "http://localhost:8000/custom-images")
+    monkeypatch.setenv("IMAGE_STORAGE_BASE_URL", "http://localhost:8000/custom-images")
 
     monkeypatch.setattr(
         "media.storage.image_store.settings",
@@ -340,6 +344,51 @@ def test_image_store_uses_app_env_and_typed_settings(monkeypatch) -> None:
 
     assert isinstance(store, LocalImageStore)
     assert store.base_url == "http://localhost:8000/custom-images"
+
+
+@pytest.mark.asyncio
+async def test_local_image_store_separates_direct_provider_url_from_served_route(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("IMAGE_PROVIDER", "xai")
+    monkeypatch.setenv("IMAGE_BASE_URL", "https://api.x.ai/v1")
+    monkeypatch.delenv("IMAGE_STORAGE_BASE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "media.storage.image_store.settings",
+        Settings(_env_file=None),
+    )
+
+    store = get_image_store()
+    url = await store.store_image(
+        b"png-bytes",
+        generation_id="generation-1",
+        section_id="diagram-block",
+        filename="diagram.png",
+    )
+
+    parsed = urlsplit(url)
+    assert parsed.netloc == "localhost:8000"
+    assert parsed.path == "/images/generation-1/diagram-block/diagram.png"
+    assert parsed.netloc != "api.x.ai"
+
+    # The URL returned by the store is backed by the same /images route that
+    # the production app mounts, not merely a syntactically valid URL.
+    app = FastAPI()
+    app.mount("/images", StaticFiles(directory=str(store.base_path)), name="images")
+    with TestClient(app) as client:
+        response = client.get(parsed.path)
+    assert response.status_code == 200
+    assert response.content == b"png-bytes"
+
+
+def test_local_image_store_rejects_provider_endpoint_as_storage_url(
+    tmp_path,
+) -> None:
+    with pytest.raises(ValueError, match="must not point at an image provider"):
+        LocalImageStore(tmp_path, "https://api.x.ai/v1")
 
 
 def test_image_store_uses_gcs_bucket_in_production(monkeypatch) -> None:
