@@ -77,6 +77,86 @@ def _preparation_key(*, version_id: str, lesson_id: str, revision: int) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+async def _lock_current_lesson_for_preparation(
+    session: AsyncSession,
+    *,
+    version: PathVersionModel,
+    lesson: PathLessonModel,
+) -> PathLessonModel:
+    """Serialize preparation attempts for one path lesson in the DB.
+
+    The lock is held by the caller's transaction through the eventual route
+    commit. Re-reading the row after waiting prevents a duplicate request from
+    creating a second active preparation, while the revision check protects a
+    request that started before a genuine lesson edit.
+    """
+    requested_revision = lesson.revision
+    current = await session.scalar(
+        select(PathLessonModel)
+        .where(
+            PathLessonModel.id == lesson.id,
+            PathLessonModel.path_version_id == version.id,
+        )
+        .execution_options(populate_existing=True)
+        .with_for_update()
+    )
+    if current is None:
+        raise PathPreparationBlocked("The path lesson no longer exists")
+    if current.revision != requested_revision:
+        raise PathPreparationBlocked(
+            "The path lesson changed while preparation was starting; reload before continuing"
+        )
+    return current
+
+
+async def _reuse_existing_preparation(
+    session: AsyncSession,
+    *,
+    unit: UnitModel,
+    version: PathVersionModel,
+    lesson: PathLessonModel,
+    request: PrepareLessonRequest,
+) -> tuple[PreparedLessonResponse, StructuralPlan] | None:
+    """Return the active preparation, if the lesson is already prepared."""
+    linkage = await resolve_lesson_preparation(
+        session, unit=unit, version=version, lesson=lesson
+    )
+    if linkage.stale:
+        raise PathPreparationBlocked("Existing preparation is stale; use explicit regeneration")
+    if not linkage.complete:
+        return None
+    generation = linkage.generation
+    provenance = linkage.provenance
+    assert generation is not None and provenance is not None
+    if provenance.lesson_mode not in {None, request.lesson_mode} or sorted(
+        provenance.group_ids or []
+    ) != sorted(request.group_ids):
+        raise PathPreparationBlocked("Preparation settings changed; use explicit regeneration")
+    try:
+        state = await load_chunked_state(generation.id, session)
+    except ValueError as exc:
+        raise PathPreparationBlocked(
+            "Existing preparation predates the resumable workflow; regenerate it explicitly"
+        ) from exc
+    plan = StructuralPlan.model_validate(state.get("structural_plan"))
+    slots = [section.role for section in plan.sections]
+    return (
+        PreparedLessonResponse(
+            generation_id=generation.id,
+            path_lesson_id=lesson.id,
+            objective=lesson.objective,
+            objective_hash=lesson.objective_hash,
+            skeleton_id=provenance.skeleton_id or "",
+            skeleton_version=provenance.skeleton_version or 0,
+            slots=slots,
+            section_roles=slots,
+            status="awaiting_review",
+            reused=True,
+        ),
+        plan,
+    )
+
+
 def _clip_advisory_text(value: str, *, limit: int) -> str:
     normalized = " ".join(value.split())
     if len(normalized) <= limit:
@@ -331,6 +411,23 @@ async def prepare_path_lesson(
         raise PathPreparationBlocked("Path must be approved before lesson preparation")
     if lesson.skipped:
         raise PathPreparationBlocked("Skipped path lessons cannot be prepared")
+    requested_pack_id = lesson.pack_id
+    lesson = await _lock_current_lesson_for_preparation(
+        session, version=version, lesson=lesson
+    )
+    if lesson.pack_id != requested_pack_id:
+        reused = await _reuse_existing_preparation(
+            session,
+            unit=unit,
+            version=version,
+            lesson=lesson,
+            request=request,
+        )
+        if reused is not None:
+            return reused
+        raise PathPreparationBlocked(
+            "A concurrent preparation changed the lesson; reload before continuing"
+        )
     groups = await selected_unit_groups(
         session,
         unit_id=unit.id,
@@ -343,44 +440,15 @@ async def prepare_path_lesson(
     if regenerate and not (regeneration_reason or "").strip():
         raise PathPreparationBlocked("Regeneration requires a recorded reason")
     if previous_pack_id and not regenerate:
-        linkage = await resolve_lesson_preparation(
-            session, unit=unit, version=version, lesson=lesson
+        reused = await _reuse_existing_preparation(
+            session,
+            unit=unit,
+            version=version,
+            lesson=lesson,
+            request=request,
         )
-        if linkage.stale:
-            raise PathPreparationBlocked("Existing preparation is stale; use explicit regeneration")
-        if linkage.complete:
-            generation = linkage.generation
-            provenance = linkage.provenance
-            assert generation is not None and provenance is not None
-            if provenance.lesson_mode not in {None, request.lesson_mode} or sorted(
-                provenance.group_ids or []
-            ) != sorted(request.group_ids):
-                raise PathPreparationBlocked(
-                    "Preparation settings changed; use explicit regeneration"
-                )
-            try:
-                state = await load_chunked_state(generation.id, session)
-            except ValueError as exc:
-                raise PathPreparationBlocked(
-                    "Existing preparation predates the resumable workflow; regenerate it explicitly"
-                ) from exc
-            plan = StructuralPlan.model_validate(state.get("structural_plan"))
-            slots = [section.role for section in plan.sections]
-            return (
-                PreparedLessonResponse(
-                    generation_id=generation.id,
-                    path_lesson_id=lesson.id,
-                    objective=lesson.objective,
-                    objective_hash=lesson.objective_hash,
-                    skeleton_id=provenance.skeleton_id or "",
-                    skeleton_version=provenance.skeleton_version or 0,
-                    slots=slots,
-                    section_roles=slots,
-                    status="awaiting_review",
-                    reused=True,
-                ),
-                plan,
-            )
+        if reused is not None:
+            return reused
 
     scope_contract, prior_established, prerequisites, lesson_actuals = await _preparation_context(
         session,

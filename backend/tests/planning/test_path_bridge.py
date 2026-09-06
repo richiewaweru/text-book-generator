@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+import planning.bridge as bridge
 from sqlalchemy import select
 
 from core.database.models import (
@@ -15,7 +16,11 @@ from core.database.models import (
     UserModel,
 )
 from generation.path_preparation import enforce_path_owned_card_objective
-from planning.bridge import PathPreparationBlocked, prepare_path_lesson
+from planning.bridge import (
+    PathPreparationBlocked,
+    _lock_current_lesson_for_preparation,
+    prepare_path_lesson,
+)
 from planning.models import (
     ComponentSelection,
     GroupVoice,
@@ -41,6 +46,61 @@ from v3_blueprint.planning.persistence import load_chunked_state, persist_chunke
 FIXTURE = (
     Path(__file__).resolve().parents[3] / "handoff" / "fixtures" / "grade4-photosynthesis-path.json"
 )
+
+
+async def test_prepare_lock_rejects_a_newer_lesson_revision() -> None:
+    lesson = type("Lesson", (), {"id": "lesson-1", "revision": 2})()
+    version = type("Version", (), {"id": "version-1"})()
+    current = type("Lesson", (), {"id": "lesson-1", "revision": 3})()
+
+    class Session:
+        async def scalar(self, statement):
+            return current
+
+    with pytest.raises(PathPreparationBlocked, match="lesson changed"):
+        await _lock_current_lesson_for_preparation(
+            Session(), version=version, lesson=lesson
+        )
+
+
+@pytest.mark.asyncio
+async def test_deferred_regeneration_reuses_pointer_observed_after_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = type("Lesson", (), {"id": "lesson-1", "revision": 2, "pack_id": "prepared-1", "skipped": False})()
+    current = type("Lesson", (), {"id": "lesson-1", "revision": 2, "pack_id": "prepared-2", "skipped": False})()
+    version = type("Version", (), {"id": "version-1", "status": "approved"})()
+    unit = type("Unit", (), {"id": "unit-1"})()
+    request = PrepareLessonRequest(lesson_mode="first_exposure")
+    sentinel = (type("Response", (), {"generation_id": "prepared-2"})(), object())
+    calls: list[str] = []
+
+    async def deferred_lock(session, *, version, lesson):
+        assert lesson.pack_id == "prepared-1"
+        return current
+
+    async def reuse(session, *, unit, version, lesson, request):
+        calls.append(lesson.pack_id)
+        return sentinel
+
+    async def must_not_plan(*args, **kwargs):
+        raise AssertionError("deferred duplicate must not run the planner")
+
+    monkeypatch.setattr(bridge, "_lock_current_lesson_for_preparation", deferred_lock)
+    monkeypatch.setattr(bridge, "_reuse_existing_preparation", reuse)
+    result = await prepare_path_lesson(
+        object(),
+        unit=unit,
+        version=version,
+        lesson=original,
+        request=request,
+        regenerate=True,
+        regeneration_reason="Retry after a disconnected request.",
+        structural_planner=must_not_plan,
+    )
+    assert result is sentinel
+    assert result[0].generation_id == "prepared-2"
+    assert calls == ["prepared-2"]
 
 
 async def _fake_structural_planner(context: dict) -> PathStructuralPlan:
@@ -194,6 +254,12 @@ async def test_prepare_bridge_locks_slots_and_objective_hash(db_session) -> None
             pack_id=response.generation_id,
             objective="A rewritten objective",
         )
+
+    # A duplicate prepare after approval/completion must reuse the original
+    # active provenance rather than overwrite the path pointer with a new
+    # awaiting_review generation.
+    generation.status = "completed"
+    await db_session.flush()
 
     reused, reused_plan = await prepare_path_lesson(
         db_session,
