@@ -114,20 +114,12 @@ async def test_legacy_packs_are_computed_as_one_lesson_units_without_writes(
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 200
-    assert [row["legacy_pack_id"] for row in response.json()] == ["legacy-pack"]
-    assert detail.status_code == 200
-    assert detail.json()["lesson"] == {
-        "title": "Cells",
-        "pack_id": "legacy-pack",
-        "generation_ids": ["legacy-generation"],
-        "open_href": "/units/legacy/legacy-pack",
-    }
-    assert detail.json()["computed"] is True
-    assert detail.json()["migration_required"] is False
-    assert detail.json()["resource_count"] == 1
-    assert detail.json()["completed_count"] == 1
-    assert forbidden.status_code == 404
+    assert response.status_code == 410
+    assert detail.status_code == 410
+    assert forbidden.status_code == 410
+    assert response.json()["detail"]["code"] == "legacy_pipeline_retired"
+    assert detail.json()["detail"]["code"] == "legacy_pipeline_retired"
+    assert forbidden.json()["detail"]["code"] == "legacy_pipeline_retired"
 
     async with db_session_factory() as session:
         assert await session.scalar(select(func.count()).select_from(LearningPackModel)) == 2

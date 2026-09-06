@@ -1,4 +1,4 @@
-"""HTTP retirement contract for the removed legacy Units surface."""
+"""HTTP retirement contract for the removed Legacy Studio API."""
 
 from __future__ import annotations
 
@@ -9,17 +9,17 @@ from fastapi import APIRouter, HTTPException
 
 LEGACY_PIPELINE_RETIRED = {
     "code": "legacy_pipeline_retired",
-    "message": "Legacy Units have been retired. Use the Units workflow.",
+    "message": "The Legacy Studio pipeline has been retired. Use the Units workflow.",
 }
 
 
 def _raise_legacy_retired() -> NoReturn:
-    # This route intentionally has no auth, capability, or database dependency:
-    # every caller receives the same sanitized retirement response.
+    # Keep the response deliberately generic: retired endpoints must not read
+    # or disclose historical lesson/generation data.
     raise HTTPException(status_code=410, detail=LEGACY_PIPELINE_RETIRED)
 
 
-router = APIRouter(prefix="/api/v1/legacy-units", tags=["legacy-retired"])
+router = APIRouter(prefix="/v3", tags=["legacy-retired"])
 
 
 @router.api_route(
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/v1/legacy-units", tags=["legacy-retired"])
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
     include_in_schema=False,
 )
-async def retire_legacy_units_root() -> None:
+async def retire_v3_root() -> None:
     _raise_legacy_retired()
 
 
@@ -36,7 +36,7 @@ async def retire_legacy_units_root() -> None:
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
     include_in_schema=False,
 )
-async def retire_legacy_units_path(path: str) -> None:
+async def retire_v3_path(path: str) -> None:
     _ = path
     _raise_legacy_retired()
 
