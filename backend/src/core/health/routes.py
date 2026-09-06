@@ -10,7 +10,7 @@ from typing import Awaitable, Callable, Literal, Sequence
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select, text
+from sqlalchemy import func, inspect, select, text
 
 from core.database.models import GenerationModel
 from core.config import settings
@@ -40,7 +40,7 @@ class LivenessResponse(BaseModel):
 
 class DependencyStatus(BaseModel):
     name: str
-    status: Literal["ok", "degraded", "unreachable"]
+    status: Literal["ok", "degraded", "unreachable", "unavailable"]
     latency_ms: float | None = None
     detail: str | None = None
 
@@ -106,6 +106,46 @@ async def _check_database() -> DependencyStatus:
         name="postgres",
         status="ok",
         latency_ms=round(latency_ms, 1),
+    )
+
+
+async def _check_component_lectio_schema() -> DependencyStatus:
+    """Verify the schema contract required by the active Units workflow.
+
+    A database can be stamped at the Alembic head while this table is absent
+    (for example after an incomplete restore).  A connection-only probe would
+    report healthy in that state, but the first Units write would then fail
+    while flushing capability declarations.  Keep this check separate from
+    the generic connection probe so readiness explains the actual blocker.
+    """
+    try:
+        async with async_session_factory() as session:
+            connection = await session.connection()
+            present = await connection.run_sync(
+                lambda sync_connection: inspect(sync_connection).has_table(
+                    "unit_capability_declarations"
+                )
+            )
+    except Exception as exc:  # pragma: no cover - exercised via tests
+        logger.error("Component Lectio schema health check failed", exc_info=exc)
+        return DependencyStatus(
+            name="component_lectio_schema",
+            status="unreachable",
+            detail=str(exc),
+        )
+
+    if not present:
+        return DependencyStatus(
+            name="component_lectio_schema",
+            status="unavailable",
+            detail=(
+                "Required table unit_capability_declarations is missing; "
+                "run database migrations before serving Units."
+            ),
+        )
+    return DependencyStatus(
+        name="component_lectio_schema",
+        status="ok",
     )
 
 
@@ -209,7 +249,11 @@ async def _get_generation_summary() -> GenerationSummary | None:
 
 
 def _overall_status(dependencies: list[DependencyStatus]) -> Literal["ok", "degraded", "unavailable"]:
-    if any(dep.name == "postgres" and dep.status == "unreachable" for dep in dependencies):
+    if any(
+        dep.name in {"postgres", "component_lectio_schema"}
+        and dep.status in {"unreachable", "unavailable"}
+        for dep in dependencies
+    ):
         return "unavailable"
     if any(dep.status != "ok" for dep in dependencies):
         return "degraded"
@@ -246,12 +290,14 @@ async def _build_readiness_payload(request: Request) -> ReadinessResponse:
     now = datetime.now(timezone.utc)
     (
         db_status,
+        component_lectio_schema_status,
         event_bus_status,
         playwright_status,
         temp_dir_status,
         generation_summary,
     ) = await asyncio.gather(
         _check_database(),
+        _check_component_lectio_schema(),
         _check_event_bus(),
         _check_playwright_runtime(),
         _check_pdf_temp_dir(),
@@ -264,6 +310,7 @@ async def _build_readiness_payload(request: Request) -> ReadinessResponse:
         )
     dependencies = [
         db_status,
+        component_lectio_schema_status,
         event_bus_status,
         playwright_status,
         temp_dir_status,
