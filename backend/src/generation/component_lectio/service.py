@@ -35,7 +35,8 @@ from generation.component_lectio.payload_validation import (
     ExactPayloadValidationError,
     validate_exact_payload,
 )
-from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
+from generation.contracts import GenerationInputForm as V3InputForm
+from generation.contracts import GenerationSignalSummary as V3SignalSummary
 from v3_blueprint.planning.canonical_plan import (
     SelectorFn,
     build_canonical_execution_plan,

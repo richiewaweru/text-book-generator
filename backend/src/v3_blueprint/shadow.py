@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.database.models import GenerationModel, SkeletonShadowRecordModel
 from core.database.session import async_session_factory
-from generation.v3_studio.dtos import V3InputForm
+from generation.contracts import GenerationInputForm as V3InputForm
 from v3_blueprint.knowledge_classifier import classify_knowledge_type
 from v3_blueprint.planning.models import StructuralPlan
 from v3_blueprint.skeletons import SkeletonPreviewRequest, load_skeleton_catalog

@@ -19,7 +19,8 @@ from v3_blueprint.planning.structural_planner import (
     build_stage1_user_message,
 )
 from v3_blueprint.planning.validators import validate_structural_plan
-from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
+from generation.contracts import GenerationInputForm as V3InputForm
+from generation.contracts import GenerationSignalSummary as V3SignalSummary
 
 
 LESSON_ROLES = ("orient", "build", "model", "practice", "close")

@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from core.database.models import GenerationModel, SkeletonShadowRecordModel, UserModel
-from generation.v3_studio.dtos import V3InputForm
+from generation.contracts import GenerationInputForm as V3InputForm
 from v3_blueprint.knowledge_classifier import KnowledgeTypeClassification
 from v3_blueprint.planning.models import (
     AnchorSpec,

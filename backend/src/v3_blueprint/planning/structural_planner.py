@@ -8,8 +8,9 @@ from pydantic_ai import Agent
 from core.config import settings
 from core.llm.runner import RetryPolicy, run_llm
 from core.prompts import effective_prompt_text
-from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
-from generation.v3_studio.prompts import build_v3_shared_prefix
+from generation.contracts import GenerationInputForm as V3InputForm
+from generation.contracts import GenerationSignalSummary as V3SignalSummary
+from generation.prompts import build_shared_generation_prefix
 from v3_blueprint.planning.models import (
     IntentPlan,
     StructuralPlan,
@@ -31,7 +32,7 @@ def _load_stage1_static_body() -> str:
 
 
 def build_stage1_system_prompt(*, path_prepared: bool = False) -> str:
-    shared_prefix = build_v3_shared_prefix()
+    shared_prefix = build_shared_generation_prefix()
     static_body = _load_stage1_static_body()
     prompt = f"{shared_prefix}{static_body}"
     if not path_prepared:

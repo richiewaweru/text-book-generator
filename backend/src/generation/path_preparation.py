@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database.models import ConceptCardModel, GenerationModel, LessonProvenanceModel
 from generation.pipeline_dispatch import build_control_patch, select_default_pipeline
-from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
+from generation.contracts import GenerationInputForm as V3InputForm
+from generation.contracts import GenerationSignalSummary as V3SignalSummary
 from resource_specs.loader import get_spec
 from resource_specs.renderer import render_spec_for_prompt
 from v3_blueprint.planning.models import StructuralPlan, VariantSpec

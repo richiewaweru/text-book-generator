@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from contracts.lectio import get_component_card
-from generation.v3_studio.prompts import _planner_index_block, build_v3_shared_prefix
+from generation.prompts import build_shared_generation_prefix, planner_index_block
 from v3_blueprint.planning.section_expander import build_stage2_system_prompt
 from v3_blueprint.planning.structural_planner import build_stage1_system_prompt
 from v3_execution.models import (
@@ -19,7 +19,7 @@ from v3_execution.prompts.section_writer import build_section_writer_prompt
 
 
 def test_stage1_and_stage2_prompts_share_stable_prefix() -> None:
-    prefix = build_v3_shared_prefix()
+    prefix = build_shared_generation_prefix()
 
     assert build_stage1_system_prompt().startswith(prefix)
     assert build_stage2_system_prompt().startswith(prefix)
@@ -32,7 +32,7 @@ def test_stage1_prompt_excludes_lectio_component_catalogue() -> None:
     assert "AVAILABLE COMPONENTS" not in prompt
     assert "@@PLANNER_INDEX_BLOCK@@" not in prompt
     # Planner-index helper still exists for later selector phases.
-    planner_block = _planner_index_block()
+    planner_block = planner_index_block()
     card = get_component_card("worked-example-card")
     assert card is not None
     assert (
@@ -62,7 +62,7 @@ def test_stage1_role_instructions_name_resource_spec_roles_as_authority() -> Non
 
 
 def test_writer_prompts_share_stable_prefix() -> None:
-    prefix = build_v3_shared_prefix()
+    prefix = build_shared_generation_prefix()
     section_order = SectionWriterWorkOrder(
         work_order_id="wo-1",
         section=WriterSection(

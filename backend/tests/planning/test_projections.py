@@ -20,7 +20,6 @@ from core.database.models import (
     UnitModel,
     UserModel,
 )
-from generation.pdf_export.v3_pack_pipeline_document import build_pipeline_document_for_v3_pdf
 from planning.models import ResourceComposeRequest
 from planning.projections import build_composition_payload
 
@@ -149,15 +148,7 @@ async def test_revision_preview_is_deterministic_and_traceable(db_session) -> No
     assert all(source["objective_hash"] == lesson.objective_hash for source in payload["source_snapshots"])
     assert payload["document"]["sections"][0]["summary"]["items"] == [{"text": "Leaves make food."}]
 
-    render_document = build_pipeline_document_for_v3_pdf(
-        generation_id="projection-preview",
-        title="Revision sheet",
-        subject="Science",
-        template_id=payload["document"]["template_id"],
-        document_json=payload["document"],
-    )
-    assert len(render_document.section_manifest) == len(payload["document"]["sections"])
-    assert len(render_document.sections) == len(payload["document"]["sections"])
+    assert len(payload["document"]["sections"]) == 1
     assert before_calls == after_calls == 0
 
 

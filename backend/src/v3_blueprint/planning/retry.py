@@ -7,7 +7,8 @@ from collections.abc import Awaitable, Callable
 
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 
-from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
+from generation.contracts import GenerationInputForm as V3InputForm
+from generation.contracts import GenerationSignalSummary as V3SignalSummary
 from core.config import settings
 from core.llm.runner import TruncatedCompletionError
 from v3_blueprint.planning.models import (

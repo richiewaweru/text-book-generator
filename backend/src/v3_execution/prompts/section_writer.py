@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from generation.v3_studio.prompts import build_v3_shared_prefix
+from generation.prompts import build_shared_generation_prefix
 from core.prompts import effective_prompt_text
 from v3_execution.prompts.formatting import (
     format_consistency_rules,
@@ -213,7 +213,7 @@ LECTIO COMPONENT CONTRACTS:
 
 
 def build_section_writer_prompt(order: SectionWriterWorkOrder) -> str:
-    shared_prefix = build_v3_shared_prefix()
+    shared_prefix = build_shared_generation_prefix()
     order_context = _build_brief_order_context(order)
 
     body = _load_static_template().replace(_ORDER_CONTEXT_MARKER, order_context)

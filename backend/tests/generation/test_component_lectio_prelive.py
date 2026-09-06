@@ -17,7 +17,7 @@ from generation.component_lectio.service import (
     run_component_lectio_execution,
 )
 from generation.pipeline_dispatch import build_control_patch
-from generation.v3_studio.dtos import V3InputForm
+from generation.contracts import GenerationInputForm as V3InputForm
 from resource_specs.candidates import resolve_role_candidates
 from tests.v3_blueprint.planning.test_intent_plan import SUBJECT_FIXTURES, _intent_plan_for_subject
 from v3_blueprint.planning.canonical_plan import (

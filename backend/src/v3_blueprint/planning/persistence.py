@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database.models import ConceptCardModel, GenerationModel, GenerationStepModel
 from core.database.session import async_session_factory
-from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
+from generation.contracts import GenerationInputForm as V3InputForm
+from generation.contracts import GenerationSignalSummary as V3SignalSummary
 from v3_blueprint.planning.models import (
     ConceptCard,
     Misconception,

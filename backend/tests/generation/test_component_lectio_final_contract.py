@@ -36,7 +36,7 @@ from generation.component_lectio.service import (
     reconstruct_checkpoint_store,
     run_component_lectio_execution,
 )
-from generation.v3_studio.dtos import V3InputForm
+from generation.contracts import GenerationInputForm as V3InputForm
 from tests.v3_blueprint.planning.test_intent_plan import SUBJECT_FIXTURES, _intent_plan_for_subject
 from v3_blueprint.planning.canonical_plan import (
     CanonicalExecutionPlan,

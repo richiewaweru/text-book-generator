@@ -8,7 +8,8 @@ from typing import Any
 from generation.component_lectio.service import run_component_lectio_execution
 from v3_blueprint.planning.models import adapt_legacy_structural_plan
 from v3_blueprint.planning.persistence import load_chunked_state
-from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
+from generation.contracts import GenerationInputForm as V3InputForm
+from generation.contracts import GenerationSignalSummary as V3SignalSummary
 
 EmitEvent = Callable[[str, dict[str, Any]], Awaitable[None]]
 

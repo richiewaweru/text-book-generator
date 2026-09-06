@@ -225,7 +225,9 @@ async def test_prepare_bridge_locks_slots_and_objective_hash(db_session) -> None
     assert len(provenance.preparation_key or "") == 64
     generation = await db_session.get(GenerationModel, response.generation_id)
     assert generation is not None
-    assert generation.mode == "v3"
+    assert generation.mode == "component_lectio"
+    assert generation.requested_preset_id == "component-lectio"
+    assert generation.resolved_preset_id == "component-lectio"
     assert generation.status == "awaiting_review"
     state = await load_chunked_state(response.generation_id, db_session)
     assert state["stage"] == "awaiting_review"

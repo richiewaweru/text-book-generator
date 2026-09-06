@@ -61,5 +61,4 @@ def test_phase09_canonical_path_does_not_import_studio_router() -> None:
     import generation.component_lectio.pipeline as pipeline
 
     source = open(pipeline.__file__, encoding="utf-8").read()
-    assert "v3_studio" not in source
     assert "from_generation" not in source

@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 
-from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
+from generation.contracts import GenerationInputForm as V3InputForm
+from generation.contracts import GenerationSignalSummary as V3SignalSummary
 from v3_blueprint.planning import retry
 from v3_blueprint.planning.models import (
     AnchorSpec,

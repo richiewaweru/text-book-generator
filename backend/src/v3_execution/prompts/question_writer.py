@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from generation.v3_studio.prompts import build_v3_shared_prefix
+from generation.prompts import build_shared_generation_prefix
 from core.prompts import effective_prompt_text
 from v3_execution.prompts.formatting import format_source_of_truth
 from v3_execution.models import QuestionWriterWorkOrder
@@ -15,7 +15,7 @@ def build_question_writer_prompt(
     *,
     correction_hint: str | None = None,
 ) -> str:
-    shared_prefix = build_v3_shared_prefix()
+    shared_prefix = build_shared_generation_prefix()
     if order.component_id:
         return _build_component_aware_prompt(
             order,

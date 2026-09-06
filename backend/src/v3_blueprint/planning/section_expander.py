@@ -11,9 +11,10 @@ from core.config import settings
 from core.llm.runner import RetryPolicy, run_llm
 from core.llm.types import ModelFamily
 from core.prompts import effective_prompt_text
-from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
-from generation.v3_studio.prompts import build_v3_shared_prefix
-from generation.v3_studio.signal_map import summarise_form_supports
+from generation.contracts import GenerationInputForm as V3InputForm
+from generation.contracts import GenerationSignalSummary as V3SignalSummary
+from generation.prompts import build_shared_generation_prefix
+from generation.signal_map import summarise_form_supports
 from v3_blueprint.planning.models import SectionBrief, SectionPlan, StructuralPlan
 from v3_execution.config import get_v3_model, get_v3_model_settings, get_v3_slot, get_v3_spec
 from v3_execution.llm_helpers import structured_output_type_for_model
@@ -23,7 +24,7 @@ STAGE2_NODE = "v3_stage2_expander"
 
 
 def build_stage2_system_prompt() -> str:
-    shared_prefix = build_v3_shared_prefix()
+    shared_prefix = build_shared_generation_prefix()
     return shared_prefix + effective_prompt_text("section-expander")
 
 
