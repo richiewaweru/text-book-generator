@@ -76,7 +76,8 @@ async def main() -> None:
     from contracts.lectio import get_template_contract
     from core.database.models import Base, GenerationModel, SkeletonShadowRecordModel, UserModel
     from core.database.session import async_session_factory, engine
-    from generation.v3_studio.dtos import V3InputForm, V3SignalSummary
+    from generation.contracts import GenerationInputForm as V3InputForm
+    from generation.contracts import GenerationSignalSummary as V3SignalSummary
     from v3_blueprint.planning.retry import run_stage1_with_retry
 
     async with engine.begin() as connection:
