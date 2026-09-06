@@ -29,6 +29,13 @@
 
 ## Local campaign
 
+### Post-cutover verification ledger (separate from prior campaign counters)
+
+- [x] Run 6 of 12 — Grade 8 Social Studies text-only Units → Component Lectio → Builder proof on exact SHA 4853d1f4; existing campaign counters were not rewritten.
+- [x] Final state reconciled: migration 20260906_0035, one serving worker, explicit component_lectio, valid five-section document, one Builder lesson, save/reload survival, canonical history link, Run 5 absent in this database.
+- [x] Retired API probes and available JSON-log searches recorded; no generation-flow Studio/V3/legacy fallback or concurrent generation observed.
+- [x] Prior schema P1 and preparation-timeout blockers recorded with fixes b2f4cdb, 4352fdb, and 4853d1f.
+
 ## Units cutover workstream
 
 - [ ] A — atomically persist the selected pipeline on Units preparation and dispatch review/approve/progress/retry from the persisted marker

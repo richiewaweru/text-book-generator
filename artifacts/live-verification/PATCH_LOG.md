@@ -28,6 +28,28 @@ Do not blend evidence across code SHAs. For every patch record the originating g
 
 ## Final static gates
 
+## Post-cutover Run 6 and blocker fixes
+
+- Prior schema P1: the capability table was missing in the Docker campaign
+  database. b2f4cdb added idempotent schema repair/readiness detection;
+  migration 20260906_0035 was applied and readiness verified.
+- Preparation timeout: the first post-cutover attempt timed out while the
+  bounded serial planner continued and committed late. 4352fdb aligned the
+  client deadline with the planner budget and made timeout recovery consult
+  authoritative state without retrying. 4853d1f exposed authoritative
+  Builder completion.
+- Run 6 then completed on exact SHA 4853d1f4a9ffc3b9625058b56af1dabaabb73ea0:
+  generation 7be66903-f3cc-4594-8c10-0144135d213b, Builder
+  ff310d12-a59c-41d5-bb85-cdfc248f8c69, five sections, six successful
+  provider calls, truthful component_lectio/completed/complete state, and
+  save/reload survival. This is provider-capacity Run 6 of 12 and is
+  recorded additively; prior campaign counters remain unchanged.
+- Run 5 generation 825f0f9e-2221-4e96-8160-44f07a02aa54 was absent from the
+  active database. No repair write or provider call was attempted.
+- Sanitized DB/network/log/timing evidence is under
+  runs/RUN06-GRADE8-SOCIAL-STUDIES/. The protected
+  artifacts/reports/COMPONENT_LECTIO_PATCH_REPORT.md was not touched.
+
 - Architecture check: PASS.
 - Isolated aggregate `validate_repo` completed with exit code `0`: backend Ruff PASS; backend pytest `690 passed, 1 known warning`; frontend check `0 errors, 2 warnings`; frontend build PASS; tooling pytest `11 passed`.
 - The earlier shared-temp database-lock cascade was invalidated by the successful isolated validation pass; it is not treated as a repository or campaign failure.

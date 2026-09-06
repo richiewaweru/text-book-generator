@@ -42,6 +42,23 @@ Final aggregate gate on the same SHA exited `0`; backend Ruff, frontend check/bu
 
 ## Campaign gate — PAUSED_P0_UNITS_CUTOVER
 
+## Post-cutover Run 6 — PASS
+
+- PostgreSQL head was 20260906_0035 after the capability-schema P1 repair.
+- Generation 7be66903-f3cc-4594-8c10-0144135d213b is explicitly marked
+  component_lectio; scalar status is completed, chunked stage is complete,
+  quality passed is true, and the document is present.
+- The document contains five sections and six structured blocks. Six ordered
+  block_ready steps are present, all attempt 1, with no failed step or retry.
+- Exactly one Component Lectio Builder row exists for the generation:
+  ff310d12-a59c-41d5-bb85-cdfc248f8c69. Its persisted update timestamp
+  advanced after save/reload. No duplicate generation or Builder row exists.
+- Run 5 generation 825f0f9e-2221-4e96-8160-44f07a02aa54 is absent from this
+  database; no write or provider call was used for repair.
+- Provider-capacity accounting: Run 6 of 12, six successful llm_calls, zero
+  failures. This entry is additive and does not rewrite the separate campaign
+  counter ledger. Full sanitized evidence is in the Run 6 evidence directory.
+
 - Real-generation count: `0`; CL-LOCAL-001 is not counted as executed.
 - P0 blocker: `/units/[id]` preparation redirects to `/studio` (`frontend/src/routes/units/[id]/+page.svelte:322-326`). The bridge creates the generation and invokes path initialization (`backend/src/planning/bridge.py:577-648`), whose structural/chunked state has no `control.pipeline` marker (`backend/src/generation/path_preparation.py:46-114`); the resolver maps a missing marker to `v3_studio` (`backend/src/generation/pipeline_dispatch.py:70-91`). Studio approval is the only approval path (`frontend/src/routes/studio/+page.svelte:725`), and the Component Lectio branch requires the persisted marker (`backend/src/generation/v3_studio/router.py:2591-2603`).
 - Campaign status: `PAUSED_P0_UNITS_CUTOVER`; no source, browser, provider, or database mutation is authorized until this scope/marker gap is corrected.

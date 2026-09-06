@@ -70,3 +70,25 @@ Use one section per serialized generation. The CSV is the machine-readable index
 - IAB network cursor: `639`; `/v3/narrow` request/response/finish `645/650/652` (HTTP 200), `/v3/propose-intent` `655/658/660` (HTTP 200), `/v3/signals` `663/668/670` (HTTP 500, text/plain). UI reset with `Internal Server Error`.
 - Dedicated campaign DB terminal counts after the attempt: `generations=0`, `generation_steps=0`, `learning_packs=0`, `v3_trace_runs=0`, `v3_trace_events=0`, `llm_calls=7`.
 - Seven paid pre-generation calls were persisted: narrow succeeded on attempt 2, propose-intent succeeded on attempt 2, and signal extraction failed on attempts 1–3. These calls are retained as separate legacy evidence and are not a CL-LOCAL-001 generation.
+
+### Run 6 — Grade 8 Social Studies post-cutover Units verification — PASS
+
+- Provider-capacity run 6 of 12, recorded as a separate post-cutover entry;
+  existing campaign counters were not rewritten. Exact SHA:
+  4853d1f4a9ffc3b9625058b56af1dabaabb73ea0.
+- Generation 7be66903-f3cc-4594-8c10-0144135d213b completed through
+  /units → Component Lectio → Builder; Builder id
+  ff310d12-a59c-41d5-bb85-cdfc248f8c69. Five sections and six structured
+  blocks were persisted; the document is valid and the terminal state is
+  truthful (component_lectio, complete, completed).
+- Builder save/reload survived with a persisted updated_at change. Canonical
+  dashboard history linked to Builder. Run 5 generation
+  825f0f9e-2221-4e96-8160-44f07a02aa54 was absent from this database, so no
+  repair or provider call was attempted.
+- Six successful DeepSeek calls were persisted over the openai-compatible
+  transport; no visual call, transport retry, failed step, or concurrent
+  generation was observed. Detailed sanitized evidence:
+  runs/RUN06-GRADE8-SOCIAL-STUDIES/.
+- This is one passing post-cutover proof and does not satisfy the four-
+  consecutive local/hosted gates. Visual behavior remains out of scope for
+  this text-only run.

@@ -22,6 +22,24 @@ For each run record sanitized URL path, method, status, start/end time, generati
 
 ## Campaign gate — PAUSED_P0_UNITS_CUTOVER
 
+## Post-cutover Run 6 — PASS
+
+- The in-app browser began at /units and finished at the Builder route for
+  ff310d12-a59c-41d5-bb85-cdfc248f8c69; the canonical history endpoint was
+  used for dashboard reconciliation.
+- Retired API probes returned sanitized HTTP 410 with code
+  legacy_pipeline_retired for /api/v1/v3/* and /api/v1/legacy-units/*.
+  Frontend legacy probes returned data-free retirement/404 responses.
+- Available JSON logs were searched for /studio, /api/v1/v3, legacy,
+  fallback, and concurrent. Studio/V3/legacy hits were explicit retirement
+  probes only; fallback and concurrent had zero matches. No generation-flow
+  Studio/V3 request or fallback was observed.
+- Six provider calls were reconciled from llm_calls: DeepSeek,
+  openai-compatible transport, api.deepseek.com, standard/fast lanes, six
+  successes, zero failures. No visual request or transport retry was made.
+- Detailed sanitized network/log evidence is in
+  runs/RUN06-GRADE8-SOCIAL-STUDIES/RUN06_NETWORK_LOG_SUMMARY.md.
+
 - T0 (UTC): `2026-09-05T09:56:19.979Z`; IAB network cursor at start: `639`; real-generation count: `0`.
 - No CL-LOCAL-001 generation request is counted. The P0 scope blocker is that unit preparation redirects to Studio (`frontend/src/routes/units/[id]/+page.svelte:322-326`) and the bridge/initializer omits `chunked_state_json.control.pipeline` (`backend/src/planning/bridge.py:577-648`; `backend/src/generation/path_preparation.py:46-114`), which resolves to `v3_studio` when absent (`backend/src/generation/pipeline_dispatch.py:70-91`).
 - Generation approval is only exposed by Studio (`frontend/src/routes/studio/+page.svelte:725`), so the campaign is paused before a valid Component Lectio run.
