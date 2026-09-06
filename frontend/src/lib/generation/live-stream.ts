@@ -459,7 +459,7 @@ export function applyGenerationStreamEvent(
 			return {
 				next: {
 					...context,
-					viewerWarning: `v3 stream: ${String(type)} → ${String(label)}`
+					viewerWarning: `generation stream: ${String(type)} → ${String(label)}`
 				},
 				terminal: null
 			};

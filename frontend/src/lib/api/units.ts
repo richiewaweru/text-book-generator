@@ -4,7 +4,6 @@ import type {
 	ConstructorReadback,
 	ConstructorReadbackInput,
 	KnowledgeType,
-	LegacyUnitWrapper,
 	LessonActual,
 	LessonActualStatus,
 	LessonShapeDeviation,
@@ -71,14 +70,6 @@ async function jsonRequest<T>(path: string, fallback: string, init?: RequestInit
 
 export function listUnits(): Promise<Unit[]> {
 	return jsonRequest('/api/v1/units', 'Could not load units.');
-}
-
-export function listLegacyUnitWrappers(): Promise<LegacyUnitWrapper[]> {
-	return jsonRequest('/api/v1/legacy-units', 'Could not load legacy unit wrappers.');
-}
-
-export function getLegacyUnitWrapper(packId: string): Promise<LegacyUnitWrapper> {
-	return jsonRequest(`/api/v1/legacy-units/${encodeURIComponent(packId)}`, 'Could not load this legacy unit.');
 }
 
 export function getUnit(unitId: string): Promise<Unit> {

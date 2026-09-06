@@ -13,9 +13,8 @@
 	import { Plus } from 'lucide-svelte';
 	import { saveVersionSnapshot } from '$lib/builder/persistence/idb-store';
 	import type { DocumentStore } from '$lib/builder/stores/document.svelte';
-	import type { PendingPlanSection } from '$lib/builder/streaming/generation-stream';
+	import type { PendingPlanSection } from '$lib/builder/reconciliation';
 	import type { BuilderIssue } from '$lib/builder/issues';
-	import type { V3VisualBlock } from '$lib/api/v3';
 
 	let {
 		document,
@@ -24,10 +23,7 @@
 		sectionProgress = {},
 		generationTerminal = false,
 		documentLevelIssues = [],
-		onDismissDocumentIssue = () => {},
-		generationId = null,
-		visualBlocks = [],
-		onVisualRegenerated = async () => {}
+		onDismissDocumentIssue = () => {}
 	}: {
 		document: LessonDocument;
 		store: DocumentStore;
@@ -36,9 +32,6 @@
 		generationTerminal?: boolean;
 		documentLevelIssues?: BuilderIssue[];
 		onDismissDocumentIssue?: (issueId: string) => void;
-		generationId?: string | null;
-		visualBlocks?: V3VisualBlock[];
-		onVisualRegenerated?: () => void | Promise<void>;
 	} = $props();
 
 	const preset = $derived(basePresetMap[document.preset_id] ?? null);
@@ -146,12 +139,12 @@
 			{#if preset}
 				<LectioThemeSurface {preset}>
 					{#snippet children()}
-						<BlockCanvas {store} {pendingPlan} {sectionProgress} {generationTerminal} {documentLevelIssues} {onDismissDocumentIssue} {generationId} {visualBlocks} {onVisualRegenerated} />
+						<BlockCanvas {store} {pendingPlan} {sectionProgress} {generationTerminal} {documentLevelIssues} {onDismissDocumentIssue} />
 					{/snippet}
 				</LectioThemeSurface>
 			{:else}
 				<p class="text-sm text-amber-800">Unknown preset "{document.preset_id}" - showing unstyled canvas.</p>
-				<BlockCanvas {store} {pendingPlan} {sectionProgress} {generationTerminal} {documentLevelIssues} {onDismissDocumentIssue} {generationId} {visualBlocks} {onVisualRegenerated} />
+				<BlockCanvas {store} {pendingPlan} {sectionProgress} {generationTerminal} {documentLevelIssues} {onDismissDocumentIssue} />
 			{/if}
 		</main>
 		<CanvasOutline {store} />

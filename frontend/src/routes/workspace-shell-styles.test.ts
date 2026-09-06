@@ -52,9 +52,8 @@ describe('workspace shell styling contract', () => {
 		expect(settings).toContain('href="/lessons"');
 	});
 
-	it('preserves both print-shell exclusions', () => {
-		expect(layout).toContain("page.url.pathname.startsWith('/studio/print/')");
+	it('preserves the active Builder print-shell exclusion', () => {
 		expect(layout).toContain("page.url.pathname.startsWith('/builder/print/')");
-		expect(layout).toContain('isStudioPrintRoute || isBuilderPrintRoute');
-	});
+		expect(layout).not.toContain('isStudioPrintRoute');
+});
 });

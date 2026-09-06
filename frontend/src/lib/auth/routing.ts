@@ -34,10 +34,7 @@ export function shouldRedirectToOnboarding(user: User | null, path: string): boo
 		return false;
 	}
 
-	const safePaths = ['/login', '/onboarding', '/studio'];
-	if (path.startsWith('/studio/print/')) {
-		return false;
-	}
+	const safePaths = ['/login', '/onboarding'];
 	return !safePaths.some((safePath) => path.startsWith(safePath));
 }
 

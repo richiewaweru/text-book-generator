@@ -6,7 +6,6 @@
 	import type { DocumentStore } from '$lib/builder/stores/document.svelte';
 	import { ArrowDown, ArrowUp, Copy, GripVertical, Pencil, Trash2 } from 'lucide-svelte';
 	import type { BlockGenerateContextBlock } from '$lib/builder/api/ai-client';
-	import type { V3VisualBlock } from '$lib/api/v3';
 	import { apiBaseUrl } from '$lib/builder/api/public-env';
 	import AiBlockAssist from '$lib/builder/components/ai/AiBlockAssist.svelte';
 	import { isAiGeneratableComponent } from '$lib/builder/components/ai/ai-block-utils';
@@ -17,8 +16,6 @@
 	import { isTextEditingTarget } from '$lib/builder/utils/shortcuts';
 	import BlockEditor from './BlockEditor.svelte';
 	import BlockPreview from './BlockPreview.svelte';
-	import VisualRegeneratePopover from './VisualRegeneratePopover.svelte';
-	import { isSingleAssetVisualBlock } from '$lib/builder/visual-regeneration';
 
 	let {
 		block,
@@ -39,10 +36,7 @@
 		contextBlocksForAi = [],
 		onapplyaicontent,
 		aiRepairRequest = null,
-		onairepairapplied,
-		generationId = null,
-		matchedVisual,
-		onVisualRegenerated = async () => {}
+		onairepairapplied
 	}: {
 		block: BlockInstance;
 		document: LessonDocument | null;
@@ -63,9 +57,6 @@
 		onapplyaicontent?: (content: Record<string, unknown>) => void;
 		aiRepairRequest?: BlockAiRepairRequest | null;
 		onairepairapplied?: (request: BlockAiRepairRequest) => void | Promise<void>;
-		generationId?: string | null;
-		matchedVisual?: V3VisualBlock;
-		onVisualRegenerated?: () => void | Promise<void>;
 	} = $props();
 
 	const apiConfigured = $derived(Boolean(apiBaseUrl()));
@@ -110,15 +101,14 @@
 		const t = e.target as HTMLElement;
 		if (
 			t.closest?.('.drag-handle') ||
-			t.closest?.('button') ||
-			t.closest?.('[data-visual-regenerate-root]')
+			t.closest?.('button')
 		)
 			return;
 		onselect?.();
 	}}
 	ondblclick={(e) => {
 		const t = e.target as HTMLElement;
-		if (t.closest?.('.drag-handle') || t.closest?.('[data-visual-regenerate-root]')) return;
+		if (t.closest?.('.drag-handle')) return;
 		onstartedit?.();
 	}}
 	onkeydown={(e) => {
@@ -182,14 +172,6 @@
 
 	{#if selected && !editing}
 		<div class="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-lg border border-slate-200 bg-white/95 p-1 shadow">
-			{#if isSingleAssetVisualBlock(block.component_id)}
-				<VisualRegeneratePopover
-					presentation="popover"
-					{generationId}
-					visual={matchedVisual}
-					onRegenerated={onVisualRegenerated}
-				/>
-			{/if}
 			{#if editSchema && onapplyaicontent && isAiGeneratableComponent(block.component_id)}
 				<AiBlockAssist
 					{block}

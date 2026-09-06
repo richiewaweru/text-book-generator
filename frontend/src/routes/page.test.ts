@@ -116,7 +116,7 @@ describe('root route session resume', () => {
 		await waitFor(() =>
 			expect(goto).toHaveBeenCalledWith('/lessons', { replaceState: true })
 		);
-		await waitFor(() => expect(getCapabilities).toHaveBeenCalledTimes(1));
+		expect(getCapabilities).not.toHaveBeenCalled();
 		expect(screen.getByRole('link', { name: 'Units' })).toBeTruthy();
 		expect(screen.getByRole('link', { name: 'Lectio' }).getAttribute('href')).toBe('/lessons');
 		expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('href')).toBe('/settings');
@@ -146,10 +146,10 @@ describe('root route session resume', () => {
 		authedStore.set(true);
 
 		await waitFor(() => expect(screen.getByRole('link', { name: 'Units' })).toBeTruthy());
-		expect(getCapabilities).toHaveBeenCalledTimes(1);
+		expect(getCapabilities).not.toHaveBeenCalled();
 	});
 
-	it('keeps Units hidden when the capability request fails', async () => {
+	it('keeps Units available because capability gating is retired', async () => {
 		getCapabilities.mockRejectedValue(new Error('capabilities unavailable'));
 
 		render(Layout, {
@@ -161,7 +161,7 @@ describe('root route session resume', () => {
 		});
 
 		await waitFor(() => expect(screen.getByRole('link', { name: 'Home' })).toBeTruthy());
-		await waitFor(() => expect(getCapabilities).toHaveBeenCalledTimes(1));
-		expect(screen.queryByRole('link', { name: 'Units' })).toBeNull();
+		expect(getCapabilities).not.toHaveBeenCalled();
+		expect(screen.getByRole('link', { name: 'Units' })).toBeTruthy();
 	});
 });

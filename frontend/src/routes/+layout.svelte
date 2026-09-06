@@ -5,61 +5,21 @@
 	import { fromStore } from 'svelte/store';
 	import { resolveShellRedirect } from '$lib/auth/routing';
 	import { fetchCurrentUser } from '$lib/api/auth';
-	import { getCapabilities } from '$lib/api/capabilities';
 	import { authInitialized, authIsAuthenticated, authUser, bootstrapAuth } from '$lib/stores/auth';
 
 	let { children } = $props();
 	const initialized = fromStore(authInitialized);
 	const user = fromStore(authUser);
 	const authed = fromStore(authIsAuthenticated);
-	let xploreV2 = $state(false);
-	let capabilitiesReady = $state(false);
-	let capabilitiesUserId = $state<string | null>(null);
-	let capabilitiesRequestUserId = $state<string | null>(null);
 
-	const isStudioPrintRoute = $derived(
-		page.url.pathname.startsWith('/studio/print/') && page.url.searchParams.get('print') === 'true'
-	);
 	const isBuilderPrintRoute = $derived(page.url.pathname.startsWith('/builder/print/'));
-	const isPrintShellRoute = $derived(isStudioPrintRoute || isBuilderPrintRoute);
+	const isPrintShellRoute = $derived(isBuilderPrintRoute);
 	const isLessonsRoute = $derived(page.url.pathname.startsWith('/lessons'));
 	const isUnitsRoute = $derived(page.url.pathname.startsWith('/units'));
 	const isWorkspaceRoute = $derived(isLessonsRoute || isUnitsRoute);
 
-	async function loadCapabilitiesForUser(userId: string): Promise<void> {
-		if (capabilitiesUserId === userId || capabilitiesRequestUserId === userId) return;
-
-		capabilitiesRequestUserId = userId;
-		capabilitiesReady = false;
-		try {
-			xploreV2 = (await getCapabilities()).xplore_v2;
-			capabilitiesUserId = userId;
-		} catch {
-			xploreV2 = false;
-			capabilitiesUserId = userId;
-		} finally {
-			if (capabilitiesRequestUserId === userId) capabilitiesRequestUserId = null;
-			if (user.current?.id === userId) capabilitiesReady = true;
-		}
-	}
-
 	onMount(() => {
 		void bootstrapAuth(fetchCurrentUser);
-	});
-
-	$effect(() => {
-		if (!initialized.current) return;
-
-		const userId = user.current?.id ?? null;
-		if (!userId) {
-			xploreV2 = false;
-			capabilitiesUserId = null;
-			capabilitiesRequestUserId = null;
-			capabilitiesReady = true;
-			return;
-		}
-
-		void loadCapabilitiesForUser(userId);
 	});
 
 	$effect(() => {
@@ -68,9 +28,6 @@
 		const redirectTo = resolveShellRedirect(user.current, path);
 		if (redirectTo && redirectTo !== path) {
 			goto(redirectTo, { replaceState: true });
-		}
-		if (capabilitiesReady && path.startsWith('/units') && !xploreV2) {
-			goto('/lessons', { replaceState: true });
 		}
 	});
 </script>
@@ -92,8 +49,7 @@
 			{#if authed.current && user.current}
 				<div class="workspace-links" aria-label="Workspace">
 					<a href="/lessons" aria-current={isLessonsRoute ? 'page' : undefined}>Home</a>
-					{#if xploreV2}<a href="/units" aria-current={isUnitsRoute ? 'page' : undefined}>Units</a>{/if}
-					<a href="/studio">Legacy</a>
+					<a href="/units" aria-current={isUnitsRoute ? 'page' : undefined}>Units</a>
 				</div>
 				<div class="workspace-nav-end">
 					<a class="workspace-avatar-link" href="/settings" aria-label="Settings">

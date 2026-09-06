@@ -7,7 +7,7 @@ import {
 	saveLessonToServer
 } from '$lib/builder/persistence/server-sync';
 import { createHistoryStore } from './history.svelte';
-import { appendAbsentGenerationSections, type PendingPlanSection } from '$lib/builder/streaming/generation-stream';
+import { appendAbsentGenerationSections, type PendingPlanSection } from '$lib/builder/reconciliation';
 import { issuesForSection, type IssueSection } from '$lib/builder/issues';
 
 const FIELD_HISTORY_IDLE_MS = 1000;

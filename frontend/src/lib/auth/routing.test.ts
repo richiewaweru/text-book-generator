@@ -41,7 +41,7 @@ describe('auth routing helpers', () => {
 	it('only uses the shell onboarding redirect on routes that cannot self-heal', () => {
 		expect(shouldRedirectToOnboarding(baseUser, '/')).toBe(true);
 		expect(shouldRedirectToOnboarding(baseUser, '/lessons')).toBe(true);
-		expect(shouldRedirectToOnboarding(baseUser, '/studio')).toBe(false);
+		expect(shouldRedirectToOnboarding(baseUser, '/studio')).toBe(true);
 		expect(shouldRedirectToOnboarding(baseUser, '/onboarding')).toBe(false);
 		expect(shouldRedirectToOnboarding({ ...baseUser, has_profile: true }, '/')).toBe(false);
 	});

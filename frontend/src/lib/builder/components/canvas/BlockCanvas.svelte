@@ -7,18 +7,15 @@
 	import AddSectionControl from './AddSectionControl.svelte';
 	import BlockCard from './BlockCard.svelte';
 	import SectionDivider from './SectionDivider.svelte';
-	import type { PendingPlanSection } from '$lib/builder/streaming/generation-stream';
+	import type { PendingPlanSection } from '$lib/builder/reconciliation';
 	import { issuesForSection } from '$lib/builder/issues';
 	import type { BuilderIssue } from '$lib/builder/issues';
-	import type { V3VisualBlock } from '$lib/api/v3';
-	import BuilderVisualIssueAction from './BuilderVisualIssueAction.svelte';
 	import {
 		qcReasonToInstruction,
 		resolveTextIssueTarget,
 		resolveVisualIssueTarget
 	} from '$lib/builder/issue-targeting';
 	import type { BlockAiRepairRequest } from '$lib/builder/issues';
-	import { resolveBlockVisual } from '$lib/builder/visual-regeneration';
 
 	let {
 		store,
@@ -26,10 +23,7 @@
 		sectionProgress = {},
 		generationTerminal = false,
 		documentLevelIssues = [],
-		onDismissDocumentIssue = () => {},
-		generationId = null,
-		visualBlocks = [],
-		onVisualRegenerated = async () => {}
+		onDismissDocumentIssue = () => {}
 	}: {
 		store: DocumentStore;
 		pendingPlan?: PendingPlanSection[];
@@ -37,9 +31,6 @@
 		generationTerminal?: boolean;
 		documentLevelIssues?: BuilderIssue[];
 		onDismissDocumentIssue?: (issueId: string) => void;
-		generationId?: string | null;
-		visualBlocks?: V3VisualBlock[];
-		onVisualRegenerated?: () => void | Promise<void>;
 	} = $props();
 
 	const readySectionCount = $derived(
@@ -215,13 +206,6 @@
 								{#if visualEditTarget}
 									<button type="button" class="rounded border border-amber-400 bg-white px-2 py-1 text-xs" onclick={() => editVisualIssueBlock(section.id, issue.target_block_id)}>Swap image</button>
 								{/if}
-								<BuilderVisualIssueAction
-									{issue}
-									{generationId}
-									visual={visualBlocks.find((visual) => visual.visual_id === issue.visual_id)}
-									onResolved={() => store.resolveIssue(section.id, issue.id)}
-									onRegenerated={onVisualRegenerated}
-								/>
 							{:else if textRepairTarget}
 								<button type="button" class="rounded border border-amber-400 bg-white px-2 py-1 text-xs" onclick={() => editIssueBlock(section.id, issue)}>Fix with AI</button>
 							{:else}
@@ -263,14 +247,6 @@
 							store.resolveIssue(request.sectionId, request.issueId);
 							aiRepairRequest = null;
 						}}
-						{generationId}
-						matchedVisual={resolveBlockVisual(
-							item,
-							section.id,
-							visualBlocks,
-							store.document?.media ?? {}
-						)}
-						{onVisualRegenerated}
 						onapplyaicontent={(content) => {
 							const merged = mergeAiContentWithEditableFields(
 								item.component_id,
