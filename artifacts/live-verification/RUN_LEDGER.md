@@ -8,11 +8,21 @@ Use one section per serialized generation. The CSV is the machine-readable index
 - `PASS_WITH_RECOVERY`: a correctly classified, block-scoped retry/repair recovered without regenerating valid siblings.
 - `FAIL`: wrong pipeline, hidden fallback, invalid ready payload, false/stuck terminal state, identity corruption, or unusable Builder/document.
 - `FAIL_P1_CONTENT_QUALITY`: a persisted lesson contains a P1 semantic/content defect even when structural validation, lifecycle, and Builder linkage complete successfully.
+- `FAIL_P1_VISUAL_QC`: a visual provider/QC failure leaves an unusable or prompt-echo diagram represented as a complete lesson; exclude from pass and latency statistics.
 - `INVALID_SCOPE_SELECTION`: the selected path lesson is valid and generated successfully, but its persisted objective/scope does not satisfy the campaign scenario; this is excluded from pass and latency statistics even when Builder linkage/UI subchecks pass.
 - `PAUSED_P0_UNITS_CUTOVER`: a pre-campaign blocker prevents a valid Component Lectio run; real-generation count remains zero.
 - `INVALID_SCOPE_LEGACY`: retained evidence from a prior path that is excluded from the named campaign run and its real-generation count.
 
 ## Runs
+
+### Run 4 — Grade 5 Science visual — FAIL_P1_VISUAL_QC
+
+- Provider-capacity generation `4 of 12`: generation `7f2ff0ef-2a00-4dc8-9dd7-8ad7570a08df`; verified source SHA `b41a6d1c`; Builder `bced2938-e7d0-41bf-bacf-47bcc1e23911`.
+- The ninth displayed path lesson (zero-based position 8) completed with `status=completed`, `stage=complete`, `quality_passed=true`, and exact Component Lectio Builder linkage. No `/studio` fallback was observed.
+- Six ordered `block_ready` checkpoints were persisted. The check block used attempt 2/`repair`; all other blocks used attempt 1. `failed_sections=[]` and no scalar/chunked error was persisted.
+- Seven LLM calls were persisted: six successful DeepSeek text calls and one failed Anthropic visual-QC call (`claude-haiku-4-5-20251001`) rejected for provider billing/credit. No successful image-generation call was persisted.
+- The selected diagram block reached `block_ready` with an xAI-shaped API URL, empty document media, and duplicated prompt-like `alt_text`/`caption`; Builder QA observed a broken-image icon and prompt repetition. This violates the visual readiness contract.
+- Classification: `FAIL_P1_VISUAL_QC`; exclude from pass and latency statistics. Detailed sanitized evidence: `RUN04_COMPONENT_LECTIO.md`.
 
 ### Run 3 — corrected Grade 7 Math — PASS
 

@@ -19,12 +19,14 @@
 ## Key Runtime Contracts
 - The core owns auth primitives, shared database access, and generic infrastructure.
 - The generation app owns auth-aware HTTP, persistence, generation orchestration, and SSE transport.
-- The planning app owns Teacher Studio flows and feeds generation.
+- The planning app owns Unit planning and the Component Lectio bridge into generation.
 - The pipeline owns prompts, contract loading, providers, graph orchestration, QC, and Lectio document assembly.
-- The canonical saved artifact is a JSON `PipelineDocument`.
-- `/studio` is the canonical teacher lesson-creation route.
-- `GET /api/v1/contracts`, `POST /api/v1/brief/stream`, and `POST /api/v1/brief/commit` are the live planning endpoints.
-- Public textbook viewing is generation-centric: `/textbook/[id]` maps to a generation ID, hydrates from `/document`, and streams updates from `/events`.
+- The canonical saved artifact is a JSON `LessonDocument`; historical pipeline rows remain inert audit data.
+- `/units` → Component Lectio → Builder is the only supported new-lesson workflow.
+- `GET /api/v1/contracts` and the canonical Units, generation-history, Builder, pack-document, and PDF endpoints are the live workflow APIs.
+- `/studio*` and `/units/legacy*` are retired frontend routes. `/api/v1/v3/*` and `/api/v1/legacy-units/*` return sanitized `410 Gone` responses with code `legacy_pipeline_retired`.
+- Rollback is an operational redeploy of the recorded pre-cutover SHA; runtime fallback to Legacy Studio is not supported.
+- Public lesson viewing is document-centric: Builder, active pack views, and PDF export consume the canonical `LessonDocument` produced by Component Lectio.
 - The pipeline must never import `generation` or `planning`.
 
 ## Frontend

@@ -34,6 +34,13 @@ Deployment remains manual for now. GitHub Actions is no longer the source of tru
 - Frontend deployment follows the Vercel readiness handoff and operator notes
 - Release prep should record any manual deploy validation in the active runbook or handoff
 
+## Legacy Studio Cutover
+
+- `/units` → Component Lectio → Builder is the only supported new-lesson workflow.
+- `/studio*` and `/units/legacy*` are retired frontend routes with no lesson data or actions.
+- `/api/v1/v3/*` and `/api/v1/legacy-units/*` return sanitized `410 Gone` responses with code `legacy_pipeline_retired`.
+- Rollback is performed by redeploying the recorded pre-cutover SHA. Do not add an automatic runtime fallback.
+
 ## Runtime Verification
 
 Before testing textbook generation in dev:

@@ -18,6 +18,15 @@
 - [x] Run architecture and full repository validation
 - [x] Record pre-live commits and approved campaign SHA
 
+## Run 4 visual-QC correction
+
+- [x] Record Run 4 `FAIL_P1_VISUAL_QC` on exact SHA `b41a6d1`; exclude from pass and latency statistics
+- [x] Record corrective commits `04a2412`, `9e1dba8`, and `c3a2632`
+- [x] Record user-directed temporary policy: QC unavailable → retain usable visual as `flagged_quality`; explicit reject and missing media/source still block
+- [x] Run affected-suite validation on `c3a2632`: `86 passed, 1 known warning`
+- [x] Record PostgreSQL 16 `0033 → 0032 → 0033` migration roundtrip; current Run 4 DB head observed as `0034`
+- [ ] Prove post-`c3a2632` exact-SHA restart, readiness/image probe, and replacement generation before resuming the campaign
+
 ## Local campaign
 
 ## Units cutover workstream

@@ -40,9 +40,9 @@ Authenticated shell identity.
 
 ## Live Planning DTOs
 
-### `TeacherBrief`
+### `TeacherBrief` (historical planning record)
 
-Teacher Studio now plans from a structured brief:
+Historical planning records may contain a structured brief:
 
 - `subject`
 - `topic`
@@ -192,9 +192,12 @@ Unsupported legacy endpoints:
 - `POST /api/v1/brief/stream`
 - `POST /api/v1/generations`
 
-## Viewer Contract
+## Canonical Lesson/Builder Contract
 
-- The generation ID is the public viewer identity.
-- `/studio` plans through `TeacherBriefBuilder`, reviews a frozen `PlanningGenerationSpec`, then hands off to `GenerationView`.
-- Generation hydration comes from `/document` and `/report`; live progress comes from `/events`.
+- `/units` is the only supported new-lesson entrypoint. It dispatches Component Lectio and hands successful completion to Builder.
+- `LessonDocument` is the canonical saved artifact consumed by Builder, active packs, and PDF export.
+- Generation history and status use pipeline-neutral APIs; historical pipeline markers are audit-only.
+- `/studio*` and `/units/legacy*` expose no lesson data or actions.
+- `/api/v1/v3/*` and `/api/v1/legacy-units/*` return sanitized `410 Gone` with code `legacy_pipeline_retired`.
+- Rollback is a redeploy of the recorded pre-cutover SHA, never an automatic runtime fallback.
 - Raw filesystem paths remain internal implementation details.
