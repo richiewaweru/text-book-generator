@@ -273,8 +273,13 @@ async def _render_frame(
                 generation_id=generation_id,
             )
         except Exception as exc:  # noqa: BLE001
+            # A required visual cannot be marked ready when its quality gate did
+            # not run.  Failing open here used to persist provider URLs/images
+            # without a QC verdict and allowed a broken diagram to complete the
+            # whole lesson.  Raise through the executor retry boundary so the
+            # visual work item is recorded as failed and siblings remain usable.
             logger.warning(
-                "v3 visual qc failed open",
+                "v3 visual qc failed; visual is not ready",
                 extra=_visual_log_extra(
                     order=order,
                     generation_id=generation_id,
@@ -286,6 +291,7 @@ async def _render_frame(
                     error_message=str(exc),
                 ),
             )
+            raise VisualStageError.from_exception(stage="visual_qc", exc=exc) from exc
         else:
             if verdict.verdict == "reject":
                 return GeneratedVisualBlock(

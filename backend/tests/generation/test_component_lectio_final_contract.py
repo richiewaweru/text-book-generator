@@ -896,6 +896,73 @@ async def test_unusable_visual_exhaustion_fails_only_visual_work_item():
 
 
 @pytest.mark.asyncio
+async def test_empty_ready_visual_is_blocked_without_dropping_ready_siblings():
+    """A completed-looking empty diagram must not produce a LessonDocument."""
+    generation_id = f"visual-empty-{uuid.uuid4().hex[:8]}"
+    await _seed_generation(generation_id)
+    plan = intent_plan_to_structural_plan(_intent_plan_for_subject(**SUBJECT_FIXTURES[0]))
+
+    async def empty_ready_visual(work_order, emit, **kwargs):
+        return [
+            GeneratedVisualBlock(
+                visual_id=work_order.visual.id,
+                attaches_to=work_order.visual.attaches_to,
+                mode=work_order.visual.mode,
+                image_url="  ",
+                html_content="",
+                source_work_order_id=work_order.work_order_id,
+                component_id=work_order.visual.component_id,
+                status="ready",
+            )
+        ]
+
+    picks = {
+        "orient": ("hook-hero",),
+        "build": ("explanation-block",),
+        "model": ("worked-example-card", "diagram-block"),
+        "practice": ("practice-stack",),
+        "close": ("summary-block",),
+    }
+    with pytest.raises(RuntimeError, match="missing usable visual source"):
+        await run_component_lectio_execution(
+            generation_id=generation_id,
+            plan=plan,
+            form=_form(),
+            **_exec_kwargs(
+                selector=_forced_selector(picks),
+                visual_executor=empty_ready_visual,
+            ),
+        )
+
+    rows = await load_steps(generation_id)
+    failed_visuals = [
+        row
+        for row in rows
+        if row.step == FAILED_STEP
+        and isinstance(row.payload, dict)
+        and row.payload.get("error", {}).get("component_id") == "diagram-block"
+    ]
+    ready_components = {
+        row.payload["payload"].get("component_id")
+        for row in rows
+        if row.step == READY_STEP
+        and isinstance(row.payload, dict)
+        and isinstance(row.payload.get("payload"), dict)
+    }
+    assert len(failed_visuals) == 1
+    assert {"hook-hero", "explanation-block", "worked-example-card", "practice-stack"} <= (
+        ready_components
+    )
+    async with async_session_factory() as session:
+        model = await session.get(GenerationModel, generation_id)
+        assert model is not None
+        assert model.status == "failed"
+        assert model.document_json is None
+        assert model.quality_passed is False
+        assert (model.chunked_state_json or {})["stage"] == "assembly_blocked"
+
+
+@pytest.mark.asyncio
 async def test_flagged_visual_quality_is_checkpoint_metadata_only():
     generation_id = f"visual-flagged-{uuid.uuid4().hex[:8]}"
     await _seed_generation(generation_id)

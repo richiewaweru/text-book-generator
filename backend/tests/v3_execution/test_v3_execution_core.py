@@ -795,7 +795,7 @@ async def test_execute_visual_qc_reject_omits_without_retry_or_upload(
 
 
 @pytest.mark.asyncio
-async def test_execute_visual_qc_error_fails_open(
+async def test_execute_visual_qc_error_fails_visual_without_uploading(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     order = VisualGeneratorWorkOrder(
@@ -816,8 +816,11 @@ async def test_execute_visual_qc_error_fails_open(
             return SimpleNamespace(bytes=b"image", format="png", mime_type="image/png")
 
     class StubStore:
+        def __init__(self) -> None:
+            self.uploads: list[bytes] = []
+
         async def store_image(self, image_bytes, *_args, **kwargs):
-            _ = image_bytes
+            self.uploads.append(image_bytes)
             return f"https://cdn.example/{kwargs['filename']}"
 
     async def qc_error(**_kwargs):
@@ -830,7 +833,8 @@ async def test_execute_visual_qc_error_fails_open(
     monkeypatch.setattr("v3_execution.executors.visual_executor.visual_qc_enabled", lambda: True)
     monkeypatch.setattr("v3_execution.executors.visual_executor.evaluate_visual_quality", qc_error)
     monkeypatch.setattr("v3_execution.executors.visual_executor.get_image_client", lambda: StubClient())
-    monkeypatch.setattr("media.storage.image_store.get_image_store", lambda: StubStore())
+    store = StubStore()
+    monkeypatch.setattr("media.storage.image_store.get_image_store", lambda: store)
     monkeypatch.setattr("v3_execution.executors.visual_executor.load_image_provider_spec", lambda: SimpleNamespace(provider="stub", model_name="stub-model"))
     monkeypatch.setattr("v3_execution.executors.visual_executor.run_with_retries", stub_run_with_retries)
 
@@ -840,8 +844,10 @@ async def test_execute_visual_qc_error_fails_open(
     blocks = await execute_visual(order, emit, trace_id="trace", generation_id="gen")
 
     assert len(blocks) == 1
-    assert blocks[0].status == "ready"
-    assert blocks[0].image_url == "https://cdn.example/vis-qc-error.png"
+    assert blocks[0].status == "failed"
+    assert blocks[0].image_url is None
+    assert "visual_qc failed" in (blocks[0].error_message or "")
+    assert store.uploads == []
 
 
 @pytest.mark.asyncio
