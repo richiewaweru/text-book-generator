@@ -1,10 +1,10 @@
-"""Central generation-pipeline selection and persistence (Casa flag cutover).
+"""Central active-pipeline selection and persisted identity handling.
 
 Authority for:
 - default selection from settings
 - persist identity on generation admission
 - resolve persisted identity for status/retry/resume
-- historical inference when marker is missing
+- historical markers are retained as inert metadata and never admitted
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 PIPELINE_VERSION = 1
 GenerationPipelineName = GenerationPipeline
+_HISTORICAL_PIPELINE_MARKERS = frozenset({"v3_studio"})
 
 CONTROL_KEY = "control"
 
@@ -29,6 +30,8 @@ def select_default_pipeline() -> GenerationPipeline:
 
 
 def pipeline_control_payload(pipeline: GenerationPipeline) -> dict[str, Any]:
+    if pipeline != "component_lectio":
+        raise ValueError("Only Component Lectio generations can be admitted")
     return {
         "pipeline": pipeline,
         "pipeline_version": PIPELINE_VERSION,
@@ -71,24 +74,40 @@ def resolve_generation_pipeline(
     state: dict[str, Any] | None,
     *,
     generation_id: str | None = None,
-) -> GenerationPipeline:
-    """Trust persisted marker; infer v3_studio for historical unmarked rows."""
+) -> GenerationPipeline | None:
+    """Resolve only an active marker; historical rows remain inert.
+
+    A missing or retired marker is intentionally not mapped to the current
+    pipeline.  This prevents an old row from being executed accidentally after
+    the cutover while allowing callers to distinguish it from a new run.
+    """
     control = _control_from_state(state)
     if control is not None:
         raw = control.get("pipeline")
-        if raw in {"component_lectio", "v3_studio"}:
-            return raw  # type: ignore[return-value]
+        if raw == "component_lectio":
+            return "component_lectio"
+        if raw in _HISTORICAL_PIPELINE_MARKERS:
+            log.info(
+                "generation_pipeline_retired generation_id=%s pipeline=%s",
+                generation_id or "unknown",
+                raw,
+                extra={
+                    "event": "generation_pipeline_retired",
+                    "generation_id": generation_id,
+                    "pipeline": raw,
+                },
+            )
+            return None
     log.info(
-        "generation_pipeline_inferred generation_id=%s pipeline=v3_studio reason=missing_marker",
+        "generation_pipeline_unresolved generation_id=%s reason=missing_marker",
         generation_id or "unknown",
         extra={
-            "event": "generation_pipeline_inferred",
+            "event": "generation_pipeline_unresolved",
             "generation_id": generation_id,
-            "pipeline": "v3_studio",
             "reason": "missing_marker",
         },
     )
-    return "v3_studio"
+    return None
 
 
 def pipeline_from_state_or_default(state: dict[str, Any] | None) -> GenerationPipeline | None:
@@ -97,6 +116,6 @@ def pipeline_from_state_or_default(state: dict[str, Any] | None) -> GenerationPi
     if control is None:
         return None
     raw = control.get("pipeline")
-    if raw in {"component_lectio", "v3_studio"}:
-        return raw  # type: ignore[return-value]
+    if raw == "component_lectio":
+        return "component_lectio"
     return None

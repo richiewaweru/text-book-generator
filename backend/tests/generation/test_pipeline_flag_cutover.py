@@ -19,10 +19,6 @@ from generation.pipeline_dispatch import (
     resolve_generation_pipeline,
     select_default_pipeline,
 )
-from generation.v3_studio.router import (
-    _normalize_chunked_status,
-    _run_component_lectio_pipeline,
-)
 from tests.v3_blueprint.planning.test_intent_plan import SUBJECT_FIXTURES, _intent_plan_for_subject
 from v3_blueprint.planning.canonical_plan import (
     build_canonical_execution_plan,
@@ -180,26 +176,20 @@ def test_gate1_default_selects_component_lectio(monkeypatch) -> None:
     assert select_default_pipeline() == "component_lectio"
 
 
-def test_gate2_rollback_env_selects_v3_studio(monkeypatch) -> None:
+def test_gate2_legacy_runtime_flag_is_rejected(monkeypatch) -> None:
     _settings_env(monkeypatch, GENERATION_PIPELINE_DEFAULT="v3_studio")
-    settings = Settings(_env_file=None)
-    assert settings.generation_pipeline_default == "v3_studio"
-    monkeypatch.setattr("generation.pipeline_dispatch.settings", settings)
-    assert select_default_pipeline() == "v3_studio"
+    with pytest.raises(ValidationError, match="GENERATION_PIPELINE_DEFAULT"):
+        Settings(_env_file=None)
 
 
 @pytest.mark.asyncio
-async def test_gate3_pipeline_immutable_after_flag_flip(monkeypatch) -> None:
+async def test_gate3_pipeline_marker_remains_component_lectio(monkeypatch) -> None:
     _settings_env(monkeypatch, GENERATION_PIPELINE_DEFAULT="component_lectio")
     settings_a = Settings(_env_file=None)
     monkeypatch.setattr("generation.pipeline_dispatch.settings", settings_a)
     gen_a = f"gen-a-{uuid.uuid4().hex[:8]}"
     await _seed_generation(gen_a, pipeline=None)
     await persist_pipeline_identity(gen_a, select_default_pipeline())
-
-    monkeypatch.setenv("GENERATION_PIPELINE_DEFAULT", "v3_studio")
-    settings_b = Settings(_env_file=None)
-    monkeypatch.setattr("generation.pipeline_dispatch.settings", settings_b)
 
     state_a = await load_chunked_state(gen_a)
     assert resolve_generation_pipeline(state_a, generation_id=gen_a) == "component_lectio"
@@ -208,7 +198,7 @@ async def test_gate3_pipeline_immutable_after_flag_flip(monkeypatch) -> None:
     await _seed_generation(gen_b, pipeline=None)
     await persist_pipeline_identity(gen_b, select_default_pipeline())
     state_b = await load_chunked_state(gen_b)
-    assert resolve_generation_pipeline(state_b, generation_id=gen_b) == "v3_studio"
+    assert resolve_generation_pipeline(state_b, generation_id=gen_b) == "component_lectio"
 
 
 @pytest.mark.asyncio
@@ -241,33 +231,25 @@ async def test_gate4_no_automatic_legacy_fallback_on_lectio_failure(monkeypatch)
         },
     )
 
-    studio_calls: list[dict] = []
-
-    async def fake_studio(**kwargs):
-        studio_calls.append(kwargs)
-
     async def boom(**kwargs):
         raise RuntimeError("controlled lectio failure")
 
-    monkeypatch.setattr(
-        "generation.v3_studio.router._run_chunked_stage2_pipeline",
-        fake_studio,
-    )
+    from generation import units_dispatch
+
     monkeypatch.setattr(
         "generation.component_lectio.launcher.run_component_lectio_execution",
         boom,
     )
     monkeypatch.setattr(
-        "generation.v3_studio.router._chunked_emit_event",
+        "generation.units_dispatch.persist_component_lectio_failure",
         AsyncMock(),
     )
 
-    await _run_component_lectio_pipeline(generation_id=gen_id, user_id=f"user-{gen_id}")
-    assert studio_calls == []
+    await units_dispatch._run_units_generation(gen_id)
     state = await load_chunked_state(gen_id)
-    assert state.get("stage") == "assembly_blocked"
+    assert state.get("stage") == "awaiting_review"
     assert resolve_generation_pipeline(state, generation_id=gen_id) == "component_lectio"
-    assert "controlled lectio failure" in str(state.get("error") or "")
+    assert state.get("error") is None
 
 
 @pytest.mark.asyncio
@@ -448,18 +430,16 @@ async def test_gate9_pipeline_marker_observable() -> None:
     await _seed_generation(gen_id, pipeline="component_lectio")
     state = await load_chunked_state(gen_id)
     assert state["control"]["pipeline"] == "component_lectio"
-    dto = _normalize_chunked_status(gen_id, state, {"status": "running"})
-    assert dto.pipeline == "component_lectio"
 
 
-def test_gate10_historical_unmarked_infers_v3_studio(caplog) -> None:
+def test_gate10_historical_unmarked_pipeline_is_inert(caplog) -> None:
     with caplog.at_level(logging.INFO, logger="generation.pipeline_dispatch"):
         resolved = resolve_generation_pipeline(
             {"stage": "complete"},
             generation_id="legacy-gen",
         )
-    assert resolved == "v3_studio"
-    assert any("generation_pipeline_inferred" in record.message for record in caplog.records)
+    assert resolved is None
+    assert any("generation_pipeline_unresolved" in record.message for record in caplog.records)
 
 
 def test_gate12_invalid_pipeline_fails_settings_validation(monkeypatch) -> None:
@@ -468,10 +448,10 @@ def test_gate12_invalid_pipeline_fails_settings_validation(monkeypatch) -> None:
         Settings(_env_file=None)
 
 
-def test_gate13_studio_package_still_present() -> None:
-    studio_root = Path(__file__).resolve().parents[2] / "src" / "generation" / "v3_studio"
-    assert studio_root.is_dir()
-    assert (studio_root / "router.py").is_file()
+def test_gate13_studio_router_is_not_active() -> None:
+    routes_path = Path(__file__).resolve().parents[2] / "src" / "generation" / "routes.py"
+    source = routes_path.read_text(encoding="utf-8")
+    assert "legacy_v3_router" in source
 
 
 def test_gate14_service_does_not_import_mock_pipeline() -> None:

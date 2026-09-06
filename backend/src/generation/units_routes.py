@@ -133,7 +133,7 @@ async def _status(
         )
     return UnitsGenerationStatus(
         generation_id=generation.id,
-        pipeline=str((state.get("control") or {}).get("pipeline") or "v3_studio"),
+        pipeline=str((state.get("control") or {}).get("pipeline") or "retired"),
         stage=stage,
         document_present=isinstance(generation.document_json, dict),
         failed_blocks=[str(item) for item in failed if isinstance(item, str)],
@@ -273,7 +273,7 @@ async def open_units_builder(
         )
     if lesson.pack_id != generation.id:
         raise HTTPException(status_code=409, detail="Lesson generation linkage is stale")
-    if str((state.get("control") or {}).get("pipeline") or "v3_studio") != "component_lectio":
+    if str((state.get("control") or {}).get("pipeline") or "retired") != "component_lectio":
         raise HTTPException(status_code=409, detail="Generation is not marked as Component Lectio")
     try:
         await get_or_create_component_lectio_builder_lesson(
