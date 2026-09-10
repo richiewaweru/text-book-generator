@@ -208,10 +208,13 @@ def get_v3_model_settings(
     if (
         spec.family == ModelFamily.OPENAI_COMPATIBLE
         and spec.model_name.startswith("deepseek-")
-        and isinstance(reasoning, str)
     ):
-        settings["openai_reasoning_effort"] = reasoning
-        settings["extra_body"] = {"thinking": {"type": "enabled"}}
+        if isinstance(reasoning, str):
+            settings["openai_reasoning_effort"] = reasoning
+            settings["extra_body"] = {"thinking": {"type": "enabled"}}
+        elif reasoning is False:
+            # DeepSeek thinking is default-on; False nodes must opt out explicitly.
+            settings["extra_body"] = {"thinking": {"type": "disabled"}}
 
     if base_settings:
         settings = _merge_model_settings(settings, base_settings)

@@ -16,7 +16,7 @@ def test_structured_output_type_wraps_deepseek_models_with_prompted_output() -> 
         _ExampleModel,
         spec=ModelSpec(
             family=ModelFamily.OPENAI_COMPATIBLE,
-            model_name="deepseek-v4-flash",
+            model_name="deepseek-flash",
             base_url="https://api.deepseek.com",
             api_key_env="DEEPSEEK_API_KEY",
         ),

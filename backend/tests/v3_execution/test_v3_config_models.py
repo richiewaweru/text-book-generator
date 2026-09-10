@@ -57,14 +57,14 @@ def test_get_v3_spec_defaults_to_anthropic_baseline(monkeypatch: pytest.MonkeyPa
 
 def test_get_v3_spec_supports_deepseek_slot_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("V3_FAST_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("V3_FAST_MODEL_NAME", "deepseek-v4-flash")
+    monkeypatch.setenv("V3_FAST_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("V3_FAST_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("V3_FAST_API_KEY_ENV", "DEEPSEEK_API_KEY")
 
     fast_spec = get_v3_spec("v3_signal_extractor")
 
     assert fast_spec.family == ModelFamily.OPENAI_COMPATIBLE
-    assert fast_spec.model_name == "deepseek-v4-flash"
+    assert fast_spec.model_name == "deepseek-flash"
     assert fast_spec.base_url == "https://api.deepseek.com"
     assert fast_spec.api_key_env == "DEEPSEEK_API_KEY"
 
@@ -73,7 +73,7 @@ def test_visual_qc_keeps_vision_default_when_fast_slot_uses_deepseek(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("V3_FAST_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("V3_FAST_MODEL_NAME", "deepseek-v4-flash")
+    monkeypatch.setenv("V3_FAST_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("V3_FAST_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("V3_FAST_API_KEY_ENV", "DEEPSEEK_API_KEY")
 
@@ -84,22 +84,25 @@ def test_visual_qc_keeps_vision_default_when_fast_slot_uses_deepseek(
     assert spec.api_key_env == "ANTHROPIC_API_KEY"
 
 
-def test_get_v3_model_settings_omits_reasoning_for_fast_deepseek_nodes(
+def test_get_v3_model_settings_disables_thinking_for_fast_deepseek_nodes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("V3_FAST_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("V3_FAST_MODEL_NAME", "deepseek-v4-flash")
+    monkeypatch.setenv("V3_FAST_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("V3_FAST_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("V3_FAST_API_KEY_ENV", "DEEPSEEK_API_KEY")
 
-    assert get_v3_model_settings("v3_signal_extractor") == {"max_tokens": 120000}
+    assert get_v3_model_settings("v3_signal_extractor") == {
+        "extra_body": {"thinking": {"type": "disabled"}},
+        "max_tokens": 120000,
+    }
 
 
 def test_get_v3_model_settings_adds_deepseek_reasoning_for_standard_nodes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("V3_STANDARD_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("V3_STANDARD_MODEL_NAME", "deepseek-v4-pro")
+    monkeypatch.setenv("V3_STANDARD_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("V3_STANDARD_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("V3_STANDARD_API_KEY_ENV", "DEEPSEEK_API_KEY")
 
@@ -116,7 +119,7 @@ def test_get_v3_model_settings_preserves_thinking_when_base_sets_extra_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("V3_STANDARD_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("V3_STANDARD_MODEL_NAME", "deepseek-v4-pro")
+    monkeypatch.setenv("V3_STANDARD_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("V3_STANDARD_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("V3_STANDARD_API_KEY_ENV", "DEEPSEEK_API_KEY")
 
@@ -141,7 +144,7 @@ def test_get_v3_model_settings_applies_safety_backstop_when_no_max_tokens(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("V3_STANDARD_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("V3_STANDARD_MODEL_NAME", "deepseek-v4-pro")
+    monkeypatch.setenv("V3_STANDARD_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("V3_STANDARD_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("V3_STANDARD_API_KEY_ENV", "DEEPSEEK_API_KEY")
     monkeypatch.setenv("V3_MAX_TOKENS_SAFETY", "120000")
@@ -158,7 +161,7 @@ def test_build_model_sets_reasoning_content_profile_for_deepseek() -> None:
     model = build_model(
         ModelSpec(
             family=ModelFamily.OPENAI_COMPATIBLE,
-            model_name="deepseek-v4-pro",
+            model_name="deepseek-flash",
             base_url="https://api.deepseek.com",
             api_key_env=None,
         )
