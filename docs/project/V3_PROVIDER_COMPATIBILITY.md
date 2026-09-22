@@ -16,8 +16,8 @@ the V3 pipeline and block-generation surfaces.
 - Use `deepseek-flash` for `V3_FAST_MODEL_NAME`, `V3_STANDARD_MODEL_NAME`, and
   `V3_PREMIUM_MODEL_NAME`. Slot quality still comes from the per-node thinking
   policy, not from separate Flash vs Pro model IDs.
-- Legacy names `deepseek-v4-flash` and `deepseek-v4-pro` are temporary compatibility
-  aliases; prefer `deepseek-flash` in new config.
+- Do not configure the retired names `deepseek-v4-flash` or `deepseek-v4-pro`; all
+  deployment and test configuration must use `deepseek-flash`.
 
 ## Thinking mode
 
